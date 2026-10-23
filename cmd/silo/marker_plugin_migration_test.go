@@ -335,8 +335,9 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 }
 
 // Saving markers.share_by_default=false stops sharing on every installed
-// provider whose manifest shares by default, disabled ones included, using only
-// the save's own connection: database.max_connections may be 1.
+// provider whose manifest shares by default, disabled and currently fetch-only
+// ones included, using only the save's own connection:
+// database.max_connections may be 1.
 func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -397,7 +398,7 @@ func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
 	if err := configs.Reload(ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	for provider, wantSharing := range map[string]bool{sharingDisabled: false, optedIn: true, fetchOnly: true} {
+	for provider, wantSharing := range map[string]bool{sharingDisabled: false, optedIn: true, fetchOnly: false} {
 		if got, _ := configs.Get(provider); got.ContributeEnabled != wantSharing || got.ContributeAutoLocal != wantSharing {
 			t.Errorf("%s = %+v, want sharing %v", provider, got, wantSharing)
 		}

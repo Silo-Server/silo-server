@@ -4759,7 +4759,9 @@ func stopDefaultMarkerSharingInTx(ctx context.Context, tx pgx.Tx) error {
 }
 
 // defaultSharingMarkerProviders lists the installed marker providers whose
-// manifest turns contribution on by default.
+// manifest turns contribution on by default. It reads the manifest key alone,
+// not whether the current version accepts submissions, so a provider that is
+// fetch-only for now cannot resume sharing after a later update restores it.
 func defaultSharingMarkerProviders(ctx context.Context, tx pgx.Tx) ([]string, error) {
 	capabilities, err := plugins.ListCapabilitiesOfType(ctx, tx, sdkcapability.MarkerProvider)
 	if err != nil {
@@ -4771,7 +4773,7 @@ func defaultSharingMarkerProviders(ctx context.Context, tx pgx.Tx) ([]string, er
 		if err != nil {
 			return nil, fmt.Errorf("decode marker provider capability %d/%s: %w", capability.InstallationID, capability.ID, err)
 		}
-		if markerContributionDefaults(markerCapabilityMetadata(descriptor)).Enabled {
+		if markers.PluginContributionDefaultsFromMetadata(markerCapabilityMetadata(descriptor)).Enabled {
 			providers = append(providers, markers.PluginProviderID(capability.InstallationID, capability.ID))
 		}
 	}
