@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -619,7 +620,25 @@ func (h *ImagesHandler) collectionVisibleToSession(ctx context.Context, session 
 	if err != nil {
 		return false, err
 	}
-	return collectionVisible(collection, visible), nil
+	if !collectionVisible(collection, visible) {
+		return false, nil
+	}
+	if h.collections == nil {
+		return true, nil
+	}
+	// As the BoxSet listing and detail decide: a collection whose members the
+	// viewer can open none of is not served, so neither is its artwork or the
+	// poster generated from its title.
+	access := catalog.AccessFilter{}
+	if h.accessFilter != nil {
+		access = h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
+	}
+	collections := []*models.LibraryCollection{collection}
+	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, withCompatAccessExclusions(access))
+	if err != nil {
+		slog.WarnContext(ctx, "counting compat collection for the viewer failed", "component", "jellycompat", "error", err)
+	}
+	return len(catalog.CollectionsShownToViewer(collections, counts)) == 1, nil
 }
 
 // serveCollectionsViewImage serves the synthetic Collections library tile. It is

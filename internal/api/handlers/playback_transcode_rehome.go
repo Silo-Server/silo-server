@@ -504,7 +504,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		// The route changed under the move: give back the planner reservation
 		// Resolve made on this node along with the job.
 		h.releaseMoveReservationV3(session.ID, reservation)
-		h.tm.StopRemoteTranscode(transportID, node.URL)
+		h.releaseMovedTransportV3(ctx, transportID, node.URL)
 		return err
 	}
 	if fromStore {
@@ -606,11 +606,21 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 // which a legacy session's empty route field does not name.
 func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, sessionID, deadNodeURL, transportID, nodeURL string, card playback.RecipeCard, fromStore bool) {
 	if !fromStore {
-		go h.tm.StopRemoteTranscode(transportID, nodeURL)
+		go h.releaseMovedTransportV3(context.WithoutCancel(ctx), transportID, nodeURL)
 		return
 	}
-	h.tm.StopRemoteTranscode(transportID, nodeURL)
+	h.releaseMovedTransportV3(ctx, transportID, nodeURL)
 	h.putNodeRecipeIfRouteV3(context.WithoutCancel(ctx), sessionID, playback.TranscodeRoute{NodeURL: deadNodeURL, TransportID: transportID}, card)
+}
+
+// releaseMovedTransportV3 stops a move's job on nodeURL without fencing the
+// transport id there: the session keeps the id on whichever node runs it, and
+// a replica whose copy still names nodeURL must be able to rebuild it.
+func (h *PlaybackHandler) releaseMovedTransportV3(ctx context.Context, transportID, nodeURL string) {
+	if err := h.tm.ReleaseRemoteTranscode(ctx, transportID, nodeURL); err != nil {
+		slog.WarnContext(ctx, "could not release a moved transcode on its node",
+			"component", "api", "node", logredact.SanitizeURL(nodeURL), "transport", transportID, "error", logredact.SanitizeText(err.Error()))
+	}
 }
 
 // putNodeRecipeIfRouteV3 writes a transport's stored recipe only while the
@@ -691,7 +701,7 @@ func (h *PlaybackHandler) releaseMoveReservationV3(sessionID string, held nodepo
 func (h *PlaybackHandler) retireUnreachableTransportV3(ctx context.Context, nodeURL, transportID string, after func(context.Context)) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
-		if err := h.tm.CancelRemoteTranscode(detached, transportID, nodeURL); err != nil {
+		if err := h.tm.ReleaseRemoteTranscode(detached, transportID, nodeURL); err != nil {
 			// Expected when the node is down. When it is only unreachable from
 			// here, its FFmpeg keeps running until the node's idle reaper ends it.
 			slog.WarnContext(detached, "could not stop the transcode on the node it moved off; the node's idle reaper will end it if it still runs",

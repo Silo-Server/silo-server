@@ -126,7 +126,8 @@ func ResolveUploadLanguage(filename string, format SubtitleFormat, data []byte, 
 		return LanguageDetection{}, fmt.Errorf("invalid subtitle language")
 	}
 
-	if detected := DetectSubtitleLanguage(filename, format, data); detected.Language != "" {
+	// Upload stores UTF-16 as UTF-8, so the detect preview reads it the same way.
+	if detected := DetectSubtitleLanguage(filename, format, decodeUTF16WithBOM(data)); detected.Language != "" {
 		return detected, nil
 	}
 	if manual := canonicalLanguageToken(userLanguage); manual != "" {

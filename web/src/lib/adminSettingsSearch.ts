@@ -771,7 +771,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Server ID",
       "Jellyfin version to report",
       "Stay signed in for",
-      "Forget idle playback after",
+      "End playback sessions after",
       "Audiobookshelf",
       "Allow Audiobookshelf apps to connect",
     ),

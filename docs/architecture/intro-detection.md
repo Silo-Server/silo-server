@@ -355,7 +355,8 @@ metadata (no video, or an all-intra codec) is decided on every analysis and
 never stored, and an unusable row an earlier build stored that way does not
 keep a movie out. Such movies, like movies whose credits come from a chapter,
 are listed on every run, but analyzing them reads no artifact and runs no
-ffmpeg. The run lists movies 200 at a time, each page starting after the
+ffmpeg. Once the probe metadata no longer rules the tail out, a failed tail
+pass replaces such a row, so the movie backs off like any other failure. The run lists movies 200 at a time, each page starting after the
 last movie of the one before in that order, so a movie analyzed in this run
 that is still eligible is not listed again in it. The run starts no new
 movie, and lists no further page, once 60 minutes have passed since it

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -158,6 +159,9 @@ func passwordProblem(err error) *Problem {
 		if apiErr.Field != "" {
 			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 				WithErrors(ProblemError{Location: locationBody + "." + apiErr.Field, Code: codeInvalid, Detail: apiErr.Message + "."})
+		}
+		if errors.Is(err, passwordhash.ErrBusy) {
+			return passwordHashBusyProblem()
 		}
 		if apiErr.Status == http.StatusServiceUnavailable {
 			return NewProblem(TypeDependencyUnavailable, apiErr.Message+".").WithRetryAfter(30)

@@ -190,7 +190,9 @@ issued expiry; the upsert waits for an active collector to finish.
 `local` (the default) decodes on the API server, `prefer_transcode_nodes`
 uses a node when one can take the run and decodes locally otherwise, and
 `transcode_nodes_only` gives the file back to the queue for a minute,
-without counting a failure, when no node can. The API server keeps the claim,
+without counting a failure, when no node can take the run. When a node ran
+the file and no node made its sheets, the failure counts and backs off as it
+would locally. The API server keeps the claim,
 the lease, and the uploads; a node only decodes and tiles
 (`POST /trickplay/extract`, see
 [worker protocol](worker-http-protocol.md)).
@@ -204,9 +206,17 @@ the lease, and the uploads; a node only decodes and tiles
   reported load accounts for work accepted from other replicas.
 - A node takes one run at a time. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
-  node. A transient sampling failure also tries another node, followed by
-  local extraction in `prefer_transcode_nodes` mode. Only a `permanent`
-  sampling failure marks the file unusable, as it would locally.
+  node. A node whose ffmpeg cannot open an input that passed its path check
+  (such as a file its user may not read) answers `input_unreadable`, which
+  does not count against the file: it moves on like `node_unavailable`.
+  `unsupported` (the node's ffmpeg lacks a filter, decoder, or device the run
+  needs) also moves on, and counts against the file, as when this server's
+  own ffmpeg lacks it, unless another node that may have it was busy or at
+  its job cap. Another
+  transient sampling failure also tries another node, followed by local
+  extraction in `prefer_transcode_nodes` mode. In `transcode_nodes_only` mode
+  it counts against the file when no node makes the sheets. Only a
+  `permanent` sampling failure marks the file unusable, as it would locally.
 - Remote extraction checks the media path on the node. It does not require
   the API server's media mount to be readable.
 - The request carries a hardware attempt and a software attempt; a node

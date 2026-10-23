@@ -400,22 +400,24 @@ type collectionCollageComposer struct {
 	prefix     string
 	store      blobstore.Store
 	posters    itemPosterSigner
+	signer     *artworkurl.Signer
 	httpClient *http.Client
 }
 
 // NewPersonalCollectionCollageGenerator composes personal collection
 // collages and stores them beside their uploaded posters. It returns nil
 // when artwork storage or poster signing is not configured, which leaves
-// personal collections without collages. A nil httpClient uses
-// newCollectionImageClient.
-func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, httpClient *http.Client) catalog.CollageGenerator {
+// personal collections without collages. signer is the artwork URL signer
+// that local storage resolves posters with; nil when storage serves its own
+// URLs. A nil httpClient uses newCollectionImageClient.
+func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, signer *artworkurl.Signer, httpClient *http.Client) catalog.CollageGenerator {
 	if store == nil || posters == nil {
 		return nil
 	}
 	if httpClient == nil {
 		httpClient = newCollectionImageClient()
 	}
-	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, httpClient: httpClient}
+	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, signer: signer, httpClient: httpClient}
 }
 
 // ComposeCollectionCollage fetches the source posters, composes them and
@@ -473,11 +475,24 @@ func (c collectionCollageComposer) CollectionCollagePath(collectionID, key strin
 }
 
 // fetchImage downloads an image from a resolved URL. The URL is a catalog
-// title's poster as the server resolved it: a direct URL to the artwork
-// store, which may be on the local network, or a metadata provider's URL that
-// was not cached, which is untrusted. artworkurl.FetchContext tells them
-// apart, and netguard refuses blocked addresses either way.
+// title's poster as the server resolved it. Local artwork storage resolves
+// posters to this server's own signed artwork route, a root-relative URL that
+// is read from the store directly, as offline downloads do. Otherwise it is a
+// direct URL to the artwork store, which may be on the local network, or a
+// metadata provider's URL that was not cached, which is untrusted.
+// artworkurl.FetchContext tells those apart, and netguard refuses blocked
+// addresses either way.
 func (c collectionCollageComposer) fetchImage(ctx context.Context, imageURL string) ([]byte, error) {
+	if c.store != nil && c.signer != nil {
+		if key, ok := c.signer.SignedKey(imageURL, time.Now()); ok {
+			body, _, err := c.store.Get(ctx, key)
+			if err != nil {
+				return nil, fmt.Errorf("reading stored poster: %w", err)
+			}
+			defer func() { _ = body.Close() }()
+			return io.ReadAll(io.LimitReader(body, collectionImageMaxBytes))
+		}
+	}
 	if c.httpClient == nil {
 		return nil, errors.New("collage downloads have no HTTP client")
 	}

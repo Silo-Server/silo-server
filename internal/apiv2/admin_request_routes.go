@@ -77,8 +77,8 @@ type AdminRequestRouteConditions struct {
 	Anime             *bool    `json:"anime,omitempty" doc:"Match anime (true) or not (false): Japanese animation, and titles TMDB tags anime or an AniDB-based list names"`
 	GenreIDs          []int    `json:"genre_ids,omitempty" doc:"TMDB genre IDs"`
 	KeywordIDs        []int    `json:"keyword_ids,omitempty" doc:"TMDB keyword IDs"`
-	OriginalLanguages []string `json:"original_languages,omitempty" doc:"ISO 639-1 codes of the original language" example:"[\"ja\"]"`
-	OriginCountries   []string `json:"origin_countries,omitempty" doc:"ISO 3166-1 country codes" example:"[\"JP\"]"`
+	OriginalLanguages []string `json:"original_languages,omitempty" pattern:"^[a-z]{2,3}$" doc:"TMDB original-language codes: lowercase ISO 639-1 (TMDB also uses cn and xx)" example:"[\"ja\"]"`
+	OriginCountries   []string `json:"origin_countries,omitempty" pattern:"^[A-Z]{2}$" doc:"Upper-case ISO 3166-1 alpha-2 country codes (TMDB origin_country)" example:"[\"JP\"]"`
 	YearFrom          int      `json:"year_from,omitempty" doc:"First release (or first-air) year, inclusive" example:"1980"`
 	YearTo            int      `json:"year_to,omitempty" doc:"Last release (or first-air) year, inclusive" example:"1989"`
 	NetworkIDs        []int    `json:"network_ids,omitempty" doc:"TMDB network IDs (series)"`
@@ -87,8 +87,8 @@ type AdminRequestRouteConditions struct {
 
 	ExcludeGenreIDs          []int    `json:"exclude_genre_ids,omitempty" doc:"Match titles with none of these TMDB genre IDs"`
 	ExcludeKeywordIDs        []int    `json:"exclude_keyword_ids,omitempty" doc:"Match titles with none of these TMDB keyword IDs"`
-	ExcludeOriginalLanguages []string `json:"exclude_original_languages,omitempty" doc:"Match titles whose original language is none of these ISO 639-1 codes" example:"[\"en\"]"`
-	ExcludeOriginCountries   []string `json:"exclude_origin_countries,omitempty" doc:"Match titles from none of these ISO 3166-1 countries"`
+	ExcludeOriginalLanguages []string `json:"exclude_original_languages,omitempty" pattern:"^[a-z]{2,3}$" doc:"Match titles whose original language is none of these TMDB codes (lowercase ISO 639-1; TMDB also uses cn and xx)" example:"[\"en\"]"`
+	ExcludeOriginCountries   []string `json:"exclude_origin_countries,omitempty" pattern:"^[A-Z]{2}$" doc:"Match titles from none of these upper-case ISO 3166-1 alpha-2 countries"`
 	ExcludeNetworkIDs        []int    `json:"exclude_network_ids,omitempty" doc:"Match series on none of these TMDB networks"`
 	ExcludeCompanyIDs        []int    `json:"exclude_company_ids,omitempty" doc:"Match movies from none of these TMDB companies"`
 	ExcludeRequesterUserIDs  []int    `json:"exclude_requester_user_ids,omitempty" doc:"Match requests from none of these accounts"`
@@ -174,8 +174,8 @@ type AdminRequestRoutePreviewInput struct {
 type AdminRequestRouteFacts struct {
 	GenreIDs         []int    `json:"genre_ids"`
 	KeywordIDs       []int    `json:"keyword_ids"`
-	OriginalLanguage string   `json:"original_language,omitempty"`
-	OriginCountries  []string `json:"origin_countries"`
+	OriginalLanguage string   `json:"original_language,omitempty" doc:"The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx)"`
+	OriginCountries  []string `json:"origin_countries" doc:"The title's TMDB origin countries, ISO 3166-1 alpha-2"`
 	Year             int      `json:"year,omitempty"`
 	NetworkIDs       []int    `json:"network_ids"`
 	CompanyIDs       []int    `json:"company_ids"`

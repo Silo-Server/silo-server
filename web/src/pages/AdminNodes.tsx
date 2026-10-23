@@ -990,7 +990,7 @@ function NodeForm({
     const parsedMaxBandwidthMbps = parseFloat(maxBandwidthMbps);
     const fields = {
       name,
-      url,
+      url: url.trim(),
       group: group.trim(),
       max_jobs: Number.isNaN(parsedMaxJobs) ? 0 : parsedMaxJobs,
       max_bandwidth_kbps: Number.isNaN(parsedMaxBandwidthMbps)

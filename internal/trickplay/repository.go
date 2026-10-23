@@ -258,7 +258,7 @@ const (
 	Unusable
 	// Released returns the file to the queue after a delay without counting
 	// a failure: the cause was this server's, such as a shutdown or no
-	// transcode node to run on.
+	// transcode node able to run the work.
 	Released
 )
 

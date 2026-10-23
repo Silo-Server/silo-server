@@ -1,3 +1,550 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "completeAdminChatGPTLogin",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "e811500bc1a85b467a87302da98c91326b15c024e10d4db08348083c97fc6072",
+      "reason": "Declares callback_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminAutoscanConnection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "abcdc9ce0fa4f230d8c93575f8b4360b2b3039dedab82a006f094342b7d58bcc",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "b6823a1c0a6883d2eab89f2d313b4eb580bbf61231b954125daf4777e0a274ef",
+      "reason": "Declares backdrop_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "d25421148fe70d181d6ed787db1a61a35d60f325c8e03fccfedc512803c9e39e",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "d52acc92ee37bf118360d51c583af9ffcc8d9b9d771dd7b84dfc52a4d4e08ecd",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminHistoryImportSource",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "4fdd0717f57d131654b53ac0fb2f0cd79340b01f6c0dcfaadd2bbbd29f9154a2",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminNode",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "1a95b75c28c23bae37402a83ecf98d23af6cc180e770ee230ee2ad5a0d6f256c",
+      "reason": "Declares public_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminNode",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "1f2bd4691bacdd8da47232f53de0fb4ac901d56f55980de892808eb4242b73fb",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminNotificationServerChannel",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "63b9962d9c39d1491c61f00c53dddd5637710c7b07b8d9f667719da4802552b5",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createAdminPluginRepository",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "3ec432565416032b5da2bf20b7542b29458c3c29f875b29ac34a1c63c97bf521",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createCatalogImportJob",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "6a6efdb80d098df8ec55e2bbdd9a2299cd5da50a74d4caf5f1ba369ba0293a42",
+      "reason": "Declares remote_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "968aab4f7164b05037d63d881830eef59d648627402bfaae6a78e23ea1526091",
+      "reason": "Declares poster_source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createHistoryImportRun",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "dc84aaef3c183468ed15637764d8bcfaa130cdeec30d6abf417343a4d25f0e94",
+      "reason": "Declares jellyfin_base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createHistoryImportRun",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "e80ed03d20e5c1ad601ab7ba7dc7130c5f041fc6fce6d4f6be2f5d616a1b47a3",
+      "reason": "Declares plex_base_urls as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createHistoryImportRun",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "fb9db515a340cf677e8ed31b01f6e54c19824ef02762ab7b91db52e2a6298840",
+      "reason": "Declares plex_base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createLibrary",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "d3bc7be9d5eb44b6de5f1d17250af24f9e33af3c1098f61e5407ffb111759705",
+      "reason": "Declares metadata_language as a lowercase ISO 639-1 code or empty before the v2 lock (#2903). The handler already accepted only lowercase codes from its supported list.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createNotificationWebhook",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "d734d35580133c8ce9604fa4036e7ba1e54631b6814a79976d0bb68667531c86",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "0efe26f0bf572f8223de084b12a3e96dcc0e77bc1958e930e9e1ce2cdef888f5",
+      "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "381b4a55870fe82cfa6f4a26df6609d9c8fda98f45043ca07e4f763b76d248c7",
+      "reason": "Declares the language tag shape of preferred_metadata_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "b9e2abd48305a205cb5bdee854e9aca3b1e0cf0d5c6d70ed33aea33c0d08f16b",
+      "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "459662955820b28a0133ae696ceca26c302ea3f71687337632691612d065db2a",
+      "reason": "Declares the TMDB code shape of conditions.exclude_original_languages before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "7a0ad511be0051110f14aa1b9b695f83fa58dd07dec0f489443a08b75aeb50d3",
+      "reason": "Declares the TMDB code shape of conditions.origin_countries before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "7b69b1830fe22ebb75853eb4b08aebaecc704509c72850e56998af6aa00e07af",
+      "reason": "Declares the TMDB code shape of conditions.original_languages before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "98b23d7a40064d302a986960048c766ad53b2947aa9e838f7aa0c508a92958af",
+      "reason": "Declares the TMDB code shape of conditions.exclude_origin_countries before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createSubtitleAIJob",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "6a149794e19b23a00686c15867e854f6994047f6eb79cc87fc70b7e7d824591b",
+      "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createWatchTogetherSuggestion",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "39ffb685b966fa85caff46e39b89e511375b2657bd3af4e38142f755b9a818d1",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "createWebhookConnection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "9365f95439d7d598ec9fe50b99d6a17e028b85baf06af9d6351c9bf6698e6643",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "downloadSubtitle",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "a4c7db6dfdf70ab95dd83252fc956b71c30e6dfd5907493a0cc87de697b0bd97",
+      "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminCatalog",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "f83196b74fa0927f547c5b958da87039a3440ff6e4565f532324040f9f01840c",
+      "reason": "Declares remote_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminMDBList",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "1322c7978c3ac7764fbf54acbe984b05147505f4ef67a1ff570674a891fd4354",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminMDBList",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "7d4df6653ad1e661f6e574aa880153bb8ff73a50f93321bfc4475e63e3399f1b",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminTMDB",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "464799e86dfad2c5bc2829b233490e2805a2a3aa4a07b6454ec3fd02e446c923",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminTMDBList",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "502576de4801056c20e7cc0f518b088541926abd3ea4011c9c97c2f39f49d043",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importAdminTMDBList",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "5ac813bdca76dcbfccac7576bf2e24266b4e5645042334fc65283d52f1c4f464",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importMDBListCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "314a0ddc55616a009b37471c1c3c5ecb3713ac9629c52f2ca1fe93072ef799eb",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importMDBListCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "83fb072aebc8de387232e1c73b19947f5798e701f0d9ee3a60bbac3ccc380154",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importTMDBCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "6954e70992179f4c3e8b7ce16a9e312f91e3cc490047abc4d5d4dcea5b7345ae",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importTMDBListCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "72d8c9741db9556e4bbe477044a8c0d82c5459dec85faaa7f5c9f023b1952993",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "importTMDBListCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "90f1518bdbb7ec8f9b5487514bd9d02aa924d8a227c39d1e4dcd58e5341fd489",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "installAdminJellyfinCompatWeb",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "794d326bae54277214a98da394d7096555c1238110bce01a8c98df8c33096dd0",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "registerAdminNotificationRelay",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "f53585de3739add15c95b2c64ab8a9f821ee5f27f710e7525ba0c3cd102d3d70",
+      "reason": "Declares relay_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "subscribeNotificationWebPush",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "fd56c10e5e414efdc4db024072e7acc0aadcb75a8a9b7781fa722571191cd466",
+      "reason": "Declares endpoint as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "testAdminAutoscanConnection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "a83c01548fca47653c0742598840fb778d30fd6d54470a89642f130e81c0cf9d",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "translateAdminItemMetadata",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "82bb1a7518bfa4117481120b7516485526083585ca0f27074eebdd9b64b27641",
+      "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "translateCatalogItemDescription",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "2d2073be0da0903538fe793c1cb980c14e5e536d74cf7792e107c9182a79f657",
+      "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "translateLibraryMetadata",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "8b375eeb23fb942ee9c63b666dca02029eeebb36bdab6cbbbd483e768b476db0",
+      "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "unsubscribeNotificationWebPush",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "026e95b25b3655af92019fec583f0a3ae1e8f91c33cd5594170c674bc0d959d9",
+      "reason": "Declares endpoint as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminAutoscanConnection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "b95eda1cfa8bbdd1ef7f15b9f0972cb591c257e1c45b756395c488e831966bc3",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "501d1b461b8a011f536b906322b28fb732658c7c015e374e0350f2d991dfc4c5",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "9c34fcac43b0326e7f48a1d79d92a73248e177b66c0b6486f3694c1282541b2c",
+      "reason": "Declares poster_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "fe9a87e6a5cc404015022a6ab0a2b89533fbb64f80e1b77e376b5615e99b82df",
+      "reason": "Declares backdrop_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminHistoryImportSource",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "3fd3def838d56179993adc13fb4404f02c6acb4b5bdb13d603cc8c6cae79e527",
+      "reason": "Declares base_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminJellyfinCompatSettings",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "483a53f07610088c7b172b921f26ca530cf2e84cd18abbbde1136305ed692633",
+      "reason": "Declares public_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminNode",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "8622e4699d16ef0a5bb2927a7d47f326929b4e5c6dfb712a0d79dddb0a6e9f67",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminNode",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "ed41e0f17c13898870e81600c34aee162290b6a2567aecfc246b258cdff52b9e",
+      "reason": "Declares public_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminNotificationServerChannel",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "038f36305c58e65eebbcce487e19fd41a158575ba970122ff11132c7fbc45286",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminPerson",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "062524219862e8b5e6684b12059b7db3db87a254fea2d3ddaaffe900f979dad9",
+      "reason": "Declares birth_date as YYYY-MM-DD or empty before the v2 lock (#2903). The handler already refused any other value; empty still clears.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminPerson",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "f51bab5edf8f6e08b9eebc4352a6bf43727627634f7231b288c517178380e4c7",
+      "reason": "Declares death_date as YYYY-MM-DD or empty before the v2 lock (#2903). The handler already refused any other value; empty still clears.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminPluginRepository",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "1f1d76ba5f31d62039eda1ad90d20c3f27a81fe2c332c68ac6a38d4f0e490137",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAdminSubtitleMetadata",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "acf183cd8ca878a274e05cf0b8b16ee5bab8365720473652a05eb37a5f29645c",
+      "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateAudioPreference",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "b56fe63fdd4840f5b74f0095209e953d0b9c263f9c7f32ca765cc713e26ff213",
+      "reason": "Declares the language tag shape of audio_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "427ddbaa4a97fb06dd0935100732eb9042f2241b7fecc20ae452bcb11dc45a63",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateCollection",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "57ed4e36d68a7ae1ae8097fa135fc36ac22a6f604ff465e9dd8ee08eb22e8025",
+      "reason": "Declares poster_source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateLibrary",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "b21bace4ac1fcf8ff1d102caeaa66d98b49061b3b250c01af7473dafe79b2178",
+      "reason": "Declares metadata_language as a lowercase ISO 639-1 code or empty before the v2 lock (#2903). The handler already accepted only lowercase codes from its supported list.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateLibraryPlaybackPreference",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "ef8242a6404498de3c1ea2ea7f3e73d52f52f0cd48d559e96ed09b24f0662a17",
+      "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateLibraryPlaybackPreference",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "8a7cf54db3c9e3163d2fa4c24416a320cde960ef0aaf6a4df3860dc8fc739852",
+      "reason": "Declares the language tag shape of audio_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "b56f21f4bf35811919c1b5b6ee08507b8132e481dc18ef645bd1bdc9eb030b79",
+      "reason": "Declares url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "7ff9ce68774b6f7e5d177a3364c52e1008a13168e53fc4c032c8baacf6360c40",
+      "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "f90f06cc8312931e76474edd3dce7b9f0d414aab8fd08b2856d7be4cb27b2b04",
+      "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "85abfd4d92fd9e98c55e1dfdfc5ba1f6220ca73f230749b70e2d351d6f0e0f2b",
+      "reason": "Declares the language tag shape of preferred_metadata_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "7560b4a089950a7269518615a3bde4a03d86b407fc7bc8a037b729ddbd67c698",
+      "reason": "Declares the TMDB code shape of conditions.exclude_origin_countries before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "7e0fe6fa9570c58befa40ecb4975ce46240e6ad81adb72b2be17d41e209312c1",
+      "reason": "Declares the TMDB code shape of conditions.original_languages before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "8970e5e745b581340bd83945c0d7222ba0a2d92c69c13de83a755c4fe30e0b85",
+      "reason": "Declares the TMDB code shape of conditions.exclude_original_languages before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateRequestRoute",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "b76803844b972aab86afd34f7eb8a5e710f866630f7e96e1e97b675b3ac7d991",
+      "reason": "Declares the TMDB code shape of conditions.origin_countries before the v2 lock (#2903): lowercase languages, upper-case countries, as stored. The web sends picker values; other callers can no longer rely on the server fixing case or trimming.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "updateSubtitlePreference",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "07ac53d3edaf37498f74fbd49ffe6f28edf05daed9119a3c2281ac28f972287c",
+      "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "uploadAdminCollectionBackdrop",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "f637c271d9f35ead3b98d3d55a99855e7c5ecf427b75d655adbeb7fd89c86b80",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "uploadAdminCollectionPoster",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "61e46f41ca338cfd25444279ddc93d383767725b4f658eaf5e576b257ef5d64b",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    },
+    {
+      "operation_id": "uploadCollectionPoster",
+      "change_id": "request-property-type-changed",
+      "fingerprint": "e4bc11660c8a608d16525b3898be55009cd80cb25052f9f07791341bb37e2825",
+      "reason": "Declares source_url as a URI before the v2 lock (#2903). Huma checks uri and uri-reference with url.Parse, so only values that do not parse as a URL, including padded values the handler used to trim, are newly refused; the web app trims what it sends.",
+      "approved_in": "#2903"
+    }
+  ]
 }

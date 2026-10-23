@@ -26,7 +26,7 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
-	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil)
+	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil)
 	if err != nil {
 		t.Fatalf("installBinary() returned error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		Version:      "0.0.18",
 		InstallPath:  oldPath,
 		Enabled:      true,
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil)
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil)
 	if err != nil {
 		t.Fatalf("replaceBinary() returned error: %v", err)
 	}

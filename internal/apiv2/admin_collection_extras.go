@@ -53,7 +53,7 @@ type AdminCollectionImageInput struct {
 }
 type AdminCollectionArtworkForm struct {
 	Image     huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp" required:"false"`
-	SourceURL string        `form:"source_url" required:"false"`
+	SourceURL string        `form:"source_url" format:"uri-reference" required:"false"`
 }
 type AdminCollectionArtworkInput struct {
 	ID      ID `path:"id"`
@@ -125,7 +125,7 @@ type AdminCollectionPreviewItem struct {
 	ContentID ID     `json:"content_id"`
 	Title     string `json:"title"`
 	Type      string `json:"type"`
-	PosterURL string `json:"poster_url,omitempty"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
 }
 type AdminCollectionPreviewOutput struct {
 	Body struct {

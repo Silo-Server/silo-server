@@ -32,6 +32,7 @@ const entry = {
   watched_seconds: 3600,
   duration_seconds: null,
   completed: true,
+  played_seconds: 120,
 };
 
 function page(items: unknown[], next?: string) {

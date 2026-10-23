@@ -99,6 +99,12 @@ func DefaultConfig() Config {
 			// Public autoscan webhook intake. Generous: arr fires one delivery
 			// per imported file, so season packs are legitimate bursts.
 			"autoscan_webhook": {RequestsPerMinute: 60, Burst: 30},
+			// Session-less Apple push retirement. The 256-bit installation
+			// key is the guard; this is anti-probe hygiene.
+			"apple_push_retire": {RequestsPerMinute: 20, Burst: 10},
+			// Session-less Android push retirement. The 256-bit installation
+			// key is the guard; this is anti-probe hygiene.
+			"android_push_retire": {RequestsPerMinute: 20, Burst: 10},
 		},
 	}
 }

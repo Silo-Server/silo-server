@@ -56,10 +56,6 @@ func (s *SQLiteUserStore) DeleteProfile(_ context.Context, id string) error {
 	return DeleteProfile(s.db, id)
 }
 
-func (s *SQLiteUserStore) VerifyPIN(_ context.Context, profileID, pin string) (bool, error) {
-	return VerifyPIN(s.db, profileID, pin)
-}
-
 // --- Progress ---
 
 func (s *SQLiteUserStore) UpdateProgress(_ context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {

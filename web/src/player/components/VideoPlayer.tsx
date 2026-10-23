@@ -781,6 +781,13 @@ export function VideoPlayer({
   // The subtitle selection active before a translation hijacked it, so a failed
   // translation can restore it instead of leaving subtitles off.
   const preTranslationSubtitleIndexRef = useRef<number | null>(null);
+  // A stored subtitle the server returned for a request it had already
+  // finished, waiting to be selected once the inventory lists it.
+  const [pendingStoredSubtitle, setPendingStoredSubtitle] = useState<{
+    jobId: string;
+    subtitleId: string;
+    refreshed: boolean;
+  } | null>(null);
 
   // Drop any live translation when the media changes so a stale track from the
   // previous file never lingers.
@@ -795,6 +802,7 @@ export function VideoPlayer({
     acceptedSubtitleJobRef.current = null;
     reportedSubtitleFailureRef.current = null;
     setPendingTranslationHandoff(null);
+    setPendingStoredSubtitle(null);
     setLiveTranslation(null);
     setLiveCues([]);
     setTranslationBuffering(false);
@@ -840,16 +848,34 @@ export function VideoPlayer({
   }, []);
 
   const handleSubtitleJobAccepted = useCallback(
-    (jobId: string) => {
+    (jobId: string, resultSubtitleId?: string) => {
       acceptedSubtitleJobRef.current = jobId;
+      if (resultSubtitleId) {
+        // An earlier identical request already produced this track, and the
+        // job is finished, so no event will follow. A live translation still
+        // running for an earlier request no longer owns the display.
+        liveTranslationIdentityRef.current = null;
+        setPendingTranslationHandoff(null);
+        setPendingStoredSubtitle({ jobId, subtitleId: resultSubtitleId, refreshed: false });
+        return;
+      }
+      setPendingStoredSubtitle(null);
       // Source loading can fail before Started, even before the POST response.
       // Reconcile once after acceptance so that early terminal event is not lost.
       void playerV2(playerConfig, "GET /api/v2/subtitles/ai/jobs/{job_id}", {
         path: { job_id: jobId },
       })
         .then((result) => {
-          if (acceptedSubtitleJobRef.current === jobId && result?.job.status === "failed") {
+          if (acceptedSubtitleJobRef.current !== jobId || !result) return;
+          if (result.job.status === "failed") {
             reportSubtitleFailure(jobId, result.job.error_message);
+          } else if (result.job.status === "completed" && result.job.result_subtitle_id) {
+            // An earlier identical request already produced this track.
+            setPendingStoredSubtitle({
+              jobId,
+              subtitleId: result.job.result_subtitle_id,
+              refreshed: false,
+            });
           }
         })
         .catch(() => {
@@ -1932,6 +1958,7 @@ export function VideoPlayer({
   // -- Subtitle toggle callback --
   const toggleCaptions = useCallback(() => {
     subtitleSelectionWasManualRef.current = true;
+    setPendingStoredSubtitle(null);
     if (activeSubtitleIndex !== null) {
       lastSubtitleIndexRef.current = activeSubtitleIndex;
       setActiveSubtitleIndex(null);
@@ -1954,6 +1981,16 @@ export function VideoPlayer({
       onSubtitleChanged?.(index, inventoryTrack);
     },
     [onSubtitleChanged],
+  );
+
+  // A choice in the subtitle menu wins over a reused track still waiting for
+  // the inventory.
+  const handleMenuSubtitleSelect = useCallback(
+    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
+      setPendingStoredSubtitle(null);
+      handleSubtitleSelect(index, inventoryTrack);
+    },
+    [handleSubtitleSelect],
   );
 
   useEffect(() => {
@@ -2011,6 +2048,36 @@ export function VideoPlayer({
     setTranslationBuffering(false);
   }, []);
 
+  // Select a reused stored track once the inventory lists it, refreshing the
+  // inventory once if it predates the track.
+  useEffect(() => {
+    if (!pendingStoredSubtitle) return;
+    // A newer job took over while this track waited for the inventory.
+    if (acceptedSubtitleJobRef.current !== pendingStoredSubtitle.jobId) {
+      setPendingStoredSubtitle(null);
+      return;
+    }
+    const key = `stored-${pendingStoredSubtitle.subtitleId}`;
+    const track = subtitleUrls.find((t) => syncKeyOf(t) === key);
+    if (track) {
+      setPendingStoredSubtitle(null);
+      resumeFromTranslationPause();
+      setLiveTranslation(null);
+      setLiveCues([]);
+      handleSubtitleSelect(track.index);
+    } else if (!pendingStoredSubtitle.refreshed) {
+      setPendingStoredSubtitle({ ...pendingStoredSubtitle, refreshed: true });
+      onRefreshSubtitles?.(getSubtitleStartPosition());
+    }
+  }, [
+    pendingStoredSubtitle,
+    subtitleUrls,
+    handleSubtitleSelect,
+    onRefreshSubtitles,
+    getSubtitleStartPosition,
+    resumeFromTranslationPause,
+  ]);
+
   // Intercept live-translation events; forward everything else to the parent.
   const handleRealtimeEvent = useCallback(
     (event: PlaybackRealtimeEventEnvelope) => {
@@ -2058,6 +2125,7 @@ export function VideoPlayer({
           const payload = event.payload;
           if (!isForActiveStream(payload) || matchesLiveTranslation(payload)) break;
           acceptedSubtitleJobRef.current = String(payload.job_id);
+          setPendingStoredSubtitle(null);
           liveTranslationIdentityRef.current = {
             jobId: payload.job_id,
             trackKey: payload.track_key,
@@ -2460,6 +2528,9 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
+    // Set when startup recovery loads a failed manifest again, so the reload's
+    // own failure is not swallowed by the recovery cooldown.
+    let manifestReloadPending = false;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -2717,13 +2788,30 @@ export function VideoPlayer({
               }
 
               const now = Date.now();
-              if (now - lastRecoveryRef.current < 3000) return;
+              // A reloaded manifest can fail again within the cooldown (a
+              // parse error does at once); that failure must still reach the
+              // startup guard, or the player waits for the startup timeout.
+              const reloadFailed = manifestReloadPending;
+              manifestReloadPending = false;
+              if (!reloadFailed && now - lastRecoveryRef.current < 3000) return;
               lastRecoveryRef.current = now;
 
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                 if (startupGuardRef.current?.handleFatalNetworkError() ?? true) {
                   console.warn("[hls.js] Fatal network error, attempting recovery...");
-                  hls?.startLoad();
+                  // startLoad() never requests a manifest that failed to load,
+                  // so it would leave the player waiting for the startup
+                  // timeout. Load the source again instead.
+                  if (
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
+                  ) {
+                    manifestReloadPending = !streamPlayedRef.current;
+                    hls?.loadSource(effectiveStreamUrl);
+                  } else {
+                    hls?.startLoad();
+                  }
                 } else {
                   console.error("[hls.js] Fatal startup network error, giving up");
                 }
@@ -5417,7 +5505,7 @@ export function VideoPlayer({
           subtitleTracks={effectiveSubtitleTracks}
           preferredSubtitleLanguage={preferredSubtitleLanguage}
           activeSubtitleIndex={activeSubtitleIndex}
-          onSubtitleSelect={handleSubtitleSelect}
+          onSubtitleSelect={handleMenuSubtitleSelect}
           subtitleDelayMs={subtitleDelayMs}
           onSubtitleDelayChange={setSubtitleDelayMs}
           mediaFileId={activeFileId ?? undefined}

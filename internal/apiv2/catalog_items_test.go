@@ -13,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
 
 // fakeCatalog backs the catalog-items operations: it records the request
@@ -743,5 +745,33 @@ func TestEpisodesOfStatesRatings(t *testing.T) {
 		if _, ok := fields["ratings"]; ok {
 			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
 		}
+	}
+}
+
+// A stored date that is not YYYY-MM-DD is left out of a format: date member
+// rather than sent as text a typed client cannot decode: first_air_date is
+// free text, and request-provider dates are copied as fetched.
+func TestCatalogDatesLeaveOutFreeText(t *testing.T) {
+	text := func(s string) *string { return &s }
+	shown := func(s *string) string {
+		if s == nil {
+			return "absent"
+		}
+		return *s
+	}
+	detail := catalogItemDetailOf(&catalogpkg.ItemDetail{ContentID: "series:x", Type: "series",
+		FirstAirDate: text("Oct 2015"), ReleaseDate: text("2024-02-30"), LastAirDate: text(" 2025-12-28T00:00:00Z ")}, ratingsources.Selection{})
+	if detail.FirstAirDate != nil || detail.ReleaseDate != nil || detail.LastAirDate == nil || *detail.LastAirDate != "2025-12-28" {
+		t.Fatalf("detail dates = %s %s %s", shown(detail.FirstAirDate), shown(detail.ReleaseDate), shown(detail.LastAirDate))
+	}
+	card := catalogItemOfListing(handlers.CollectionItemView{ContentID: "series:x", Type: "series", ReleaseDate: text("2015"),
+		SortMetrics: &handlers.SortMetricsView{ReleaseDate: text("Oct 2015")}}, ratingsources.Selection{})
+	if card.ReleaseDate != nil || card.SortMetrics != nil {
+		t.Fatalf("card dates = %s %+v", shown(card.ReleaseDate), card.SortMetrics)
+	}
+	request := requestMediaDetailOf(&mediarequests.MediaDetail{ReleaseDate: "1995-12-15", FirstAirDate: "Oct 2015",
+		Seasons: []mediarequests.RequestSeason{{Number: 1, AirDate: "2015"}}})
+	if request.ReleaseDate != "1995-12-15" || request.FirstAirDate != "" || request.Seasons[0].AirDate != "" {
+		t.Fatalf("request dates = %q %q %q", request.ReleaseDate, request.FirstAirDate, request.Seasons[0].AirDate)
 	}
 }

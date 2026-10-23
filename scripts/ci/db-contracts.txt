@@ -6,22 +6,34 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
+./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
+./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
+./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
+./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestHDR10PlusBackfillRecordsFrameStatusDB
+./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
+./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
+./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# A watched special does not anchor Next Up for a series with regular seasons.
+./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
@@ -55,6 +67,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
+./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -86,6 +100,9 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
 
+# Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
+./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB
+
 # Persisted failure text stays valid UTF-8 and bounded.
 ./internal/trickplay TestFinishAcceptsTruncatedUTF8ErrorDB
 
@@ -116,6 +133,9 @@
 ./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
 ./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
 ./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
+
+# Session-less Android push retirement is ordered against registration by generation.
+./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
 
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
@@ -170,17 +190,23 @@
 ./internal/markers TestPopulationStoreReleaseKeepsFetchState
 ./internal/markers TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
+./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
+./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
+./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres
 ./migrations TestSubtitleTimingFileReplacePostgres
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
+./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
+./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
@@ -229,9 +255,14 @@
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
+./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
+
+# Credits tail failures replace legacy metadata verdicts and back off.
+./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres
+./internal/mediaartifact TestArtifactFailureReplacesListedUnusableDetailsPostgres
 
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
@@ -239,6 +270,10 @@
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
+
+# A resumed play's measured watch time survives repeated finalizations and is
+# what admin watch totals count.
+./internal/api/handlers TestAdminPlaybackWatchTimeDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
@@ -269,6 +304,11 @@
 # Two library items with one provider key each keep a list sync row, and a key
 # stays on the provider while another item of the same kind still holds it.
 ./internal/watchsync TestListItemsSharingProviderKeyDB
+
+# A sync flow saves only its own bookkeeping: tokens refreshed meanwhile stay,
+# its cursors merge with the stored ones, only a deferral that has ended is
+# cleared, and a connection disconnected meanwhile is not restored.
+./internal/watchsync TestConnectionSyncStateUpdatesDB
 
 # Plugin event deliveries: a claim takes at most its limit, never shares a row,
 # and only the latest claim records the outcome.
@@ -398,8 +438,15 @@
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
 
+# Deleting a library keeps the admin collections that cover other libraries,
+# moving one off the deleted library without a slug clash.
+./internal/catalog TestFolderDeleteKeepsMultiLibraryCollectionsDB
+
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+
+# A provider refresh with no translation clears only a copy of the base item's text.
+./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
 
 # An unmatched item an admin ignored stays off the unmatched and scan-retry
 # lists, the matcher queues and library refreshes across a rescan, the matcher
@@ -446,3 +493,26 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Server collections show a restricted viewer only the members it can open, and
+# leave out a collection whose members it can open none of (#2828).
+./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+
+# The household profile limit holds under concurrent creates (issue #2423).
+./internal/api/handlers TestCreateProfileLimitConcurrentDB
+
+# A scan cut short by shutdown goes back to the queue with its owed follow-up;
+# an admin cancel still ends it cancelled, and a late requeue never takes back
+# another worker's claim.
+./internal/scanqueue TestShutdownRequeuesRunningScanWithFollowUpDB
+./internal/scanqueue TestShutdownDuringLibraryLoadRequeuesScanDB
+./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
+./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
+./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
+
+# Password sign-in spends one attempt budget per name on every surface.
+./internal/auth TestSignInNameBudgetDB
+
+# The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
+# keeps a value an administrator chose.
+./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres

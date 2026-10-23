@@ -20,6 +20,27 @@ import (
 // loaded host cannot beat it.
 func TestProbeFileKillsTheWrappersChildWithIt(t *testing.T) {
 	t.Parallel()
+	assertKillsTheWrappersChild(t, func(ctx context.Context, ffprobePath, filePath string) error {
+		_, err := probeFileWithin(ctx, ffprobePath, filePath, probeLimits{probe: time.Minute, waitDelay: 200 * time.Millisecond})
+		return err
+	})
+}
+
+// The first-frame read for HDR10+ ends the same way, so a stalled wrapper
+// cannot hold a scan worker or the HDR10+ backfill past its context.
+func TestFrameSideDataProbeKillsTheWrappersChildWithIt(t *testing.T) {
+	t.Parallel()
+	assertKillsTheWrappersChild(t, func(ctx context.Context, ffprobePath, filePath string) error {
+		_, err := probeVideoFrameSideData(ctx, ffprobePath, filePath, "0")
+		return err
+	})
+}
+
+// assertKillsTheWrappersChild runs probe against a fake ffprobe wrapper whose
+// child holds stdout open, cancels it once the child is up, and checks that
+// the run returns and the child is killed with the wrapper.
+func assertKillsTheWrappersChild(t *testing.T, probe func(ctx context.Context, ffprobePath, filePath string) error) {
+	t.Helper()
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
 	ffprobePath := filepath.Join(dir, "ffprobe")
@@ -29,8 +50,7 @@ func TestProbeFileKillsTheWrappersChildWithIt(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := probeFileWithin(ctx, ffprobePath, filepath.Join(dir, "S01E06.mkv"), probeLimits{probe: time.Minute, waitDelay: 200 * time.Millisecond})
-		done <- err
+		done <- probe(ctx, ffprobePath, filepath.Join(dir, "S01E06.mkv"))
 	}()
 	pid := waitForPID(t, pidFile)
 	cancel()

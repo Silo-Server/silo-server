@@ -90,7 +90,7 @@ func (h *ItemsHandler) RequestTrailersRefresh(ctx context.Context, userID int, c
 		if !result.Allowed {
 			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many trailer refresh requests")
 			if result.RetryAfter > 0 {
-				limited.RetryAfter = max(1, int(result.RetryAfter.Seconds()))
+				limited.RetryAfter = ratelimit.RetryAfterSeconds(result.RetryAfter)
 			}
 			return TrailerRefreshView{}, limited
 		}
@@ -318,7 +318,7 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64,
 	if !result.Allowed {
 		limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many person refresh requests")
 		if result.RetryAfter > 0 {
-			limited.RetryAfter = max(1, int(result.RetryAfter.Seconds()))
+			limited.RetryAfter = ratelimit.RetryAfterSeconds(result.RetryAfter)
 		}
 		return limited
 	}

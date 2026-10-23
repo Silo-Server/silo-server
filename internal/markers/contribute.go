@@ -129,6 +129,27 @@ func (s *ContributionService) submitters() []Submitter {
 	return out
 }
 
+// AutoContributors lists the registered submitters that share local markers
+// automatically, with the settings ContributeFile applies to an automatic run.
+func (s *ContributionService) AutoContributors() []AutoContributor {
+	if s == nil || s.config == nil {
+		return nil
+	}
+	var out []AutoContributor
+	for _, sub := range s.submitters() {
+		cfg, ok := s.config.Get(sub.ID())
+		if !ok || !cfg.ContributeEnabled || !cfg.ContributeAutoLocal {
+			continue
+		}
+		out = append(out, AutoContributor{
+			Provider:            sub.ID(),
+			MinConfidence:       cfg.ContributeMinConfidence,
+			RequiredExternalIDs: submissionKeyIDs(sub),
+		})
+	}
+	return out
+}
+
 // ContributeFile submits the file's eligible markers and returns one outcome
 // per (provider, segment) attempted (including explicit skips).
 func (s *ContributionService) ContributeFile(ctx context.Context, file *models.MediaFile, opts ContributeOptions) ([]ContributionOutcome, error) {
@@ -346,10 +367,9 @@ func contributionTargetParts(ids ExternalIDs) []string {
 // active claim on this key blocks every later payload for the same item.
 //
 // The item is identified by the first external ID the provider keys
-// submissions by, or else by TMDB, TVDB, then IMDb. The migration that
-// introduced the column, and the candidate query, derive the second form in
-// SQL, so the two agree for providers that declare no keyed IDs or key by
-// TMDB.
+// submissions by, or else by TMDB, TVDB, then IMDb. The candidate query
+// derives the same key in SQL; the migration that introduced the column
+// derived only the second form.
 func contributionTargetKey(ids ExternalIDs, keyedBy []string) string {
 	id := ""
 	values := ids.AsRequestMap()

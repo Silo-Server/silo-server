@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 
@@ -143,7 +144,7 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 				RequestsPerMinute: cfg.IPReqPerMinute,
 				Burst:             cfg.IPBurst,
 			}
-			ipKey := "ip:" + clientIP
+			ipKey := "ip:" + SourceKey(clientIP)
 			ipResult := mw.perKey.Allow(r.Context(), ipKey, ipRate)
 			if !ipResult.Allowed {
 				writeRateLimitResponse(w, ipResult, reject)
@@ -231,13 +232,14 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 
 			clientIP := clientip.FromContext(r.Context())
 			if clientIP != "" {
+				source := SourceKey(clientIP)
 				// Check global per-IP limit (shared counter with authenticated routes)
 				ipRate := Rate{
 					RequestsPerSecond: cfg.IPReqPerSecond,
 					RequestsPerMinute: cfg.IPReqPerMinute,
 					Burst:             cfg.IPBurst,
 				}
-				ipResult := mw.perKey.Allow(r.Context(), "ip:"+clientIP, ipRate)
+				ipResult := mw.perKey.Allow(r.Context(), "ip:"+source, ipRate)
 				if !ipResult.Allowed {
 					writeRateLimitResponse(w, ipResult, reject)
 					return
@@ -251,7 +253,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 						RequestsPerMinute: epCfg.RequestsPerMinute,
 						Burst:             epCfg.Burst,
 					}
-					epKey := fmt.Sprintf("authip:%s:%s", clientIP, endpoint)
+					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
 					if !epResult.Allowed {
 						writeRateLimitResponse(w, epResult, reject)
@@ -265,7 +267,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					// that all clients behind it share. Network access ingress
 					// writes the header itself and needs no such cap.
 					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
-						peerKey := fmt.Sprintf("authpeer:%s:%s", peer, endpoint)
+						peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
 						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
 						if !peerResult.Allowed {
 							writeRateLimitResponse(w, peerResult, reject)
@@ -289,6 +291,39 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// nat64Prefixes hold the IPv6 addresses that NAT64 and SIIT translators give
+// IPv4 clients: the well-known prefix (RFC 6052) and the local-use range
+// (RFC 8215). Each address there is a separate IPv4 client.
+var nat64Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
+
+// SourceKey is the part of a client address that the per-address budgets
+// count. A public IPv6 client counts by its /64: one home line or server
+// usually holds a whole /64, so counting each address would give it billions
+// of budgets. Every other address counts on its own: IPv4, IPv4 written as
+// IPv6, unique local and link-local IPv6, which only come from the local
+// network the way private IPv4 addresses do, and anything that does not
+// parse as an address.
+func SourceKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() || addr.Is4In6() || !addr.IsGlobalUnicast() || addr.IsPrivate() || isNAT64(addr) {
+		return ip
+	}
+	prefix, _ := addr.Prefix(64) // cannot fail: an IPv6 address has 128 bits
+	return prefix.String()
+}
+
+func isNAT64(addr netip.Addr) bool {
+	for _, prefix := range nat64Prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // allowAccount uses an authenticated account identity, independent of forwarding

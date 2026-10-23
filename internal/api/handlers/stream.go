@@ -284,7 +284,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			SourceAudioChannels:       session.SourceAudioChannels,
 			TargetAudioChannels:       session.TargetAudioChannels,
 			TargetAudioBitrateKbps:    session.TargetAudioBitrateKbps,
-			Abort:                     abort,
+			// For a copied track the planned codec is the source's.
+			CopyAudioCodec: session.TargetAudioCodec,
+			Abort:          abort,
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -464,7 +466,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 		// Other formats (MicroDVD .sub) cannot be retimed; ffmpeg converts
 		// them from the file.
-		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.ffmpegPath())
+		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub, h.ffmpegPath())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error",
 				"Failed to load external subtitle")

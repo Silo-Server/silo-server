@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -372,7 +373,7 @@ type ItemVideoInfo struct {
 	Site       string `json:"site"`
 	SiteKey    string `json:"site_key"`
 	Name       string `json:"name,omitempty"`
-	Language   string `json:"language,omitempty"`
+	Language   string `json:"language,omitempty" doc:"Language of the video as the provider reports it, usually ISO 639-1"`
 	IsOfficial bool   `json:"is_official"`
 }
 
@@ -413,7 +414,7 @@ type AudiobookDetailExtension struct {
 type AudiobookPerson struct {
 	PersonID       string `json:"person_id,omitempty"`
 	Name           string `json:"name"`
-	PhotoURL       string `json:"photo_url,omitempty"`
+	PhotoURL       string `json:"photo_url,omitempty" format:"uri-reference"`
 	PhotoThumbhash string `json:"photo_thumbhash,omitempty"`
 }
 
@@ -426,7 +427,7 @@ type AudiobookRelatedItem struct {
 	ContentID   string `json:"content_id"`
 	Title       string `json:"title"`
 	Year        int    `json:"year,omitempty"`
-	PosterURL   string `json:"poster_url,omitempty"`
+	PosterURL   string `json:"poster_url,omitempty" format:"uri-reference"`
 	SeriesIndex *int   `json:"series_index,omitempty"`
 }
 
@@ -469,7 +470,7 @@ type MangaChapter struct {
 	// only when a progress row exists. The row progress bar uses it.
 	Progress *float64 `json:"progress,omitempty"`
 	// PosterURL is the chapter's extracted cover (presigned), for row thumbnails.
-	PosterURL string `json:"poster_url,omitempty"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -491,7 +492,7 @@ type CastCredit struct {
 	TvdbID         string `json:"tvdb_id,omitempty"`
 	ImdbID         string `json:"imdb_id,omitempty"`
 	PlexGUID       string `json:"plex_guid,omitempty"`
-	PhotoURL       string `json:"photo_url,omitempty"`
+	PhotoURL       string `json:"photo_url,omitempty" format:"uri-reference"`
 	PhotoThumbhash string `json:"photo_thumbhash,omitempty"`
 	// PhotoPath is the stored photo key behind PhotoURL. It is internal: the
 	// Jellyfin compatibility layer signs person image tags over it.
@@ -507,7 +508,7 @@ type CrewCredit struct {
 	TvdbID         string `json:"tvdb_id,omitempty"`
 	ImdbID         string `json:"imdb_id,omitempty"`
 	PlexGUID       string `json:"plex_guid,omitempty"`
-	PhotoURL       string `json:"photo_url,omitempty"`
+	PhotoURL       string `json:"photo_url,omitempty" format:"uri-reference"`
 	PhotoThumbhash string `json:"photo_thumbhash,omitempty"`
 	// PhotoPath is internal; see CastCredit.PhotoPath.
 	PhotoPath string `json:"-"`
@@ -639,14 +640,14 @@ type VersionChapter struct {
 	StartSeconds       float64 `json:"start_seconds"`
 	EndSeconds         float64 `json:"end_seconds"`
 	Source             string  `json:"source"`
-	ThumbnailURL       string  `json:"thumbnail_url,omitempty"`
+	ThumbnailURL       string  `json:"thumbnail_url,omitempty" format:"uri-reference"`
 	ThumbnailThumbhash string  `json:"thumbnail_thumbhash,omitempty"`
 }
 
 // VersionSubtitleTrack represents one embedded or external subtitle track in a file version.
 type VersionSubtitleTrack struct {
 	Index           int    `json:"index,omitempty"`
-	Language        string `json:"language,omitempty"`
+	Language        string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name"`
 	Codec           string `json:"codec,omitempty"`
 	Title           string `json:"title,omitempty"`
 	TitleIsFallback bool   `json:"-"` // An external title filled from its file name.
@@ -662,7 +663,7 @@ type VersionSubtitleTrack struct {
 // SubtitleInfo represents a subtitle track available for a media item.
 type SubtitleInfo struct {
 	Source          string `json:"source"` // embedded, external
-	Language        string `json:"language"`
+	Language        string `json:"language" doc:"Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value"`
 	Codec           string `json:"codec,omitempty"`
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
@@ -2605,7 +2606,7 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			PhotoPath: p.PhotoPath,
 		}
 		if strings.HasPrefix(p.PhotoPath, "http://") || strings.HasPrefix(p.PhotoPath, "https://") {
-			pc.PhotoURL = p.PhotoPath
+			pc.PhotoURL = ImageURLOrEmpty(p.PhotoPath)
 		} else if photoPaths[i] != "" {
 			pc.PhotoURL = photoURLs[photoPaths[i]].URL
 		}
@@ -4585,6 +4586,18 @@ func (s *DetailService) PresignURL(ctx context.Context, path string, variant str
 	return s.PresignURLWithExpiry(ctx, path, variant).URL
 }
 
+// ImageURLOrEmpty returns u when it parses as a URL reference and "" when it
+// does not. Image URLs stored as entered (admin edits, NFO and catalog
+// imports) and those a plugin resolver returns pass through presigning, so a
+// malformed one reads as no image rather than a value the API's uri-reference
+// format refuses.
+func ImageURLOrEmpty(u string) string {
+	if _, err := url.Parse(u); err != nil || strings.Contains(u, `\`) {
+		return ""
+	}
+	return u
+}
+
 // PresignURLWithExpiry resolves an image path and returns expiry metadata when
 // the underlying resolver can state the resolved URL validity window.
 func (s *DetailService) PresignURLWithExpiry(ctx context.Context, path string, variant string) ResolvedImageURL {
@@ -4592,14 +4605,16 @@ func (s *DetailService) PresignURLWithExpiry(ctx context.Context, path string, v
 		return ResolvedImageURL{}
 	}
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return ResolvedImageURL{URL: path}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 	}
 
 	if s.imageResolver != nil {
 		if resolver, ok := s.imageResolver.(expiringImageResolver); ok {
-			return resolver.ResolveImageURLWithExpiry(ctx, path, variant)
+			resolved := resolver.ResolveImageURLWithExpiry(ctx, path, variant)
+			resolved.URL = ImageURLOrEmpty(resolved.URL)
+			return resolved
 		}
-		return ResolvedImageURL{URL: s.imageResolver.ResolveImageURL(ctx, path, variant)}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(s.imageResolver.ResolveImageURL(ctx, path, variant))}
 	}
 
 	slog.WarnContext(ctx, "image path could not be resolved", "component", "catalog", "path", path)
@@ -4678,7 +4693,7 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 			continue
 		}
 		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-			resolved[path] = ResolvedImageURL{URL: path}
+			resolved[path] = ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 			continue
 		}
 		resolverPaths = append(resolverPaths, path)
@@ -4686,11 +4701,12 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 	if s.imageResolver != nil && len(resolverPaths) > 0 {
 		if resolver, ok := s.imageResolver.(expiringImageResolver); ok {
 			for path, value := range resolver.ResolveImageURLsWithExpiry(ctx, resolverPaths, variant) {
+				value.URL = ImageURLOrEmpty(value.URL)
 				resolved[path] = value
 			}
 		} else {
-			for path, url := range s.imageResolver.ResolveImageURLs(ctx, resolverPaths, variant) {
-				resolved[path] = ResolvedImageURL{URL: url}
+			for path, resolvedURL := range s.imageResolver.ResolveImageURLs(ctx, resolverPaths, variant) {
+				resolved[path] = ResolvedImageURL{URL: ImageURLOrEmpty(resolvedURL)}
 			}
 		}
 	}
@@ -4753,7 +4769,7 @@ func (s *DetailService) PresignImageURLWithExpiry(ctx context.Context, path, ima
 	}
 	// HTTP URLs pass through.
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return ResolvedImageURL{URL: path}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 	}
 
 	return s.PresignURLWithExpiry(ctx, cachedImageVariantPath(path, imageType, size), sizeToVariant(size))

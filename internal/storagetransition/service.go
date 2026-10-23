@@ -3,11 +3,13 @@ package storagetransition
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"path"
 	"path/filepath"
 	"slices"
@@ -299,35 +301,13 @@ func New(pool *pgxpool.Pool, settings Settings, jobs JobRepository, source, priv
 	service.openPublic = openTarget
 	service.openPrivate = openPrivateTarget
 	service.commitVerifyBackoff = func(ctx context.Context, attempt int) error {
-		timer := time.NewTimer(time.Duration(attempt+1) * 200 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return sleepContext(ctx, time.Duration(attempt+1)*200*time.Millisecond)
 	}
 	service.admissionRejoinBackoff = func(ctx context.Context, _ int) error {
-		timer := time.NewTimer(500 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return sleepContext(ctx, 500*time.Millisecond)
 	}
 	service.postRestartBackoff = func(ctx context.Context, attempt int) error {
-		delay := time.Second << min(attempt, 5)
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return sleepContext(ctx, time.Second<<min(attempt, 5))
 	}
 	service.reconcileResumable = func(ctx context.Context, target blobstore.Store, checkpoint *metadata.ArtworkReconcileCheckpoint, save func(metadata.ArtworkReconcileCheckpoint) error, progress func(float64, string)) (metadata.ArtworkReconcileStats, error) {
 		return metadata.NewArtworkCacheReconciler(pool, target).RunResumable(ctx, checkpoint, save, progress)
@@ -1414,7 +1394,26 @@ func (s *Service) copyPrefixPass(ctx context.Context, transitionID, scope string
 				if err := groupCtx.Err(); err != nil {
 					return err
 				}
-				outcome, err := s.copyObject(groupCtx, transitionID, scope, source, target, object, checkpoint, found, runID, sameRunListings, finalPass)
+				var outcome copyOutcome
+				var err error
+				for attempt := 0; ; attempt++ {
+					outcome, err = s.copyObject(groupCtx, transitionID, scope, source, target, object, checkpoint, found, runID, sameRunListings, finalPass)
+					// The fenced pass blocks storage writes, so it fails fast and
+					// the transition resumes from its checkpoints when restarted.
+					if !errors.Is(err, blobstore.ErrThrottled) || finalPass || attempt >= throttleRetries {
+						break
+					}
+					if outcome.checkpoint.SHA256 != "" {
+						checkpoint, found = outcome.checkpoint, true
+					}
+					delay := throttleDelay(attempt)
+					mu.Lock()
+					progress(offset+copied, 0, fmt.Sprintf("Storage provider is rate limiting requests; retrying in %s", delay.Round(time.Second)))
+					mu.Unlock()
+					if err := sleepContext(groupCtx, delay); err != nil {
+						return err
+					}
+				}
 				if err != nil {
 					return err
 				}
@@ -1461,6 +1460,33 @@ func (s *Service) copyPrefixPass(ctx context.Context, transitionID, scope string
 			return copied, bytes, skipped, nil
 		}
 		cursor = next
+	}
+}
+
+// A copy rejected by provider rate limiting waits and retries this many times,
+// 14 to 28 minutes in total, before the transition fails. Providers such as
+// Cloudflare R2 do not publish how long a throttle lasts.
+const (
+	throttleRetries   = 8
+	throttleBaseDelay = 30 * time.Second
+	throttleMaxDelay  = 5 * time.Minute
+)
+
+// throttleDelay picks a wait between half and all of the backoff step, so
+// workers throttled in the same burst do not all retry at the same moment.
+func throttleDelay(attempt int) time.Duration {
+	step := min(throttleBaseDelay<<min(attempt, 10), throttleMaxDelay)
+	return step/2 + rand.N(step/2+1) //nolint:gosec // retry jitter, not a secret
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -1539,19 +1565,17 @@ func (s *Service) copyObject(ctx context.Context, transitionID, scope string, so
 	if err != nil || closeErr != nil {
 		return copyOutcome{}, fmt.Errorf("write %q: %w", object.Key, errors.Join(err, closeErr))
 	}
-	sourceDigest := fmt.Sprintf("%x", hasher.Sum(nil))
+	written := objectCheckpoint{Size: info.Size, SHA256: hex.EncodeToString(hasher.Sum(nil)), Listing: listing, ListingRunID: runID}
 	targetDigest, targetSize, err := objectDigest(ctx, target, object.Key)
 	if err != nil {
-		return copyOutcome{}, fmt.Errorf("verify %q: %w", object.Key, err)
+		// The write succeeded, so a retry can verify it from this checkpoint
+		// instead of uploading the object again.
+		return copyOutcome{checkpoint: written}, fmt.Errorf("verify %q: %w", object.Key, err)
 	}
-	if targetSize != info.Size || targetDigest != sourceDigest {
+	if targetSize != info.Size || targetDigest != written.SHA256 {
 		return copyOutcome{}, fmt.Errorf("verify %q: target checksum or size differs from source", object.Key)
 	}
-	return copyOutcome{
-		checkpoint:      objectCheckpoint{Size: info.Size, SHA256: sourceDigest, Listing: listing, ListingRunID: runID},
-		message:         "Copying",
-		rememberListing: rememberListing,
-	}, nil
+	return copyOutcome{checkpoint: written, message: "Copying", rememberListing: rememberListing}, nil
 }
 
 func listingShortcutReliable(source blobstore.Store, listing objectListing) bool {

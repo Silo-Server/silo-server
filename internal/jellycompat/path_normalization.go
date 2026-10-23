@@ -149,6 +149,11 @@ func canonicalizeCompatPath(path string) string {
 			parts[i] = "LocalTrailers"
 			continue
 		}
+		// AdditionalParts likewise, only as /Videos/{id}/AdditionalParts.
+		if i >= 3 && strings.EqualFold(part, "additionalparts") && strings.EqualFold(parts[i-2], "videos") {
+			parts[i] = "AdditionalParts"
+			continue
+		}
 		parts[i] = canonicalizeCompatSegment(part)
 	}
 	return strings.Join(parts, "/")

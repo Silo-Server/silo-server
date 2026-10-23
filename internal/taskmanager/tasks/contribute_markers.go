@@ -11,22 +11,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// ContributionRunner submits a file's eligible markers (satisfied by
-// *markers.ContributionService).
+// ContributionRunner lists the providers that share automatically and submits
+// a file's eligible markers (satisfied by *markers.ContributionService).
 type ContributionRunner interface {
+	AutoContributors() []markers.AutoContributor
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
-}
-
-// AutoContributeConfigReader exposes per-provider contribution config (satisfied
-// by *markers.ProviderConfigStore).
-type AutoContributeConfigReader interface {
-	List() []markers.ProviderConfig
 }
 
 // ContributionCandidateSource lists local-marker files eligible for auto
 // contribution (satisfied by *markers.ContributionStore).
 type ContributionCandidateSource interface {
-	CandidateLocalMarkerFiles(ctx context.Context, kind markers.MarkerKind, minConfidence float64, providers []string, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
+	CandidateLocalMarkerFiles(ctx context.Context, kind markers.MarkerKind, providers []markers.AutoContributor, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
 }
 
 // ContributionFileLoader loads files by id (satisfied by *scanner.FileRepository).
@@ -39,7 +34,6 @@ type ContributionFileLoader interface {
 // provider opts in.
 type ContributeMarkersTask struct {
 	service    ContributionRunner
-	config     AutoContributeConfigReader
 	candidates ContributionCandidateSource
 	files      ContributionFileLoader
 	wait       func(context.Context, time.Duration) error
@@ -57,8 +51,8 @@ const (
 )
 
 // NewContributeMarkersTask constructs the task.
-func NewContributeMarkersTask(service ContributionRunner, config AutoContributeConfigReader, candidates ContributionCandidateSource, files ContributionFileLoader) *ContributeMarkersTask {
-	return &ContributeMarkersTask{service: service, config: config, candidates: candidates, files: files, wait: sleepContext}
+func NewContributeMarkersTask(service ContributionRunner, candidates ContributionCandidateSource, files ContributionFileLoader) *ContributeMarkersTask {
+	return &ContributeMarkersTask{service: service, candidates: candidates, files: files, wait: sleepContext}
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -89,22 +83,12 @@ func (t *ContributeMarkersTask) DefaultTriggers() []taskmanager.TriggerConfig {
 }
 
 func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
-	if t.service == nil || t.config == nil || t.candidates == nil || t.files == nil {
+	if t.service == nil || t.candidates == nil || t.files == nil {
 		progress.Report(100, "Contribution is not configured")
 		return nil
 	}
 
-	minConfidence := 0.0
-	var providers []string
-	for _, c := range t.config.List() {
-		if !c.ContributeEnabled || !c.ContributeAutoLocal {
-			continue
-		}
-		if len(providers) == 0 || c.ContributeMinConfidence < minConfidence {
-			minConfidence = c.ContributeMinConfidence
-		}
-		providers = append(providers, c.Provider)
-	}
+	providers := t.service.AutoContributors()
 	if len(providers) == 0 {
 		progress.Report(100, "No provider has auto-contribution enabled")
 		return nil
@@ -115,7 +99,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	// One pass per kind, intros first, so a pass asks each file for the one
 	// segment it was selected for.
 	for _, kind := range markers.AutoContributedKinds() {
-		stopped, err := t.contributeKind(ctx, progress, kind, minConfidence, providers, &counts, &rateLimitWaits)
+		stopped, err := t.contributeKind(ctx, progress, kind, providers, &counts, &rateLimitWaits)
 		if err != nil || stopped {
 			return err
 		}
@@ -132,15 +116,14 @@ func (t *ContributeMarkersTask) contributeKind(
 	ctx context.Context,
 	progress taskmanager.ProgressReporter,
 	kind markers.MarkerKind,
-	minConfidence float64,
-	providers []string,
+	providers []markers.AutoContributor,
 	counts *contributionCounts,
 	rateLimitWaits *int,
 ) (bool, error) {
 	opts := markers.ContributeOptions{Segments: []markers.MarkerKind{kind}, Auto: true}
 	var after *markers.ContributionCandidate
 	for {
-		candidates, err := t.candidates.CandidateLocalMarkerFiles(ctx, kind, minConfidence, providers, after, contributionCandidateBatch)
+		candidates, err := t.candidates.CandidateLocalMarkerFiles(ctx, kind, providers, after, contributionCandidateBatch)
 		if err != nil {
 			return false, fmt.Errorf("load contribution candidates: %w", err)
 		}

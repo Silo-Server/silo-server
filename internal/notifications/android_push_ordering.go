@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -57,8 +56,7 @@ func validateAndroidPushCommand(cmd AndroidPushCommand) (AndroidPushCommand, err
 	if cmd.UserID <= 0 || strings.TrimSpace(cmd.ProfileID) == "" || cmd.DeviceID == "" || len(cmd.DeviceID) > 128 || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) || cmd.Generation <= 0 {
 		return cmd, ErrPushDeviceInvalid
 	}
-	key, err := base64.RawURLEncoding.DecodeString(cmd.InstallationKey)
-	if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != cmd.InstallationKey {
+	if !validInstallationKey(cmd.InstallationKey) {
 		return cmd, ErrPushInstallationProof
 	}
 	if cmd.Remove {
@@ -75,6 +73,17 @@ func validateAndroidPushCommand(cmd AndroidPushCommand) (AndroidPushCommand, err
 	return cmd, nil
 }
 func pushDigest(value []byte) string { sum := sha256.Sum256(value); return hex.EncodeToString(sum[:]) }
+
+// androidPushIntent digests what an ordered command asks for, so only an exact
+// replay of the newest command matches the stored intent.
+func androidPushIntent(cmd AndroidPushCommand) string {
+	payload, _ := json.Marshal(struct {
+		User                     int
+		Profile, TokenHash, Mode string
+		Remove                   bool
+	}{cmd.UserID, cmd.ProfileID, fcmTokenHash(cmd.Token), cmd.PushMode, cmd.Remove})
+	return pushDigest(payload)
+}
 
 // lockAndroidPushInstallation serializes bridge and ordered writers across all
 // accounts/profiles using this installation. Generation zero is bridge-only.
@@ -98,12 +107,7 @@ func (r *PushDeviceRepository) ApplyAndroidPush(ctx context.Context, cmd Android
 	if err != nil {
 		return result, err
 	}
-	payload, _ := json.Marshal(struct {
-		User                     int
-		Profile, TokenHash, Mode string
-		Remove                   bool
-	}{cmd.UserID, cmd.ProfileID, fcmTokenHash(cmd.Token), cmd.PushMode, cmd.Remove})
-	intent := pushDigest(payload)
+	intent := androidPushIntent(cmd)
 	keyHash := pushDigest([]byte(cmd.InstallationKey))
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -180,4 +184,108 @@ func (s *PushDeviceService) OrderedAndroidAvailable() bool {
 	}
 	_, ok := s.store.(orderedAndroidPushStore)
 	return ok
+}
+
+// AndroidPushRetirement stops delivery to an installation without a login
+// session. The installation key is the only authority: an app that removed
+// this server or signed out has already cleared its login but still holds the key.
+type AndroidPushRetirement struct {
+	DeviceID        string
+	InstallationKey string
+	Generation      int64
+}
+
+func validateAndroidPushRetirement(cmd AndroidPushRetirement) error {
+	if cmd.Generation <= 0 || cmd.DeviceID == "" || len(cmd.DeviceID) > 128 || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) {
+		return ErrPushDeviceInvalid
+	}
+	if !validInstallationKey(cmd.InstallationKey) {
+		return ErrPushInstallationProof
+	}
+	return nil
+}
+
+// RetireAndroidPush applies an ordered removal at the command's generation on
+// behalf of the installation's stored owner, authorized by the key hash instead
+// of a login. It deletes the installation's Android rows, whose pending attempts
+// cascade, and records the owner's removal intent, so the owner's own removal at
+// that generation replays and a registration there conflicts. A later
+// registration with a higher generation and the same key resumes through
+// ApplyAndroidPush. An installation with no ordered record has no key to check;
+// the call then answers removed and writes nothing.
+func (r *PushDeviceRepository) RetireAndroidPush(ctx context.Context, cmd AndroidPushRetirement) (AndroidPushReceipt, error) {
+	if r == nil || r.pool == nil {
+		return AndroidPushReceipt{}, ErrPushDeviceUnavailable
+	}
+	if err := validateAndroidPushRetirement(cmd); err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	retired := AndroidPushReceipt{Generation: cmd.Generation, Removed: true}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	// Rolling back also drops the placeholder row the lock inserts for an
+	// unknown installation.
+	defer func() { _ = tx.Rollback(ctx) }()
+	generation, err := lockAndroidPushInstallation(ctx, tx, cmd.DeviceID)
+	if err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	if generation == 0 {
+		return retired, nil
+	}
+	var storedKey, profile string
+	var user int
+	var removed bool
+	if err = tx.QueryRow(ctx, `SELECT installation_key_hash,user_id,profile_id,removed FROM android_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&storedKey, &user, &profile, &removed); err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	if !hmac.Equal([]byte(storedKey), []byte(pushDigest([]byte(cmd.InstallationKey)))) {
+		return AndroidPushReceipt{}, ErrPushInstallationProof
+	}
+	if cmd.Generation < generation || (cmd.Generation == generation && !removed) {
+		return AndroidPushReceipt{}, ErrPushGenerationConflict
+	}
+	if cmd.Generation == generation {
+		return retired, nil
+	}
+	// Deleting the rows retires queued attempts through their FK. A provider
+	// request already dispatched cannot be recalled.
+	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE device_id=$1 AND platform=$2`, cmd.DeviceID, PushPlatformAndroid); err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	intent := androidPushIntent(AndroidPushCommand{UserID: user, ProfileID: profile, Remove: true})
+	if _, err = tx.Exec(ctx, `UPDATE android_push_installations SET generation=$2,intent_hash=$3,registration_id='',server_device_id='',push_mode='',removed=true WHERE device_id=$1`, cmd.DeviceID, cmd.Generation, intent); err != nil {
+		return AndroidPushReceipt{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return AndroidPushReceipt{}, fmt.Errorf("commit Android push retirement: %w", err)
+	}
+	return retired, nil
+}
+
+type androidPushRetiringStore interface {
+	RetireAndroidPush(context.Context, AndroidPushRetirement) (AndroidPushReceipt, error)
+}
+
+// AndroidPushRetirementAvailable reports whether ordered Android storage can
+// accept a session-less retirement.
+func (s *PushDeviceService) AndroidPushRetirementAvailable() bool {
+	if !s.Available() {
+		return false
+	}
+	_, ok := s.store.(androidPushRetiringStore)
+	return ok
+}
+
+func (s *PushDeviceService) RetireAndroidPush(ctx context.Context, cmd AndroidPushRetirement) (AndroidPushReceipt, error) {
+	if !s.Available() {
+		return AndroidPushReceipt{}, ErrPushDeviceUnavailable
+	}
+	store, ok := s.store.(androidPushRetiringStore)
+	if !ok {
+		return AndroidPushReceipt{}, ErrPushDeviceUnavailable
+	}
+	return store.RetireAndroidPush(ctx, cmd)
 }

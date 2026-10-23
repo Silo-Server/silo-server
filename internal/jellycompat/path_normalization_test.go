@@ -21,3 +21,18 @@ func TestCanonicalizeCompatPathLocalTrailers(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalizeCompatPathAdditionalParts(t *testing.T) {
+	for in, want := range map[string]string{
+		"/videos/abc123/additionalparts":      "/Videos/abc123/AdditionalParts",
+		"/Videos/abc123/AdditionalParts":      "/Videos/abc123/AdditionalParts",
+		"/emby/videos/abc123/additionalParts": "/Videos/abc123/AdditionalParts",
+		"/DisplayPreferences/additionalparts": "/DisplayPreferences/additionalparts",
+		"/items/abc123/additionalparts":       "/Items/abc123/additionalparts",
+		"/videos/additionalparts":             "/Videos/additionalparts",
+	} {
+		if got := canonicalizeCompatPath(in); got != want {
+			t.Errorf("canonicalizeCompatPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

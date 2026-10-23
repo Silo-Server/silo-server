@@ -575,6 +575,44 @@ func (r *Repository) MarkCancelled(ctx context.Context, id string) (*models.Scan
 	return run, false, nil
 }
 
+// Requeue returns a running run to the queue so a worker claims it again,
+// keeping any owed follow-up and dropping the interrupted attempt's progress.
+// startedAt is the claim being given up: a run that was requeued as stale and
+// claimed again since has a new start time and is left alone. It reports
+// false, with the run's current row, when the run is no longer that running
+// claim, for example because an admin cancel landed first.
+func (r *Repository) Requeue(ctx context.Context, id string, startedAt *time.Time) (*models.ScanRun, bool, error) {
+	run, err := scanRunRow(r.pool.QueryRow(ctx, `
+		UPDATE scan_runs
+		SET status = $2,
+			result_payload = '{}'::jsonb,
+			started_at = NULL,
+			heartbeat_at = NULL,
+			completed_at = NULL,
+			error_message = '',
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $3
+		  AND started_at IS NOT DISTINCT FROM $4
+		RETURNING `+scanRunColumns,
+		id,
+		StatusAccepted,
+		StatusRunning,
+		startedAt,
+	))
+	if err == nil {
+		return run, true, nil
+	}
+	if !errors.Is(err, ErrScanRunNotFound) {
+		return nil, false, err
+	}
+	run, err = r.GetByID(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	return run, false, nil
+}
+
 func (r *Repository) GetByID(ctx context.Context, id string) (*models.ScanRun, error) {
 	return scanRunRow(r.pool.QueryRow(ctx, `
 		SELECT `+scanRunColumns+`

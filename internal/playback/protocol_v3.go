@@ -818,13 +818,13 @@ type RouteEventV3 struct {
 }
 
 type StreamV3 struct {
-	URL              string              `json:"url"`
+	URL              string              `json:"url" format:"uri-reference"`
 	Protocol         StreamProtocolV3    `json:"protocol"`
 	Container        string              `json:"container,omitempty"`
 	MIMEType         string              `json:"mime_type,omitempty"`
 	Headers          map[string]string   `json:"headers"`
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
-	HeaderRefreshURL string              `json:"header_refresh_url,omitempty"`
+	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
 }
 
 type TimelineV3 struct {
@@ -924,7 +924,7 @@ type ValidationClaimsV3 struct {
 }
 
 type SubtitleArtifactV3 struct {
-	URL                 string  `json:"url"`
+	URL                 string  `json:"url" format:"uri-reference"`
 	MIMEType            string  `json:"mime_type"`
 	Format              string  `json:"format"`
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`

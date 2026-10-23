@@ -342,6 +342,10 @@ func (p *PluginProvider) listRemoteState(
 	if err != nil {
 		return pluginRemoteTraversal{}, watchSyncUnavailableError()
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return pluginRemoteTraversal{}, err
+	}
 	cursor := conn.SyncCursors[cursorKey]
 	pageToken := ""
 	seenPageTokens := make(map[string]struct{})
@@ -619,6 +623,10 @@ func (p *PluginProvider) applyPluginEventsDetailed(
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return result, statuses, watchSyncUnavailableError()
+	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return result, statuses, err
 	}
 	for offset := 0; offset < len(events); offset += max(1, p.ExportBatchSize()) {
 		end := min(len(events), offset+max(1, p.ExportBatchSize()))
