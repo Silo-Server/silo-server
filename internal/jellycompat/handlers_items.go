@@ -2401,12 +2401,13 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 	items = sliceBaseItems(items, query.startIndex, query.limit)
 	pageIDs = slicePageIDs(pageIDs, query.startIndex, query.limit)
 	if query.needsDetailFields {
+		detailsByID := h.batchListItemDetails(r.Context(), session, pageIDs, nil)
 		for i := range items {
 			if i >= len(pageIDs) {
 				break
 			}
-			detail, detailErr := h.content.GetItemDetail(r.Context(), session, pageIDs[i], nil)
-			if detailErr != nil {
+			detail := detailsByID[pageIDs[i]]
+			if detail == nil {
 				continue
 			}
 			h.rememberDetailImages(*detail)
@@ -2954,15 +2955,12 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 
 	items := make([]baseItemDTO, 0, len(query.specificIDs))
 	savedMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
-	for _, contentID := range query.specificIDs {
-		detail, itemErr := h.content.GetItemDetail(r.Context(), session, contentID, libraryIDPtr(query.parentLibraryID))
-		if itemErr != nil {
-			if isHTTPStatus(itemErr, http.StatusNotFound) {
-				continue
-			}
-			writeCompatUpstreamError(w, itemErr)
-			return
-		}
+	details, err := h.specificItemDetails(r.Context(), session, query.specificIDs, libraryIDPtr(query.parentLibraryID))
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	for _, detail := range details {
 		h.rememberDetailImages(*detail)
 		dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
 		if query.requestedFields == nil {
@@ -3024,6 +3022,35 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
+}
+
+// specificItemDetails returns the details of an Ids list in its order. One
+// batch serves the movies, series, and episodes; GetItemDetail serves what the
+// batch leaves out, such as seasons, or every id when the batch fails. An id
+// GetItemDetail answers 404 for is left out, and any other error fails the
+// list.
+func (h *ItemsHandler) specificItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]*upstreamItemDetail, error) {
+	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID)
+	if batchErr != nil {
+		batch = nil
+	}
+	details := make([]*upstreamItemDetail, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		detail := batch[contentID]
+		var err error
+		if detail == nil {
+			detail, err = h.content.GetItemDetail(ctx, session, contentID, libraryID)
+		}
+		switch {
+		case isHTTPStatus(err, http.StatusNotFound):
+			// Left out of the list.
+		case err != nil:
+			return nil, err
+		case detail != nil:
+			details = append(details, detail)
+		}
+	}
+	return details, nil
 }
 
 // handlePlayedItems serves IsPlayed=True requests by querying completed
