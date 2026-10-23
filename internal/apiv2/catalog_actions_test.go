@@ -229,8 +229,9 @@ func TestMetadataAICapabilityAndTranslate(t *testing.T) {
 	if !fake.lastFilter.SeriesLibraryCoversEpisodes {
 		t.Fatalf("filter = %+v, want SeriesLibraryCoversEpisodes", fake.lastFilter)
 	}
+	// Empty fails both minLength and the language tag pattern, at the member.
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/items/movie:heat-1995/translate-description", `{"target_language":""}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.target_language" {
+	if len(p.Errors) == 0 || slices.ContainsFunc(p.Errors, func(e ProblemError) bool { return e.Location != "body.target_language" }) {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/items/movie:heat-1995/translate-description", `{"target_language":"de","force":true}`, viewerHeaders()), TypeValidationFailed)

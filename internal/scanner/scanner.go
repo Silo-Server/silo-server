@@ -43,7 +43,8 @@ var ignoredDirNames = map[string]bool{
 // ignoredMovieSupplementalDirNames holds movie-library directory names whose
 // contents are never playable content (noise). Extras-shaped directories
 // (Trailers/, Featurettes/, ...) are NOT in this set: they are walked and
-// classified via extrasDirKinds instead of discarded.
+// classified via extrasDirKinds instead of discarded. Subtitle discovery
+// reads the subtitle folders (subtitleDirLabels) on its own.
 var ignoredMovieSupplementalDirNames = map[string]bool{
 	"sample":    true,
 	"samples":   true,
@@ -900,7 +901,7 @@ func (s *Scanner) scanPaths(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
-	subtitleCache := newExternalSubtitleDirCache()
+	subtitleCache := newExternalSubtitleDirCache(folder.Type)
 
 	for range s.workerCount() {
 		wg.Go(func() {
@@ -1758,7 +1759,7 @@ func (s *Scanner) scanScope(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
-	subtitleCache := newExternalSubtitleDirCache()
+	subtitleCache := newExternalSubtitleDirCache(folder.Type)
 
 	for range s.workerCount() {
 		wg.Go(func() {
@@ -2790,7 +2791,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
+	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache(folder.Type))
 	if err != nil {
 		return err
 	}
@@ -3013,8 +3014,10 @@ func (s *Scanner) processFile(
 		var subErr error
 		externalSubs, subErr = subtitleCache.Detect(filePath)
 		if subErr != nil {
+			// Keep what was found (sidecars beside the video when only a
+			// Subs/ folder failed), but leave the set unchecked so the
+			// failure never reads as a change to the stored sidecars.
 			slog.WarnContext(ctx, "scanner: subtitle detection failed", "component", "scanner", "path", filePath, "error", subErr)
-			externalSubs = nil
 			externalSubsChecked = false
 			return externalSubs
 		}

@@ -180,13 +180,13 @@ func NewDurableCompatPlaybackStore(pool *pgxpool.Pool, ttl time.Duration, now fu
 	if now == nil {
 		now = time.Now
 	}
-	if ttl <= 0 {
-		ttl = 6 * time.Hour
-	}
+	mem := NewPlaybackSessionStore(ttl, now)
 	return &DurableCompatPlaybackStore{
-		mem:              NewPlaybackSessionStore(ttl, now),
-		pool:             pool,
-		ttl:              ttl,
+		mem:  mem,
+		pool: pool,
+		// Rows expire with the lifetime the cache resolved, including its
+		// default for a non-positive ttl.
+		ttl:              mem.ttl,
 		now:              now,
 		validatedIDs:     make(map[string]time.Time),
 		validatedTokens:  make(map[string]time.Time),

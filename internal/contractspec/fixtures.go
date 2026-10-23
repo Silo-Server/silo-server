@@ -77,6 +77,9 @@ func ValidateFixtures(fsys fs.FS, doc []byte) []string {
 	}
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
+	// A body must satisfy each declared format too (date, uri, …), not
+	// only its type: format is an annotation by default in draft 2020-12.
+	compiler.AssertFormat()
 	if err := addResource(compiler, fixturesSchemaID, schemaBytes); err != nil {
 		return []string{err.Error()}
 	}

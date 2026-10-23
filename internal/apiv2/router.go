@@ -25,6 +25,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
@@ -1190,7 +1191,18 @@ func serviceProblem(err error) *Problem {
 		}
 		return p
 	}
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return passwordHashBusyProblem()
+	}
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
+}
+
+// passwordHashBusyProblem answers a password or PIN the server was too busy
+// to hash or check (passwordhash.ErrBusy): a capacity failure, retried after
+// the delay, never a wrong password.
+func passwordHashBusyProblem() *Problem {
+	return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").
+		WithRetryAfter(passwordhash.RetryAfterSeconds)
 }
 
 // externalSignInProblemTypes keeps the external sign-in codes a shared

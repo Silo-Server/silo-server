@@ -42,11 +42,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	apiv2 "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -439,24 +441,22 @@ func (e *Env) Reseed() {
 	// account; admin_secondary stays PIN-free because scenarios declare it
 	// as the acting profile and would otherwise stop at profile_unverified.
 	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminLocked, Name: "Fixture Admin Locked"})
-	adminPIN := adminLockedPIN
 	adminStore, err := e.stores.ForUser(ctx, admin.ID)
 	if err != nil {
 		e.t.Fatalf("scenario executor: admin store: %v", err)
 	}
-	if err := adminStore.UpdateProfile(ctx, profileAdminLocked, userstore.UpdateProfileInput{PIN: &adminPIN}); err != nil {
+	if err := adminStore.UpdateProfile(ctx, profileAdminLocked, userstore.UpdateProfileInput{PINHash: e.pinHash(ctx, adminLockedPIN)}); err != nil {
 		e.t.Fatalf("scenario executor: lock admin profile: %v", err)
 	}
 	e.mustProfile(member.ID, userstore.Profile{ID: profilePrimary, Name: "Fixture Parent"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileSecondary, Name: "Fixture Teen"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileChild, Name: "Fixture Kid", IsChild: true, MaxContentRating: "PG"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileLocked, Name: "Fixture Locked"})
-	pin := lockedPIN
 	store, err := e.stores.ForUser(ctx, member.ID)
 	if err != nil {
 		e.t.Fatalf("scenario executor: member store: %v", err)
 	}
-	if err := store.UpdateProfile(ctx, profileLocked, userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	if err := store.UpdateProfile(ctx, profileLocked, userstore.UpdateProfileInput{PINHash: e.pinHash(ctx, lockedPIN)}); err != nil {
 		e.t.Fatalf("scenario executor: lock profile: %v", err)
 	}
 	e.mustProfile(grouped.ID, userstore.Profile{ID: profileGroupedPrimary, Name: "Fixture Grouped"})
@@ -673,6 +673,17 @@ func (e *Env) mustProfile(userID int, p userstore.Profile) {
 	if err := store.CreateProfile(e.ctx, p); err != nil {
 		e.t.Fatalf("scenario executor: profile %s: %v", p.Name, err)
 	}
+}
+
+// pinHash hashes a fixture PIN the way the profile handlers do before they
+// store it.
+func (e *Env) pinHash(ctx context.Context, pin string) *string {
+	hash, err := passwordhash.Generate(ctx, []byte(pin), bcrypt.MinCost)
+	if err != nil {
+		e.t.Fatalf("scenario executor: hashing PIN: %v", err)
+	}
+	stored := string(hash)
+	return &stored
 }
 
 func (e *Env) mintProfileToken(u *models.User, profileID string) string {

@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -456,7 +457,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// failed hash must not leave behind a profile that can be used without proof.
 	var pinHash string
 	if req.PIN != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
+		hash, err := passwordhash.Generate(ctx, []byte(req.PIN), bcrypt.DefaultCost)
+		if apiErr := busyError(err); apiErr != nil {
+			return none, apiErr
+		}
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
 		}
@@ -654,10 +658,15 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
+	pinHash, err := hashProfilePIN(ctx, req.PIN)
+	if err != nil {
+		return none, err
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
-		PIN:                        req.PIN,
+		PINHash:                    pinHash,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
@@ -961,12 +970,18 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 
 	// The attempt is counted before the PIN is checked, so concurrent
 	// guesses cannot overrun the limit, and while the profile is locked even
-	// the right PIN is refused.
+	// the right PIN is refused. The check then waits for a hashing turn ahead
+	// of sign-ins, and compares against the hash read with the revision above.
 	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
 	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
 		return none, PINLockedError(retryAfter)
 	}
-	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if apiErr := busyError(err); apiErr != nil {
+		return none, apiErr
+	}
+	valid, err := permit.Matches([]byte(profile.PINHash), []byte(cmd.PIN))
+	permit.Release()
 	if err != nil {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}
@@ -989,6 +1004,24 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
 	}
 	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
+}
+
+// hashProfilePIN prepares a requested PIN for storage before the profile
+// transaction opens, as creation does, so the transaction never waits for a
+// hashing turn: its bcrypt hash, "" to remove the PIN, or nil to keep it.
+func hashProfilePIN(ctx context.Context, pin *string) (*string, error) {
+	if pin == nil || *pin == "" {
+		return pin, nil
+	}
+	raw, err := passwordhash.Generate(ctx, []byte(*pin), bcrypt.DefaultCost)
+	if apiErr := busyError(err); apiErr != nil {
+		return nil, apiErr
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+	}
+	hash := string(raw)
+	return &hash, nil
 }
 
 // PINLockedError is the 429 a PIN check answers while the profile is locked

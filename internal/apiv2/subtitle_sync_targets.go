@@ -21,7 +21,7 @@ type SubtitleSyncState struct {
 	Source      string `json:"source" enum:"downloaded,external"`
 	// StoredSubtitleID is the stored subtitle's ID; absent for a sidecar.
 	StoredSubtitleID ID     `json:"stored_subtitle_id,omitempty"`
-	Language         string `json:"language"`
+	Language         string `json:"language" doc:"Language tag (BCP 47 for current data); may be empty or a legacy value"`
 	Format           string `json:"format"`
 	// Label is the stored subtitle's release name, or the sidecar's file name.
 	Label string `json:"label"`

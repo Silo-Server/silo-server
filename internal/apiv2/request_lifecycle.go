@@ -190,7 +190,7 @@ type WatchProviderDeviceAuth struct {
 	ID              ID      `json:"id"`
 	Provider        string  `json:"provider"`
 	UserCode        string  `json:"user_code"`
-	VerificationURL string  `json:"verification_url"`
+	VerificationURL string  `json:"verification_url" format:"uri-reference"`
 	IntervalSeconds int     `json:"interval_seconds"`
 	ExpiresAt       Instant `json:"expires_at"`
 }

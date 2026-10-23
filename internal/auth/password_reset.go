@@ -9,7 +9,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 )
 
 // ResetPasswordInTransaction replaces a local password on behalf of a
@@ -18,7 +19,7 @@ import (
 // revoked in the same transaction (RevokeSignInsInTransaction): whoever held
 // the old password is signed out everywhere.
 func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newPassword string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
+	hash, err := passwordhash.Generate(ctx, []byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}

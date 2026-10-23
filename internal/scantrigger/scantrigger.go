@@ -175,7 +175,7 @@ func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigg
 	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Subtree path must be below a library root", Reason: ReasonSubtreeOutsideLibrary}
 	}
-	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: normalizeTrigger(trigger)}, nil
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: subtitleFolderScope(cleanPath, matchedRoot, folder.Type), Trigger: normalizeTrigger(trigger)}, nil
 }
 
 // matchEnabledFolder lists the configured libraries and returns the enabled
@@ -252,7 +252,7 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	if dir, ok := localSidecarScope(cleanPath, matchedRoot, folder.Type); ok {
 		return &Target{Folder: folder, Mode: ModeSubtree, Path: dir, Trigger: trigger}, nil
 	}
-	scope := cleanPath
+	scope := subtitleFolderScope(cleanPath, matchedRoot, folder.Type)
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
 		// A vanished entry directly under the root reconciles via a full
 		// library scan, which keeps the empty-root guard in play.
@@ -340,6 +340,8 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	switch mode {
 	case ModeLibrary:
 		targetPath = ""
+	case ModeSubtree:
+		targetPath = subtitleFolderScope(cleanPath, matchedRoot, folder.Type)
 	case ModeFile:
 		mode, targetPath, err = mediaFileTarget(cleanPath, matchedRoot, folder.Type)
 		if err != nil {
@@ -400,20 +402,45 @@ func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string,
 }
 
 // localSidecarScope maps a local metadata sidecar (an .nfo document or sidecar
-// artwork) in a video library to a subtree scan of its directory: the scan
-// lists the directory's sidecars, and metadata re-applies the items there whose
-// sidecars changed. A sidecar directly under the library root is not mapped,
-// so one edit in a flat library never becomes a full library scan; the next
-// library scan picks it up.
+// artwork) or a subtitle in a video library to a subtree scan of the directory
+// of the videos it belongs to: the scan lists the directory's sidecars, and
+// metadata re-applies the items there whose sidecars changed. A subtitle in a
+// Subs/ folder belongs to the videos beside that folder. A sidecar directly
+// under the library root is not mapped, so one edit in a flat library never
+// becomes a full library scan; the next library scan picks it up.
 func localSidecarScope(cleanPath, matchedRoot, folderType string) (string, bool) {
-	if !scansVideoFiles(folderType) || !scanner.IsLocalMetadataSidecar(cleanPath) {
+	if !scansVideoFiles(folderType) {
 		return "", false
 	}
 	dir := filepath.Dir(cleanPath)
+	switch {
+	case scanner.IsLocalMetadataSidecar(cleanPath):
+	case scanner.IsSubtitleSidecar(cleanPath):
+		if owner, ok := scanner.SubtitleFolderOwner(dir); ok {
+			dir = owner
+		}
+	default:
+		return "", false
+	}
 	if filepath.Clean(dir) == filepath.Clean(matchedRoot) || !PathWithinRoot(dir, matchedRoot) {
 		return "", false
 	}
 	return dir, true
+}
+
+// subtitleFolderScope widens a subtree scan of a Subs/ or Subtitles/ folder,
+// or of a folder inside one, to the directory of the videos that read it: the
+// subtitle folder holds no video, so scanning it alone changes nothing. The
+// widening stops below the library root, as localSidecarScope does.
+func subtitleFolderScope(dir, matchedRoot, folderType string) string {
+	if !scansVideoFiles(folderType) {
+		return dir
+	}
+	owner, ok := scanner.SubtitleFolderOwner(dir)
+	if !ok || filepath.Clean(owner) == filepath.Clean(matchedRoot) || !PathWithinRoot(owner, matchedRoot) {
+		return dir
+	}
+	return owner
 }
 
 // scansVideoFiles reports whether a library kind is served by the video

@@ -39,9 +39,9 @@ func (h *AdminHandler) ReadAdminWatchSummary(ctx context.Context, q AdminWatchSu
 	err := h.pool.QueryRow(ctx, `
 		SELECT count(*),
 			count(*) FILTER (WHERE completed),
-			COALESCE(sum(watched_seconds), 0),
+			COALESCE(sum(`+adminPlaybackWatchTimeSQL("h")+`), 0),
 			max(ended_at)
-		FROM admin_playback_history
+		FROM admin_playback_history h
 		WHERE user_id = $1 AND ended_at >= $2 AND ($3 = '' OR profile_id = $3)`,
 		q.UserID, out.Since, q.ProfileID,
 	).Scan(&out.Plays, &out.CompletedPlays, &out.WatchedSeconds, &out.LastPlayedAt)

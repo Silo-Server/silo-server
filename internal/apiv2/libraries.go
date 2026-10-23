@@ -29,7 +29,7 @@ type Library struct {
 	Type                       string   `json:"type" doc:"Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)" example:"movies"`
 	Name                       string   `json:"name" example:"Movies"`
 	Enabled                    bool     `json:"enabled" example:"true"`
-	MetadataLanguage           string   `json:"metadata_language" doc:"ISO 639-1 code metadata is fetched in" example:"en"`
+	MetadataLanguage           string   `json:"metadata_language" pattern:"^(?:[a-z]{2})?$" doc:"Lowercase ISO 639-1 code metadata is fetched in; empty when an update cleared it, and fetches then use en" example:"en"`
 	AutoTranslateMetadata      bool     `json:"auto_translate_metadata" doc:"Translate descriptions when providers lack the language" example:"false"`
 	ChapterThumbnailsEnabled   bool     `json:"chapter_thumbnails_enabled" example:"false"`
 	ChapterThumbnailsSupported bool     `json:"chapter_thumbnails_supported" doc:"Whether the server can produce chapter thumbnails (public asset storage is configured)" example:"true"`
@@ -39,7 +39,7 @@ type Library struct {
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
 	RealtimeMonitoring         bool     `json:"realtime_monitoring" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 	SortOrder                  int      `json:"sort_order" doc:"Position among libraries, lowest first" example:"0"`
-	PosterURL                  string   `json:"poster_url,omitempty" doc:"Presigned poster URL; absent when the library has no poster"`
+	PosterURL                  string   `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned poster URL; absent when the library has no poster"`
 	LastScannedAt              *Instant `json:"last_scanned_at,omitempty" doc:"Absent until the first scan completes"`
 	ScanWarningCode            *string  `json:"scan_warning_code,omitempty" doc:"Outstanding scan warning (empty_root, dead_root, …); absent when none" example:"empty_root"`
 	ScanWarningMessage         *string  `json:"scan_warning_message,omitempty" doc:"Human-readable warning; absent when none"`
@@ -51,7 +51,7 @@ type LibraryCreate struct {
 	Paths                    []string `json:"paths" minItems:"1" doc:"Root directories the library scans" example:"[\"/media/movies\"]"`
 	Type                     string   `json:"type" minLength:"1" doc:"Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)" example:"movies"`
 	Name                     string   `json:"name" minLength:"1" example:"Movies"`
-	MetadataLanguage         string   `json:"metadata_language,omitempty" doc:"ISO 639-1 code; default en" example:"en"`
+	MetadataLanguage         string   `json:"metadata_language,omitempty" pattern:"^(?:[a-z]{2})?$" doc:"Lowercase ISO 639-1 code from the supported list; empty or omitted means en" example:"en"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty" doc:"Requires public asset storage" example:"false"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty" example:"false"`
 	TrickplayEnabled         bool     `json:"trickplay_enabled,omitempty" doc:"Generate seek-bar preview images; requires public asset storage" example:"false"`
@@ -66,7 +66,7 @@ type LibraryUpdate struct {
 	Type                     *string   `json:"type,omitempty" nullable:"false" minLength:"1" example:"movies"`
 	Name                     *string   `json:"name,omitempty" nullable:"false" minLength:"1" example:"Movies"`
 	Enabled                  *bool     `json:"enabled,omitempty" nullable:"false" example:"true"`
-	MetadataLanguage         *string   `json:"metadata_language,omitempty" nullable:"false" doc:"ISO 639-1 code; a change queues a quick metadata refresh" example:"en"`
+	MetadataLanguage         *string   `json:"metadata_language,omitempty" nullable:"false" pattern:"^(?:[a-z]{2})?$" doc:"Lowercase ISO 639-1 code from the supported list; a change queues a quick metadata refresh" example:"en"`
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`

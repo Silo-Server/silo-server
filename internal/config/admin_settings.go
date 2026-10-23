@@ -372,7 +372,7 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
 	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
 	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    "6h",
+	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
