@@ -58,6 +58,7 @@ type ContributionOutcome struct {
 // provider config store (satisfied by *ProviderConfigStore).
 type providerConfigReader interface {
 	Get(provider string) (ProviderConfig, bool)
+	Reload(ctx context.Context) error
 }
 
 // contributionRecorder is the audit surface ContributionService needs
@@ -132,9 +133,15 @@ func (s *ContributionService) submitters() []Submitter {
 
 // AutoContributors lists the registered submitters that share local markers
 // automatically, with the settings ContributeFile applies to an automatic run.
-func (s *ContributionService) AutoContributors() []AutoContributor {
+// It reloads provider config from the database first: a node that missed the
+// change event for a sharing opt-out saved elsewhere would otherwise keep
+// sharing on its cached flags. A failed reload lists none.
+func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContributor, error) {
 	if s == nil || s.config == nil {
-		return nil
+		return nil, nil
+	}
+	if err := s.config.Reload(ctx); err != nil {
+		return nil, err
 	}
 	var out []AutoContributor
 	for _, sub := range s.submitters() {
@@ -148,7 +155,7 @@ func (s *ContributionService) AutoContributors() []AutoContributor {
 			RequiredExternalIDs: submissionKeyIDs(sub),
 		})
 	}
-	return out
+	return out, nil
 }
 
 // ContributeFile submits the file's eligible markers and returns one outcome

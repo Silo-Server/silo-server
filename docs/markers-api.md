@@ -95,7 +95,10 @@ those defaults apply: when it is `false`, new providers start with sharing off,
 and changing it to `false` also turns contribution and automatic sharing off
 for existing providers whose manifest turns sharing on. That change commits
 with the setting: if it fails, the save fails and the setting keeps its old
-value. Changing it back to `true` changes no existing provider.
+value. Changing it back to `true` changes no existing provider. Each automatic
+sharing run reads provider config from the database before it starts, so a node
+that missed the change event still stops; if that read fails, the run shares
+nothing.
 
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,

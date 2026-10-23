@@ -26,7 +26,9 @@ type fakeContribRunner struct {
 	sequence [][]markers.ContributionOutcome
 }
 
-func (f *fakeContribRunner) AutoContributors() []markers.AutoContributor { return f.auto }
+func (f *fakeContribRunner) AutoContributors(context.Context) ([]markers.AutoContributor, error) {
+	return f.auto, nil
+}
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	f.calls = append(f.calls, file.ID)

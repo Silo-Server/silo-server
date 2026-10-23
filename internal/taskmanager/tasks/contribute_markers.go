@@ -14,7 +14,7 @@ import (
 // ContributionRunner lists the providers that share automatically and submits
 // a file's eligible markers (satisfied by *markers.ContributionService).
 type ContributionRunner interface {
-	AutoContributors() []markers.AutoContributor
+	AutoContributors(ctx context.Context) ([]markers.AutoContributor, error)
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
 }
 
@@ -88,7 +88,10 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 		return nil
 	}
 
-	providers := t.service.AutoContributors()
+	providers, err := t.service.AutoContributors(ctx)
+	if err != nil {
+		return fmt.Errorf("load marker sharing settings: %w", err)
+	}
 	if len(providers) == 0 {
 		progress.Report(100, "No provider has auto-contribution enabled")
 		return nil

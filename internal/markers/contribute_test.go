@@ -64,6 +64,24 @@ type fakeConfig map[string]ProviderConfig
 
 func (f fakeConfig) Get(p string) (ProviderConfig, bool) { c, ok := f[p]; return c, ok }
 
+func (fakeConfig) Reload(context.Context) error { return nil }
+
+// reloadingConfig is one node's cached provider config. Reload replaces the
+// cache with stored, the database's rows, or fails with err.
+type reloadingConfig struct {
+	fakeConfig
+	stored fakeConfig
+	err    error
+}
+
+func (c *reloadingConfig) Reload(context.Context) error {
+	if c.err != nil {
+		return c.err
+	}
+	c.fakeConfig = c.stored
+	return nil
+}
+
 type fakeRecorder struct {
 	mu       sync.Mutex
 	recorded []ContributionRow
@@ -462,7 +480,9 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 }
 
 // AutoContributors lists only registered submitters with automatic sharing on,
-// carrying each one's own minimum and required IDs.
+// carrying each one's own minimum and required IDs. It reads the stored
+// config, so a node that missed the change event for an opt-out saved on
+// another node stops sharing, and it lists none when that read fails.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
@@ -472,19 +492,40 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	} {
 		_ = reg.Register(sub)
 	}
-	cfg := fakeConfig{
+	stored := fakeConfig{
 		"keyed":       {Provider: "keyed", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.97},
 		"manual-only": {Provider: "manual-only", ContributeEnabled: true},
 		"disabled":    {Provider: "disabled", ContributeAutoLocal: true},
 		// A configured provider whose plugin is not loaded cannot submit.
 		"unregistered": {Provider: "unregistered", ContributeEnabled: true, ContributeAutoLocal: true},
 	}
-	svc := NewContributionService(reg, fakeResolver{}, cfg, &fakeRecorder{}, nil)
-
-	got := svc.AutoContributors()
-	want := []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}}
-	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
-		t.Fatalf("AutoContributors = %+v, want %+v", got, want)
+	// This node's cache predates an opt-out saved elsewhere.
+	stale := fakeConfig{"manual-only": {Provider: "manual-only", ContributeEnabled: true, ContributeAutoLocal: true}}
+	tests := []struct {
+		name    string
+		config  *reloadingConfig
+		want    []AutoContributor
+		wantErr bool
+	}{
+		{
+			name:   "stored config",
+			config: &reloadingConfig{fakeConfig: stale, stored: stored},
+			want:   []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}},
+		},
+		{
+			name:    "reload fails",
+			config:  &reloadingConfig{fakeConfig: stale, err: errors.New("database unavailable")},
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := NewContributionService(reg, fakeResolver{}, test.config, &fakeRecorder{}, nil)
+			got, err := svc.AutoContributors(context.Background())
+			if (err != nil) != test.wantErr || fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", test.want) {
+				t.Fatalf("AutoContributors = %+v, %v; want %+v, error %v", got, err, test.want, test.wantErr)
+			}
+		})
 	}
 }
 

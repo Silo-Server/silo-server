@@ -55,6 +55,8 @@ func (c dbProviderConfig) Get(provider string) (markers.ProviderConfig, bool) {
 	return cfg, ok
 }
 
+func (dbProviderConfig) Reload(context.Context) error { return nil }
+
 // seededFileLoader loads only the files a test seeded, so candidates other
 // packages' tests leave in the shared database never reach its providers.
 type seededFileLoader struct {
