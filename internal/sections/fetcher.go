@@ -1253,7 +1253,7 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result, err := runner(ctx, sec)
+			result, err := runSectionFetch(ctx, sec, runner)
 			if err != nil {
 				LogFetchError(ctx, "sections", sec, err)
 				result = SectionWithItems{
@@ -1267,6 +1267,20 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 
 	wg.Wait()
 	return results
+}
+
+// runSectionFetch runs runner for one section of fetchAllWithRunner. It runs
+// on its own goroutine, out of reach of the request's panic recovery, so a
+// panic becomes the section's error.
+func runSectionFetch(ctx context.Context, sec ResolvedSection, runner sectionFetchRunner) (result SectionWithItems, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.ErrorContext(ctx, "section fetch panicked", "component", "sections", "section_id", sec.ID, "type", sec.SectionType,
+				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+			result, err = SectionWithItems{}, errors.New("section fetch panicked")
+		}
+	}()
+	return runner(ctx, sec)
 }
 
 // FetchItemsByContentIDs resolves content IDs to full MediaItem objects,
