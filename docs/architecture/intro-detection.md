@@ -86,6 +86,33 @@ of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
 and silence-extended chapters 0.98. Contribution to online providers compares
 these values with each provider's minimum confidence.
 
+### Chapters and online markers
+
+Source priority puts online and plugin markers above every local one. The
+marker writer, `markers.CanWriteMarkerUpdate`, makes one exception for markers
+placed from the file's own chapters (`chapter:v1`, `chapter:silence:v1`,
+`chapter:silence:v2`, and `credits-chapter:v1`), which were authored for that
+exact file while a provider answers from other copies: between such a marker
+and an online one, the higher confidence wins and a tie goes to the online
+marker. So an online marker rated below the chapter does not replace it, and
+the chapter step replaces an online marker rated below it. Copies from another
+version of the episode, Chromaprint, and audio or video credits keep source
+priority, since their confidence scale is not comparable with a provider's.
+
+The episode chapter steps, for intros and credits, consider files whose marker
+came online and offer the chapter when the writer would take it, judged on the
+unrefined chapter, whose confidence silence refinement can only raise. Once
+the chapter is stored, a later lookup returning the same online marker leaves
+it in place, so neither side replaces the other on the next run. A file whose
+online marker arrived first, through the 03:00 sync or lazy playback, gets its
+chapter the next time local analysis of that kind covers its episode: the
+scheduled run, a re-detection, or a playback or admin refresh that starts local
+analysis because a file of the episode lacks a marker. Playback analyzes the
+kinds the played file lacks; admin refresh then analyzes every enabled kind.
+Both cover every version of the episode. The nightly movie pass does not list
+movies whose credits came online, so a movie's credits chapter replaces weaker
+online credits only on re-detection.
+
 ## Versions and caches
 
 - `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
@@ -114,7 +141,8 @@ analysis, and admin refresh. Intro and credits season groups share one work
 list, the ffmpeg limit, and the Chromaprint capability check. Each kind is
 judged on its own: a file whose intro came from an online provider or a
 manual edit can still get local credits, and local analysis never replaces
-credits from a higher-priority source.
+credits from a higher-priority source, except online credits rated below the
+file's credits chapter ([above](#chapters-and-online-markers)).
 
 Credits start in the file's tail window: the last 450 seconds of an episode,
 or its last 40 percent when that is shorter. They last 15 to 450 seconds. An
@@ -314,7 +342,9 @@ A movie file is analyzed when its item is a movie, it is not an episode or an
 extra, it is not a part of a multi-part film, it is at least 1200 seconds
 long, it is not missing, and its library is enabled, of type movies or mixed,
 with marker detection on. Credits from a higher-priority source, such as an
-online provider or a manual edit, are left alone.
+online provider or a manual edit, are left alone, except online credits rated
+below the movie's credits chapter, which re-detection replaces
+([above](#chapters-and-online-markers)).
 
 - **Chapters.** A credits chapter, by the episode title rules without
   `Ending`, which in a movie is as likely the story's ending, places the

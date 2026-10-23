@@ -363,6 +363,11 @@ type providerResult struct {
 
 // mergeProviderResults preserves every range from the winning provider for each
 // kind. Priority selects across providers; their quality signals break ties.
+// A marker below its provider's minimum confidence takes no part, so another
+// provider, or local detection, can fill its kind. The provider then counts as
+// refreshed even when its answer came from the cache: that answer is current
+// for the file, so a stored marker of the provider it no longer supports is
+// withdrawn rather than kept.
 func mergeProviderResults(results []providerResult) Result {
 	type candidate struct {
 		rank   mergeCandidate
@@ -371,12 +376,14 @@ func mergeProviderResults(results []providerResult) Result {
 	best := make(map[MarkerKind]candidate)
 	merged := Result{SourceClass: models.MarkerSourceOnline}
 	for _, fetched := range results {
-		if fetched.refreshed {
-			merged.RefreshedProviders = append(merged.RefreshedProviders, fetched.entry.provider.ID())
-		}
+		refreshed := fetched.refreshed
 		grouped := make(map[MarkerKind]candidate)
 		for _, m := range fetched.result.Markers {
 			if m.Kind < MarkerKindIntro || m.Kind > MarkerKindPreview || m.Start < 0 || m.End <= m.Start {
+				continue
+			}
+			if m.Confidence < fetched.entry.minConfidence {
+				refreshed = true
 				continue
 			}
 			m.SourceClass = firstNonEmpty(m.SourceClass, fetched.result.SourceClass, models.MarkerSourceOnline)
@@ -395,6 +402,9 @@ func mergeProviderResults(results []providerResult) Result {
 				best[kind] = group
 			}
 		}
+		if refreshed {
+			merged.RefreshedProviders = append(merged.RefreshedProviders, fetched.entry.provider.ID())
+		}
 	}
 	for _, kind := range []MarkerKind{MarkerKindIntro, MarkerKindCredits, MarkerKindRecap, MarkerKindPreview} {
 		ranges := best[kind].ranges
@@ -410,13 +420,15 @@ func mergeProviderResults(results []providerResult) Result {
 }
 
 type fetchEntry struct {
-	provider Provider
-	priority int
+	provider      Provider
+	priority      int
+	minConfidence float64
 }
 
-// fetchEntries returns the providers to query with their priorities. When a
-// config store is set only fetch-enabled providers participate, ordered by
-// fetch_priority; otherwise all providers participate in registration order.
+// fetchEntries returns the providers to query with their priorities and
+// minimum confidences. When a config store is set only fetch-enabled providers
+// participate, ordered by fetch_priority; otherwise all providers participate
+// in registration order and keep every marker.
 func (r *Registry) fetchEntries() []fetchEntry {
 	providers := r.Providers()
 	if r.config == nil {
@@ -426,14 +438,14 @@ func (r *Registry) fetchEntries() []fetchEntry {
 		}
 		return entries
 	}
-	priority := make(map[string]int)
+	configs := make(map[string]ProviderConfig)
 	for _, c := range r.config.EnabledForFetch() {
-		priority[c.Provider] = c.FetchPriority
+		configs[c.Provider] = c
 	}
 	entries := make([]fetchEntry, 0, len(providers))
 	for _, p := range providers {
-		if prio, ok := priority[p.ID()]; ok {
-			entries = append(entries, fetchEntry{provider: p, priority: prio})
+		if c, ok := configs[p.ID()]; ok {
+			entries = append(entries, fetchEntry{provider: p, priority: c.FetchPriority, minConfidence: c.FetchMinConfidence})
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {

@@ -42,6 +42,9 @@ type providerConfigResponse struct {
 	ContributeEnabled       bool    `json:"contribute_enabled"`
 	ContributeAutoLocal     bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence float64 `json:"contribute_min_confidence"`
+	// FetchMinConfidence is newer than the frozen v1 response, so only v2
+	// emits it (json:"-").
+	FetchMinConfidence float64 `json:"-"`
 }
 
 type markerUserStatsResponse struct {
@@ -193,6 +196,7 @@ func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc m
 		ContributeEnabled:       c.ContributeEnabled,
 		ContributeAutoLocal:     c.ContributeAutoLocal,
 		ContributeMinConfidence: c.ContributeMinConfidence,
+		FetchMinConfidence:      c.FetchMinConfidence,
 	}
 }
 
@@ -214,6 +218,9 @@ type MarkerProviderUpdate struct {
 	ContributeEnabled       *bool    `json:"contribute_enabled"`
 	ContributeAutoLocal     *bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence *float64 `json:"contribute_min_confidence"`
+	// FetchMinConfidence is set through v2 only; the frozen v1 body cannot
+	// carry it (json:"-").
+	FetchMinConfidence *float64 `json:"-"`
 }
 
 func (h *AdminMarkerProvidersHandler) UpdateMarkerProvider(ctx context.Context, provider string, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
@@ -232,6 +239,13 @@ func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, 
 	}
 	if body.FetchPriority != nil {
 		existing.FetchPriority = *body.FetchPriority
+	}
+	if body.FetchMinConfidence != nil {
+		v := *body.FetchMinConfidence
+		if v < 0 || v > 1 {
+			return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "fetch_min_confidence must be between 0 and 1")
+		}
+		existing.FetchMinConfidence = v
 	}
 	if body.ContributeEnabled != nil {
 		existing.ContributeEnabled = *body.ContributeEnabled

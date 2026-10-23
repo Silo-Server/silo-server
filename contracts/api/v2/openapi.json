@@ -9889,6 +9889,13 @@
           "fetch_enabled": {
             "type": "boolean"
           },
+          "fetch_min_confidence": {
+            "description": "Markers the provider rates below this confidence are left out of lookups, so another provider or local detection can fill their kind. 0 keeps every marker.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
           "fetch_priority": {
             "format": "int64",
             "type": "integer"
@@ -9919,6 +9926,7 @@
           "is_submitter",
           "fetch_enabled",
           "fetch_priority",
+          "fetch_min_confidence",
           "contribute_enabled",
           "contribute_auto_local",
           "contribute_min_confidence"
@@ -9952,6 +9960,15 @@
           "fetch_enabled": {
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "fetch_min_confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
               "null"
             ]
           },

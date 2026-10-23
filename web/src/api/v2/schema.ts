@@ -16107,6 +16107,11 @@ export interface components {
       contribute_min_confidence: number;
       display_name?: string;
       fetch_enabled: boolean;
+      /**
+       * Format: double
+       * @description Markers the provider rates below this confidence are left out of lookups, so another provider or local detection can fill their kind. 0 keeps every marker.
+       */
+      fetch_min_confidence: number;
       /** Format: int64 */
       fetch_priority: number;
       is_submitter: boolean;
@@ -16128,6 +16133,8 @@ export interface components {
       /** Format: double */
       contribute_min_confidence?: number | null;
       fetch_enabled?: boolean | null;
+      /** Format: double */
+      fetch_min_confidence?: number | null;
       /** Format: int64 */
       fetch_priority?: number | null;
     };

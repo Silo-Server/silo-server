@@ -427,9 +427,12 @@ Jellyfin have no corresponding administration callers.
 ordered by fetch priority then provider ID. Plugin installation IDs are opaque
 strings. `PUT /api/v2/admin/markers/providers/{provider}` retains partial-update
 semantics: omitted/null members preserve current values; explicit false and zero
-remain edits. Confidence must be between 0 and 1. Persistence and the existing
-configuration event run synchronously; there is no revision precondition or
-whole-operation replay receipt.
+remain edits. Confidence must be between 0 and 1. `fetch_min_confidence`,
+default 0, leaves the provider's markers rated below it out of lookups; see
+[markers-api.md](markers-api.md#provider-modes-and-storage). It is v2-only: the
+frozen v1 provider routes neither return nor accept it. Persistence and the
+existing configuration event run synchronously; there is no revision
+precondition or whole-operation replay receipt.
 
 `POST /api/v2/admin/markers/providers/{provider}/validate` asks the provider for
 contribution statistics. It returns `200` with `valid: true` and typed statistics,

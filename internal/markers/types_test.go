@@ -182,6 +182,55 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 	}
 }
 
+// A marker below its provider's minimum confidence leaves its kind to the next
+// provider. A provider left with nothing for a kind withdraws its stored marker
+// of that kind, even when its answer comes from the cache, and a local marker
+// stays.
+func TestPopulationRegistrySkipsMarkersBelowMinimumConfidence(t *testing.T) {
+	registry := NewRegistry(nil)
+	preferred := &fakeProvider{id: "preferred", result: Result{Markers: []Marker{
+		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.2},
+		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1900 * time.Second, Confidence: 0.9},
+	}}}
+	fallback := &fakeProvider{id: "fallback", result: Result{Markers: []Marker{
+		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.6},
+	}}}
+	_ = registry.Register(preferred)
+	_ = registry.Register(fallback)
+	registry.config = &ProviderConfigStore{cache: map[string]ProviderConfig{
+		"preferred": {Provider: "preferred", FetchEnabled: true, FetchPriority: 10, FetchMinConfidence: 0.5},
+		"fallback":  {Provider: "fallback", FetchEnabled: true, FetchPriority: 20, FetchMinConfidence: 0.5},
+	}}
+
+	merged, _, err := populateRegistryForTest(context.Background(), registry)
+	if err != nil {
+		t.Fatalf("population returned error: %v", err)
+	}
+	winners := map[MarkerKind]string{}
+	for _, m := range merged.Markers {
+		winners[m.Kind] = m.ProviderID
+	}
+	if len(merged.Markers) != 2 || winners[MarkerKindIntro] != "fallback" || winners[MarkerKindCredits] != "preferred" {
+		t.Fatalf("merged = %+v, want the fallback intro and the preferred credits", merged.Markers)
+	}
+
+	cached := mergeProviderResults([]providerResult{{
+		entry:  fetchEntry{provider: preferred, minConfidence: 0.95},
+		result: preferred.result,
+	}})
+	file := &models.MediaFile{ID: 1, Duration: 2000,
+		IntroStart: new(0.0), IntroEnd: new(30.0), IntroMarkersSource: new(models.MarkerSourceOnline), IntroMarkersProvider: new("preferred"),
+		CreditsStart: new(1810.0), CreditsEnd: new(1900.0), CreditsMarkersSource: new(models.MarkerSourceScanner),
+		CreditsMarkersAlgorithm: new("credits-chapter:v1"), CreditsMarkersConfidence: new(0.95)}
+	next := ApplyResult(file, cached)
+	if next.IntroStart != nil {
+		t.Fatalf("intro = %v, want the provider's stored intro withdrawn", *next.IntroStart)
+	}
+	if next.CreditsStart == nil || *next.CreditsStart != 1810 {
+		t.Fatalf("credits = %v, want the local credits kept", next.CreditsStart)
+	}
+}
+
 func TestNormalizeSetting(t *testing.T) {
 	tests := []struct {
 		name    string

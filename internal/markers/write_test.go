@@ -219,6 +219,10 @@ func TestCanWriteMarkerUpdateRanksScannerAlgorithms(t *testing.T) {
 		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
 			Confidence: new(confidence), Algorithm: algorithm}
 	}
+	provider := func(source string, confidence *float64) SegmentPayload {
+		return SegmentPayload{Start: new(60.0), End: new(125.0), Source: source, Provider: new("provider"),
+			Confidence: confidence, Algorithm: "provider:v1"}
+	}
 	ranks := []string{"credits-chapter:v1", "credits-version-copy:v1", "credits-audio:video:v1", "credits-audio:v1", "credits-video:v1"}
 	for i := 1; i < len(ranks); i++ {
 		if scannerAlgorithmPriority(ranks[i-1]) <= scannerAlgorithmPriority(ranks[i]) {
@@ -255,6 +259,16 @@ func TestCanWriteMarkerUpdateRanksScannerAlgorithms(t *testing.T) {
 		{"audio rescored lower", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-audio:v1", 0.65, 1300, 1400), true},
 		{"plain audio replaces video-refined audio", payload("credits-audio:video:v1", 0.95, 1305, 1400), payload("credits-audio:v1", 0.65, 1300, 1400), true},
 		{"identical audio result is a no-op", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-audio:v1", 0.9, 1300.2, 1400), false},
+		{"less confident provider cannot replace chapter", payload("chapter:v1", 0.95, 60, 120), provider(models.MarkerSourcePlugin, new(0.3)), false},
+		{"provider without confidence cannot replace chapter", payload("chapter:silence:v2", 0.98, 60, 122), provider(models.MarkerSourceOnline, nil), false},
+		{"less confident provider cannot replace credits chapter", payload("credits-chapter:v1", 0.95, 1310, 1400), provider(models.MarkerSourceOnline, new(0.9)), false},
+		{"provider as confident as chapter replaces it", payload("chapter:v1", 0.95, 60, 120), provider(models.MarkerSourcePlugin, new(0.95)), true},
+		{"less confident provider replaces episode copy", payload("episode-version-copy:v1", 0.9, 60, 120), provider(models.MarkerSourcePlugin, new(0.3)), true},
+		{"less confident provider replaces chromaprint", payload("chromaprint:v4", 0.9, 60, 120), provider(models.MarkerSourceOnline, new(0.1)), true},
+		{"chapter replaces less confident provider", provider(models.MarkerSourcePlugin, new(0.3)), payload("chapter:v1", 0.95, 60, 120), true},
+		{"credits chapter replaces provider without confidence", provider(models.MarkerSourceOnline, nil), payload("credits-chapter:v1", 0.95, 1310, 1400), true},
+		{"chapter cannot replace equally confident provider", provider(models.MarkerSourcePlugin, new(0.95)), payload("chapter:v1", 0.95, 60, 120), false},
+		{"chromaprint cannot replace less confident provider", provider(models.MarkerSourceOnline, new(0.1)), payload("chromaprint:v4", 0.9, 60, 120), false},
 	}
 	for _, tc := range cases {
 		if got := CanWriteMarkerUpdate(tc.existing, tc.incoming); got != tc.want {

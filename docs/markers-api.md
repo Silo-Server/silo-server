@@ -45,6 +45,29 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 Both paths honor provider priority, manual edits and deletions, and provider quota limits.
 
+Each provider has a minimum confidence for lookups, `fetch_min_confidence` on
+the v2 provider configuration, default 0. A marker the provider rates below it is
+left out, so the next provider by priority or local detection fills its kind,
+and a stored marker of that provider for the kind is withdrawn, even when the
+provider's answer comes from the cache. A marker without a confidence counts as
+0. The minimum is applied when results are selected, so a change reaches cached
+answers the next time the file is looked up or refreshed, without fetching
+again. The **Sync online markers** task looks up only files whose cached answer
+is due, so with `markers.lazy_playback` off a raised minimum reaches a file with
+a fresh answer when that answer comes due, up to 30 days later, or on an admin
+refresh. A provider's confidence is on its own scale, not local detection's, which
+is why the default keeps every marker.
+
+Online markers outrank local ones, with one exception. A marker placed from
+the file's own chapters, an intro or credits chapter with or without a silence
+extension, is compared with an online marker by confidence: an online marker
+rated below it does not replace it, and local detection replaces an online
+marker rated below the file's chapter. A tie goes to the online marker.
+Chapter-derived local markers are rated 0.95, or 0.98 with a silence
+extension. Chromaprint, audio, and video results and copies from another version
+of the episode are not compared this way, so any online marker still replaces
+them.
+
 Providers address an episode by its series' TMDB, TVDB, and IMDb IDs and the
 catalog's season and episode numbers; season 0 holds specials. When the catalog
 has them, lookups and contributions also carry the episode's own provider IDs,
@@ -72,8 +95,9 @@ changing markers, contributing them, or emitting a playback update.
 Local detection finds episode intros and end credits, and movie end credits on
 a best-effort basis: from chapters and the picture near the end, never intros.
 Some movies get no local credits, or credits that start late. It never replaces
-a marker from a higher-priority source, and it judges each kind separately, so
-an episode with an online intro can still get local credits. With `on_demand`
+a marker from a higher-priority source, except an online marker rated below
+the file's own chapter, and it judges each kind separately, so an episode with
+an online intro can still get local credits. With `on_demand`
 storage, players keep the online intro while playback detects the credits.
 
 `markers.detect_intros` and `markers.detect_credits` choose which kinds local
