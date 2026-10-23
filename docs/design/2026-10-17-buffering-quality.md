@@ -743,8 +743,9 @@ return to connectivity after none. A client that cannot observe network changes
   hidden tab. A test that is running when one of these begins is cancelled and
   measured nothing. The quiet period after a start holds automatic tests only.
 - **Test speed** runs the accurate test whenever no media plays or loads, even
-  with automatic tests off or a current reading. It replaces a running automatic
-  test and joins a running **Test speed**.
+  with automatic tests off or a current reading. Settings hides it on a metered
+  or cellular link (see *Settings*), so it never runs there. It replaces a
+  running automatic test and joins a running **Test speed**.
 - A client may keep its own result for playback starts only if the server
   accepted it, or the POST failed for a transport reason. A result the server
   refused is never kept.
