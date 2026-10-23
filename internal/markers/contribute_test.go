@@ -20,6 +20,7 @@ type fakeSubmitter struct {
 	result    SubmissionResult
 	err       error
 	required  []string
+	amend     bool
 	onSubmit  func()
 	deadline  chan time.Time
 }
@@ -51,7 +52,7 @@ func (f *fakeSubmitter) SubmitMarker(ctx context.Context, req SubmissionRequest)
 }
 func (f *fakeSubmitter) FetchUserStats(context.Context) (UserStats, error) { return UserStats{}, nil }
 func (f *fakeSubmitter) SubmissionRequirements() SubmissionRequirements {
-	return SubmissionRequirements{RequiredExternalIDs: f.required}
+	return SubmissionRequirements{RequiredExternalIDs: f.required, SupportsAmend: f.amend}
 }
 
 type fakeResolver struct{ ids ExternalIDs }
@@ -169,6 +170,27 @@ func TestContributeSubmitsManualOnDemand(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending {
 		t.Errorf("outcomes = %+v", outcomes)
+	}
+}
+
+// A manual save that only kept one provider's marker goes back to that
+// provider as a check of its data, and to no other.
+func TestContributeSendsAConfirmedMarkerOnlyToItsProvider(t *testing.T) {
+	reg := NewRegistry(nil)
+	origin, other := &fakeSubmitter{id: "origin"}, &fakeSubmitter{id: "other"}
+	_ = reg.Register(origin)
+	_ = reg.Register(other)
+	cfg := fakeConfig{"origin": {Provider: "origin", ContributeEnabled: true}, "other": {Provider: "other", ContributeEnabled: true}}
+	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
+	svc := NewContributionService(reg, resolver, cfg, &fakeRecorder{}, nil)
+
+	file := newContribIntroFile(models.MarkerSourceManual)
+	opts := ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}, Confirmed: map[MarkerKind]string{MarkerKindIntro: "origin"}}
+	if _, err := svc.ContributeFile(context.Background(), file, opts); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(origin.submitted) != 1 || len(other.submitted) != 0 {
+		t.Fatalf("submissions: origin %d, other %d; want 1 and 0", len(origin.submitted), len(other.submitted))
 	}
 }
 
@@ -485,7 +507,7 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
-		{id: "keyed", required: []string{ExternalIDKeyTVDB}},
+		{id: "keyed", required: []string{ExternalIDKeyTVDB}, amend: true},
 		{id: "manual-only"},
 		{id: "disabled"},
 	} {
@@ -507,7 +529,7 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 		{
 			name:   "stored config",
 			config: stored,
-			want:   []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}},
+			want:   []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
 		},
 		{
 			name:    "config unreadable",

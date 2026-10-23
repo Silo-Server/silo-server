@@ -38,6 +38,10 @@ type ContributionRow struct {
 	Error            *string
 	SubmittedAt      time.Time
 	UpdatedAt        time.Time
+	// Amend lets Claim take over the target from a settled claim with a
+	// different content hash. It is set for providers that support amend and
+	// is not stored.
+	Amend bool
 }
 
 // ContributionClaim identifies one ownership generation of a contribution
@@ -58,13 +62,14 @@ func NewContributionStore(pool *pgxpool.Pool) *ContributionStore {
 	return &ContributionStore{pool: pool}
 }
 
-// ContentHash is a stable hash over the contributed value and resolved target.
-// Identical submissions hash identically (never resubmitted); a marker
-// correction or rematch to a different provider identity hashes differently.
-func ContentHash(segmentKind string, startMs, endMs, durationMs *int64, targetParts ...string) string {
+// ContentHash is a stable hash over the contributed value, the resolved target,
+// and for amend providers the marker's source and algorithm. A marker
+// correction or rematch hashes differently; only a provider that supports
+// amend is sent the new value for a target it already holds.
+func ContentHash(segmentKind string, startMs, endMs, durationMs *int64, parts ...string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s|%s|%s|%s", segmentKind, ptrIntStr(startMs), ptrIntStr(endMs), ptrIntStr(durationMs))
-	for _, part := range targetParts {
+	for _, part := range parts {
 		fmt.Fprintf(h, "|%s", part)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:32]
@@ -77,10 +82,11 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
-// Claim atomically reserves a provider target before the network call. Any
+// Claim atomically reserves a provider target before the network call. An
 // active row for the same provider, segment, and target blocks the claim,
-// whatever times it carried: providers accept one submission per account for
-// each item. A stale in-flight row, or an invalid refusal older than
+// whatever times it carried, unless row.Amend is set and the row is settled
+// with a different content hash: the provider then replaces its earlier
+// submission. A stale in-flight row, or an invalid refusal older than
 // contributionInvalidRecheck, can be reclaimed; recording a retryable error
 // releases the claim. The advisory lock and partial unique index serialize
 // claims across local media files and server workers.
@@ -119,12 +125,14 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 		SELECT id,
 		       (status = $4 AND updated_at < now() - ($5 * interval '1 second'))
 		       OR (status = $6 AND updated_at < now() - ($7 * interval '1 second'))
+		       OR ($8 AND status <> $4 AND content_hash <> $9)
 		FROM marker_contributions
 		WHERE provider = $1 AND segment_kind = $2 AND target_key = $3
 		  AND claim_active`,
 		row.Provider, row.SegmentKind, row.TargetKey,
 		contributionStatusClaim, leaseSeconds,
 		OutcomeStatusInvalid, recheckSeconds,
+		row.Amend, row.ContentHash,
 	).Scan(&activeID, &reclaimable)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ContributionClaim{}, false, fmt.Errorf("find marker contribution claim: %w", err)
@@ -238,6 +246,9 @@ type AutoContributor struct {
 	// RequiredExternalIDs are the series IDs the provider requires, in the
 	// order it keys submissions by them.
 	RequiredExternalIDs []string
+	// SupportsAmend keys the provider's claims by file and offers a file again
+	// when its marker no longer hashes as the claim did.
+	SupportsAmend bool
 }
 
 // CandidateLocalMarkerFiles returns episode files carrying a local (scanner)
@@ -247,9 +258,11 @@ type AutoContributor struct {
 // requires, and it holds no claim on the file's current target for that
 // segment, from this file or another version of the episode, that Claim would
 // not hand over; a claim on an older target, a stale in-flight claim, and an
-// invalid refusal due for its recheck leave the file eligible. A file every
-// provider declines is not returned, and returns once a provider's reason no
-// longer holds.
+// invalid refusal due for its recheck leave the file eligible. For a provider
+// that supports amend the target is the file itself, and a settled claim whose
+// content hash differs from the marker's current one leaves it eligible too.
+// A file every provider declines is not returned, and returns once a
+// provider's reason no longer holds.
 // Paging is by keyset: pass the last candidate returned (nil for the first
 // page).
 func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind MarkerKind, providers []AutoContributor, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
@@ -262,9 +275,10 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 	ids := make([]string, len(providers))
 	minimums := make([]float64, len(providers))
 	required := make([]string, len(providers))
+	amend := make([]bool, len(providers))
 	minConfidence := providers[0].MinConfidence
 	for i, p := range providers {
-		ids[i], minimums[i] = p.Provider, p.MinConfidence
+		ids[i], minimums[i], amend[i] = p.Provider, p.MinConfidence, p.SupportsAmend
 		required[i] = strings.Join(normalizeExternalIDKeys(p.RequiredExternalIDs), ",")
 		minConfidence = min(minConfidence, p.MinConfidence)
 	}
@@ -274,7 +288,9 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 	}
 	// series_ids holds the series' non-blank external IDs. The target key
 	// follows contributionTargetKey: the provider's first required ID, or else
-	// TMDB, TVDB, then IMDb.
+	// TMDB, TVDB, then IMDb, and the file for an amend provider. The amend
+	// hash follows contributeSegment's ContentHash call for a scanner marker,
+	// over the IDs as the resolver reads them.
 	rows, err := s.pool.Query(ctx, `
 		SELECT mf.id, seg.confidence
 		FROM media_files mf
@@ -286,9 +302,9 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		    'imdb', NULLIF(BTRIM(series.imdb_id), '')
 		)) AS ids) AS series_ids
 		CROSS JOIN LATERAL (VALUES
-		    ('intro', mf.intro_markers_source, mf.intro_start, mf.intro_end, COALESCE(mf.intro_markers_confidence, 0)),
-		    ('credits', mf.credits_markers_source, mf.credits_start, mf.credits_end, COALESCE(mf.credits_markers_confidence, 0))
-		) AS seg(kind, source, start_s, end_s, confidence)
+		    ('intro', mf.intro_markers_source, mf.intro_start, mf.intro_end, COALESCE(mf.intro_markers_confidence, 0), mf.intro_markers_algorithm),
+		    ('credits', mf.credits_markers_source, mf.credits_start, mf.credits_end, COALESCE(mf.credits_markers_confidence, 0), mf.credits_markers_algorithm)
+		) AS seg(kind, source, start_s, end_s, confidence, algorithm)
 		WHERE seg.kind = $11
 		  AND mf.episode_id IS NOT NULL
 		  AND seg.source = $1
@@ -299,7 +315,7 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		  AND (seg.confidence, -mf.id) < ($3::double precision, -$4::integer)
 		  AND EXISTS (
 		      SELECT 1
-		      FROM unnest($5::text[], $12::double precision[], $13::text[]) AS p(provider, min_confidence, required)
+		      FROM unnest($5::text[], $12::double precision[], $13::text[], $14::boolean[]) AS p(provider, min_confidence, required, amend)
 		      CROSS JOIN LATERAL (SELECT string_to_array(NULLIF(p.required, ''), ',') AS keys) AS req
 		      WHERE seg.confidence >= p.min_confidence
 		        AND series_ids.ids ?& COALESCE(req.keys, '{}')
@@ -315,8 +331,20 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		                  'tvdb:' || (series_ids.ids ->> 'tvdb'),
 		                  'imdb:' || (series_ids.ids ->> 'imdb')
 		              ) || '|' || e.season_number || '|' || e.episode_number
+		                || CASE WHEN p.amend THEN '|file:' || mf.id ELSE '' END
 		              AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
 		              AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
+		              AND (NOT p.amend OR mc.status = $7 OR mc.content_hash = left(encode(sha256(convert_to(
+		                  seg.kind
+		                  || '|' || trunc(seg.start_s * 1000)::bigint
+		                  || '|' || trunc(seg.end_s * 1000)::bigint
+		                  || '|' || COALESCE(mf.duration, 0) * 1000
+		                  || '|episode|' || COALESCE(series.tmdb_id, '')
+		                  || '|' || COALESCE(series.imdb_id, '')
+		                  || '|' || COALESCE(series.tvdb_id, '')
+		                  || '|' || e.season_number || '|' || e.episode_number
+		                  || '|' || seg.source || '|' || COALESCE(seg.algorithm, ''),
+		                  'UTF8')), 'hex'), 32))
 		        )
 		  )
 		ORDER BY seg.confidence DESC, mf.id
@@ -324,7 +352,7 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		models.MarkerSourceScanner, minConfidence, afterConfidence, afterID, ids, limit,
 		contributionStatusClaim, int64(contributionClaimLease/time.Second),
 		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
-		markerKindName(kind), minimums, required,
+		markerKindName(kind), minimums, required, amend,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query contribution candidates: %w", err)

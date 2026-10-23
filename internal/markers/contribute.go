@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,10 @@ type ContributeOptions struct {
 	// (scanner) intro or credits at or above the provider's confidence
 	// threshold.
 	Auto bool
+	// Confirmed maps a kind to the online provider whose marker a manual save
+	// kept (see ConfirmedProvider). The manual marker repeats that provider's
+	// data, so it goes to that provider alone, as a human check of its marker.
+	Confirmed map[MarkerKind]string
 }
 
 // ContributionOutcome is the per (provider, segment) result of a run.
@@ -95,17 +100,46 @@ type segmentData struct {
 	start      *float64
 	end        *float64
 	source     *string
+	provider   *string
 	confidence *float64
 	algorithm  *string
 }
 
 func fileSegments(file *models.MediaFile) []segmentData {
 	return []segmentData{
-		{MarkerKindIntro, models.MarkerSegmentIntro, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm},
-		{MarkerKindCredits, models.MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm},
-		{MarkerKindRecap, models.MarkerSegmentRecap, file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm},
-		{MarkerKindPreview, models.MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm},
+		{MarkerKindIntro, models.MarkerSegmentIntro, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm},
+		{MarkerKindCredits, models.MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersProvider, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm},
+		{MarkerKindRecap, models.MarkerSegmentRecap, file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersProvider, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm},
+		{MarkerKindPreview, models.MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersProvider, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm},
 	}
+}
+
+// manualConfirmTolerance is how far, in seconds, each bound of a manual save
+// may move from a provider's marker and still count as keeping it.
+const manualConfirmTolerance = 1.0
+
+// ConfirmedProvider returns the online provider whose marker of kind a manual
+// save of start-end keeps: before, the file as it was before the save, held
+// that provider's marker, and neither bound moved by more than a second. It
+// returns "" otherwise.
+func ConfirmedProvider(before *models.MediaFile, kind MarkerKind, start, end float64) string {
+	if before == nil {
+		return ""
+	}
+	for _, seg := range fileSegments(before) {
+		if seg.kind != kind {
+			continue
+		}
+		if seg.start == nil || seg.end == nil || seg.source == nil || seg.provider == nil ||
+			(*seg.source != models.MarkerSourceOnline && *seg.source != models.MarkerSourcePlugin) {
+			return ""
+		}
+		if math.Abs(*seg.start-start) > manualConfirmTolerance || math.Abs(*seg.end-end) > manualConfirmTolerance {
+			return ""
+		}
+		return *seg.provider
+	}
+	return ""
 }
 
 // AutoContributedKinds lists the local segment kinds automatic contribution
@@ -150,10 +184,12 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 		if !ok || !cfg.ContributeEnabled || !cfg.ContributeAutoLocal {
 			continue
 		}
+		reqs := submissionRequirements(sub)
 		out = append(out, AutoContributor{
 			Provider:            sub.ID(),
 			MinConfidence:       cfg.ContributeMinConfidence,
-			RequiredExternalIDs: submissionKeyIDs(sub),
+			RequiredExternalIDs: reqs.RequiredExternalIDs,
+			SupportsAmend:       reqs.SupportsAmend,
 		})
 	}
 	return out, nil
@@ -206,7 +242,7 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 			if !want(seg.kind) {
 				continue
 			}
-			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, opts.Auto); attempted {
+			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, opts); attempted {
 				outcomes = append(outcomes, outcome)
 				if outcome.Status == OutcomeStatusRateLimited {
 					return outcomes, nil
@@ -225,7 +261,7 @@ func (s *ContributionService) contributeSegment(
 	file *models.MediaFile,
 	ids ExternalIDs,
 	seg segmentData,
-	auto bool,
+	opts ContributeOptions,
 ) (ContributionOutcome, bool) {
 	if seg.start == nil || seg.end == nil {
 		return ContributionOutcome{}, false
@@ -238,7 +274,11 @@ func (s *ContributionService) contributeSegment(
 	if source != models.MarkerSourceScanner && source != models.MarkerSourceManual {
 		return ContributionOutcome{}, false
 	}
-	if auto {
+	// Nor another provider's marker that a manual save only kept.
+	if confirmed := opts.Confirmed[seg.kind]; source == models.MarkerSourceManual && confirmed != "" && confirmed != providerID {
+		return ContributionOutcome{}, false
+	}
+	if opts.Auto {
 		if !cfg.ContributeAutoLocal || source != models.MarkerSourceScanner || !autoContributedKind(seg.kind) {
 			return ContributionOutcome{}, false
 		}
@@ -272,7 +312,21 @@ func (s *ContributionService) contributeSegment(
 	startMs := int64(*seg.start * 1000)
 	endMs := int64(*seg.end * 1000)
 	durMs := int64(file.Duration) * 1000
-	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, contributionTargetParts(ids)...)
+	reqs := submissionRequirements(sub)
+	algorithm := ""
+	if seg.algorithm != nil {
+		algorithm = *seg.algorithm
+	}
+	// An amend provider replaces this file's earlier submission, so the file
+	// is its own target and a new detection version is a change worth sending.
+	// CandidateLocalMarkerFiles derives the same hash and key in SQL.
+	hashParts := contributionTargetParts(ids)
+	targetKey := contributionTargetKey(ids, reqs.RequiredExternalIDs)
+	if reqs.SupportsAmend {
+		hashParts = append(hashParts, source, algorithm)
+		targetKey += "|file:" + strconv.Itoa(file.ID)
+	}
+	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, hashParts...)
 
 	row := ContributionRow{
 		MediaFileID:      file.ID,
@@ -283,8 +337,9 @@ func (s *ContributionService) contributeSegment(
 		SubmittedEndMs:   &endMs,
 		VideoDurationMs:  &durMs,
 		ContentHash:      hash,
-		TargetKey:        contributionTargetKey(ids, submissionKeyIDs(sub)),
+		TargetKey:        targetKey,
 		Status:           contributionStatusClaim,
+		Amend:            reqs.SupportsAmend,
 	}
 	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 	if err != nil {
@@ -313,9 +368,7 @@ func (s *ContributionService) contributeSegment(
 		FileHash:           file.FileHash,
 		FileSize:           file.FileSize,
 		Source:             source,
-	}
-	if seg.algorithm != nil {
-		req.Algorithm = *seg.algorithm
+		Algorithm:          algorithm,
 	}
 	if seg.confidence != nil {
 		req.Confidence = *seg.confidence
@@ -387,9 +440,10 @@ func contributionTargetParts(ids ExternalIDs) []string {
 }
 
 // contributionTargetKey names the provider-side item a segment is submitted
-// against, independent of the submitted times. Providers accept one submission
-// per account for each item and segment and offer no way to amend it, so an
-// active claim on this key blocks every later payload for the same item.
+// against, independent of the submitted times. Most providers accept one
+// submission per account for each item and segment and offer no way to amend
+// it, so an active claim on this key blocks every later payload for the same
+// item. contributeSegment appends the file for a provider that supports amend.
 //
 // The item is identified by the first external ID the provider keys
 // submissions by, or else by TMDB, TVDB, then IMDb. The candidate query
@@ -407,14 +461,15 @@ func contributionTargetKey(ids ExternalIDs, keyedBy []string) string {
 	return strings.Join([]string{itemTypeName(ids.Kind), id, strconv.Itoa(ids.SeasonNumber), strconv.Itoa(ids.EpisodeNumber)}, "|")
 }
 
-// submissionKeyIDs returns the external IDs a provider requires, which are the
-// ones it keys submissions by.
-func submissionKeyIDs(sub Submitter) []string {
+// submissionRequirements returns what the provider declares, or nothing for a
+// provider without requirements. Its required IDs are the ones it keys
+// submissions by.
+func submissionRequirements(sub Submitter) SubmissionRequirements {
 	provider, ok := sub.(SubmissionRequirementProvider)
 	if !ok {
-		return nil
+		return SubmissionRequirements{}
 	}
-	return provider.SubmissionRequirements().RequiredExternalIDs
+	return provider.SubmissionRequirements()
 }
 
 func intPart(v int) string {
@@ -425,17 +480,13 @@ func intPart(v int) string {
 }
 
 func missingRequiredExternalIDs(sub Submitter, ids ExternalIDs) []string {
-	reqProvider, ok := sub.(SubmissionRequirementProvider)
-	if !ok {
-		return nil
-	}
-	reqs := reqProvider.SubmissionRequirements()
-	if len(reqs.RequiredExternalIDs) == 0 {
+	required := submissionRequirements(sub).RequiredExternalIDs
+	if len(required) == 0 {
 		return nil
 	}
 	values := ids.AsRequestMap()
 	var missing []string
-	for _, key := range reqs.RequiredExternalIDs {
+	for _, key := range required {
 		if strings.TrimSpace(values[key]) == "" {
 			missing = append(missing, key)
 		}

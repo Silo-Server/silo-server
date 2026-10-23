@@ -203,8 +203,8 @@ type SubmissionResult struct {
 }
 
 // SubmissionConflictError marks a provider refusal that cannot succeed when
-// the exact same payload is retried. A changed marker produces a different
-// content hash and remains eligible for a later submission.
+// the exact same payload is retried. The refusal holds the provider target: a
+// changed marker is submitted again only to a provider that supports amend.
 type SubmissionConflictError struct {
 	Provider   string
 	HTTPStatus int

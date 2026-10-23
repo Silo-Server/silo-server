@@ -237,6 +237,42 @@ func TestSetFileMarkersTriggersBackgroundContribution(t *testing.T) {
 	}
 }
 
+// A manual save that keeps an online provider's marker, both bounds within a
+// second, names that provider so its data is not passed on to another one.
+func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		body   string
+		want   string
+	}{
+		{"kept within a second", models.MarkerSourcePlugin, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
+		{"moved", models.MarkerSourcePlugin, `{"intro":{"start":11.5,"end":70}}`, ""},
+		{"local marker", models.MarkerSourceScanner, `{"intro":{"start":10,"end":70}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
+				IntroMarkersSource: new(tc.source), IntroMarkersProvider: new("theintrodb")}
+			called := make(chan markers.ContributeOptions, 1)
+			h := newTestMarkersHandler(fakeMarkerFiles{file: before}, &fakeMarkerWriter{}, signalContributor{called: called}, nil, nil, nil)
+
+			rec := httptest.NewRecorder()
+			h.HandleSetFileMarkers(rec, markerPutRequest(tc.body))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			select {
+			case opts := <-called:
+				if got := opts.Confirmed[markers.MarkerKindIntro]; got != tc.want {
+					t.Fatalf("confirmed provider = %q, want %q", got, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("expected a background contribution for the saved intro")
+			}
+		})
+	}
+}
+
 func TestSetFileMarkersClearOnlyDoesNotContribute(t *testing.T) {
 	called := make(chan markers.ContributeOptions, 1)
 	files := fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}}

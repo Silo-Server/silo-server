@@ -109,6 +109,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	}
 	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: manualMarkerAlgorithm}
 	var clears, sets []string
+	confirmed := make(map[markers.MarkerKind]string)
 	// Intro comes before credits in markerSegmentNames, so by the credits
 	// check this is the intro the change leaves the file with.
 	introEnd := file.IntroEnd
@@ -138,6 +139,11 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		}
 		applyManualSegment(&update, segment, start, end)
 		sets = append(sets, segment)
+		if kind, ok := markerKindForName(segment); ok {
+			if provider := markers.ConfirmedProvider(file, kind, start, end); provider != "" {
+				confirmed[kind] = provider
+			}
+		}
 	}
 	if _, err := h.Writer.UpsertAndClearMarkers(ctx, file.ID, update, clears); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -154,7 +160,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		h.logger.ErrorContext(ctx, "markers: reload after save failed", "file_id", file.ID, "error", err)
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
-	h.maybeContribute(refreshed, sets)
+	h.maybeContribute(refreshed, sets, confirmed)
 	return h.fileMarkersView(ctx, refreshed), nil
 }
 

@@ -584,9 +584,11 @@ func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*mode
 // segments just set by a manual save. ContributeFile self-gates on each
 // provider's contribute_enabled flag, only submits scanner/manual-sourced
 // segments, and is idempotent — so this is a no-op when contribution is off or
-// the marker was already submitted. It runs in the background so the save
-// responds immediately and is never blocked by provider rate limits.
-func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string) {
+// the marker was already submitted. confirmed names the kinds whose save kept
+// an online provider's marker (markers.ConfirmedProvider). It runs in the
+// background so the save responds immediately and is never blocked by provider
+// rate limits.
+func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string, confirmed map[markers.MarkerKind]string) {
 	if h == nil || h.Contributor == nil || file == nil || len(segments) == 0 {
 		return
 	}
@@ -606,7 +608,7 @@ func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []stri
 	go func() {
 		ctx, cancel := context.WithTimeout(base, markerContributeTimeout)
 		defer cancel()
-		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds}); err != nil {
+		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds, Confirmed: confirmed}); err != nil {
 			h.logger.Warn("markers: background contribution failed", "file_id", file.ID, "error", err)
 		}
 	}()
