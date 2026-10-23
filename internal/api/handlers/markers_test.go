@@ -237,9 +237,15 @@ func TestSetFileMarkersTriggersBackgroundContribution(t *testing.T) {
 	}
 }
 
-type onDemandMarkerPopulation struct{ shown *models.MediaFile }
+type onDemandMarkerPopulation struct {
+	shown *models.MediaFile
+	err   error
+}
 
-func (p onDemandMarkerPopulation) Populate(context.Context, *models.MediaFile) (*models.MediaFile, bool, error) {
+func (p onDemandMarkerPopulation) Populate(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+	if p.err != nil {
+		return file, false, p.err
+	}
 	return p.shown, true, nil
 }
 
@@ -249,7 +255,8 @@ func (onDemandMarkerPopulation) OnlineStorage(context.Context) (markers.OnlineSt
 
 // A manual save that keeps an online provider's marker, both bounds within a
 // second, names that provider so its data is not passed on to another one. In
-// on_demand mode the marker kept is the one the lookup showed, never stored.
+// on_demand mode the marker kept is the one the lookup showed, never stored;
+// when that lookup fails, the save is not contributed at all.
 func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
 	plugin := func() *models.MediaFile {
 		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
@@ -257,6 +264,7 @@ func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
 	}
 	scanner := plugin()
 	scanner.IntroMarkersSource = new(models.MarkerSourceScanner)
+	const withheld = "(not contributed)"
 	for _, tc := range []struct {
 		name       string
 		stored     *models.MediaFile
@@ -268,6 +276,7 @@ func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
 		{"moved", plugin(), nil, `{"intro":{"start":11.5,"end":70}}`, ""},
 		{"local marker", scanner, nil, `{"intro":{"start":10,"end":70}}`, ""},
 		{"kept an on-demand lookup", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{shown: plugin()}, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
+		{"on-demand lookup failed", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{err: context.DeadlineExceeded}, `{"intro":{"start":10.5,"end":70.9}}`, withheld},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := make(chan markers.ContributeOptions, 1)
@@ -278,6 +287,14 @@ func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
 			h.HandleSetFileMarkers(rec, markerPutRequest(tc.body))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if tc.want == withheld {
+				select {
+				case <-called:
+					t.Fatal("a save whose provider markers could not be read must not be contributed")
+				case <-time.After(200 * time.Millisecond):
+				}
+				return
 			}
 			select {
 			case opts := <-called:

@@ -428,10 +428,15 @@ on a later run, when it no longer matches its active claim. It must hash
 exactly as `contributeSegment` does; the database contract test
 `TestContributionStoreAmendResubmitsChangedMarkers` checks that. The candidate
 query never offers a manual marker, so the contribution after a manual save
-waits out an in-flight claim (`ContributeOptions.WaitInFlight`) within its
-30-second budget, after every other provider and kind. A submission still in
-flight when the budget runs out, such as one held by a crashed worker until
-its lease expires, leaves the provider with the earlier marker until the next
+waits out an in-flight claim (`ContributeOptions.WaitInFlight`), after every
+other provider and kind. The wait lasts until that claim settles or its
+15-minute lease expires, and a claim won this way gets its own two-minute
+submit limit. Before taking over a target for an amend provider, `Claim`
+checks under its lock that the payload's times and source are still the
+file's stored marker, so an older save or a nightly run that read the file
+before a save never replaces a newer marker at the provider. The wait runs in
+the saving server's process like the rest of that contribution: if the
+server stops during it, the provider keeps the earlier marker until the next
 save or admin contribution.
 
 A manual save that keeps an online or plugin provider's marker, with both
@@ -441,7 +446,8 @@ save sends it to that provider only. The rule compares the save with the
 markers shown before it: the stored row, or with `markers.online_storage`
 set to `on_demand`, the stored row with the on-demand lookup laid over it, as
 `GetMarkers` returns it. When that lookup fails within its read timeout, the
-rule falls back to the stored row and does not fire. The saved marker carries
+save is not contributed to any provider, since it may have kept a marker the
+lookup could not show. The saved marker carries
 no record of the confirmation, so the rule does not cover a later save of the
 same times or an admin contribution of the file; either can send the
 confirmed marker to another provider that holds no claim on the target.

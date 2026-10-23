@@ -111,6 +111,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	var clears, sets []string
 	confirmed := make(map[markers.MarkerKind]string)
 	var shown *models.MediaFile
+	shownKnown := true
 	// Intro comes before credits in markerSegmentNames, so by the credits
 	// check this is the intro the change leaves the file with.
 	introEnd := file.IntroEnd
@@ -142,12 +143,19 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		sets = append(sets, segment)
 		if kind, ok := markerKindForName(segment); ok {
 			if shown == nil {
-				shown = h.shownMarkers(ctx, file)
+				shown, shownKnown = h.shownMarkers(ctx, file)
 			}
 			if provider := markers.ConfirmedProvider(shown, kind, start, end); provider != "" {
 				confirmed[kind] = provider
 			}
 		}
+	}
+	contribute := sets
+	if !shownKnown {
+		// The save may have kept a provider marker this lookup could not
+		// see, so contributing it could pass that provider's data on.
+		h.logger.InfoContext(ctx, "markers: manual save not contributed; the on-demand provider markers it may have kept could not be read", "file_id", file.ID)
+		contribute = nil
 	}
 	if _, err := h.Writer.UpsertAndClearMarkers(ctx, file.ID, update, clears); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -164,7 +172,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		h.logger.ErrorContext(ctx, "markers: reload after save failed", "file_id", file.ID, "error", err)
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
-	h.maybeContribute(refreshed, sets, confirmed)
+	h.maybeContribute(refreshed, contribute, confirmed)
 	return h.fileMarkersView(ctx, refreshed), nil
 }
 
@@ -176,19 +184,26 @@ type markerStorageReader interface {
 
 var _ markerStorageReader = (*markers.PopulationService)(nil)
 
-// shownMarkers returns file with the markers a player showed before a save.
-// With markers.online_storage=on_demand provider markers are never stored, so
-// it lays the on-demand lookup over the stored row, as GetMarkers does. Only
+// shownMarkers returns file with the markers a player showed before a save,
+// and false when it could not tell. With markers.online_storage=on_demand
+// provider markers are never stored, so it lays the on-demand lookup over the
+// stored row, as GetMarkers does; a failed lookup leaves them unknown. Only
 // contribution reads the result, so without a contributor it looks nothing up.
-func (h *MarkersHandler) shownMarkers(ctx context.Context, file *models.MediaFile) *models.MediaFile {
+func (h *MarkersHandler) shownMarkers(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool) {
 	reader, ok := h.MarkerPopulation.(markerStorageReader)
 	if h.Contributor == nil || !ok {
-		return file
+		return file, true
 	}
-	if storage, err := reader.OnlineStorage(ctx); err != nil || storage != markers.OnlineStorageOnDemand {
-		return file
+	storage, err := reader.OnlineStorage(ctx)
+	if err != nil {
+		h.logger.WarnContext(ctx, "markers: read online marker storage failed", "file_id", file.ID, "error", err)
+		return file, false
 	}
-	return populateFileMarkers(ctx, h.MarkerPopulation, file)
+	if storage != markers.OnlineStorageOnDemand {
+		return file, true
+	}
+	shown, err := lookupFileMarkers(ctx, h.MarkerPopulation, file)
+	return shown, err == nil
 }
 
 // v2-only projection; the legacy writer retains its frozen response shape.
