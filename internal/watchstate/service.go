@@ -374,6 +374,7 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {
+	watchedAt = userstore.ClampProgressEventAt(watchedAt, time.Now().UTC())
 	_, err := s.recordMarkWatched(ctx, userID, profileID, []LeafWatchTarget{{MediaItemID: targetID}}, watchedAt, userstore.WatchHistorySourceJellycompat)
 	return err
 }
@@ -388,6 +389,7 @@ func (s *Service) RecordJellycompatMarkUnplayed(ctx context.Context, userID int,
 // jellycompat's series-mark-played path to collapse a per-episode loop into
 // one progress upsert plus per-episode history inserts (audit 2026-05-01 §2.7).
 func (s *Service) RecordJellycompatMarkPlayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string, watchedAt time.Time) error {
+	watchedAt = userstore.ClampProgressEventAt(watchedAt, time.Now().UTC())
 	return s.recordMarkWatchedBatch(ctx, userID, profileID, targetIDs, watchedAt, userstore.WatchHistorySourceJellycompat)
 }
 
@@ -691,9 +693,7 @@ func formatWatchedAt(watchedAt time.Time) string {
 // RecordJellycompatProgress commits the leaf's explicit state and its optional
 // played/unplayed history mutation before notifying watch providers.
 func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
-	if edit.EventAt.IsZero() {
-		edit.EventAt = time.Now().UTC()
-	}
+	edit.EventAt = userstore.ClampProgressEventAt(edit.EventAt, time.Now().UTC())
 	store, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return err
