@@ -1,7 +1,8 @@
--- web_only keeps a hero row on the web app alone. While the row is featured,
--- only a caller that declares the web client family (X-Silo-Client-Family:
--- web) receives it; native apps and every other client never see the row.
--- The flag does nothing while the row is not featured.
+-- web_only keeps a hero row on the web app alone. While the row is its page's
+-- first featured row, the one the web shows as the banner, only a caller that
+-- declares the web client family (X-Silo-Client-Family: web) receives it. A
+-- later featured row reaches every client as a regular row, and the flag does
+-- nothing while the row is not featured.
 
 -- +goose Up
 -- +goose StatementBegin

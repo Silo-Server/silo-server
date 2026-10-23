@@ -108,6 +108,8 @@ export function HomeRowsPage({
   const { rows, surface, page } = adapter;
   const label = pageLabel(page, adapter.pages);
   const shownCount = rows.filter((row) => row.shown).length;
+  // The first shown hero is the page's banner; only it can be kept off the apps.
+  const bannerRowId = rows.find((row) => row.hero && row.shown)?.id;
   const summary =
     adapter.status === "ready"
       ? `${rows.length} ${rows.length === 1 ? "row" : "rows"} · ${shownCount} ${surface === "admin" ? "on" : "shown"}`
@@ -274,6 +276,7 @@ export function HomeRowsPage({
                           : undefined
                       }
                       switchDisabled={!adapter.canEdit}
+                      webOnlyBanner={row.webOnly === true && row.id === bannerRowId}
                       onShownChange={(shown) => void adapter.setShown(row.id, shown)}
                       onOpen={onOpenRow ? () => onOpenRow(row) : undefined}
                       menu={

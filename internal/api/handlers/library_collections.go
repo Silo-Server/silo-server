@@ -1948,6 +1948,11 @@ func (h *LibraryCollectionHandler) upsertTemplateBundleFeaturedSection(
 	if err == nil {
 		existing.SectionType = sections.SectionCollection
 		existing.Title = ref.Template.Title
+		// A row that becomes the hero starts on every client, as an admin
+		// update does: web_only an older node left on the demoted row stays off.
+		if !existing.Featured {
+			existing.WebOnly = false
+		}
 		existing.Featured = true
 		existing.ItemLimit = templateBundleFeaturedSectionItemLimit
 		existing.Config = config
