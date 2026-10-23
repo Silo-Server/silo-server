@@ -1,9 +1,10 @@
 {
-  "revision": "6fcbb994aa4a8925a3276d419d1a8d73147ac1dee0abfad0fb8c18a1f42accba",
+  "revision": "ba274e8dc035a37e5dcb79b9e194c1c2403c007f81d462fc77d2bb16b7eafd5d",
   "state": "available",
   "allowed": true,
   "realtime_monitoring": true,
   "trickplay": true,
   "trickplay_supported": false,
-  "ignore_unmatched": true
+  "ignore_unmatched": true,
+  "unsupported_files": true
 }

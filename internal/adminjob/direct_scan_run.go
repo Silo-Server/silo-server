@@ -162,6 +162,7 @@ func scanRunResultFromIngest(result *libraryingest.Result) *events.ScanRunResult
 		out.Unchanged = result.ScanResult.Unchanged
 		out.Missing = result.ScanResult.Missing
 		out.MissingSkippedProtected = result.ScanResult.MissingSkippedProtected
+		out.UnsupportedFiles = len(result.ScanResult.UnsupportedFiles)
 		out.FilesDeleted = result.ScanResult.FilesDeleted
 		out.MembershipsRemoved = result.ScanResult.MembershipsRemoved
 		out.ItemsDeleted = result.ScanResult.ItemsDeleted

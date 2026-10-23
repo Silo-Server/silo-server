@@ -623,6 +623,7 @@ POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
 DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+GET /api/v2/libraries/unsupported-files	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media
@@ -1908,6 +1909,7 @@ POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
 DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+GET /api/v2/libraries/unsupported-files	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media

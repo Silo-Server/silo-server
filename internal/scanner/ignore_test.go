@@ -21,7 +21,7 @@ func writeTestFile(t *testing.T, path string, content string) {
 
 func collectTestFilePaths(t *testing.T, root string, libraryType string) []string {
 	t.Helper()
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestIgnoreFilePatternsAtLibraryRootSkipOnlyMatches(t *testing.T) {
 	assertFilePaths(t, files, root, []string{"Show/Season 01/Episode 01.mkv"})
 
 	scope := filepath.Join(root, "Show", "Season 01")
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "series", []string{root})
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{scope}, "series", []string{root})
 	if err != nil || len(walkFailures) != 0 {
 		t.Fatalf("scoped walk: %v, failures: %v", err, walkFailures)
 	}

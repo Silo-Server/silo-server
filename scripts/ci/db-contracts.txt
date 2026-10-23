@@ -510,3 +510,14 @@
 # The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
 # keeps a value an administrator chose.
 ./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
+
+# The list of files scans skip because of their type: a scan replaces the rows
+# it covers and keeps those under paths it could not read or verify, an older
+# scan never overwrites a newer count, a guarded scan only adds, rows are
+# written in bounded batches, and the list pages and searches the stored rows.
+./internal/scanner TestUnsupportedFileRepositoryReplace
+./internal/scanner TestUnsupportedFileRepositoryReplaceKeepsTheFolderOfAnUnreadableFile
+./internal/scanner TestUnsupportedFileRepositoryListPage
+./internal/scanner TestUnsupportedFileRepositoryRecordsAcrossBatches
+./internal/scanner TestScanSubtreeProtectsASuspectEmptyRoot
+./internal/scanner TestScanKeepsTheRowOfAFolderWithAnUnreadableFile

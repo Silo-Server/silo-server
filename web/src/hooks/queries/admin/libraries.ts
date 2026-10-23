@@ -34,6 +34,7 @@ import {
   skippedRootFromV2,
   staleMediaIDFromV2,
   unmatchedItemFromV2,
+  unsupportedFileGroupFromV2,
 } from "@/api/v2/libraries";
 import { v2, V2ProblemError, type V2Body, type V2Result } from "@/api/v2/request";
 import { adminKeys, libraryKeys } from "../keys";
@@ -176,6 +177,39 @@ export function useSkippedLibraryRoots({
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor,
     enabled,
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+/** Page size of the unsupported files listing. */
+export const UNSUPPORTED_FILES_PAGE_LIMIT = 50;
+
+/**
+ * Folders holding files that scans skip because of their type, a page at a
+ * time. Scans replace the list, and a finished scan invalidates every admin
+ * libraries query, this one included.
+ */
+export function useUnsupportedLibraryFiles({ search = "" }: { search?: string } = {}) {
+  const query = search.trim();
+  return useInfiniteQuery({
+    queryKey: [...adminKeys.libraryUnsupportedFiles(), query],
+    queryFn: async ({ pageParam, signal }) => {
+      const page = await v2("GET /api/v2/libraries/unsupported-files", {
+        query: {
+          limit: UNSUPPORTED_FILES_PAGE_LIMIT,
+          ...(query ? { q: query } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      });
+      return {
+        groups: page.items.map(unsupportedFileGroupFromV2),
+        nextCursor: page.page?.has_more ? page.page.next_cursor : undefined,
+        total: page.total,
+      };
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
     staleTime: ADMIN_STALE_TIME,
   });
 }

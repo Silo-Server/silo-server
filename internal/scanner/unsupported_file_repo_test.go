@@ -1,0 +1,480 @@
+package scanner
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+func TestGroupUnsupportedFiles(t *testing.T) {
+	got := GroupUnsupportedFiles(3, []UnsupportedFile{
+		{Path: "/movies/Ronin (1998)/VIDEO_TS/VTS_01_2.VOB", Reason: UnsupportedReasonDVDVOB},
+		{Path: "/movies/Ronin (1998)/VIDEO_TS/VIDEO_TS.VOB", Reason: UnsupportedReasonDVDVOB},
+		{Path: "/movies/Ronin (1998)/VIDEO_TS/VTS_01_1.VOB", Reason: UnsupportedReasonDVDVOB},
+		{Path: "/movies/Mixed/b.rmvb", Reason: UnsupportedReasonRealMedia},
+		{Path: "/movies/Mixed/a.iso", Reason: UnsupportedReasonDiscImage},
+	})
+	want := []models.UnsupportedMediaFileGroup{
+		{MediaFolderID: 3, DirectoryPath: "/movies/Mixed", Reason: UnsupportedReasonDiscImage, FileCount: 1, FileNames: []string{"a.iso"}},
+		{MediaFolderID: 3, DirectoryPath: "/movies/Mixed", Reason: UnsupportedReasonRealMedia, FileCount: 1, FileNames: []string{"b.rmvb"}},
+		{MediaFolderID: 3, DirectoryPath: "/movies/Ronin (1998)/VIDEO_TS", Reason: UnsupportedReasonDVDVOB, FileCount: 3, FileNames: []string{"VIDEO_TS.VOB", "VTS_01_1.VOB", "VTS_01_2.VOB"}},
+	}
+	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
+		t.Fatalf("groups =\n%+v\nwant\n%+v", got, want)
+	}
+	if got := GroupUnsupportedFiles(3, nil); len(got) != 0 {
+		t.Fatalf("groups of nothing = %+v, want none", got)
+	}
+
+	// A disc folder with more clips than the cap keeps the first names in
+	// name order and counts every clip.
+	files := make([]UnsupportedFile, 0, MaxUnsupportedFileNames+20)
+	for i := MaxUnsupportedFileNames + 19; i >= 0; i-- {
+		files = append(files, UnsupportedFile{Path: fmt.Sprintf("/movies/Thief (1981)/BDMV/STREAM/%05d.m2ts", i), Reason: UnsupportedReasonDiscStream})
+	}
+	got = GroupUnsupportedFiles(3, files)
+	if len(got) != 1 {
+		t.Fatalf("groups = %+v, want one", got)
+	}
+	names := got[0].FileNames
+	if got[0].FileCount != MaxUnsupportedFileNames+20 || len(names) != MaxUnsupportedFileNames ||
+		names[0] != "00000.m2ts" || names[len(names)-1] != fmt.Sprintf("%05d.m2ts", MaxUnsupportedFileNames-1) {
+		t.Fatalf("count %d, %d names from %s to %s", got[0].FileCount, len(names), names[0], names[len(names)-1])
+	}
+}
+
+func TestUnsupportedFileRepositoryReplace(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Files Test")
+	otherFolderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Files Other")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-%d", time.Now().UnixNano())
+	// Each scan starts after the one before it, so no row was written by a
+	// newer scan while it ran.
+	start := time.Now()
+	nextScan := func() time.Time { start = start.Add(time.Minute); return start }
+
+	group := func(folder int, dir, reason string, count int) models.UnsupportedMediaFileGroup {
+		return models.UnsupportedMediaFileGroup{MediaFolderID: folder, DirectoryPath: base + dir, Reason: reason, FileCount: count, FileNames: []string{"sample"}}
+	}
+	expect := func(step string, folder int, want ...string) {
+		t.Helper()
+		if got := unsupportedRowsUnder(t, pool, folder, base); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("%s: rows = %v, want %v", step, got, want)
+		}
+	}
+
+	// A library scan records every group it found.
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group(folderID, "/movies/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 6),
+		group(folderID, "/movies/Manhunter (1986)", UnsupportedReasonRealMedia, 1),
+		group(folderID, "/movies/Offline/VIDEO_TS", UnsupportedReasonDVDVOB, 2),
+		group(folderID, "/tv/Show/Season 01/BDMV/STREAM", UnsupportedReasonDiscStream, 40),
+	}); err != nil {
+		t.Fatalf("first replace: %v", err)
+	}
+	if err := repo.Replace(ctx, otherFolderID, nil, nil, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group(otherFolderID, "/movies/Manhunter (1986)", UnsupportedReasonRealMedia, 1),
+	}); err != nil {
+		t.Fatalf("other library replace: %v", err)
+	}
+	expect("first scan", folderID,
+		"/movies/Manhunter (1986) realmedia 1",
+		"/movies/Offline/VIDEO_TS dvd_vob 2",
+		"/movies/Ronin (1998)/VIDEO_TS dvd_vob 6",
+		"/tv/Show/Season 01/BDMV/STREAM disc_stream 40",
+	)
+
+	// A library scan that started before another scan last wrote the rows
+	// leaves them alone: it neither deletes the ones it did not find nor
+	// overwrites the count of one it found.
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now().Add(-time.Hour), []models.UnsupportedMediaFileGroup{
+		group(folderID, "/movies/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 9),
+	}); err != nil {
+		t.Fatalf("overlapping replace: %v", err)
+	}
+	expect("overlapping scan", folderID,
+		"/movies/Manhunter (1986) realmedia 1",
+		"/movies/Offline/VIDEO_TS dvd_vob 2",
+		"/movies/Ronin (1998)/VIDEO_TS dvd_vob 6",
+		"/tv/Show/Season 01/BDMV/STREAM disc_stream 40",
+	)
+
+	// A subtree scan replaces only its subtree. A sibling sharing a string
+	// prefix with the scope is outside it.
+	if err := repo.Replace(ctx, folderID, []string{base + "/movies/Ronin (1998)"}, nil, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group(folderID, "/movies/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 4),
+	}); err != nil {
+		t.Fatalf("subtree replace: %v", err)
+	}
+	if err := repo.Replace(ctx, folderID, []string{base + "/movies/Man"}, nil, nil, nextScan(), nil); err != nil {
+		t.Fatalf("prefix sibling replace: %v", err)
+	}
+	expect("subtree scans", folderID,
+		"/movies/Manhunter (1986) realmedia 1",
+		"/movies/Offline/VIDEO_TS dvd_vob 2",
+		"/movies/Ronin (1998)/VIDEO_TS dvd_vob 4",
+		"/tv/Show/Season 01/BDMV/STREAM disc_stream 40",
+	)
+
+	// A library scan drops what it no longer finds but keeps rows under a
+	// path it could not read, and leaves other libraries alone.
+	if err := repo.Replace(ctx, folderID, nil, []string{base + "/movies/Offline/"}, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group(folderID, "/movies/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 4),
+	}); err != nil {
+		t.Fatalf("second library replace: %v", err)
+	}
+	expect("second library scan", folderID,
+		"/movies/Offline/VIDEO_TS dvd_vob 2",
+		"/movies/Ronin (1998)/VIDEO_TS dvd_vob 4",
+	)
+	expect("other library", otherFolderID, "/movies/Manhunter (1986) realmedia 1")
+
+	// A refreshed row keeps when it was first found.
+	var firstSeen, lastSeen time.Time
+	if err := pool.QueryRow(ctx, `SELECT first_seen_at, last_seen_at FROM unsupported_media_files WHERE media_folder_id = $1 AND directory_path = $2`,
+		folderID, base+"/movies/Ronin (1998)/VIDEO_TS").Scan(&firstSeen, &lastSeen); err != nil {
+		t.Fatalf("query seen times: %v", err)
+	}
+	if !lastSeen.After(firstSeen) {
+		t.Errorf("first_seen_at %v, last_seen_at %v: want the refresh to move only last_seen_at", firstSeen, lastSeen)
+	}
+
+	// Deleting the library deletes its rows.
+	if _, err := pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID); err != nil {
+		t.Fatalf("delete library: %v", err)
+	}
+	expect("deleted library", folderID)
+}
+
+// A scan that could not read one file, or could not tell whether an entry was
+// a file, saw the folder holding it only in part. That folder's rows stay, a
+// partial count found there does not overwrite the stored one, and a group
+// found there for the first time is added. Folders below it and a sibling
+// sharing a string prefix are not protected. A folder the scan could not read
+// protects only its own tree: the folder above it was read in full, so its
+// rows are replaced as usual.
+func TestUnsupportedFileRepositoryReplaceKeepsTheFolderOfAnUnreadableFile(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Unreadable File Test")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-unreadable-%d", time.Now().UnixNano())
+	start := time.Now()
+	nextScan := func() time.Time { start = start.Add(time.Minute); return start }
+
+	group := func(dir, reason string, names ...string) models.UnsupportedMediaFileGroup {
+		return models.UnsupportedMediaFileGroup{MediaFolderID: folderID, DirectoryPath: base + dir, Reason: reason, FileCount: len(names), FileNames: names}
+	}
+	expect := func(step string, want ...string) {
+		t.Helper()
+		result, err := pool.Query(ctx, `SELECT directory_path, reason, file_count, file_names FROM unsupported_media_files WHERE media_folder_id = $1`, folderID)
+		if err != nil {
+			t.Fatalf("query rows: %v", err)
+		}
+		defer result.Close()
+		got := []string{}
+		for result.Next() {
+			var dir, reason string
+			var count int
+			var names []string
+			if err := result.Scan(&dir, &reason, &count, &names); err != nil {
+				t.Fatalf("scan row: %v", err)
+			}
+			got = append(got, fmt.Sprintf("%s %s %d %s", strings.TrimPrefix(dir, base), reason, count, strings.Join(names, ",")))
+		}
+		if err := result.Err(); err != nil {
+			t.Fatalf("read rows: %v", err)
+		}
+		sort.Strings(got)
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("%s: rows = %v, want %v", step, got, want)
+		}
+	}
+	row := func(dir, reason string, count int, names string) string {
+		return fmt.Sprintf("%s %s %d %s", dir, reason, count, names)
+	}
+
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group("/movies/Gone", UnsupportedReasonDiscImage, "gone.iso"),
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso", "b.iso"),
+		group("/movies/Shelf", UnsupportedReasonDiscImage, "old.iso"),
+		group("/movies/Shelf/Extras", UnsupportedReasonDVDVOB, "VTS_01_1.VOB"),
+		group("/movies/Title", UnsupportedReasonDiscImage, "title.iso"),
+		group("/movies/Title/Extras", UnsupportedReasonDVDVOB, "VTS_01_1.VOB"),
+		group("/movies/Title2", UnsupportedReasonRealMedia, "title2.rmvb"),
+	}); err != nil {
+		t.Fatalf("first replace: %v", err)
+	}
+
+	// title.iso, b.iso and d.iso can't be read. The walk still found a.iso next
+	// to b.iso, and c.rmvb next to d.iso in a folder with no row yet. The
+	// Extras folders under Shelf and Gone can't be read at all; Shelf itself
+	// now holds new.iso, and gone.iso is gone.
+	unreadableFiles := []string{
+		base + "/movies/Title/title.iso",
+		base + "/movies/Mixed/b.iso",
+		base + "/movies/New/d.iso",
+	}
+	protected := append([]string{base + "/movies/Shelf/Extras", base + "/movies/Gone/Extras"}, unreadableFiles...)
+	if err := repo.Replace(ctx, folderID, nil, protected, unreadableFiles, nextScan(), []models.UnsupportedMediaFileGroup{
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso"),
+		group("/movies/New", UnsupportedReasonRealMedia, "c.rmvb"),
+		group("/movies/Shelf", UnsupportedReasonDiscImage, "new.iso"),
+	}); err != nil {
+		t.Fatalf("replace with unreadable paths: %v", err)
+	}
+	expect("unreadable paths",
+		row("/movies/Mixed", UnsupportedReasonDiscImage, 2, "a.iso,b.iso"),
+		row("/movies/New", UnsupportedReasonRealMedia, 1, "c.rmvb"),
+		row("/movies/Shelf", UnsupportedReasonDiscImage, 1, "new.iso"),
+		row("/movies/Shelf/Extras", UnsupportedReasonDVDVOB, 1, "VTS_01_1.VOB"),
+		row("/movies/Title", UnsupportedReasonDiscImage, 1, "title.iso"),
+	)
+
+	// Once every path reads again, the next scan replaces the rows as usual.
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, nextScan(), []models.UnsupportedMediaFileGroup{
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso"),
+	}); err != nil {
+		t.Fatalf("readable replace: %v", err)
+	}
+	expect("readable again", row("/movies/Mixed", UnsupportedReasonDiscImage, 1, "a.iso"))
+}
+
+func TestUnsupportedFileRepositoryListPage(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("Unsupported List %d", time.Now().UnixNano())
+	folderID := seedDeadRootTestFolder(t, pool, "movies", name)
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-list-%d", time.Now().UnixNano())
+
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now().Add(time.Hour), []models.UnsupportedMediaFileGroup{
+		{MediaFolderID: folderID, DirectoryPath: base + "/Ronin (1998)/VIDEO_TS", Reason: UnsupportedReasonDVDVOB, FileCount: 2, FileNames: []string{"VIDEO_TS.VOB", "VTS_01_1.VOB"}},
+		{MediaFolderID: folderID, DirectoryPath: base + "/Manhunter (1986)", Reason: UnsupportedReasonRealMedia, FileCount: 1, FileNames: []string{"Manhunter (1986).rmvb"}},
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	for _, tc := range []struct {
+		search string
+		want   []string
+	}{
+		{search: base, want: []string{"/Manhunter (1986)", "/Ronin (1998)/VIDEO_TS"}},
+		{search: base + "/ronin", want: []string{"/Ronin (1998)/VIDEO_TS"}},
+		{search: "vts_01", want: []string{"/Ronin (1998)/VIDEO_TS"}},
+		{search: name, want: []string{"/Manhunter (1986)", "/Ronin (1998)/VIDEO_TS"}},
+	} {
+		page, err := repo.ListPage(ctx, tc.search, 10, 0)
+		if err != nil {
+			t.Fatalf("list %q: %v", tc.search, err)
+		}
+		got := make([]string, 0, len(page))
+		for _, group := range page {
+			got = append(got, strings.TrimPrefix(group.DirectoryPath, base))
+		}
+		total, err := repo.Count(ctx, tc.search)
+		if err != nil {
+			t.Fatalf("count %q: %v", tc.search, err)
+		}
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") || total != len(tc.want) {
+			t.Errorf("search %q = %v (total %d), want %v", tc.search, got, total, tc.want)
+		}
+	}
+
+	page, err := repo.ListPage(ctx, base, 1, 1)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(page) != 1 || page[0].DirectoryPath != base+"/Ronin (1998)/VIDEO_TS" || page[0].FileCount != 2 ||
+		strings.Join(page[0].FileNames, "|") != "VIDEO_TS.VOB|VTS_01_1.VOB" {
+		t.Fatalf("second page = %+v", page)
+	}
+}
+
+// A subtree scan of a root whose mount dropped, leaving an empty mountpoint,
+// protects that root, so the list keeps the rows under it.
+func TestScanSubtreeProtectsASuspectEmptyRoot(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Subtree Test")
+
+	root := filepath.Join(t.TempDir(), "movies")
+	writeTestFile(t, filepath.Join(root, "Heat (1995)", "Heat (1995).mkv"), "fake payload")
+	writeTestFile(t, filepath.Join(root, "Ronin (1998)", "VIDEO_TS", "VTS_01_1.VOB"), "fake payload")
+	folder := &models.MediaFolder{ID: folderID, Paths: []string{root}, Type: "movies", Name: "Unsupported Subtree Test", Enabled: true}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, false, 0)
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			t.Fatalf("empty root: %v", err)
+		}
+	}
+	result, err := scanner.ScanSubtree(ctx, folder, root)
+	if err != nil {
+		t.Fatalf("subtree scan: %v", err)
+	}
+	if len(result.UnsupportedFiles) != 0 {
+		t.Errorf("unsupported files = %v, want none from an empty root", result.UnsupportedFiles)
+	}
+	if fmt.Sprint(result.ProtectedPaths) != fmt.Sprint([]string{root}) {
+		t.Errorf("protected paths = %v, want [%s]", result.ProtectedPaths, root)
+	}
+}
+
+// A disc image that turns into a symlink to a file that is gone can't be read,
+// so the scan protects that file, and the list keeps the row of the folder
+// holding it instead of dropping it as no longer found.
+func TestScanKeepsTheRowOfAFolderWithAnUnreadableFile(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Unreadable Scan Test")
+
+	root := filepath.Join(t.TempDir(), "movies")
+	title := filepath.Join(root, "Thief (1981)")
+	iso := filepath.Join(title, "Thief (1981).iso")
+	writeTestFile(t, filepath.Join(root, "Heat (1995)", "Heat (1995).mkv"), "fake payload")
+	writeTestFile(t, iso, "fake payload")
+	folder := &models.MediaFolder{ID: folderID, Paths: []string{root}, Type: "movies", Name: "Unsupported Unreadable Scan Test", Enabled: true}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, false, 0)
+	repo := NewUnsupportedFileRepository(pool)
+	// Each scan starts after every row's last sighting, so only protection
+	// keeps a row the scan did not find.
+	scan := func(step string) *ScanResult {
+		t.Helper()
+		result, err := scanner.ScanFolder(ctx, folder)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if err := repo.Replace(ctx, folderID, nil, result.ProtectedPaths, result.UnreadableEntries, time.Now().Add(time.Hour), GroupUnsupportedFiles(folderID, result.UnsupportedFiles)); err != nil {
+			t.Fatalf("%s: replace: %v", step, err)
+		}
+		return result
+	}
+	count := func(step string) int {
+		t.Helper()
+		var n int
+		err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(file_count), 0) FROM unsupported_media_files WHERE media_folder_id = $1 AND directory_path = $2 AND reason = $3`,
+			folderID, title, UnsupportedReasonDiscImage).Scan(&n)
+		if err != nil {
+			t.Fatalf("%s: query row: %v", step, err)
+		}
+		return n
+	}
+
+	scan("first scan")
+	if got := count("first scan"); got != 1 {
+		t.Fatalf("first scan: disc image count = %d, want 1", got)
+	}
+
+	if err := os.Remove(iso); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone.iso"), iso); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	result := scan("second scan")
+	if fmt.Sprint(result.ProtectedPaths) != fmt.Sprint([]string{iso}) {
+		t.Errorf("protected paths = %v, want [%s]", result.ProtectedPaths, iso)
+	}
+	if fmt.Sprint(result.UnreadableEntries) != fmt.Sprint([]string{iso}) {
+		t.Errorf("unreadable entries = %v, want [%s]", result.UnreadableEntries, iso)
+	}
+	if len(result.UnsupportedFiles) != 0 {
+		t.Errorf("unsupported files = %v, want none", result.UnsupportedFiles)
+	}
+	if got := count("second scan"); got != 1 {
+		t.Errorf("second scan: disc image count = %d, want the row kept at 1", got)
+	}
+}
+
+func TestUnsupportedFileRepositoryRecordsAcrossBatches(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Batches Test")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-batches-%d", time.Now().UnixNano())
+	previous := unsupportedFileBatchSize
+	unsupportedFileBatchSize = 2
+	t.Cleanup(func() { unsupportedFileBatchSize = previous })
+
+	groups := func(names ...string) []models.UnsupportedMediaFileGroup {
+		out := make([]models.UnsupportedMediaFileGroup, 0, len(names))
+		for _, name := range names {
+			out = append(out, models.UnsupportedMediaFileGroup{MediaFolderID: folderID, DirectoryPath: base + "/" + name, Reason: UnsupportedReasonDVDVOB, FileCount: 1, FileNames: []string{"VTS_01_1.VOB"}})
+		}
+		return out
+	}
+	expect := func(step string, names ...string) {
+		t.Helper()
+		want := make([]string, 0, len(names))
+		for _, name := range names {
+			want = append(want, "/"+name+" dvd_vob 1")
+		}
+		if got := unsupportedRowsUnder(t, pool, folderID, base); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("%s: rows = %v, want %v", step, got, want)
+		}
+	}
+
+	// Five groups go out as batches of two, two and one.
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now(), groups("A", "B", "C", "D", "E")); err != nil {
+		t.Fatalf("first replace: %v", err)
+	}
+	expect("first scan", "A", "B", "C", "D", "E")
+
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now().Add(time.Minute), groups("A", "C", "E")); err != nil {
+		t.Fatalf("second replace: %v", err)
+	}
+	expect("second scan", "A", "C", "E")
+
+	// AddNew adds only the groups not stored yet: A is stored, so its new
+	// count is ignored.
+	added := groups("A", "B", "D", "F", "G")
+	added[0].FileCount = 3
+	if err := repo.AddNew(ctx, folderID, time.Now().Add(2*time.Minute), added); err != nil {
+		t.Fatalf("add new: %v", err)
+	}
+	expect("guarded scan", "A", "B", "C", "D", "E", "F", "G")
+}
+
+// unsupportedRowsUnder lists a library's stored groups as "dir reason count",
+// with base trimmed from each directory, in order.
+func unsupportedRowsUnder(t *testing.T, pool *pgxpool.Pool, folderID int, base string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT directory_path, reason, file_count FROM unsupported_media_files WHERE media_folder_id = $1`, folderID)
+	if err != nil {
+		t.Fatalf("query rows: %v", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var dir, reason string
+		var count int
+		if err := rows.Scan(&dir, &reason, &count); err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		out = append(out, fmt.Sprintf("%s %s %d", strings.TrimPrefix(dir, base), reason, count))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	sort.Strings(out)
+	return out
+}
