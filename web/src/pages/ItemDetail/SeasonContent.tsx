@@ -85,11 +85,13 @@ export default function SeasonContent({
   const playableEpisodes = playbackEpisodes.filter((episode) => (episode.files?.length ?? 0) > 0);
   // Until that list arrives (or if it fails), an episode with no file here may
   // still play from another library, so the season's episode count stands in.
-  const canShuffle =
-    playableEpisodes.length > 1 ||
-    (needsUnscopedFiles && !unscopedEpisodesData && episodes.length > 1);
-  const firstUnwatched =
-    playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0];
+  const unscopedPending = needsUnscopedFiles && !unscopedEpisodesData;
+  const canShuffle = playableEpisodes.length > 1 || (unscopedPending && episodes.length > 1);
+  // The scoped list can't name the first unwatched playable episode, so Watch
+  // Party gets no target (its sheet asks for one) until the unscoped list does.
+  const firstUnwatched = unscopedPending
+    ? undefined
+    : (playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0]);
   const watchTogether = useDetailWatchTogether({
     item,
     target: firstUnwatched

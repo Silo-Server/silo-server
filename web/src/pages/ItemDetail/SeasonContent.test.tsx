@@ -240,7 +240,7 @@ describe("SeasonContent", () => {
     expect(mocks.capturedActionBarProps.value?.playHref).toBe("/watch/episode-1");
   });
 
-  it("keeps Shuffle while the season's unscoped list is still loading", () => {
+  it("keeps Shuffle but holds the watch party target while the unscoped list loads", () => {
     const episode = (n: number, files: object[]) => ({
       content_id: `episode-${n}`,
       title: `Episode ${n}`,
@@ -267,6 +267,9 @@ describe("SeasonContent", () => {
     );
 
     expect(mocks.capturedActionBarProps.value?.onShuffle).toBeTypeOf("function");
+    expect(mocks.useDetailWatchTogether).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: null }),
+    );
   });
 
   it("picks the watch party target from every library when the opened one lacks an episode", () => {
