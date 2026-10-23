@@ -254,6 +254,8 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		EpisodeNumbering:   ids.EpisodeNumbering,
 		EpisodeTitle:       ids.EpisodeTitle,
 		Duration:           time.Duration(file.Duration) * time.Second,
+		FileHash:           file.FileHash,
+		FileSize:           file.FileSize,
 	}
 	cached := make(map[string]Result)
 	if storage == OnlineStorageStored {

@@ -4814,6 +4814,8 @@ func reloadMarkerPluginProviders(
 				PluginID:            installation.PluginID,
 				CacheRevision:       cacheRevision,
 				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
+				SupportsAmend:       markers.PluginSupportsAmendFromMetadata(metadataMap),
+				SupportsAbsent:      markers.PluginSupportsAbsentFromMetadata(metadataMap),
 			}, resolver)
 			if err != nil {
 				return err

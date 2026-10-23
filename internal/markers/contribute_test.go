@@ -289,6 +289,8 @@ func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sub := &fakeSubmitter{id: "introdb"}
 			file := newContribIntroFile(models.MarkerSourceManual)
+			file.FileHash, file.FileSize = "8e245d9679d31e12", 734003200
+			file.IntroMarkersAlgorithm, file.IntroMarkersConfidence = strPtr("manual:v1"), floatPtr(1)
 			reg := NewRegistry(nil)
 			_ = reg.Register(sub)
 			resolver := fakeResolver{ids: ExternalIDs{
@@ -318,6 +320,10 @@ func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
 			if got.SeasonNumber != tt.season || got.EpisodeNumber != tt.episode ||
 				got.EpisodeExternalIDs[ExternalIDKeyTVDB] != "4242" || got.EpisodeTitle != "Inside the Episode" {
 				t.Fatalf("submission = %+v, want the special with its episode identity", got)
+			}
+			if got.FileHash != file.FileHash || got.FileSize != file.FileSize || got.Source != models.MarkerSourceManual ||
+				got.Algorithm != "manual:v1" || got.Confidence != 1 {
+				t.Fatalf("submission = %+v, want the file facts and the intro's stored provenance", got)
 			}
 		})
 	}

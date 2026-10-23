@@ -71,10 +71,17 @@ type DescribedProvider interface {
 }
 
 // SubmissionRequirements describes IDs the generic contribution path can
-// validate before calling a provider. Providers may still perform richer
-// validation inside SubmitMarker.
+// validate before calling a provider, and the optional submission behaviors
+// the provider declares. Providers may still perform richer validation inside
+// SubmitMarker. A submitter without requirements supports neither behavior.
 type SubmissionRequirements struct {
 	RequiredExternalIDs []string
+	// SupportsAmend means the provider replaces a server's earlier submission
+	// for the same file and kind, so a changed marker may be resubmitted.
+	SupportsAmend bool
+	// SupportsAbsent means the provider accepts submissions saying the item
+	// has no segment of a kind.
+	SupportsAbsent bool
 }
 
 type SubmissionRequirementProvider interface {
@@ -117,6 +124,10 @@ type Request struct {
 	EpisodeNumbering   string
 	EpisodeTitle       string
 	Duration           time.Duration
+	// FileHash (OSHash, 16 lowercase hex) and FileSize identify the file's
+	// exact bytes. They are empty or zero when the host has none.
+	FileHash string
+	FileSize int64
 }
 
 type Result struct {
@@ -160,6 +171,13 @@ type SubmissionRequest struct {
 	Start              *time.Duration
 	End                *time.Duration
 	Duration           time.Duration
+	FileHash           string
+	FileSize           int64
+	// Source is the stored marker source (scanner or manual), Algorithm its
+	// stored algorithm ID, and Confidence its stored confidence (0 when none).
+	Source     string
+	Algorithm  string
+	Confidence float64
 }
 
 // SubmissionStatus values returned by a Submitter.

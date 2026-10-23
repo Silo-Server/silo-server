@@ -93,14 +93,15 @@ type segmentData struct {
 	end        *float64
 	source     *string
 	confidence *float64
+	algorithm  *string
 }
 
 func fileSegments(file *models.MediaFile) []segmentData {
 	return []segmentData{
-		{MarkerKindIntro, "intro", file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersConfidence},
-		{MarkerKindCredits, "credits", file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersConfidence},
-		{MarkerKindRecap, "recap", file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersConfidence},
-		{MarkerKindPreview, "preview", file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersConfidence},
+		{MarkerKindIntro, models.MarkerSegmentIntro, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm},
+		{MarkerKindCredits, models.MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm},
+		{MarkerKindRecap, models.MarkerSegmentRecap, file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm},
+		{MarkerKindPreview, models.MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm},
 	}
 }
 
@@ -294,6 +295,15 @@ func (s *ContributionService) contributeSegment(
 		Start:              &startDur,
 		End:                &endDur,
 		Duration:           time.Duration(file.Duration) * time.Second,
+		FileHash:           file.FileHash,
+		FileSize:           file.FileSize,
+		Source:             source,
+	}
+	if seg.algorithm != nil {
+		req.Algorithm = *seg.algorithm
+	}
+	if seg.confidence != nil {
+		req.Confidence = *seg.confidence
 	}
 
 	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)

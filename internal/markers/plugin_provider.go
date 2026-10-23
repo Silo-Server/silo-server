@@ -65,6 +65,8 @@ type PluginProviderOptions struct {
 	PluginID            string
 	CacheRevision       string
 	RequiredExternalIDs []string
+	SupportsAmend       bool
+	SupportsAbsent      bool
 }
 
 // PluginProvider adapts a marker_provider.v1 plugin capability to Silo's
@@ -76,6 +78,8 @@ type PluginProvider struct {
 	pluginID            string
 	cacheRevision       string
 	requiredExternalIDs []string
+	supportsAmend       bool
+	supportsAbsent      bool
 	clientFactory       pluginMarkerClientFactory
 }
 
@@ -158,6 +162,8 @@ func NewPluginProviderWithClientFactory(opts PluginProviderOptions, clientFactor
 		pluginID:            strings.TrimSpace(opts.PluginID),
 		cacheRevision:       opts.CacheRevision,
 		requiredExternalIDs: requiredIDs,
+		supportsAmend:       opts.SupportsAmend,
+		supportsAbsent:      opts.SupportsAbsent,
 		clientFactory:       clientFactory,
 	}, nil
 }
@@ -197,10 +203,14 @@ func (p *PluginProvider) ProviderDescription() ProviderDescriptor {
 }
 
 func (p *PluginProvider) SubmissionRequirements() SubmissionRequirements {
-	if p == nil || len(p.requiredExternalIDs) == 0 {
+	if p == nil {
 		return SubmissionRequirements{}
 	}
-	return SubmissionRequirements{RequiredExternalIDs: append([]string(nil), p.requiredExternalIDs...)}
+	reqs := SubmissionRequirements{SupportsAmend: p.supportsAmend, SupportsAbsent: p.supportsAbsent}
+	if len(p.requiredExternalIDs) > 0 {
+		reqs.RequiredExternalIDs = append([]string(nil), p.requiredExternalIDs...)
+	}
+	return reqs
 }
 
 func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result, error) {
@@ -220,6 +230,8 @@ func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result,
 		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
 		EpisodeNumbering:   req.EpisodeNumbering,
 		EpisodeTitle:       req.EpisodeTitle,
+		FileHash:           req.FileHash,
+		FileSize:           req.FileSize,
 	})
 	if err != nil {
 		return Result{}, pluginProviderError(p.ID(), err)
@@ -266,6 +278,11 @@ func (p *PluginProvider) SubmitMarker(ctx context.Context, req SubmissionRequest
 		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
 		EpisodeNumbering:   req.EpisodeNumbering,
 		EpisodeTitle:       req.EpisodeTitle,
+		FileHash:           req.FileHash,
+		FileSize:           req.FileSize,
+		Source:             req.Source,
+		Algorithm:          req.Algorithm,
+		Confidence:         req.Confidence,
 	}
 	if req.Start != nil {
 		start := req.Start.Seconds()
@@ -570,13 +587,33 @@ func PluginDefaultFetchPriorityFromMetadata(metadata map[string]any) (int, bool)
 // accepts submissions. Existing manifests omit the key and keep the historical
 // submitter behavior; only an explicit false makes the provider fetch-only.
 func PluginSupportsContributionFromMetadata(metadata map[string]any) bool {
-	switch value := metadata["supports_contribution"].(type) {
+	return pluginMetadataBool(metadata, "supports_contribution", true)
+}
+
+// PluginSupportsAmendFromMetadata reports whether a marker capability replaces
+// a server's earlier submission for the same file and kind, so the host may
+// resubmit a changed marker.
+func PluginSupportsAmendFromMetadata(metadata map[string]any) bool {
+	return pluginMetadataBool(metadata, "supports_amend", false)
+}
+
+// PluginSupportsAbsentFromMetadata reports whether a marker capability accepts
+// submissions saying an item has no segment of a kind.
+func PluginSupportsAbsentFromMetadata(metadata map[string]any) bool {
+	return pluginMetadataBool(metadata, "supports_absent", false)
+}
+
+func pluginMetadataBool(metadata map[string]any, key string, fallback bool) bool {
+	switch value := metadata[key].(type) {
 	case bool:
 		return value
 	case string:
 		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
-		return err != nil || parsed
+		if err != nil {
+			return fallback
+		}
+		return parsed
 	default:
-		return true
+		return fallback
 	}
 }

@@ -74,6 +74,8 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		EpisodeNumbering:   "tvdb",
 		EpisodeTitle:       "Second Episode",
 		Duration:           1800 * time.Second,
+		FileHash:           "8e245d9679d31e12",
+		FileSize:           734003200,
 	})
 	if err != nil {
 		t.Fatalf("FetchMarkers: %v", err)
@@ -84,6 +86,10 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	if episode := client.fetchReq.GetEpisodeExternalIds(); episode.GetTvdbId() != "9001" || episode.GetTmdbId() != "63" ||
 		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
 		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
+	}
+	// The host does not read absent segments yet, so it must not ask for them.
+	if client.fetchReq.GetFileHash() != "8e245d9679d31e12" || client.fetchReq.GetFileSize() != 734003200 || client.fetchReq.GetAcceptsAbsent() {
+		t.Fatalf("fetch file facts = %q %d accepts_absent=%v", client.fetchReq.GetFileHash(), client.fetchReq.GetFileSize(), client.fetchReq.GetAcceptsAbsent())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {
 		t.Fatalf("result provenance = source %q provider %q", res.SourceClass, res.ProviderID)
@@ -125,6 +131,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 		Start:       &start,
 		End:         &end,
 		Duration:    90 * time.Minute,
+		FileHash:    "8e245d9679d31e12",
+		FileSize:    734003200,
+		Source:      models.MarkerSourceScanner,
+		Algorithm:   "chromaprint:v3",
+		Confidence:  0.97,
 	})
 	if err != nil {
 		t.Fatalf("SubmitMarker: %v", err)
@@ -142,6 +153,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	}
 	if client.submitReq.GetSegment() != "intro" || client.submitReq.GetStartSeconds() != 5 || client.submitReq.GetEndSeconds() != 30 {
 		t.Fatalf("submit request segment = %+v", client.submitReq)
+	}
+	if client.submitReq.GetFileHash() != "8e245d9679d31e12" || client.submitReq.GetFileSize() != 734003200 ||
+		client.submitReq.GetSource() != models.MarkerSourceScanner || client.submitReq.GetAlgorithm() != "chromaprint:v3" ||
+		client.submitReq.GetConfidence() != 0.97 || client.submitReq.GetAbsent() {
+		t.Fatalf("submit request provenance = %+v", client.submitReq)
 	}
 }
 
@@ -271,23 +287,31 @@ func TestReadOnlyPluginProviderIsFetchOnly(t *testing.T) {
 	}
 }
 
-func TestPluginSupportsContributionFromMetadata(t *testing.T) {
+func TestPluginCapabilityFlagsFromMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
+		parse    func(map[string]any) bool
 		metadata map[string]any
 		want     bool
 	}{
-		{name: "key absent keeps legacy submitters", metadata: map[string]any{"default_fetch_priority": 20}, want: true},
-		{name: "explicit true", metadata: map[string]any{"supports_contribution": true}, want: true},
-		{name: "explicit false", metadata: map[string]any{"supports_contribution": false}, want: false},
-		{name: "string false", metadata: map[string]any{"supports_contribution": " false "}, want: false},
-		{name: "unparseable string stays compatible", metadata: map[string]any{"supports_contribution": "nope"}, want: true},
-		{name: "wrong type stays compatible", metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
+		{name: "contribution: key absent keeps legacy submitters", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"default_fetch_priority": 20}, want: true},
+		{name: "contribution: explicit true", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": true}, want: true},
+		{name: "contribution: explicit false", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": false}, want: false},
+		{name: "contribution: string false", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": " false "}, want: false},
+		{name: "contribution: unparseable string stays compatible", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": "nope"}, want: true},
+		{name: "contribution: wrong type stays compatible", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
+		{name: "amend: key absent", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_contribution": true}, want: false},
+		{name: "amend: explicit true", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": true}, want: true},
+		{name: "amend: string true", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": " true "}, want: true},
+		{name: "amend: unparseable string", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": "yes please"}, want: false},
+		{name: "absent: key absent", parse: PluginSupportsAbsentFromMetadata, metadata: nil, want: false},
+		{name: "absent: explicit true", parse: PluginSupportsAbsentFromMetadata, metadata: map[string]any{"supports_absent": true}, want: true},
+		{name: "absent: wrong type", parse: PluginSupportsAbsentFromMetadata, metadata: map[string]any{"supports_absent": float64(1)}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := PluginSupportsContributionFromMetadata(tt.metadata); got != tt.want {
-				t.Fatalf("PluginSupportsContributionFromMetadata() = %v, want %v", got, tt.want)
+			if got := tt.parse(tt.metadata); got != tt.want {
+				t.Fatalf("parse() = %v, want %v", got, tt.want)
 			}
 		})
 	}

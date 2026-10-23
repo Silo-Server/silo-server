@@ -219,9 +219,16 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 		name       string
 		metadata   map[string]any
 		wantSubmit bool
+		wantAmend  bool
+		wantAbsent bool
 	}{
 		{name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true},
 		{name: "fetch-only manifest", metadata: map[string]any{"metadata": map[string]any{"supports_contribution": false}}, wantSubmit: false},
+		{
+			name:       "amend and absent declared",
+			metadata:   map[string]any{"metadata": map[string]any{"supports_amend": true, "supports_absent": true}},
+			wantSubmit: true, wantAmend: true, wantAbsent: true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeMarkerCapabilities{
@@ -242,6 +249,13 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			}
 			if _, ok := providers[0].(markers.Submitter); ok != test.wantSubmit {
 				t.Fatalf("provider %T implements Submitter = %v, want %v", providers[0], ok, test.wantSubmit)
+			}
+			if !test.wantSubmit {
+				return
+			}
+			reqs := providers[0].(markers.SubmissionRequirementProvider).SubmissionRequirements()
+			if reqs.SupportsAmend != test.wantAmend || reqs.SupportsAbsent != test.wantAbsent {
+				t.Fatalf("submission requirements = %+v, want amend=%v absent=%v", reqs, test.wantAmend, test.wantAbsent)
 			}
 		})
 	}
