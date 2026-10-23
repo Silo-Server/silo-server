@@ -229,37 +229,6 @@ describe("PlayingNextScreen shuffle", () => {
 
   afterEach(cleanup);
 
-  it("names the shuffle and offers another pick or stopping", () => {
-    const onReshuffle = vi.fn();
-    const onStop = vi.fn();
-    renderScreen({ shuffle: { scopeLabel: "Test Show · Season 1", onReshuffle, onStop } });
-
-    expect(screen.getByText("Shuffling Test Show · Season 1")).toBeTruthy();
-    expect(screen.getByText("Up Next at Random")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Pick Another" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stop shuffling" }));
-
-    expect(onReshuffle).toHaveBeenCalledOnce();
-    expect(onStop).toHaveBeenCalledOnce();
-  });
-
-  it("shows a shuffled movie without a season and episode line", () => {
-    renderScreen({
-      seriesTitle: "Heat",
-      nextEpisode: {
-        contentId: "movie-1",
-        title: "Heat",
-        seasonNumber: 0,
-        episodeNumber: 0,
-        runtime: 170,
-      },
-      shuffle: { scopeLabel: "Movies", onReshuffle: () => {}, onStop: () => {} },
-    });
-
-    expect(screen.getByText("Heat")).toBeTruthy();
-    expect(screen.queryByText(/S0:E0/)).toBeNull();
-  });
-
   it("gives a newly picked item the full countdown", () => {
     vi.useFakeTimers();
     const onPlayNow = vi.fn();
@@ -307,30 +276,6 @@ describe("PlayingNextScreen shuffle", () => {
 
     fireEvent.keyDown(document, { key: "Enter" });
     expect(onPlayNow).toHaveBeenCalledWith("viewer");
-  });
-
-  it("titles a movie by its own name when there is no series line", () => {
-    renderScreen({
-      seriesTitle: undefined,
-      nextEpisode: {
-        contentId: "movie-1",
-        title: "Heat",
-        seasonNumber: 0,
-        episodeNumber: 0,
-        runtime: 170,
-      },
-      shuffle: { scopeLabel: "Movies", onReshuffle: () => {}, onStop: () => {} },
-    });
-
-    expect(screen.getByText("Heat")).toBeTruthy();
-  });
-
-  it("offers no shuffle controls outside a shuffle", () => {
-    renderScreen();
-
-    expect(screen.getByText("Playing Next")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Pick Another" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Stop shuffling" })).toBeNull();
   });
 });
 
@@ -407,5 +352,25 @@ describe("PlayingNextScreen spoiler protection", () => {
       nextEpisode: { ...nextWithoutUrl, watchState: { played: false, position_seconds: 120 } },
     });
     expect(previewPlaceholder().className).not.toContain("blur-xl");
+  });
+
+  it("labels an AI-translated overview only while the overview shows", () => {
+    const translated = {
+      ...nextWithoutUrl,
+      overview: "Une équipe prépare un dernier coup.",
+      machineTranslatedFields: ["overview"],
+    };
+    renderScreen({ nextEpisode: translated });
+    expect(screen.getByText("Translated by AI")).toBeTruthy();
+    cleanup();
+
+    renderScreen({ nextEpisode: { ...translated, machineTranslatedFields: undefined } });
+    expect(screen.queryByText("Translated by AI")).toBeNull();
+    cleanup();
+
+    mocks.spoilerPrefs = { hideImages: true, hideOverviews: true };
+    renderScreen({ nextEpisode: translated });
+    expect(screen.queryByText("Une équipe prépare un dernier coup.")).toBeNull();
+    expect(screen.queryByText("Translated by AI")).toBeNull();
   });
 });

@@ -16,8 +16,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -197,16 +199,15 @@ func (e artworkStatusError) Error() string {
 var artworkStallTimeout = 30 * time.Second
 
 // artworkClient fetches artwork when the service has no client of its own.
+// Its netguard transport checks every address it dials, redirect hops
+// included, so a stored metadata-provider URL cannot reach the server's own
+// network; artworkurl.FetchContext trusts the artwork store's direct URLs.
 var artworkClient = &http.Client{Transport: artworkTransport()}
 
-func artworkTransport() *http.Transport {
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		base = &http.Transport{}
-	}
-	t := base.Clone()
-	t.ResponseHeaderTimeout = artworkStallTimeout
-	return t
+func artworkTransport() *netguard.Transport {
+	return netguard.NewTransport(func(t *http.Transport) {
+		t.ResponseHeaderTimeout = artworkStallTimeout
+	})
 }
 
 func (s *Service) artworkHTTPClient() *http.Client {
@@ -297,6 +298,7 @@ func (s *Service) openStoredArtwork(ctx context.Context, key string) (artworkIma
 }
 
 func (s *Service) fetchArtwork(ctx context.Context, imageURL string) (artworkImage, error) {
+	ctx = artworkurl.FetchContext(ctx, s.artworkStore, imageURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		// Not wrapped: the parse error quotes the presigned URL.
@@ -313,6 +315,10 @@ func (s *Service) fetchArtwork(ctx context.Context, imageURL string) (artworkIma
 		// the cause.
 		if urlErr, ok := errors.AsType[*url.Error](err); ok {
 			err = urlErr.Err
+		}
+		if errors.Is(err, netguard.ErrPrivateDestination) || errors.Is(err, netguard.ErrBlockedDestination) {
+			// An address the guard refuses stays refused: not worth a retry.
+			return artworkImage{}, fmt.Errorf("fetching artwork: %w: %w", ErrAssetNotFound, err)
 		}
 		return artworkImage{}, fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
 	}
@@ -389,7 +395,7 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 		if err != nil {
 			return fmt.Errorf("reading external subtitle: %w", ErrAssetNotFound)
 		}
-		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, data)
+		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, ext.Language, data)
 	case subtitleRefEmbedded:
 		return s.serveEmbeddedSubtitle(w, r.WithContext(ctx), dl, value)
 	case "downloaded":
@@ -412,10 +418,10 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 }
 
 // downloadedSubtitleETag names one delivered representation of a stored
-// subtitle. Its bytes are immutable, so the row revision, which changes with
-// the timing correction, identifies the timed bytes.
+// subtitle. Its bytes are immutable, so the delivery revision, which changes
+// with the timing correction, identifies the delivered bytes.
 func downloadedSubtitleETag(sub *subtitles.DownloadedSubtitle) string {
-	return fmt.Sprintf(`"downloaded-%d-%d"`, sub.ID, sub.Revision)
+	return fmt.Sprintf(`"downloaded-%d-%s"`, sub.ID, subtitles.DeliveryRevision(sub))
 }
 
 // serveDownloadedSubtitle writes a stored subtitle with its timing correction.
@@ -517,9 +523,9 @@ func parseSubtitleRef(ref string) (kind string, value int, err error) {
 // serveExternalSubtitle writes a sidecar with its timing correction. Like a
 // stored subtitle it is revalidated on every use: the correction, or the file
 // on disk, can change behind the same ref.
-func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format string, data []byte) error {
+func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format, language string, data []byte) error {
 	subFormat := subtitles.SubtitleFormat(strings.ToLower(format))
-	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, data)
+	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, language, data)
 	if err != nil {
 		return fmt.Errorf("applying external subtitle timing: %w", err)
 	}

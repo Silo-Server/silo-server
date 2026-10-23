@@ -16,7 +16,7 @@ import {
 } from "@/lib/homeRows/rowDraft";
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import type { LibraryPage, RowCollections } from "@/lib/homeRows/types";
-import { kindLocked, variantFamily } from "@/lib/homeRows/variants";
+import { variantFamily } from "@/lib/homeRows/variants";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
 import { CollectionPicker } from "./CollectionPicker";
 import { CuratedTitlesEditor } from "./CuratedTitlesEditor";
@@ -82,7 +82,6 @@ function KindControl({
         value={choices.value}
         onPageIds={choices.onPageIds}
         pageLabel={choices.pageLabel}
-        locked={kindLocked(draft.config)}
         onPick={(option) => onChange(withCollection(draft, option, choices.current?.title))}
       />
     );
@@ -139,7 +138,7 @@ export function RowForm({
   previewOffText: string;
   /** Edit row only. */
   shows?: ShowsLine;
-  /** No variant control: legacy Trakt rows and Continue Reading rows. */
+  /** No variant control: Continue Reading rows. */
   variantLocked: boolean;
   libraries: ParamLibrary[];
   onLibraryPage: boolean;
@@ -204,7 +203,8 @@ export function RowForm({
   );
   const showsLine = shows ? <ShowsSummary sectionType={draft.sectionType} {...shows} /> : null;
   return (
-    <div className="grid gap-5">
+    // minmax(0,1fr): a truncated line or a wide control can't widen the form past a phone screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       {CONTROL_KINDS.has(draft.sectionType) ? (
         <>
           {showsLine}

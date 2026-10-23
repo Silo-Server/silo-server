@@ -285,6 +285,42 @@ describe("catalog window cursor paging", () => {
     expect(requests[4]?.body.seek).toBeUndefined();
   });
 
+  it("keeps showing a loaded page while it reloads under a new snapshot", async () => {
+    const { fetchMock, reply } = catalogTransport();
+    let releaseHeld: (() => void) | undefined;
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      // Hold page 1 only once it is read under page 0's second snapshot.
+      const offset = body.seek ?? Number(body.cursor?.match(/^next:(\d+):/)?.[1] ?? 0);
+      if (offset === 2 && body.cursor?.endsWith(":2")) {
+        await new Promise<void>((resolve) => (releaseHeld = resolve));
+      }
+      return reply(body);
+    });
+    const { wrapper, queryClient } = makeClient();
+    const state = createCatalogSearchState("history");
+    const { result } = renderHook(
+      () => useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange: [2, 3] }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data.pages.get(1)).toHaveLength(2));
+
+    // A realtime event invalidates the list. Page 0 comes back under a new
+    // snapshot, which re-keys page 1.
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["catalog"] });
+    });
+    await waitFor(() => expect(releaseHeld).toBeDefined());
+    expect(result.current.data.pages.get(1)?.map((item) => item.content_id)).toEqual([
+      "item-2",
+      "item-3",
+    ]);
+
+    act(() => releaseHeld!());
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(result.current.data.pages.get(1)).toHaveLength(2);
+  });
+
   it.each([
     ["search text", { q: "moon" }],
     ["library", { library_id: 7 }],

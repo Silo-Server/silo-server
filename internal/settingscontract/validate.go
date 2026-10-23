@@ -124,6 +124,11 @@ func (d *Definition) validate(manifestRevision int, objectSchemas map[string]*js
 	errs = append(errs, d.ValueSchema.validate(d.IntroducedIn, manifestRevision, objectSchemas)...)
 	errs = append(errs, d.validateDefault(objectSchemas)...)
 	errs = append(errs, d.validateConstraint()...)
+	if d.AdminDefault && !d.IsRemote() {
+		// An administrator default lives on the server and reaches viewers
+		// through server resolution, which a client_local setting never has.
+		errs = append(errs, errors.New("admin_default requires remote persistence"))
+	}
 
 	return errors.Join(errs...)
 }

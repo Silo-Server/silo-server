@@ -721,6 +721,29 @@ export interface SeasonUserData {
 
 export type ItemUserData = LeafItemUserData | SeasonUserData;
 
+const LEAF_USER_DATA_KEYS = [
+  "position_seconds",
+  "duration_seconds",
+  "is_in_progress",
+  "last_file_id",
+  "last_resolution",
+  "last_hdr",
+  "last_codec_video",
+  "last_edition_key",
+] as const;
+
+/**
+ * Narrows user data to the leaf shape. The server omits a zero position, so a
+ * movie whose only state is its remembered version carries `last_file_id`
+ * without `position_seconds`; any leaf-only field identifies it.
+ */
+export function leafUserData(userData: ItemUserData | undefined): LeafItemUserData | undefined {
+  if (!userData) return undefined;
+  return LEAF_USER_DATA_KEYS.some((key) => key in userData)
+    ? (userData as LeafItemUserData)
+    : undefined;
+}
+
 export interface Season {
   content_id: string;
   play_content_id?: string;
@@ -733,6 +756,8 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface SeasonsResponse {
@@ -766,6 +791,8 @@ export interface MediaItemUserState {
   played: boolean;
   is_favorite: boolean;
   in_watchlist: boolean;
+  /** The profile marked the movie or series Not interested. */
+  not_interested?: boolean;
 }
 
 export interface BrowseItemSortMetrics {
@@ -1122,6 +1149,9 @@ export interface ItemExtra {
   title?: string;
   duration_seconds?: number;
   file_id?: number;
+  /** 16:9 image: a sidecar beside the file, or a frame of the video. */
+  still_url?: string;
+  still_thumbhash?: string;
 }
 
 /**
@@ -1156,6 +1186,11 @@ export interface ItemDetail {
    * keys off this.
    */
   pending_translation_language?: string;
+  /**
+   * Localized fields ("overview", "tagline") whose text was machine-translated
+   * by AI rather than supplied by a metadata provider or a person.
+   */
+  machine_translated_fields?: string[];
   runtime: number;
   content_rating: string;
   /**
@@ -1313,6 +1348,10 @@ export interface EpisodeListItem {
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
   overlay_summary?: OverlaySummary | null;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
+  /** This profile's language when the episode's description is not in it yet. */
+  pending_translation_language?: string;
 }
 
 export interface EpisodesResponse {
@@ -1320,7 +1359,7 @@ export interface EpisodesResponse {
 }
 
 // Collections
-export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
 // UI-only presets for the two display-filter dropdowns. They no longer map to
@@ -1541,7 +1580,7 @@ export interface LibraryCollection {
   slug: string;
   title: string;
   description: string;
-  collection_type: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type: "manual" | "smart" | "mdblist" | "tmdb";
   visibility: "visible" | "hidden";
   sort_order: number;
   group_id?: string | null;
@@ -1611,7 +1650,7 @@ export interface CreateLibraryCollectionRequest {
   slug?: string;
   title: string;
   description?: string;
-  collection_type?: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type?: "manual" | "smart" | "mdblist" | "tmdb";
   visibility?: "visible" | "hidden";
   sort_order?: number;
   group_id?: string | null;
@@ -1665,7 +1704,7 @@ export interface LibraryTabResponse {
 
 // One library's bucket of server (admin-curated) collections in the aggregated
 // server-collections response. `collections` is a capped teaser slice;
-// `total_count` is the full visible count, used for the "See all (N)" link.
+// `total_count` is the full visible count.
 export interface ServerCollectionsLibrary {
   library_id: number;
   library_name: string;
@@ -1737,35 +1776,6 @@ export interface ImportTMDBCollectionRequest {
 }
 
 export interface ImportTMDBCollectionResponse {
-  collection: LibraryCollection;
-  sync_run?: LibraryCollectionSyncRun;
-}
-
-export interface ImportTraktCollectionRequest {
-  library_id?: number;
-  library_ids?: number[];
-  title: string;
-  description?: string;
-  // preset/media_type drive a discovery-feed collection; list_url drives a
-  // user-authored Trakt list. Exactly one path is used per request.
-  preset?: "trending" | "popular" | "recommended";
-  media_type?: "movie" | "tv";
-  profile_id?: string;
-  list_url?: string;
-  limit?: number;
-  featured?: boolean;
-  poster_url?: string;
-  poster_source_url?: string;
-  backdrop_source_url?: string;
-  sync_schedule?: string;
-  management_mode?: LibraryCollectionManagementMode;
-  management_source?: string;
-  management_key?: string;
-  /** Default order viewers land on; `{}` keeps the source list's own order. */
-  sort_config?: CollectionSortConfig;
-}
-
-export interface ImportTraktCollectionResponse {
   collection: LibraryCollection;
   sync_run?: LibraryCollectionSyncRun;
 }
@@ -3301,9 +3311,15 @@ export interface AdminPlaybackHistoryItem {
   play_method: string;
   started_at: string;
   ended_at: string;
+  /** Where the play ended, not how long it was watched. */
   watched_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
+  /** Measured watch time; null for a play recorded before it was measured. */
+  played_seconds: number | null;
+  series_title: string;
+  season_number: number | null;
+  episode_number: number | null;
 }
 
 export interface AdminUserProfile {
@@ -3326,7 +3342,10 @@ export interface AdminDeviceProfileSummary {
 /** One device the signed-in viewer watches on. */
 export interface UserDevice {
   device_id: string;
+  /** The name the device reports for itself. */
   device_name: string;
+  /** The name the profile gave the device; absent when it has none. */
+  custom_name?: string;
   device_platform: string;
   last_seen_at: string;
   profile_id: string;
@@ -3866,6 +3885,8 @@ export interface PluginCapability {
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A request_router.v1 capability: the request server fields its plugin can do without. */
+  request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
 
 export interface PluginRoute {
@@ -4464,6 +4485,10 @@ export interface SectionItem {
   badges?: string[];
   user_state?: MediaItemUserState;
   upcoming_event?: SectionItemUpcomingEvent | null;
+  /** This profile's language when the card's description is not in it yet. */
+  pending_translation_language?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface ResolvedSection {
@@ -5348,6 +5373,8 @@ export interface UnmatchedLibraryItem {
   library_id: number;
   library_name: string;
   status: string;
+  /** When an admin marked the item as intentionally unmatched; absent unless ignored. */
+  ignored_at?: string;
 }
 
 export interface FilesystemBrowseEntry {

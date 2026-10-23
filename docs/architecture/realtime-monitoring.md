@@ -29,7 +29,10 @@ operations are in `internal/apiv2/library_monitoring.go` and are described in
 Two switches control monitoring:
 
 - `scanner.realtime_monitoring`, the server-wide switch (default `true`). It
-  hot-reloads through the config watcher and needs no restart.
+  hot-reloads through the config watcher and needs no restart. Admins turn
+  monitoring on or off per library, so Library & Metadata shows this switch
+  only while it is saved off, which is where the library editor sends an admin
+  to turn it back on.
 - `media_folders.realtime_monitoring`, the per-library switch (default `true`
   for existing and new libraries). It is exposed on `/api/v2/libraries` only;
   the frozen `/api/v1` routes neither return nor change it.
@@ -306,8 +309,12 @@ Every 2 seconds the monitor flushes reported changes:
    uses, over the library list from the last reconcile, so a burst of changes
    costs no database query per path. A library created or edited on this node
    is listed again at once; one edited on another node within the reconcile
-   interval. The resolver uses `Resolve` for present files and folders, `ResolveVanishedPath` for
-   vanished files, `ResolveMissingSubtree` for vanished folders. The vanished
+   interval. The resolver uses `Resolve` for present files and folders, `ResolveVanishedFile` for
+   vanished files, `ResolveMissingSubtree` for vanished folders. A vanished
+   file that is neither media nor a sidecar of the library's videos (a tool's
+   temp or backup copy, such as Tdarr's `*.partial.old`) starts no scan:
+   nothing cataloged it, and a scan of a path that is gone would only warn
+   that the scan was partial. The vanished
    resolvers refuse to queue cleanup while the library's root is missing, so a
    lost mount never turns into removals. The scanner still treats a folder
    that no longer exists as unreadable, so the files of a renamed or deleted

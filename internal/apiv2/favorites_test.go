@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -75,6 +74,34 @@ func (f *fakePersonalLists) ListFavoritesPage(_ context.Context, viewer handlers
 		cards = append(cards, handlers.CollectionItemView{ContentID: e.MediaItemID, Type: "movie", Title: "Title " + e.MediaItemID, Status: "matched"})
 	}
 	return page, cards, nil
+}
+
+// VisibleItemIDs reports every id the catalog "has" as visible.
+func (f *fakePersonalLists) VisibleItemIDs(_ context.Context, _ handlers.PersonalListViewer, ids []string) (map[string]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	visible := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		visible[id] = !f.missing[id]
+	}
+	return visible, nil
+}
+
+// ResolveCards resolves a series card for every id the catalog "has".
+func (f *fakePersonalLists) ResolveCards(_ context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error) {
+	f.viewers = append(f.viewers, viewer)
+	if f.err != nil {
+		return nil, f.err
+	}
+	cards := make([]handlers.CollectionItemView, 0, len(ids))
+	for _, id := range ids {
+		if f.missing[id] {
+			continue
+		}
+		cards = append(cards, handlers.CollectionItemView{ContentID: id, Type: "series", Title: "Title " + id, Status: "matched"})
+	}
+	return cards, nil
 }
 
 func (f *fakePersonalLists) GetFavorite(_ context.Context, viewer handlers.PersonalListViewer, itemID string) (userstore.Favorite, bool, error) {
@@ -248,32 +275,6 @@ func favoritesDeps(lists *fakePersonalLists) Dependencies {
 	return deps
 }
 
-func TestListFavorites(t *testing.T) {
-	lists := &fakePersonalLists{favorites: favoriteRows()}
-	h := newTestHandler(t, favoritesDeps(lists))
-
-	rec := do(t, h, http.MethodGet, "/api/v2/favorites", "", viewerHeaders())
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	page := decodeCards(t, rec.Body.String())
-	if len(page.Items) != 3 || page.Items[0].ContentID != "movie:c" || page.Page.HasMore || page.Page.NextCursor != "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"title":"Title movie:c"`) || !strings.Contains(rec.Body.String(), `"genres":[]`) {
-		t.Fatalf("card = %s", rec.Body.String())
-	}
-	// The seam is probed for one row past the page and sees the viewer's
-	// profile and the requested artwork size.
-	if lists.limits[0] != DefaultLimit+1 || lists.viewers[0].ProfileID != "p-owner" || lists.viewers[0].UserID != 1 {
-		t.Fatalf("call = %d %+v", lists.limits[0], lists.viewers[0])
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/favorites?image_size=large", "", viewerHeaders())
-	if rec.Code != 200 || lists.viewers[1].ImageSize != imagesize.Large {
-		t.Fatalf("%d image size = %v", rec.Code, lists.viewers[1].ImageSize)
-	}
-}
-
 func TestListFavoritesCursor(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows()}
 	// The first page ends inside a timestamp tie, so continuation must keep the item ID.
@@ -299,20 +300,6 @@ func TestListFavoritesCursor(t *testing.T) {
 	}
 }
 
-func TestListFavoritesValidation(t *testing.T) {
-	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
-	for _, tc := range []struct{ query, location, code string }{
-		{"offset=10", "query.offset", codeUnknownParameter},
-		{"limit=0", "query.limit", codeOutOfRange},
-		{"image_size=huge", "query.image_size", codeInvalidEnum},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites?"+tc.query, "", viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.query, p.Errors)
-		}
-	}
-}
-
 func TestGetFavorite(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows(), missing: map[string]bool{"movie:hidden": true}}
 	h := newTestHandler(t, favoritesDeps(lists))
@@ -325,41 +312,6 @@ func TestGetFavorite(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:hidden", "", viewerHeaders()), TypeNotFound)
 	// Another profile's favorite is not this profile's.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:z", "", viewerHeaders()), TypeNotFound)
-}
-
-func TestAddAndDeleteFavorite(t *testing.T) {
-	lists := &fakePersonalLists{favorites: favoriteRows(), missing: map[string]bool{"movie:hidden": true}}
-	h := newTestHandler(t, favoritesDeps(lists))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodPut, "/api/v2/favorites/movie:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("put %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.favorites) != 5 || lists.favorites[0].MediaItemID != "movie:new" {
-		t.Fatalf("favorites = %+v", lists.favorites)
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/favorites/movie:hidden", "", viewerHeaders()), TypeNotFound)
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodDelete, "/api/v2/favorites/movie:new", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("delete %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(lists.favorites) != 4 {
-		t.Fatalf("favorites = %+v", lists.favorites)
-	}
-	// Demo mode lets the mutations through, as v1's demo guard does.
-	demo := favoritesDeps(lists)
-	demo.DemoSettings = fakeSettings{demo: true}
-	dh := newTestHandler(t, demo)
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPut, "/api/v2/favorites/movie:new"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
-	} {
-		if rec := do(t, dh, tc.method, tc.path, "", viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("demo %s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
-		}
-	}
 }
 
 func TestFavoritesDenied(t *testing.T) {

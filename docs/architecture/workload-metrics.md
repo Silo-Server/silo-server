@@ -16,7 +16,7 @@ recoveries, not heartbeat requests. Progress counters exclude heartbeat loops.
 
 | Work | Authoritative state and unit | Instrumentation / retry and stall interpretation |
 | --- | --- | --- |
-| Library scan | `scan_runs`, one folder/subtree/file attempt | Scan worker start/progress/durable terminal outcome. Shared queued/running counts and request age. Stale direct attempts fail; stale worker claims requeue. |
+| Library scan | `scan_runs`, one folder/subtree/file attempt | Scan worker start/progress/durable terminal outcome. Shared queued/running counts and request age. Stale direct attempts fail; stale worker claims requeue. A worker claim cut short by shutdown requeues as the worker exits, with its owed follow-up, and records `unknown`; shutdown does not wait for workers, so a requeue that misses exit falls back to the stale-claim requeue. |
 | Autoscan | `autoscan_webhook_deliveries`, one delivery; `scan_runs` for admitted scans | Scheduled poll/retry task attempts and intake queue depth/age. Delivery rows can fan out to several scans; count them separately. |
 | Movie/series matching | `movie_match_queue` / `series_root_match_queue`, pending file/root | Shared queued/running counts from claim tokens, plus matching task duration/progress. Retry gates and terminal match policy stay in metadata repositories. Empty candidates are a domain result, not necessarily a failed scheduled task. |
 | Metadata refresh | Admin job, scheduled task, or library ingest | Admin/task attempt metrics and metadata dependency spans. Admin terminal state is read after durable writes. |

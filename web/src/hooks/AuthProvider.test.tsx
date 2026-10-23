@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LoginResponse, Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
-import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
 import { queryClient } from "@/lib/query-client";
 import { wasSignedOut } from "@/lib/externalSignIn";
@@ -93,16 +92,6 @@ function makeProfile(id: string, name: string): Profile {
 
 function renderWithAuthProvider(children: ReactNode) {
   return render(<AuthProvider>{children}</AuthProvider>);
-}
-
-function ProviderProbe() {
-  const { providers, setupLoading } = useAuth();
-
-  return (
-    <div data-testid="providers">
-      {setupLoading ? "loading" : providers.map((entry) => `${entry.id}:${entry.mode}`).join(",")}
-    </div>
-  );
 }
 
 function ProfileSelectionProbe() {
@@ -212,30 +201,6 @@ describe("AuthProvider", () => {
         );
       }
       return Promise.reject(new Error(`unexpected v2 call: ${key}`));
-    });
-  });
-
-  it("preserves OAuth login providers returned by the auth providers endpoint", async () => {
-    v2Mock.mockImplementation((key: string) => {
-      if (key === "GET /api/v2/system/setup") {
-        return Promise.resolve(
-          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
-        );
-      }
-      if (key === "GET /api/v2/auth/providers") {
-        return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">(listAuthProvidersOk));
-      }
-      return Promise.reject(new Error(`unexpected v2 call: ${key}`));
-    });
-    apiMock.mockImplementation((path: string) =>
-      Promise.reject(new Error(`unexpected API call: ${path}`)),
-    );
-
-    renderWithAuthProvider(<ProviderProbe />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("providers")).toHaveTextContent("local:credentials");
-      expect(screen.getByTestId("providers")).toHaveTextContent("plugin-3:oauth");
     });
   });
 

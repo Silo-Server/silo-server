@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 
@@ -130,15 +131,11 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 			return
 		}
 
-		// Check global limiter (per-second only — spec says no per-minute global limit).
-		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
-		// no-op: it never triggers before the per-second limiter does.
-		globalRate := globalRateFor(cfg)
-		globalResult := mw.global.Allow(r.Context(), "global", globalRate)
-		if !globalResult.Allowed {
-			writeRateLimitResponse(w, globalResult, reject)
-			return
-		}
+		// The narrower per-IP, per-key and account budgets run before the shared
+		// global one, as in AuthEndpointHandler, so a client over its own
+		// limit cannot spend server-wide capacity and get unrelated clients
+		// rejected. A request the global check then rejects keeps the
+		// narrower tokens it spent; that only charges the client that sent it.
 
 		// Check per-IP limiter
 		if clientIP := clientip.FromContext(r.Context()); clientIP != "" {
@@ -147,7 +144,7 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 				RequestsPerMinute: cfg.IPReqPerMinute,
 				Burst:             cfg.IPBurst,
 			}
-			ipKey := "ip:" + clientIP
+			ipKey := "ip:" + SourceKey(clientIP)
 			ipResult := mw.perKey.Allow(r.Context(), ipKey, ipRate)
 			if !ipResult.Allowed {
 				writeRateLimitResponse(w, ipResult, reject)
@@ -189,6 +186,19 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 			}
 		}
 
+		if !mw.allowAccount(w, r, cfg, reject) {
+			return
+		}
+
+		// Check global limiter (per-second only — spec says no per-minute global limit).
+		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
+		// no-op: it never triggers before the per-second limiter does.
+		globalResult := mw.global.Allow(r.Context(), "global", globalRateFor(cfg))
+		if !globalResult.Allowed {
+			writeRateLimitResponse(w, globalResult, reject)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -222,13 +232,14 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 
 			clientIP := clientip.FromContext(r.Context())
 			if clientIP != "" {
+				source := SourceKey(clientIP)
 				// Check global per-IP limit (shared counter with authenticated routes)
 				ipRate := Rate{
 					RequestsPerSecond: cfg.IPReqPerSecond,
 					RequestsPerMinute: cfg.IPReqPerMinute,
 					Burst:             cfg.IPBurst,
 				}
-				ipResult := mw.perKey.Allow(r.Context(), "ip:"+clientIP, ipRate)
+				ipResult := mw.perKey.Allow(r.Context(), "ip:"+source, ipRate)
 				if !ipResult.Allowed {
 					writeRateLimitResponse(w, ipResult, reject)
 					return
@@ -242,7 +253,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 						RequestsPerMinute: epCfg.RequestsPerMinute,
 						Burst:             epCfg.Burst,
 					}
-					epKey := fmt.Sprintf("authip:%s:%s", clientIP, endpoint)
+					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
 					if !epResult.Allowed {
 						writeRateLimitResponse(w, epResult, reject)
@@ -256,7 +267,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					// that all clients behind it share. Network access ingress
 					// writes the header itself and needs no such cap.
 					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
-						peerKey := fmt.Sprintf("authpeer:%s:%s", peer, endpoint)
+						peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
 						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
 						if !peerResult.Allowed {
 							writeRateLimitResponse(w, peerResult, reject)
@@ -264,6 +275,10 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 						}
 					}
 				}
+			}
+
+			if !mw.allowAccount(w, r, cfg, reject) {
+				return
 			}
 
 			globalRate := globalRateFor(cfg)
@@ -278,6 +293,55 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 	}
 }
 
+// nat64Prefixes hold the IPv6 addresses that NAT64 and SIIT translators give
+// IPv4 clients: the well-known prefix (RFC 6052) and the local-use range
+// (RFC 8215). Each address there is a separate IPv4 client.
+var nat64Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
+
+// SourceKey is the part of a client address that the per-address budgets
+// count. A public IPv6 client counts by its /64: one home line or server
+// usually holds a whole /64, so counting each address would give it billions
+// of budgets. Every other address counts on its own: IPv4, IPv4 written as
+// IPv6, unique local and link-local IPv6, which only come from the local
+// network the way private IPv4 addresses do, and anything that does not
+// parse as an address.
+func SourceKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() || addr.Is4In6() || !addr.IsGlobalUnicast() || addr.IsPrivate() || isNAT64(addr) {
+		return ip
+	}
+	prefix, _ := addr.Prefix(64) // cannot fail: an IPv6 address has 128 bits
+	return prefix.String()
+}
+
+func isNAT64(addr netip.Addr) bool {
+	for _, prefix := range nat64Prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// allowAccount uses an authenticated account identity, independent of forwarding
+// headers, profiles and credentials. Distinct accounts behind a proxy keep
+// independent account budgets. With no authenticated identity, the existing
+// source/global checks still run.
+func (mw *Middleware) allowAccount(w http.ResponseWriter, r *http.Request, cfg Config, reject RejectBodyWriter) bool {
+	accountID := accountFromContext(r.Context())
+	if accountID <= 0 {
+		return true
+	}
+	result := mw.perKey.Allow(r.Context(), fmt.Sprintf("account:%d", accountID), accountRate(cfg))
+	if !result.Allowed {
+		writeRateLimitResponse(w, result, reject)
+	}
+	return result.Allowed
+}
+
 // authPeerBudgetMultiplier sizes the budget that every forwarded client behind
 // one transport peer shares, relative to one client's endpoint budget. A
 // reverse proxy fronting many users needs more than one client's allowance;
@@ -289,6 +353,22 @@ func authPeerRate(endpointRate Rate) Rate {
 		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
+	}
+}
+
+// accountBudgetMultiplier sizes the allowance every device, profile and key of
+// one account shares, in per-address budgets. One login commonly spans several
+// networks (a home, a phone on cellular, family elsewhere), and every address is
+// already capped at one per-address budget, so a single busy address or
+// integration can spend at most a quarter of its account. A client rotating
+// forwarding headers gets no more than this.
+const accountBudgetMultiplier = 4
+
+func accountRate(cfg Config) Rate {
+	return Rate{
+		RequestsPerSecond: min(cfg.IPReqPerSecond*accountBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(cfg.IPReqPerMinute*accountBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(cfg.IPBurst, MaxBurst/accountBudgetMultiplier) * accountBudgetMultiplier,
 	}
 }
 

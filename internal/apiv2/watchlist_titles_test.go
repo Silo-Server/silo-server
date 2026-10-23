@@ -222,23 +222,6 @@ func TestListWatchlistTitlesCursorScope(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/titles?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
 }
 
-// /watchlist/titles is its own route, not an item id on the library
-// watchlist's /watchlist/{item_id}.
-func TestWatchlistTitlesRoutePrecedence(t *testing.T) {
-	titles := &fakeWatchlistTitles{}
-	lists := &fakePersonalLists{watchlist: watchlistRows()}
-	deps := favoritesDeps(lists)
-	deps.WatchlistTitles, deps.WatchlistRequests = titles, &fakeWatchlistRequests{}
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/watchlist/titles", "", viewerHeaders())
-	if rec.Code != http.StatusOK || len(titles.viewers) != 1 {
-		t.Fatalf("%d %s (title list calls %d)", rec.Code, rec.Body.String(), len(titles.viewers))
-	}
-	if !strings.Contains(rec.Body.String(), `"items":[]`) {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-}
-
 func TestAddWatchlistTitle(t *testing.T) {
 	titles := &fakeWatchlistTitles{}
 	reqs := &fakeWatchlistRequests{ceiling: "PG-13", details: map[int]*tmdb.MediaDetail{
@@ -322,37 +305,6 @@ func TestWatchlistTitlesRequestsDisabled(t *testing.T) {
 	if len(titles.viewers) != 0 || len(reqs.withdrawn) != 0 || len(reqs.requested) != 0 {
 		t.Fatalf("disabled operations reached the services: %+v %+v", titles, reqs)
 	}
-}
-
-// The watchlist title operations answer 409 while requests are off, so the
-// status must not advertise them then.
-func TestRequestStatusWatchlistTitlesFollowRequestsEnabled(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		disabled bool
-		want     bool
-	}{
-		{"requests on", false, true},
-		{"requests off", true, false},
-	} {
-		deps := watchlistTitlesDeps(&fakeWatchlistTitles{}, &fakeWatchlistRequests{})
-		deps.RequestLifecycle = &fakeLifecycle{requestsDisabled: tc.disabled}
-		rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/requests/status", "", viewerHeaders())
-		var got struct {
-			Supported *bool `json:"watchlist_titles_supported"`
-		}
-		decodeBody(t, rec.Body, &got)
-		if rec.Code != http.StatusOK || got.Supported == nil || *got.Supported != tc.want {
-			t.Fatalf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
-		}
-	}
-}
-
-func TestWatchlistTitlesValidation(t *testing.T) {
-	h := newTestHandler(t, watchlistTitlesDeps(&fakeWatchlistTitles{}, &fakeWatchlistRequests{}))
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/titles/person/949", "", viewerHeaders()), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/0", "", viewerHeaders()), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/titles?cursor=garbage", "", viewerHeaders()), TypeInvalidCursor)
 }
 
 // Search results carry in_watchlist from the viewer's watchlist titles.

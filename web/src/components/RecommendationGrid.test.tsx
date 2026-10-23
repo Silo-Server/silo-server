@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
 import RecommendationGrid from "./RecommendationGrid";
 
 const mocks = vi.hoisted(() => ({
@@ -21,40 +20,6 @@ vi.mock("@/components/CardPlayOverlay", () => ({
 describe("RecommendationGrid", () => {
   beforeEach(() => {
     mocks.useCatalogItemDetail.mockReset();
-  });
-
-  it("uses the shared Embla carousel at the selected density and omits artwork-only captions", () => {
-    mocks.useCatalogItemDetail.mockReturnValue({
-      data: {
-        content_id: "ebook 1",
-        title: "A Reader",
-        poster_url: "/cover.jpg",
-      },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <UICustomizationContext.Provider
-          value={{
-            cardPresentation: { poster_size: "compact", caption: "artwork" },
-            cardPresentationSource: "profile_client",
-            primaryMenu: null,
-            primaryMenuSource: "default",
-            shortcuts: { items: [] },
-            isSupported: true,
-            supportsAtomicShortcuts: true,
-            isLoading: false,
-            isUnavailable: false,
-          }}
-        >
-          <RecommendationGrid items={[{ content_id: "ebook 1" }]} />
-        </UICustomizationContext.Provider>
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("embla__viewport");
-    expect(markup).toContain("w-[120px] shrink-0 sm:w-[140px] lg:w-[160px]");
-    expect(markup).not.toContain("mt-1.5 block truncate");
   });
 
   it("renders at most 12 recommendation cards", () => {

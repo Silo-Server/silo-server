@@ -342,6 +342,10 @@ func (p *PluginProvider) listRemoteState(
 	if err != nil {
 		return pluginRemoteTraversal{}, watchSyncUnavailableError()
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return pluginRemoteTraversal{}, err
+	}
 	cursor := conn.SyncCursors[cursorKey]
 	pageToken := ""
 	seenPageTokens := make(map[string]struct{})
@@ -620,6 +624,10 @@ func (p *PluginProvider) applyPluginEventsDetailed(
 	if err != nil {
 		return result, statuses, watchSyncUnavailableError()
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return result, statuses, err
+	}
 	for offset := 0; offset < len(events); offset += max(1, p.ExportBatchSize()) {
 		end := min(len(events), offset+max(1, p.ExportBatchSize()))
 		authContext, err := p.authenticatedContext(ctx, conn)
@@ -761,9 +769,11 @@ func remoteFavoriteFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 		return RemoteFavorite{}, err
 	}
 	row := identity.favorite(provider, providerItemKey)
-	row.FavoritedAt = time.Now().UTC()
 	if value := timePointer(listed.GetListedAt()); value != nil {
 		row.FavoritedAt = *value
+	} else {
+		row.FavoritedAt = time.Now().UTC()
+		row.FavoritedAtGuessed = true
 	}
 	return row, nil
 }

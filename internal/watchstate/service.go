@@ -92,6 +92,19 @@ func (s *Service) RecordManualMarkUnwatchedWithResult(ctx context.Context, userI
 	return s.recordMarkUnwatched(ctx, userID, profileID, targetIDs)
 }
 
+// ClearResumePosition sets the profile's visible resume position on a leaf
+// item to zero and reports whether there was one. Unlike mark unwatched it
+// keeps watch history, the watched latch and the known duration, and it sends
+// nothing to watch providers. The write is stamped now, so delta sync carries
+// it to other devices and an older provider resume point cannot restore it.
+func (s *Service) ClearResumePosition(ctx context.Context, userID int, profileID, mediaItemID string) (bool, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return store.ClearResumePosition(ctx, profileID, mediaItemID, time.Now().UTC())
+}
+
 func (s *Service) RecordPlaybackStop(
 	ctx context.Context,
 	userID int,
@@ -335,9 +348,11 @@ func (s *Service) SetFavorite(
 		return err
 	}
 	if favorite {
-		return store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+		return err
 	}
-	return store.RemoveFavorite(ctx, profileID, targetID)
+	_, err = store.RemoveFavorite(ctx, profileID, targetID)
+	return err
 }
 
 func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, targetID string) (bool, error) {
@@ -351,9 +366,11 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 	}
 	next := !current
 	if next {
-		return next, store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+	} else {
+		_, err = store.RemoveFavorite(ctx, profileID, targetID)
 	}
-	return next, store.RemoveFavorite(ctx, profileID, targetID)
+	return next, err
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {
@@ -634,10 +651,12 @@ func (s *Service) addImportedHistoryIfMissingWithSource(
 	if watchedAt == nil || watchedAt.IsZero() {
 		return false, nil
 	}
+	// The full time lets the store order the import against a history removal
+	// in the same second; the store decides the precision it keeps.
 	entry := userstore.WatchHistoryEntry{
 		ProfileID:       profileID,
 		MediaItemID:     targetID,
-		WatchedAt:       watchedAt.UTC().Format(time.RFC3339),
+		WatchedAt:       watchedAt.UTC().Format(time.RFC3339Nano),
 		DurationSeconds: duration,
 		Completed:       completed,
 		Source:          source,

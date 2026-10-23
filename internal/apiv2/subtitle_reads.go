@@ -20,7 +20,7 @@ type StoredSubtitle struct {
 	ID              ID      `json:"id"`
 	MediaFileID     ID      `json:"media_file_id"`
 	Provider        string  `json:"provider"`
-	Language        string  `json:"language"`
+	Language        string  `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty when the stored value is not a recognizable language"`
 	Format          string  `json:"format"`
 	ReleaseName     string  `json:"release_name"`
 	Score           float64 `json:"score"`
@@ -44,7 +44,7 @@ type StoredSubtitlesInput struct {
 type SubtitleSearchResult struct {
 	ID              ID       `json:"id"`
 	Provider        string   `json:"provider"`
-	Language        string   `json:"language"`
+	Language        string   `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)"`
 	ReleaseName     string   `json:"release_name"`
 	Format          string   `json:"format"`
 	Score           float64  `json:"score"`
@@ -59,7 +59,7 @@ type SubtitleSearchResults struct {
 }
 type SubtitleSearchBody struct {
 	MediaFileID ID       `json:"media_file_id"`
-	Languages   []string `json:"languages" maxItems:"100"`
+	Languages   []string `json:"languages" maxItems:"100" doc:"BCP 47 tags or ISO 639 codes, any case; recognized English language names are also accepted"`
 }
 type SubtitleSearchInput struct{ Body SubtitleSearchBody }
 type SubtitleSearchOutput struct{ Body SubtitleSearchResults }
@@ -123,8 +123,9 @@ func registerSubtitleReads(reg *Registry) {
 			}
 			out.Results = append(out.Results, result)
 		}
-		// Provider errors can contain credential-bearing upstream URLs. The
-		// bridge preserves its old warnings; v2 exposes only a bounded summary.
+		// Provider errors can contain credential-bearing upstream URLs, so the
+		// manager reports each failed provider by name only; v2 goes further and
+		// exposes one bounded summary.
 		if len(view.Warnings) > 0 {
 			out.Warnings = append(out.Warnings, "One or more subtitle providers could not complete the search.")
 		}

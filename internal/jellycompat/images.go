@@ -171,7 +171,7 @@ func zeroUUIDBytes(values []byte) bool {
 
 func withCompatImageProxyRouteRequest(r *http.Request) *http.Request {
 	if r == nil {
-		return r
+		return nil
 	}
 	return r.WithContext(context.WithValue(r.Context(), compatImageProxyRouteContextKey{}, true))
 }

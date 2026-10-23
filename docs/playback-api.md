@@ -17,6 +17,7 @@ unavailable store is `503`.
 | `stopPlayback` | DELETE `/api/v2/playback/{session_id}` | 200 mutation receipt |
 | `replanPlayback` | POST `/api/v2/playback/{session_id}/replan` | 200 v3 decision |
 | `reportPlaybackRouteEvent` | POST `/api/v2/playback/route-events` | 202 `{event_id, outcome: "accepted"}` |
+| `getPlaybackBandwidthProbe` | GET `/api/v2/playback/bandwidth-probe` | 200 random bytes |
 
 ## Capabilities
 
@@ -26,7 +27,8 @@ and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
 `[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
-`fixed_media_file_v1`, `marker_segments_v1`, and `trickplay_v1`. When the room service and
+`fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`, and
+`bandwidth_probe_v1`. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room
@@ -34,6 +36,35 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 `deliveries` lists `original_http`, `server_remux_progressive`,
 `server_remux_hls` and, when transcoding is enabled, `server_transcode_hls`.
 `revision` is a digest of the rest.
+
+## Bandwidth probe
+
+`GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)
+sends `N` random bytes, 1 to 100,000,000, default 1,000,000, as
+`application/octet-stream` with `Cache-Control: no-store`. It needs an
+authenticated account but no profile. Each server runs at most 32 probes at
+once. On each server an account may run two of them and draw up to 400 MB per
+10 minutes; bytes a client does not read because it closed the connection early
+are not counted. Beyond any limit the probe gets `429 rate_limited` with
+`Retry-After`. The bytes are random so a compressing
+proxy cannot inflate the result. A client times the transfer from its first
+byte, may close the connection once it has timed enough, and sends the result
+as `bandwidth_estimate_kbps` on start and replan. Without a measurement a
+browser has only `navigator.connection.downlink`, which Chromium caps at
+10 Mbps, too low for Auto quality ever to send a 4K source as-is. The probe
+measures the path to the API server; media served from a remote node can take
+a different path. Its bytes count as viewer transfer egress, not playback, and
+are exempt from stream caps, like the Jellyfin-compatible `/Playback/BitrateTest`.
+
+The web app probes in the background a few seconds after sign-in, skips Data
+Saver and cellular connections and pages that are already playing media,
+cancels the probe when playback starts, and caches the result for 30 minutes,
+measuring again when it expires. Tabs share the cached result, and a Web Lock
+lets only one of them probe at a time. A tab holds a shared lock while its
+media plays or playback starts, and no tab probes while any tab holds it. A
+playback start is also broadcast to the other tabs, so a probe already running
+in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
+sends no cached measurement.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
@@ -45,7 +76,8 @@ per-account enrollment.
 `GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
 `backdrop_url`, and `backdrop_thumbhash` for system media controls. Movies
 use their own artwork, episodes use their still as the poster and their
-series' backdrop, and local extras inherit their parent's artwork. URLs use
+series' backdrop, and local extras use their own still as the poster when they
+have one and otherwise inherit their parent's artwork. URLs use
 the same resolver and `image_size` query as catalog item detail. Missing
 artwork is omitted; clients can retain their catalog-detail fallback.
 The frozen v1 watch response does not gain these fields.
@@ -281,7 +313,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}` |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 

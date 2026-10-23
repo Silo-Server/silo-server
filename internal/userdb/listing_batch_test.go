@@ -1,27 +1,12 @@
 package userdb
 
 import (
-	"database/sql"
 	"reflect"
 	"testing"
 )
 
-func newListingTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	return db
-}
-
 func TestListProfilesAttachesAllowedLibrariesInOrder(t *testing.T) {
-	db := newListingTestDB(t)
+	db := newSingleConnSchemaDB(t)
 	for _, profile := range []Profile{
 		{ID: "p1", Name: "One", AllowedLibraryIDs: []int{5, 2}, CreatedAt: "2026-01-01T00:00:00Z"},
 		{ID: "p2", Name: "Two", AllowedLibraryIDs: []int{3}, CreatedAt: "2026-01-02T00:00:00Z"},
@@ -51,7 +36,7 @@ func TestListProfilesAttachesAllowedLibrariesInOrder(t *testing.T) {
 }
 
 func TestBatchAttachDoesNotScaleBindParametersWithRows(t *testing.T) {
-	db := newListingTestDB(t)
+	db := newSingleConnSchemaDB(t)
 	const aboveSQLiteVariableLimit = 32767
 
 	profiles := make([]Profile, aboveSQLiteVariableLimit)

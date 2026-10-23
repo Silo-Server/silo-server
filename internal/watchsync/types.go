@@ -129,9 +129,10 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
-// singleBatchWatchedExporter bounds one synchronization run to one provider
-// batch. This is used for plugin RPCs with independent per-call deadlines.
-type singleBatchWatchedExporter interface {
+// batchedWatchedExporter caps how many plays one ExportHistory call takes.
+// Plugin providers declare it, since each call is one RPC with its own
+// deadline.
+type batchedWatchedExporter interface {
 	ExportBatchSize() int
 }
 
@@ -406,10 +407,17 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 
 type retryableProviderError struct {
 	message string
+	// cause, when set, is a sentinel such as ErrConnectionNotFound that
+	// callers match with errors.Is.
+	cause error
 }
 
 func (e retryableProviderError) Error() string {
 	return e.message
+}
+
+func (e retryableProviderError) Unwrap() error {
+	return e.cause
 }
 
 func isRetryableProviderError(err error) bool {
@@ -515,6 +523,9 @@ type RemoteFavorite struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	FavoritedAt   time.Time
+	// FavoritedAtGuessed marks a FavoritedAt the provider did not send, which
+	// the host filled in with the import time.
+	FavoritedAtGuessed bool
 }
 
 type RemotePlay struct {
@@ -781,7 +792,11 @@ type ScrobbleEvent struct {
 	PositionSeconds   float64
 	DurationSeconds   float64
 	Completed         bool
-	OccurredAt        time.Time
+	// SessionEnded marks a pause sent because the playback session itself
+	// ended without a user stop: it expired idle or was aborted. Providers
+	// that mirror live sessions, which are plugins, receive a stop instead.
+	SessionEnded bool
+	OccurredAt   time.Time
 }
 
 func (w RemoteWatch) HistoryRecord() historyimport.Record {

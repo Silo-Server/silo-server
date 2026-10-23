@@ -41,7 +41,13 @@ func IsRemote(ctx context.Context) bool {
 }
 
 // FromContext classifies the trusted network metadata on a playback request.
+// A request forwarded for a client the client-IP resolver could not identify
+// is remote: its resolved address is the forwarder's, and a forwarder Silo
+// does not trust may pass on clients from anywhere.
 func FromContext(ctx context.Context) Location {
+	if clientip.ForwardedClientUnknown(ctx) {
+		return Remote
+	}
 	return FromMetadata(clientip.FromContext(ctx), netaccess.PathFromContext(ctx).Provider)
 }
 

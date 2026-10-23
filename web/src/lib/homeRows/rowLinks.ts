@@ -58,7 +58,7 @@ export function readRowLinks(params: URLSearchParams, surface: Surface): RowLink
 }
 
 const RETURN_PREFIXES = ["/admin/collections/", "/collections/"];
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex -- the pattern matches control characters on purpose
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 function unsafe(path: string) {

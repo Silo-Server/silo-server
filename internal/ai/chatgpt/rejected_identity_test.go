@@ -2,7 +2,6 @@ package chatgpt
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"errors"
 	"io"
@@ -39,10 +38,7 @@ func newRejectedIdentityFixture(t *testing.T, key *rsa.PrivateKey, unbound bool)
 }
 
 func TestLoginRevokesDifferentReturningIdentity(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, test := range []struct {
 		name                                          string
 		withoutConsent, unbound, superseded, failSave bool
@@ -164,10 +160,7 @@ func TestLoginRevokesDifferentReturningIdentity(t *testing.T) {
 }
 
 func TestLoginRejectedIdentityRevocationRetriesAndBounds(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, target := range []string{"discovery", "revocation"} {
 		for _, outcome := range []string{"recovered", "exhausted", "deadline", "long delay"} {
 			t.Run(target+"/"+outcome, func(t *testing.T) {
@@ -251,10 +244,7 @@ func TestLoginRejectedIdentityRevocationRetriesAndBounds(t *testing.T) {
 }
 
 func TestLoginDoesNotRevokeUnverifiedOrMatchingGrant(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, failure := range []string{"invalid identity", "matching declined consent"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newRejectedIdentityFixture(t, key, false)

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 var (
@@ -115,7 +117,14 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 
 			results, err := prov.Search(pctx, req)
 			if err != nil {
-				ch <- providerResult{warning: fmt.Sprintf("%s: %v", prov.Name(), err)}
+				// Provider errors can carry request URLs and upstream bodies, so
+				// callers only learn which provider failed; the detail is logged
+				// unless the caller has already gone away.
+				if ctx.Err() == nil {
+					slog.WarnContext(ctx, "subtitle provider search failed", "component", "subtitles", "provider", prov.Name(),
+						"error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
+				}
+				ch <- providerResult{warning: prov.Name() + ": search failed"}
 				return
 			}
 			ch <- providerResult{results: results}
@@ -250,8 +259,16 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 	if err != nil {
 		return nil, err
 	}
+	// Subtitles are served as UTF-8, so UTF-16 uploads are stored converted.
+	data := decodeUTF16WithBOM(req.Data)
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("subtitle file exceeds maximum size of %d bytes", MaxUploadSize)
+	}
+	if err := ValidateSubtitleContent(format, data); err != nil {
+		return nil, err
+	}
 
-	detected, err := ResolveUploadLanguage(req.Filename, format, req.Data, req.Language, req.PreferUserLanguage)
+	detected, err := ResolveUploadLanguage(req.Filename, format, data, req.Language, req.PreferUserLanguage)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +287,7 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 		ReleaseName:     releaseName,
 		Score:           0,
 		HearingImpaired: req.HearingImpaired,
-		Data:            req.Data,
+		Data:            data,
 	})
 }
 

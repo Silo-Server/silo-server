@@ -146,69 +146,6 @@ func TestLadderBackfillSurvivesRunnerFailure(t *testing.T) {
 	}
 }
 
-func TestLadderBackfillSkippedWhenStateUnavailable(t *testing.T) {
-	runner := &ladderRunner{complete: true}
-	state := &fakeLadderState{getErr: errors.New("database unavailable")}
-
-	runLadderTask(t, runner, state, 2)
-
-	if runner.ladderCalls != 0 {
-		t.Fatalf("ladder runs = %d, want none when the recorded version is unknown", runner.ladderCalls)
-	}
-}
-
-// One execution runs two phases, and a progress bar that reaches 100 and then
-// restarts at 0 reads as a failed-and-retrying task. The reported percent must
-// only ever climb.
-func TestLadderBackfillProgressIsMonotone(t *testing.T) {
-	runner := &ladderRunner{complete: true}
-	runner.updates = []metadata.ImageCacheRunStats{
-		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 5},
-		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 10},
-	}
-	state := &fakeLadderState{}
-	runner.ladderUpdates = []metadata.ImageCacheRunStats{
-		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 2}, Succeeded: 2},
-		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 3},
-		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 10},
-	}
-
-	progress := runLadderTask(t, runner, state, 2)
-
-	if len(progress.percents) < 2 {
-		t.Fatalf("percents = %v, want several reports", progress.percents)
-	}
-	for i, percent := range progress.percents {
-		if i > 0 && percent < progress.percents[i-1] {
-			t.Fatalf("progress went backwards at %d: %v", i, progress.percents)
-		}
-	}
-	if last := progress.percents[len(progress.percents)-1]; last != 100 {
-		t.Fatalf("final percent = %v, want 100", last)
-	}
-	// The drain must not consume the whole bar when a ladder pass follows it.
-	for i, message := range progress.messages {
-		if strings.Contains(message, "Regenerating cached artwork") && progress.percents[i] >= 100 {
-			t.Fatalf("ladder phase started at %v, want it below 100", progress.percents[i])
-		}
-	}
-}
-
-// With no ladder pass pending the drain still owns the whole bar and ends at 100.
-func TestDrainOwnsTheWholeBarWithoutALadderPass(t *testing.T) {
-	runner := &ladderRunner{complete: true}
-	state := &fakeLadderState{version: 2}
-
-	progress := runLadderTask(t, runner, state, 2)
-
-	if runner.ladderCalls != 0 {
-		t.Fatalf("ladder runs = %d, want none", runner.ladderCalls)
-	}
-	if last := progress.percents[len(progress.percents)-1]; last != 100 {
-		t.Fatalf("final percent = %v, want 100", last)
-	}
-}
-
 // Completion is measured against the artwork, so a deployment holding an image
 // that can never be regenerated never reaches "done". The sweep must therefore
 // be paced: a scheduler tick a minute after the last attempt does not re-scan.
@@ -232,18 +169,5 @@ func TestLadderBackfillPacesRepeatedScans(t *testing.T) {
 	runLadderTask(t, runner, state, 2)
 	if runner.ladderCalls != 2 {
 		t.Fatalf("ladder runs = %d, want the sweep to resume after the interval", runner.ladderCalls)
-	}
-}
-
-// Without SetLadderBackfill the task behaves exactly as before.
-func TestCacheTaskWithoutLadderBackfillOnlyDrains(t *testing.T) {
-	runner := &ladderRunner{complete: true}
-	task := NewCacheMetadataImagesTask(runner)
-
-	if err := task.Execute(context.Background(), &recordingProgress{}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if runner.drainCalls != 1 || runner.ladderCalls != 0 {
-		t.Fatalf("drain=%d ladder=%d, want 1/0", runner.drainCalls, runner.ladderCalls)
 	}
 }

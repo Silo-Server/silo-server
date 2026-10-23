@@ -9,7 +9,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 )
 
 // ResetPasswordInTransaction replaces a local password on behalf of a
@@ -18,7 +19,7 @@ import (
 // revoked in the same transaction (RevokeSignInsInTransaction): whoever held
 // the old password is signed out everywhere.
 func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newPassword string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
+	hash, err := passwordhash.Generate(ctx, []byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
@@ -79,8 +80,8 @@ func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, u
 
 // deleteJellyfinSessionsInTransaction deletes the accounts' stored
 // Jellyfin-compatible sessions, so no replica can load one again once the
-// transaction commits. Copies a replica already holds in memory stay usable
-// until the OnUserSessionsRevoked hook drops them.
+// transaction commits. Persistent compatibility lookups check the stored row;
+// the OnUserSessionsRevoked hook also discards replicas' cached copies.
 func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs); err != nil {

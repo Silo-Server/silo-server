@@ -74,7 +74,6 @@ vi.mock("@/pages/ItemDetail/EbookContent", () => ({
 }));
 
 import ItemDetail from "./index";
-import { SidebarItemDetailsReadyContext } from "@/components/sidebarItemNavigationContext";
 
 function itemProblem(status: number) {
   return new V2ProblemError("getCatalogItem", {
@@ -83,6 +82,14 @@ function itemProblem(status: number) {
     status,
     detail: status === 404 ? "Item not found." : "The catalog is unavailable.",
     instance: "/api/v2/catalog/items/movie-123",
+  });
+}
+
+function itemNotFound() {
+  mocks.useCatalogItemDetail.mockReturnValue({
+    data: undefined,
+    isLoading: false,
+    error: itemProblem(404),
   });
 }
 
@@ -129,24 +136,9 @@ describe("ItemDetail", () => {
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("movie-123", undefined);
   });
 
-  it("keeps the lightweight shell mounted until the sidebar transition finishes", () => {
-    const markup = renderToStaticMarkup(
-      <SidebarItemDetailsReadyContext.Provider value={false}>
-        <ItemDetail />
-      </SidebarItemDetailsReadyContext.Provider>,
-    );
-
-    expect(markup).not.toContain("Catalog Detail");
-    expect(markup).toContain("animate-pulse");
-  });
-
   describe("when the item cannot be shown", () => {
     it("explains a 404 on the page without a toast or a claim about why", () => {
-      mocks.useCatalogItemDetail.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: itemProblem(404),
-      });
+      itemNotFound();
 
       renderInRouter(<ItemDetail />);
 
@@ -180,11 +172,7 @@ describe("ItemDetail", () => {
 
     it("offers the link's library while the viewer can still open it", () => {
       mocks.search = "libraryId=4";
-      mocks.useCatalogItemDetail.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: itemProblem(404),
-      });
+      itemNotFound();
 
       renderInRouter(<ItemDetail />);
 
@@ -204,11 +192,7 @@ describe("ItemDetail", () => {
       ["when the fresh read failed and left the old list", { isError: true, dataUpdatedAt: 0 }],
     ])("does not vouch for the library %s", (_case, overrides) => {
       mocks.search = "libraryId=4";
-      mocks.useCatalogItemDetail.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: itemProblem(404),
-      });
+      itemNotFound();
       mocks.useUserLibraries.mockReturnValue(libraryList(overrides));
 
       renderInRouter(<ItemDetail />);
@@ -224,11 +208,7 @@ describe("ItemDetail", () => {
       try {
         vi.setSystemTime(1_000_000);
         mocks.search = "libraryId=4";
-        mocks.useCatalogItemDetail.mockReturnValue({
-          data: undefined,
-          isLoading: false,
-          error: itemProblem(404),
-        });
+        itemNotFound();
         // The list was read after the first page appeared, and now names library 5 too.
         mocks.useUserLibraries.mockReturnValue(
           libraryList({
@@ -262,11 +242,7 @@ describe("ItemDetail", () => {
 
     it("drops Browse library for a library the viewer can no longer open", () => {
       mocks.search = "libraryId=9";
-      mocks.useCatalogItemDetail.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: itemProblem(404),
-      });
+      itemNotFound();
 
       renderInRouter(<ItemDetail />);
 

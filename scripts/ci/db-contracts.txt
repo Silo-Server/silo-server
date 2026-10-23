@@ -6,25 +6,44 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
+./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
+./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
+./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
+./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestHDR10PlusBackfillRecordsFrameStatusDB
+./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
+./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
+./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
+./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
+./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# A watched special does not anchor Next Up for a series with regular seasons.
+./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 
 # Same-day episodes sorted by air date keep series title and season/episode order on every query path.
 ./internal/catalog TestQueryEpisodeAirDateTiesPostgres
+
+# PostgreSQL search keeps typo matches that contain every query word and ranks
+# titles starting with the query first, on the cursor and offset paths.
+./internal/catalog TestSearchRelevancePostgres
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
@@ -34,8 +53,11 @@
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
 # Profile history and account/invitation persistence.
+./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
+./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
@@ -45,6 +67,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
+./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -53,6 +77,16 @@
 
 # Scoped administrator keys cannot redirect recovery through either API version.
 ./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
+
+# API key verifiers preserve credentials without retaining recoverable bearers.
+./internal/auth TestAPIKeyStorageDoesNotRetainBearer
+./internal/auth TestAPIKeyVerifierUpgrade
+./internal/auth TestAPIKeyVerifierEmptyMigrationRoundTrip
+./internal/auth TestAPIKeyVerifierLegacyDigestCollision
+./internal/auth TestAPIKeyVerifierMigrationRollback
+./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
+./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
+./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -65,6 +99,9 @@
 ./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+
+# Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
+./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB
 
 # Persisted failure text stays valid UTF-8 and bounded.
 ./internal/trickplay TestFinishAcceptsTruncatedUTF8ErrorDB
@@ -90,6 +127,16 @@
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
 
+# Legacy mobile registration protects account ownership under the installation lock.
+./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
+./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
+./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
+./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
+./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
+
+# Session-less Android push retirement is ordered against registration by generation.
+./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
+
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
@@ -107,8 +154,22 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# With metadata.cache_images off, stored artwork goes back to its provider
+# source, and items whose stored art has none are queued for a refresh.
+./internal/metadata TestStoredArtworkReleaseDB
+
+# The artwork ladder backfill finds cached artwork that predates the current
+# ladder, on every surface its image type is cached for.
+./internal/metadata TestLadderBackfillCandidatesDB
+# The database fence reopens a finished backfill only for artwork published
+# without the current ladder's new rung, on every surface it regenerates.
+./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
+./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
+./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
+./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
 ./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
 ./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState
@@ -129,24 +190,37 @@
 ./internal/markers TestPopulationStoreReleaseKeepsFetchState
 ./internal/markers TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
+./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
+./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
+./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres
 ./migrations TestSubtitleTimingFileReplacePostgres
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
+./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
+./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
+./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
+./internal/notifications TestSeriesMutesList
+./internal/notifications TestSeriesMutesUnmuteAndPurge
+./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
+./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/requests TestEditorIntegrationsDatabase
+./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.
@@ -170,12 +244,25 @@
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
+./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
+./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
+./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
+./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
+./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
+
+# Credits tail failures replace legacy metadata verdicts and back off.
+./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres
+./internal/mediaartifact TestArtifactFailureReplacesListedUnusableDetailsPostgres
 
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
@@ -184,11 +271,18 @@
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
 
+# A resumed play's measured watch time survives repeated finalizations and is
+# what admin watch totals count.
+./internal/api/handlers TestAdminPlaybackWatchTimeDB
+
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
+
+# Stored sidecar subtitles take the scanner's reading of their names.
+./internal/database TestPostgresExternalSubtitleNameBackfill
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -206,6 +300,15 @@
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
+
+# Two library items with one provider key each keep a list sync row, and a key
+# stays on the provider while another item of the same kind still holds it.
+./internal/watchsync TestListItemsSharingProviderKeyDB
+
+# A sync flow saves only its own bookkeeping: tokens refreshed meanwhile stay,
+# its cursors merge with the stored ones, only a deferral that has ended is
+# cleared, and a connection disconnected meanwhile is not restored.
+./internal/watchsync TestConnectionSyncStateUpdatesDB
 
 # Plugin event deliveries: a claim takes at most its limit, never shares a row,
 # and only the latest claim records the outcome.
@@ -226,6 +329,90 @@
 ./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
 ./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
+
+# Recommendations: job locks, refresh marks, signal triggers, embedding lock and
+# reset, build-time access, exclusion set, profile purge, and section fill.
+./internal/api/handlers TestLibrarySectionItemsAnswersAnErrorWhenTheFetchFailsDB
+./internal/api/handlers TestV1RecentlyAddedDropsInaccessibleItemsPostgres
+./internal/api/handlers TestWatchedFilterDoesNotFallBackToPostgres
+./internal/historyimport TestImportRunReportsSignalChangesOncePostgres
+./internal/metadata TestMergeKeepsTheSourceEmbeddingPostgres
+./internal/metadata TestMergeMarksMovedProfilesStalePostgres
+./internal/recommendations TestCacheRefreshedAtPostgres
+./internal/recommendations TestCacheUserRowsDropRowsThatRebuildEmptyPostgres
+./internal/recommendations TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres
+./internal/recommendations TestClearTasteProfileKeepsTheRowAndDropsPersonalStatePostgres
+./internal/recommendations TestCowatchSkipsDeletedItemsAndPrunesStalePairsPostgres
+./internal/recommendations TestDeleteGlobalRecommendationCachePostgres
+./internal/recommendations TestDeletingAProfilePurgesItsRecommendationRowsPostgres
+./internal/recommendations TestEmbeddingLockConflictUsesTheRunningConfigPostgres
+./internal/recommendations TestEmbeddingTextSQLMatchesGoForTiedPeoplePostgres
+./internal/recommendations TestExtendGlobalRecommendationCachePostgres
+./internal/recommendations TestFailedRefreshLeavesTheProfilePendingPostgres
+./internal/recommendations TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres
+./internal/recommendations TestFilterItemIDsHonoursExcludedMediaTypesPostgres
+./internal/recommendations TestFindSimilarAppliesAccessLimitsInSQLPostgres
+./internal/recommendations TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres
+./internal/recommendations TestGetTasteClusterMetaOmitsOnlyEmbeddingsPostgres
+./internal/recommendations TestListCacheRefreshCandidatesOldestFirstPostgres
+./internal/recommendations TestMarkAccountsStalePostgres
+./internal/recommendations TestMarkProfilesStaleForItemsPostgres
+./internal/recommendations TestProfileAccessFilterMatchesTheResolverPostgres
+./internal/recommendations TestRecentCompletedItemIDsSkipDeletedItemsPostgres
+./internal/recommendations TestRecommendationJobRunsOnOneServerPostgres
+./internal/recommendations TestJobLocksShareOneConnectionPostgres
+./internal/recommendations TestCacheJobPurgesAProfileDeletedWhileItWritesPostgres
+./internal/recommendations TestStaleSweepRecordsFailedRefreshesPostgres
+./internal/recommendations TestMarkAllProfilesStaleForPolicyMarksOncePerGenerationPostgres
+./internal/recommendations TestRefreshWaitsForThePolicyChangePostgres
+./internal/policy TestSystemAnnouncesAChangeLoadedByALaterReload
+./internal/database/pglock TestReleaseAlsoUnlocksOnlyThatKey
+./internal/database/pglock TestHeldIsFalseAfterTheSessionDies
+./internal/recommendations TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres
+./internal/recommendations TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres
+./internal/recommendations TestRefreshPurgesAProfileDeletedWhileItWritesPostgres
+./internal/recommendations TestRefreshWritesNoTasteRowForADeletedProfilePostgres
+./internal/recommendations TestResetEmbeddingsPostgres
+./internal/recommendations TestResetEmbeddingsRefusesDuringACatalogImportPostgres
+./internal/recommendations TestResetEmbeddingsRollsBackPostgres
+./internal/recommendations TestStaleMarkBeforeTheFirstBuildSurvivesItPostgres
+./internal/recommendations TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres
+./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
+./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
+./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
+./internal/recommendations TestWatchedItemIDSetAcrossPagesPostgres
+./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
+./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
+./migrations TestPurgeOrphanedRecommendationRowsPostgres
+
+# Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
+# order, taste levels, per-interest anchors, quality prior, rubric leakage,
+# media types of personal rows.
+./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
+./internal/recommendations TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
+./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
+./internal/recommendations TestGenreSamplerIsRatingLedPostgres
+./internal/recommendations TestGetItemQualityRatingsPostgres
+./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
+./internal/recommendations TestHighlyRatedRowPostgres
+./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
+./internal/recommendations TestHighlyRatedReadsPastAStaleZeroCountPostgres
+./internal/recommendations TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres
+./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
+./internal/recommendations TestPresentMediaTypesPostgres
+./internal/recommendations TestRecentlyAddedRowPostgres
+./internal/recommendations TestRefreshCountsPositiveTitlesForTheLevelPostgres
+./internal/recommendations TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres
+./internal/recommendations TestRelevanceRubricLeakagePostgres
+./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
+./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
+./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
+./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
+./internal/recommendations TestTVLibrarySectionFillsFromTheMainRowTailPostgres
+./internal/sections TestRecommendationSectionsTakeTheServedRowTitlePostgres
 
 # Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
 # and Down, slot write-back, backdrop row identity and GC queueing, and the
@@ -250,3 +437,60 @@
 ./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
+# Deleting a library keeps the admin collections that cover other libraries,
+# moving one off the deleted library without a slug clash.
+./internal/catalog TestFolderDeleteKeepsMultiLibraryCollectionsDB
+
+# AI metadata translations never replace provider or manual localized text.
+./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+
+# A provider refresh with no translation clears only a copy of the base item's text.
+./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
+
+# An unmatched item an admin ignored stays off the unmatched and scan-retry
+# lists, the matcher queues and library refreshes across a rescan, the matcher
+# and item refreshes skip it, and a match clears the mark.
+./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
+./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
+./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
+./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
+./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB
+
+# A played mark later in the same second as a history removal stays visible.
+./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
+./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
+
+# A history import run stays within its source limits from the queue to
+# Postgres: large Jellyfin, Emby and Plex sources import completely with paged
+# listings and chunked lookups, and a listing that decodes into millions of
+# values fails the run without allocating it.
+./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
+./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Explore all on a row the catalog cannot express as a query pages the row's
+# own fetch past its item limit, on Home and on its library page.
+./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Server collections show a restricted viewer only the members it can open, and
+# leave out a collection whose members it can open none of (#2828).
+./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+
+# The household profile limit holds under concurrent creates (issue #2423).
+./internal/api/handlers TestCreateProfileLimitConcurrentDB
+
+# A scan cut short by shutdown goes back to the queue with its owed follow-up;
+# an admin cancel still ends it cancelled, and a late requeue never takes back
+# another worker's claim.
+./internal/scanqueue TestShutdownRequeuesRunningScanWithFollowUpDB
+./internal/scanqueue TestShutdownDuringLibraryLoadRequeuesScanDB
+./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
+./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
+./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
+
+# Password sign-in spends one attempt budget per name on every surface.
+./internal/auth TestSignInNameBudgetDB
+
+# The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
+# keeps a value an administrator chose.
+./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres

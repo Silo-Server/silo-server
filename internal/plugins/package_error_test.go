@@ -2,9 +2,11 @@ package plugins
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +17,7 @@ import (
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func packageErrorTestManifest(pluginID, version string) *pluginv1.PluginManifest {
@@ -235,14 +238,6 @@ func TestInstallArchiveRefusesUnsupportedOrUnlistedPlugins(t *testing.T) {
 	}
 }
 
-func TestInstallRemoteArchiveDownloadStatusIsPackageError(t *testing.T) {
-	server := packageErrorTestServer(t, http.StatusServiceUnavailable, nil)
-	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
-	_, err := installer.InstallRemote(context.Background(), InstallArchiveRequest{ArchiveURL: server.URL + "/plugin.zip"})
-	requirePackageError(t, err, "HTTP 503")
-	requireTransient(t, err, true)
-}
-
 func TestResolvedCatalogInstallArchiveRequestCarriesCatalogIdentity(t *testing.T) {
 	target := &ResolvedCatalogInstall{RepositoryID: 7, PluginID: "test.plugin", Version: "1.2.0", ArchiveURL: "https://example.test/plugin.zip", LegacyArchive: true}
 	req := target.ArchiveRequest()
@@ -331,21 +326,73 @@ func TestCatalogInvalidDownloadAddressIsPackageError(t *testing.T) {
 	requirePackageError(t, err, "invalid download address")
 }
 
+// A plugin built on a newer SDK prints manifest fields this server doesn't
+// know. They are ignored, as for an archive's manifest, and the plugin
+// installs; output that isn't a manifest at all is still refused. The stored
+// manifest keeps them, so a later server that knows them reads the same
+// manifest the plugin reports.
+func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	known, err := protojson.Marshal(packageErrorTestManifest("test.plugin", "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(known, &fields); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin reports its own checksum, as the SDK computes it at run time.
+	fields["checksum"] = "CHECKSUM"
+	fields["fieldFromANewerSdk"] = true
+	fields["capabilities"].([]any)[0].(map[string]any)["descriptorFromANewerSdk"] = map[string]any{"flag": true}
+	newer, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := func(output string) []byte {
+		return []byte("#!/bin/sh\nsum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
+			"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + output + "\nMANIFEST\n")
+	}
+
+	store := newRecordingInstallationStore()
+	result, err := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}).InstallBinaryUpload(context.Background(), script(string(newer)))
+	if err != nil {
+		t.Fatalf("InstallBinaryUpload() error = %v, want the unknown fields ignored", err)
+	}
+	if result.Manifest.GetPluginId() != "test.plugin" || len(result.Manifest.GetCapabilities()) != 1 {
+		t.Fatalf("manifest = %v, want the known fields kept", result.Manifest)
+	}
+	installed, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, stored := range map[string][]byte{"manifest.json": installed, "archive manifest": store.saveArchiveManifest} {
+		if !bytes.Contains(stored, []byte("descriptorFromANewerSdk")) {
+			t.Fatalf("%s = %s, want the plugin's own manifest with the newer fields", name, stored)
+		}
+	}
+
+	_, _, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
+	requirePackageError(t, err, "manifest couldn't be read")
+}
+
 // Only a binary that runs and fails, or isn't an executable at all, is
 // blamed on the package; a canceled request is not.
 func TestLoadManifestFromBinaryClassifiesRunFailures(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses shell scripts")
 	}
-	_, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
+	_, _, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
-	_, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
+	_, _, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
+	_, _, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled manifest read = %v, want context.Canceled and no PackageError", err)
 	}

@@ -40,7 +40,8 @@ import (
 //     decodes more than one frame (a keyframe within its short span, or an
 //     all-intra source) keeps the first, which is the frame at or before the
 //     sample time. Untagged frames are dropped. Each frame's time also
-//     places it back in the input (sourceSeconds), which a repair reads.
+//     places it back in the input (sourceSeconds), which a repair reads. A
+//     sample a keyframe list left out shows the cell before (shareFrames).
 //   - Windows (containers the list cannot seek in, and ReadThrough): each
 //     sample takes the last frame at or before its time, as
 //     pickSampleFrames does for statistics.
@@ -62,6 +63,17 @@ import (
 // behind. The log normally leads, so this only trips when the log parser
 // has stopped keeping up at all.
 const maxQueuedFrameBytes = 64 << 20
+
+// keyframeMatchSeconds absorbs the rounding between a keyframe packet's
+// time and its decoded frame's, which keyframes seconds apart never reach.
+const keyframeMatchSeconds = 0.01
+
+// maxDroppedKeyframeShare replaces maxFilledShare for a window whose
+// decoder dropped keyframes over skipped pictures (see droppedKeyframe):
+// such a file is whole, and a sample showing the keyframe a few seconds
+// before its own is a usable preview. A list keeps maxFilledShare, so too
+// many drops still send it to the window.
+const maxDroppedKeyframeShare = 0.15
 
 // sheetFramePattern matches the frame line of the sheets metadata filter:
 // "frame:12   pts:1550   pts_time:1.55". pts_time is "NOPTS" for a frame
@@ -90,16 +102,20 @@ type sheetAssembler struct {
 	sampled bool
 	cells   map[int64]int
 	offset  float64
-	// A sampled list's entries each last span seconds and start at their
-	// sample's time plus inputStart, the input's container start time,
-	// clamped at zero. header reads the list input's start time, by which
-	// ffmpeg shifted every frame's time; with these, sourceSeconds finds a
-	// frame's time in the input. sources holds that time for each cell's
-	// frame, NaN when it is unknown.
-	span       float64
-	inputStart float64
-	header     inputHeaderParser
-	sources    []float64
+	// A sampled list's entries each last span seconds, and plan says where
+	// each starts and which entry each sample's frame comes from. header
+	// reads the list input's start time, by which ffmpeg shifted every
+	// frame's time; with these, sourceSeconds finds a frame's time in the
+	// input. sources holds that time for each cell's frame, NaN when it is
+	// unknown.
+	span    float64
+	plan    listPlan
+	header  inputHeaderParser
+	sources []float64
+	// onDisorder, when set, is called once a frame comes from an earlier
+	// list entry than the frame before it, lastEntry's (see keyframeSheets).
+	onDisorder func()
+	lastEntry  int
 	// candidates, when set, collects each sample's nearest frame for a
 	// repair instead of tiling.
 	candidates []sheetCandidate
@@ -125,6 +141,18 @@ type sheetAssembler struct {
 	packetTimeBase float64
 	packetEnd      float64
 	hasPacketTime  bool
+	// dtsTiming lets a packet without a PTS count by its DTS; see
+	// packetLine.
+	dtsTiming bool
+	// A window whose decoder dropped keyframes (see droppedKeyframe) gives
+	// the samples after each dropped keyframe an earlier one. The times of
+	// the frames decoded and of the keyframe packets read find those
+	// samples, which then count as filled. A keyframe packet without a time
+	// leaves them unknown (untimedKey).
+	droppedKeyframes bool
+	untimedKey       bool
+	frameTimes       []float64
+	keyTimes         []float64
 
 	open      map[int]*sheetCanvas
 	finalized int
@@ -141,7 +169,8 @@ type sheetAssembler struct {
 
 // newSheetAssembler returns an assembler for the frames of times. A sampled
 // run places frames by their sample tag, its list entries lasting span
-// seconds; a window run by their time plus offset.
+// seconds and starting at each sample's time unless the caller sets another
+// plan; a window run places them by their time plus offset.
 func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset, span float64) *sheetAssembler {
 	a := &sheetAssembler{
 		out:        out,
@@ -158,6 +187,7 @@ func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset, 
 		a.cells = make(map[int64]int, len(times))
 		a.refinedCells = map[int]bool{}
 		a.sources = make([]float64, len(times))
+		a.plan = samplePlan(times, 0)
 		for i, at := range times {
 			a.cells[sampleKey(at)] = i
 			a.sources[i] = math.NaN()
@@ -204,6 +234,12 @@ func (a *sheetAssembler) Write(p []byte) (int, error) {
 // line takes one log line, keeping the input header and the lines of the
 // sheets metadata filter.
 func (a *sheetAssembler) line(line string) {
+	if droppedKeyframe(line) {
+		a.mu.Lock()
+		a.droppedKeyframes = true
+		a.mu.Unlock()
+		return
+	}
 	message, ok := filterMessage(line, a.logContext)
 	if !ok {
 		if a.sampled {
@@ -274,6 +310,15 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 // packetLine reads the framecrc stream-copy output: "#tb 0: 1/1000",
 // followed by "0, DTS, PTS, duration, size, checksum[, flags]". PTS and
 // duration count in that time base and are relative to the window start.
+// With dtsTiming, a packet without a PTS falls back to its DTS:
+// packed-bitstream XviD in AVI carries no PTS on any packet, and a DTS never
+// runs ahead of the PTS it stands in for, so the fallback cannot stretch a
+// reordered stream's extent. Without a PTS the decoder stamps each frame
+// with the DTS of the packet that released it, so the fallback is set only
+// for a decoder in low-delay mode, which releases each keyframe as it
+// arrives. A reordering decoder, such as H.264 with B-frames, releases a
+// keyframes-only read's keyframes a GOP or more late; its DTS-only windows
+// keep failing rather than publish every cell at an earlier keyframe.
 func (a *sheetAssembler) packetLine(line string) {
 	if raw, ok := strings.CutPrefix(line, "#tb 0: "); ok {
 		numerator, denominator, ok := strings.Cut(raw, "/")
@@ -294,16 +339,70 @@ func (a *sheetAssembler) packetLine(line string) {
 		a.err = errors.New("ffmpeg reported packet timing without a time base")
 		return
 	}
-	pts, errPTS := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+	pts, hasPTS := packetTimestamp(fields[2])
+	if !hasPTS && a.dtsTiming {
+		pts, hasPTS = packetTimestamp(fields[1])
+	}
 	duration, errDuration := strconv.ParseInt(strings.TrimSpace(fields[3]), 10, 64)
-	// framecrc prints AV_NOPTS_VALUE as the minimum int64, rather than NOPTS.
-	if errPTS == nil && pts != math.MinInt64 && errDuration == nil && duration >= 0 {
+	if hasPTS && errDuration == nil && duration >= 0 {
 		end := a.offset + (float64(pts)+float64(duration))*a.packetTimeBase
 		if finite(end) {
 			a.packetEnd = max(a.packetEnd, end)
 			a.hasPacketTime = true
 		}
 	}
+	if packetIsKey(fields[5]) {
+		if at := a.offset + float64(pts)*a.packetTimeBase; hasPTS && finite(at) {
+			a.keyTimes = append(a.keyTimes, at)
+		} else {
+			a.untimedKey = true
+		}
+	}
+}
+
+// packetIsKey reads the flags framecrc appends after the checksum. It
+// prints them only when they differ from a plain keyframe's.
+func packetIsKey(rest string) bool {
+	_, raw, ok := strings.Cut(rest, "F=0x")
+	if !ok {
+		return true
+	}
+	// Side data, when the packet has any, follows the flags.
+	raw, _, _ = strings.Cut(raw, ",")
+	flags, err := strconv.ParseUint(strings.TrimSpace(raw), 16, 64)
+	return err == nil && flags&1 != 0
+}
+
+// staleSamples counts the samples that hold a frame but not their own
+// keyframe, the last keyframe packet at or before the sample. A sample
+// without any frame is counted when its sheet is finalized.
+func (a *sheetAssembler) staleSamples() int {
+	keys := slices.Clone(a.keyTimes)
+	slices.Sort(keys)
+	frames := slices.Clone(a.frameTimes)
+	slices.Sort(frames)
+	stale, next := 0, 0
+	for cell, at := range a.times {
+		for next < len(keys) && keys[next] <= at+sampleMatchSeconds {
+			next++
+		}
+		if next == 0 || !a.placed(cell) {
+			continue
+		}
+		key := keys[next-1]
+		i, _ := slices.BinarySearch(frames, key-keyframeMatchSeconds)
+		if i == len(frames) || frames[i] > key+keyframeMatchSeconds {
+			stale++
+		}
+	}
+	return stale
+}
+
+// packetTimestamp parses a framecrc DTS or PTS field. framecrc prints
+// AV_NOPTS_VALUE as the minimum int64, rather than NOPTS.
+func packetTimestamp(field string) (int64, bool) {
+	ts, err := strconv.ParseInt(strings.TrimSpace(field), 10, 64)
+	return ts, err == nil && ts != math.MinInt64
 }
 
 // drain places every frame whose log lines are in.
@@ -324,6 +423,14 @@ func (a *sheetAssembler) place(meta sheetFrameMeta, frame []byte) {
 			a.recycle(frame)
 			return
 		}
+		if a.onDisorder != nil {
+			if entry := a.plan.entry[cell]; entry < a.lastEntry {
+				a.onDisorder()
+				a.onDisorder = nil
+			} else {
+				a.lastEntry = entry
+			}
+		}
 		source := a.sourceSeconds(meta, cell)
 		if a.candidates != nil {
 			a.offer(cell, source, frame)
@@ -341,6 +448,7 @@ func (a *sheetAssembler) place(meta sheetFrameMeta, frame []byte) {
 		return
 	}
 	at := a.offset + meta.seconds
+	a.frameTimes = append(a.frameTimes, at)
 	a.assignWindow(at - sampleMatchSeconds)
 	a.recycle(a.prev)
 	a.prev = frame
@@ -358,15 +466,35 @@ func (a *sheetAssembler) assignWindow(limit float64) {
 
 // sourceSeconds is the input time, counted from the start of the file as
 // sample times are, of a sampled list's frame for cell, NaN when the frame
-// has no time. The list's entry for cell starts cell*span seconds into the
-// list and at its inpoint in the container (see buildConcatListSpan), and
-// ffmpeg shifted every frame by the list input's start time.
+// has no time. The entry cell's frame comes from starts span seconds into
+// the list for each entry before it, and at its inpoint in the container
+// (see buildConcatListSpan), and ffmpeg shifted every frame by the list
+// input's start time.
 func (a *sheetAssembler) sourceSeconds(meta sheetFrameMeta, cell int) float64 {
-	if !meta.hasTime {
+	entry := a.plan.entry[cell]
+	if !meta.hasTime || entry < 0 {
 		return math.NaN()
 	}
-	inpoint := math.Max(0, a.times[cell]+a.inputStart)
-	return meta.seconds + a.header.info.StartSeconds - float64(cell)*a.span + inpoint - a.inputStart
+	return meta.seconds + a.header.info.StartSeconds - float64(entry)*a.span + a.plan.entries[entry].inpoint - a.plan.inputStart
+}
+
+// shareFrames gives each sample the list left out (see keyframePlan) the
+// frame and source time of the cell before it, which decoding the keyframe
+// they share again would have given it. A sample after a cell without a
+// frame stays without one, for the repair to find.
+func (a *sheetAssembler) shareFrames() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for cell, entry := range a.plan.entry {
+		if entry >= 0 || cell == 0 || !a.placed(cell-1) {
+			continue
+		}
+		frame := a.canvas((cell - 1) / a.perSheet).read((cell - 1) % a.perSheet)
+		if a.setCell(cell, frame) {
+			a.decoded++
+			a.sources[cell] = a.sources[cell-1]
+		}
+	}
 }
 
 // setCell copies frame into cell unless the cell already holds one, and
@@ -458,6 +586,9 @@ func (a *sheetAssembler) close() *AttemptError {
 			return fail(ReasonOutput, errors.New("ffmpeg reported no usable packet timing for the sampled window"))
 		}
 		a.assignWindow(a.packetEnd + sampleMatchSeconds)
+		if a.droppedKeyframes {
+			a.filled += a.staleSamples()
+		}
 	}
 	return nil
 }
@@ -472,12 +603,19 @@ func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
 	if a.decoded == 0 {
 		return fail(ReasonEmpty, errors.New("ffmpeg decoded no frame for any sample"))
 	}
+	if a.droppedKeyframes && a.untimedKey && !a.sampled {
+		return fail(ReasonEmpty, errors.New("ffmpeg dropped keyframes in a window with an untimed keyframe packet"))
+	}
 	sheets := (len(a.times) + a.perSheet - 1) / a.perSheet
 	a.finalizeThrough(sheets)
 	if a.err != nil {
 		return fail(ReasonOutput, a.err)
 	}
-	if limit := max(1, int(maxFilledShare*float64(len(a.times)))); a.filled > limit {
+	share := maxFilledShare
+	if a.droppedKeyframes && !a.sampled {
+		share = maxDroppedKeyframeShare
+	}
+	if limit := max(1, int(share*float64(len(a.times)))); a.filled > limit {
 		return fail(ReasonEmpty, fmt.Errorf("ffmpeg decoded frames for only %d of %d samples", len(a.times)-a.filled, len(a.times)))
 	}
 	return a.sheets, SheetFrames{Decoded: len(a.times) - a.filled, Filled: a.filled, Refined: a.refined}, nil

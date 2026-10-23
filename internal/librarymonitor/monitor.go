@@ -59,7 +59,7 @@ type FolderLister interface {
 // *scantrigger.Resolver the monitor uses.
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
-	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
 }
 
@@ -306,7 +306,7 @@ func setDefault(d *time.Duration, def time.Duration) {
 // blocks on the initial walks, which queue no scans.
 func (m *Monitor) Start(ctx context.Context) {
 	m.startOnce.Do(func() {
-		m.ctx, m.cancel = context.WithCancel(ctx)
+		m.ctx, m.cancel = context.WithCancel(ctx) //nolint:fatcontext // set once under startOnce, derived from the caller's ctx
 		go m.run(m.ctx)
 		go m.statusLoop(m.ctx)
 	})

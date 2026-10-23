@@ -14,31 +14,24 @@ import (
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
-// localClaimingImageCacheJobs records which claim a drain used.
-type localClaimingImageCacheJobs struct {
+// claimCountingImageCacheJobs counts drain claims.
+type claimCountingImageCacheJobs struct {
 	fakeLocalImageCacheJobs
-	claimCalls      int
-	localClaimCalls int
+	claimCalls int
 }
 
-func (f *localClaimingImageCacheJobs) ClaimDue(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+func (f *claimCountingImageCacheJobs) ClaimDue(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
 	f.claimCalls++
 	return f.fakeLocalImageCacheJobs.ClaimDue(ctx, workerID, limit)
 }
 
-func (f *localClaimingImageCacheJobs) ClaimDueLocal(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
-	f.localClaimCalls++
-	claimed := f.claimed
-	f.claimed = nil
-	return claimed, nil
-}
-
-// With metadata.cache_images off, draining still copies local artwork: it
-// claims local jobs only, and the provider-artwork backfill stays refused.
-func TestImageCacheProcessorDrainsLocalArtworkWithCachingOff(t *testing.T) {
+// With metadata.cache_images off, draining caches nothing, local artwork
+// included: it claims no jobs, and the provider-artwork backfill stays
+// refused.
+func TestImageCacheProcessorDrainsNothingWithCachingOff(t *testing.T) {
 	root := t.TempDir()
 	job := localArtworkJob("file://" + writeLocalPoster(t, root))
-	jobs := &localClaimingImageCacheJobs{fakeLocalImageCacheJobs: fakeLocalImageCacheJobs{
+	jobs := &claimCountingImageCacheJobs{fakeLocalImageCacheJobs: fakeLocalImageCacheJobs{
 		fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
 	}}
 	items := &fakeItemArtworkUpdater{updated: true}
@@ -50,23 +43,20 @@ func TestImageCacheProcessorDrainsLocalArtworkWithCachingOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DrainUntilIdle: %v", err)
 	}
-	if jobs.claimCalls != 0 || jobs.localClaimCalls == 0 {
-		t.Fatalf("claims all=%d local=%d, want local claims only", jobs.claimCalls, jobs.localClaimCalls)
+	if jobs.claimCalls != 0 || stats.Claimed != 0 || items.cachedPath != "" {
+		t.Fatalf("claims=%d stats=%+v cached=%q, want nothing claimed or copied", jobs.claimCalls, stats, items.cachedPath)
 	}
-	if stats.Succeeded != 1 || jobs.succeededID != job.ID || items.cachedPath == "" {
-		t.Fatalf("stats=%+v succeeded=%d cached=%q, want the local poster copied", stats, jobs.succeededID, items.cachedPath)
-	}
-	if !p.ArtworkCachingEnabled() {
-		t.Fatal("ArtworkCachingEnabled = false, want true: local artwork is cached with caching off")
+	if p.ArtworkCachingEnabled() {
+		t.Fatal("ArtworkCachingEnabled = true, want false with caching off")
 	}
 	if _, err := p.RunUntilIdle(context.Background(), "w1", 10, 1, 0, nil); !errors.Is(err, ErrImageCachingDisabled) {
 		t.Fatalf("backfill error = %v, want ErrImageCachingDisabled", err)
 	}
 }
 
-// Disabling caching while a claimed page is in flight stops remote jobs from
-// starting but lets local jobs finish.
-func TestImageCacheProcessorKeepsLocalJobsWhenCachingTurnsOff(t *testing.T) {
+// Disabling caching while a claimed page is in flight stops every job from
+// starting, local ones too; they go back to the queue.
+func TestImageCacheProcessorRequeuesClaimedJobsWhenCachingTurnsOff(t *testing.T) {
 	root := t.TempDir()
 	local := localArtworkJob("file://" + writeLocalPoster(t, root))
 	remote := &models.MetadataImageCacheJob{
@@ -79,25 +69,24 @@ func TestImageCacheProcessorKeepsLocalJobsWhenCachingTurnsOff(t *testing.T) {
 	p.SetEnabled(false)
 
 	stats := p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{remote, local}, 1, time.Now())
-	if stats.Succeeded != 1 || jobs.succeededID != local.ID {
-		t.Fatalf("stats=%+v succeeded=%d, want the local job processed", stats, jobs.succeededID)
+	if stats.Succeeded != 0 || jobs.succeededID != 0 {
+		t.Fatalf("stats=%+v succeeded=%d, want nothing processed", stats, jobs.succeededID)
 	}
-	if len(jobs.requeuedIDs) != 1 || jobs.requeuedIDs[0] != remote.ID {
-		t.Fatalf("requeued = %v, want the remote job %d", jobs.requeuedIDs, remote.ID)
+	if !slices.Equal(jobs.requeuedIDs, []int64{remote.ID, local.ID}) {
+		t.Fatalf("requeued = %v, want both jobs %d and %d", jobs.requeuedIDs, remote.ID, local.ID)
 	}
 }
 
-// A manual refresh with caching off still waits for its local artwork, and
-// asks the queue for local jobs only.
-func TestCacheTargetArtworkHandlesLocalOnlyWithCachingOff(t *testing.T) {
-	jobs := &targetImageCacheJobs{localOnly: true}
+// A manual refresh with caching off caches nothing and does not wait.
+func TestCacheTargetArtworkDoesNothingWithCachingOff(t *testing.T) {
+	jobs := &targetImageCacheJobs{}
 	p := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
 	p.SetEnabled(false)
 	if err := p.CacheTargetArtwork(context.Background(), "movie-1"); err != nil {
 		t.Fatalf("CacheTargetArtwork: %v", err)
 	}
-	if jobs.retryCalls != 1 || jobs.targetCalls == 0 || !jobs.localOnly {
-		t.Fatalf("retry=%d claims=%d localOnly=%v, want one local-only retry and claim", jobs.retryCalls, jobs.targetCalls, jobs.localOnly)
+	if jobs.retryCalls != 0 || jobs.targetCalls != 0 {
+		t.Fatalf("retry=%d claims=%d, want no queue access", jobs.retryCalls, jobs.targetCalls)
 	}
 }
 
@@ -158,12 +147,11 @@ func TestCacheTargetArtworkNotPendingOnceADeferredJobIsCopied(t *testing.T) {
 	}
 }
 
-// A pending image URL an NFO names is not kept with caching off, even while
-// the NFO is unreadable: only the image cache could fetch it, so the slot
-// takes the provider poster. With caching on it is kept.
+// A pending image URL an NFO names is not kept with caching off: only the
+// image cache could fetch it, so the slot takes the provider poster. With
+// caching on it is kept while the NFO is unreadable.
 func TestPendingNFONamedURLNotKeptWithCachingOff(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		nfoPoster    = "nfo+https://img.example.org/poster.jpg"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
@@ -176,31 +164,17 @@ func TestPendingNFONamedURLNotKeptWithCachingOff(t *testing.T) {
 		{name: "caching on", caching: true, want: nfoPoster},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness()
+			// A refresh searches local artwork only while it is usable.
+			ctx := context.Background()
+			if tc.caching {
+				ctx = withLocalMetadataUnreadable(withLocalArtworkSearched(ctx, localArtworkItem), localArtworkItem)
+			}
+			h := newTestFilmHarness(ctx, t, models.MediaItem{PosterSourcePath: nfoPoster})
 			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
 			h.service.SetAutoCacheImages(tc.caching)
-			ctx := withLocalMetadataUnreadable(withLocalArtworkSearched(context.Background(), localArtworkItem), localArtworkItem)
-			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
-				PosterSourcePath: nfoPoster,
-				Studios:          []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-			}); err != nil {
-				t.Fatalf("upsert existing item: %v", err)
-			}
-			providerRepo := newFakeProviderIDRepo()
-			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-			h.service.providerIDRepo = providerRepo
 
-			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeScheduledRefresh, Language: "en"},
-				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
-				[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
-				nil, nil, "movie"); err != nil {
-				t.Fatalf("mergeAndPersist: %v", err)
-			}
-			got, err := h.itemRepo.GetByID(ctx, contentID)
-			if err != nil {
-				t.Fatalf("load item: %v", err)
-			}
+			got := mergeTestFilm(ctx, t, h, ModeScheduledRefresh,
+				[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}})
 			if got.PosterSourcePath != tc.want {
 				t.Fatalf("poster = path %q source %q, want source %q", got.PosterPath, got.PosterSourcePath, tc.want)
 			}
@@ -248,7 +222,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("empty slot waiting on its local copy", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster, BackdropPath: "tmdb/movie/1/backdrop.webp", BackdropSourcePath: "tmdb://backdrop.jpg"}
-		applyLocalArtworkFallback(item, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en")
 		if item.PosterPath != "tmdb://poster.jpg" || item.PosterSourcePath != localPoster {
 			t.Fatalf("poster = %q from %q, want the remote stand-in with the local source kept", item.PosterPath, item.PosterSourcePath)
 		}
@@ -259,7 +233,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("cached copy already showing", func(t *testing.T) {
 		item := &models.MediaItem{PosterPath: "local/movie/1/abcd1234/poster/w500.webp", PosterSourcePath: localPoster}
-		applyLocalArtworkFallback(item, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en")
 		if item.PosterPath != "local/movie/1/abcd1234/poster/w500.webp" {
 			t.Fatalf("poster = %q, want the cached copy kept", item.PosterPath)
 		}
@@ -267,9 +241,61 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("locked artwork", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster, LockedFields: []int{int(FieldImages)}}
-		applyLocalArtworkFallback(item, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en")
 		if item.PosterPath != "" {
 			t.Fatalf("poster = %q, want no stand-in under an artwork lock", item.PosterPath)
+		}
+	})
+
+	// A local re-apply offers only local images: the remote image the stored
+	// slot served is the stand-in, with its thumbhash.
+	servedItem := &models.MediaItem{PosterPath: "tmdb://served.jpg", PosterSourcePath: "tmdb://served.jpg", PosterThumbhash: "served-hash"}
+	localOnly := []RemoteImage{{URL: localPoster, Type: ImagePoster}}
+
+	t.Run("local re-apply keeps the served remote image", func(t *testing.T) {
+		item := &models.MediaItem{PosterSourcePath: localPoster}
+		applyLocalArtworkFallback(item, servedItem, localOnly, "en")
+		if item.PosterPath != "tmdb://served.jpg" || item.PosterThumbhash != "served-hash" || item.PosterSourcePath != localPoster {
+			t.Fatalf("poster = %q (thumbhash %q) from %q, want the served image as the stand-in", item.PosterPath, item.PosterThumbhash, item.PosterSourcePath)
+		}
+	})
+
+	t.Run("a remote candidate outranks the served image", func(t *testing.T) {
+		item := &models.MediaItem{PosterSourcePath: localPoster}
+		applyLocalArtworkFallback(item, servedItem, images, "en")
+		if item.PosterPath != "tmdb://poster.jpg" || item.PosterThumbhash != "" {
+			t.Fatalf("poster = %q (thumbhash %q), want the refresh's best remote image", item.PosterPath, item.PosterThumbhash)
+		}
+	})
+
+	t.Run("nothing served and nothing remote", func(t *testing.T) {
+		item := &models.MediaItem{PosterSourcePath: localPoster}
+		applyLocalArtworkFallback(item, &models.MediaItem{}, localOnly, "en")
+		if item.PosterPath != "" {
+			t.Fatalf("poster = %q, want the slot empty until the copy lands", item.PosterPath)
+		}
+	})
+
+	t.Run("served clear art never stands in for the logo", func(t *testing.T) {
+		const clearArt = "tvdb://banners/v4/series/1/clearart/art.png"
+		item := &models.MediaItem{LogoSourcePath: "file:///media/Film/clearlogo.png?v=1-1"}
+		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: clearArt, LogoSourcePath: clearArt}, localOnly, "en")
+		if item.LogoPath != "" {
+			t.Fatalf("logo = %q, want no clear-art stand-in", item.LogoPath)
+		}
+		const wordmark = "tmdb://logo/wordmark.png"
+		item = &models.MediaItem{LogoSourcePath: "file:///media/Film/clearlogo.png?v=1-1"}
+		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: wordmark, LogoSourcePath: wordmark}, localOnly, "en")
+		if item.LogoPath != wordmark {
+			t.Fatalf("logo = %q, want the served wordmark as the stand-in", item.LogoPath)
+		}
+	})
+
+	t.Run("an NFO image URL gets no stand-in", func(t *testing.T) {
+		item := &models.MediaItem{PosterSourcePath: "nfo+https://example.com/poster.jpg"}
+		applyLocalArtworkFallback(item, servedItem, localOnly, "en")
+		if item.PosterPath != "" {
+			t.Fatalf("poster = %q, want no stand-in for an NFO image URL", item.PosterPath)
 		}
 	})
 }
@@ -282,11 +308,11 @@ func (failingLocalArtworkCopier) CopyLocalArtwork(context.Context, []EnqueueImag
 }
 
 // When the copier cannot take the artwork, the refresh queues it instead, so
-// any server's drain still copies it; with caching off nothing remote is
-// queued alongside it.
+// any server's drain still copies it.
 func TestLocalArtworkFallsBackToQueueWhenCopierFails(t *testing.T) {
 	jobs := &capturingImageJobEnqueuer{}
 	s := &MetadataService{imageCacheJobs: jobs}
+	s.SetAutoCacheImages(true)
 	s.SetLocalArtworkCopier(failingLocalArtworkCopier{})
 	if err := s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: "file:///media/Film/poster.jpg"},
@@ -294,8 +320,8 @@ func TestLocalArtworkFallsBackToQueueWhenCopierFails(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enqueueImageCacheJobs: %v", err)
 	}
-	if len(jobs.inputs) != 1 || jobs.inputs[0].ImageType != ImageCacheImagePoster {
-		t.Fatalf("queued = %#v, want only the local poster", jobs.inputs)
+	if len(jobs.inputs) != 2 || jobs.inputs[0].ImageType != ImageCacheImagePoster {
+		t.Fatalf("queued = %#v, want the local poster and the remote backdrop", jobs.inputs)
 	}
 }
 
@@ -311,6 +337,7 @@ func TestOnlyVisibleLocalArtworkGoesToTheCopier(t *testing.T) {
 	jobs := &capturingImageJobEnqueuer{}
 	copier := &recordingLocalArtworkCopier{}
 	s := &MetadataService{imageCacheJobs: jobs}
+	s.SetAutoCacheImages(true)
 	s.SetLocalArtworkCopier(copier)
 	if err := s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: seen},
@@ -404,35 +431,6 @@ func TestDiscoveryClaimsUseDistinctLeaseTokens(t *testing.T) {
 	if len(store.tokens) != 2 || store.tokens[0] == store.tokens[1] {
 		t.Fatalf("claim tokens = %q, want two distinct tokens", store.tokens)
 	}
-}
-
-// The artwork budget bounds jobs across callers: with one slot, a second job
-// waits until the first releases it.
-func TestImageWorkBudgetBoundsConcurrentJobs(t *testing.T) {
-	var budget imageWorkBudget
-	release, err := budget.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("acquire without a limit: %v", err)
-	}
-	release()
-
-	budget.set(1)
-	release, err = budget.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("first acquire: %v", err)
-	}
-	// With the slot taken, an acquire on a done context fails at once.
-	done, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := budget.acquire(done); !errors.Is(err, context.Canceled) {
-		t.Fatalf("second acquire with the slot taken = %v, want it to wait", err)
-	}
-	release()
-	second, err := budget.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("acquire after release: %v", err)
-	}
-	second()
 }
 
 // A drain whose budget is taken starts no job, and hands its whole claimed
@@ -539,34 +537,6 @@ func (c *gatedByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req 
 	c.entered <- struct{}{}
 	<-c.proceed
 	return &CacheImageResult{BasePath: "local/movies/" + req.ContentID + "/poster", Ext: ".webp"}, nil
-}
-
-// A drain job holds a slot of the process's artwork budget while it runs.
-func TestImageCacheProcessorJobsHoldWorkerBudget(t *testing.T) {
-	root := t.TempDir()
-	source := "file://" + writeLocalPoster(t, root)
-	first, second := localArtworkJob(source), localArtworkJob(source)
-	second.ID = first.ID + 1
-	cacher := &gatedByteImageCacher{entered: make(chan struct{}), proceed: make(chan struct{})}
-	p := NewImageCacheProcessorWithTargets(&fakeLocalImageCacheJobs{}, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
-	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
-	p.SetWorkerBudget(1)
-
-	done := make(chan ImageCacheRunStats)
-	go func() {
-		done <- p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{first, second}, 2, time.Now())
-	}()
-	<-cacher.entered
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := p.workBudget.acquire(canceled); !errors.Is(err, context.Canceled) {
-		t.Fatalf("budget while a job runs: acquire = %v, want the only slot held", err)
-	}
-	close(cacher.proceed)
-	<-cacher.entered
-	if stats := <-done; stats.Succeeded != 2 {
-		t.Fatalf("stats = %+v, want both jobs copied", stats)
-	}
 }
 
 // Lowering the budget holds back callers already waiting: none starts until
@@ -700,6 +670,18 @@ func TestCacheTargetArtworkReturnsCancellation(t *testing.T) {
 	}
 }
 
+// disablingTargetImageCacheJobs runs afterClaim once a target page is claimed.
+type disablingTargetImageCacheJobs struct {
+	targetImageCacheJobs
+	afterClaim func()
+}
+
+func (f *disablingTargetImageCacheJobs) claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+	jobs, err := f.targetImageCacheJobs.claimDueForTarget(ctx, workerID, targetContentID, limit)
+	f.afterClaim()
+	return jobs, err
+}
+
 // A manual refresh whose claimed page makes no progress leaves it to the
 // background drain and reports the artwork as pending, rather than claiming
 // the same jobs again.
@@ -709,10 +691,11 @@ func TestCacheTargetArtworkStopsWhenAPageMakesNoProgress(t *testing.T) {
 		ProviderID: "tmdb", ProviderContentID: "1", ContentType: "movies", ImageType: ImageCacheImagePoster,
 	}
 	page := []*models.MetadataImageCacheJob{remote}
-	jobs := &targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{page, page, page}}
+	jobs := &disablingTargetImageCacheJobs{targetImageCacheJobs: targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{page, page, page}}}
 	p := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
-	// Remote jobs do not start while caching is off, so the page goes back.
-	p.SetEnabled(false)
+	// Caching goes off once the page is claimed, so no job starts and the
+	// page goes back.
+	jobs.afterClaim = func() { p.SetEnabled(false) }
 	if err := p.CacheTargetArtwork(context.Background(), "movie-1"); !errors.Is(err, ErrTargetArtworkPending) {
 		t.Fatalf("CacheTargetArtwork error = %v, want ErrTargetArtworkPending", err)
 	}
@@ -727,7 +710,6 @@ func TestCacheTargetArtworkStopsWhenAPageMakesNoProgress(t *testing.T) {
 // serves nothing yet keeps its source when nothing is offered, too.
 func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		standIn      = "https://img.example/stand-in.jpg"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
@@ -742,30 +724,13 @@ func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			localSource := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
-			h := newTestHarness()
+			ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
+			h := newTestFilmHarness(ctx, t, models.MediaItem{PosterPath: tc.path, PosterSourcePath: localSource})
 			enqueuer := &recordingImageCacheJobEnqueuer{}
 			h.service.SetImageCacheJobEnqueuer(enqueuer)
-			ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
-			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
-				PosterPath: tc.path, PosterSourcePath: localSource,
-				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-			}); err != nil {
-				t.Fatalf("upsert existing item: %v", err)
-			}
-			providerRepo := newFakeProviderIDRepo()
-			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-			h.service.providerIDRepo = providerRepo
+			h.service.SetAutoCacheImages(true)
 
-			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
-				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
-				tc.images, nil, nil, "movie"); err != nil {
-				t.Fatalf("mergeAndPersist: %v", err)
-			}
-			got, err := h.itemRepo.GetByID(ctx, contentID)
-			if err != nil {
-				t.Fatalf("load item: %v", err)
-			}
+			got := mergeTestFilm(ctx, t, h, ModeManualRefresh, tc.images)
 			if got.PosterSourcePath != localSource || got.PosterPath != tc.wantPath {
 				t.Fatalf("poster = path %q source %q, want path %q and the local source kept", got.PosterPath, got.PosterSourcePath, tc.wantPath)
 			}
@@ -783,7 +748,6 @@ func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 // not answer and no other artwork was offered.
 func TestItemLeftOnItsStandInKeepsPendingLocalSource(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		standIn      = "https://img.example/stand-in.jpg"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
@@ -804,37 +768,20 @@ func TestItemLeftOnItsStandInKeepsPendingLocalSource(t *testing.T) {
 			mkdirAll(t, dir)
 			writeTestBytes(t, filepath.Join(dir, "Film.mkv"))
 			localSource := "file://" + filepath.Join(dir, "poster.jpg") + "?v=12-1"
-			h := newTestHarness()
-			enqueuer := &recordingImageCacheJobEnqueuer{}
-			h.service.SetImageCacheJobEnqueuer(enqueuer)
 			ctx := context.Background()
 			if tc.searched {
 				ctx = withLocalArtworkSearched(ctx, localArtworkItem)
 			}
-			existing := &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
-				PosterPath: standIn, PosterSourcePath: localSource,
-				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-			}
+			existing := models.MediaItem{PosterPath: standIn, PosterSourcePath: localSource}
 			if tc.locked {
 				existing.LockedFields = []int{int(FieldImages)}
 			}
-			if err := h.itemRepo.Upsert(ctx, existing); err != nil {
-				t.Fatalf("upsert existing item: %v", err)
-			}
-			providerRepo := newFakeProviderIDRepo()
-			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-			h.service.providerIDRepo = providerRepo
+			h := newTestFilmHarness(ctx, t, existing)
+			enqueuer := &recordingImageCacheJobEnqueuer{}
+			h.service.SetImageCacheJobEnqueuer(enqueuer)
+			h.service.SetAutoCacheImages(true)
 
-			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
-				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
-				tc.images, nil, nil, "movie"); err != nil {
-				t.Fatalf("mergeAndPersist: %v", err)
-			}
-			got, err := h.itemRepo.GetByID(ctx, contentID)
-			if err != nil {
-				t.Fatalf("load item: %v", err)
-			}
+			got := mergeTestFilm(ctx, t, h, ModeManualRefresh, tc.images)
 			if got.PosterPath != standIn || got.PosterSourcePath != localSource {
 				t.Fatalf("poster = path %q source %q, want the stand-in and the local source kept", got.PosterPath, got.PosterSourcePath)
 			}
@@ -929,5 +876,31 @@ func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *tes
 				}
 			}
 		})
+	}
+}
+
+// With caching off a fill-empty refresh replaces a stored copy only with a
+// provider image; a slot nothing fills keeps its copy, a stored clear-art
+// logo included, rather than being emptied.
+func TestCachingOffKeepsStoredArtworkNoProviderFills(t *testing.T) {
+	const (
+		storedPoster = "tmdb/movies/7/poster/original.r1.webp"
+		storedLogo   = "tmdb/movies/7/logo/original.r1.webp"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	ctx := context.Background()
+	h := newTestFilmHarness(ctx, t, models.MediaItem{
+		PosterPath: storedPoster, PosterSourcePath: "file:///m/Film/poster.jpg?v=1-1",
+		LogoPath: storedLogo, LogoSourcePath: "https://img.example/clearart/film.png",
+	})
+	h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+
+	got := mergeTestFilm(ctx, t, h, ModeScheduledRefresh,
+		[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Language: "en"}})
+	if got.PosterPath != remotePoster || got.PosterSourcePath != remotePoster {
+		t.Errorf("poster = %q/%q, want the unrated provider poster for both", got.PosterPath, got.PosterSourcePath)
+	}
+	if got.LogoPath != storedLogo {
+		t.Errorf("logo = %q, want the stored copy kept", got.LogoPath)
 	}
 }

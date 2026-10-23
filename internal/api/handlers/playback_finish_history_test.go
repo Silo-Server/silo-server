@@ -248,9 +248,9 @@ func TestRecordedJellyfinPlayRefreshesProfileDespiteFailedHints(t *testing.T) {
 	admin := &recordingPlaybackAdminStore{}
 	stopped := newFinishHistoryReplica(store, admin, finishHistoryFile())
 	stale := newFinishHistoryReplica(store, admin, finishHistoryFile())
-	staler := &countingProfileStaler{}
-	stopped.handler.SetProfileStaler(staler)
-	stale.handler.SetProfileStaler(staler)
+	notifier := &countingSignalsNotifier{}
+	stopped.handler.SetSignalsChangedNotifier(notifier)
+	stale.handler.SetSignalsChangedNotifier(notifier)
 	session := compatFinishSession()
 	stopped.holdCopy(t, session, 3500)
 	staleCopy := stale.holdCopy(t, session, 1800)
@@ -261,8 +261,8 @@ func TestRecordedJellyfinPlayRefreshesProfileDespiteFailedHints(t *testing.T) {
 	stale.expire(staleCopy)
 
 	assertOneCompletedPlay(t, sqlite)
-	if staler.calls != 1 {
-		t.Fatalf("profile refreshes = %d, want 1", staler.calls)
+	if notifier.calls != 1 {
+		t.Fatalf("profile refreshes = %d, want 1", notifier.calls)
 	}
 }
 
@@ -304,56 +304,94 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 	}
 }
 
-// TestPGPlaybackAdminStoreKeepsFurthestFinalizationDB proves a session
-// finalized more than once keeps the furthest position, whichever
-// finalization lands first.
-func TestPGPlaybackAdminStoreKeepsFurthestFinalizationDB(t *testing.T) {
+// TestAdminPlaybackWatchTimeDB proves a resumed play counts what was watched,
+// not where it ended: the measured watch time survives a later finalization
+// of another copy that never saw progress, and the watch summary sums it with
+// the capped estimate for a play recorded before measurement existed.
+func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	pool, err := pgxpool.New(t.Context(), dsn)
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	ctx := t.Context()
 	suffix := uuid.NewString()
 	var account int
-	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "finish-history-"+suffix).Scan(&account); err != nil {
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "watch-time-"+suffix).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
-	sessionID := "finish-" + suffix
-	defer func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM admin_playback_history WHERE session_id=$1`, sessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account)
-	}()
+	// Deleting the account cascades to its playback history.
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
 
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	started, ended := now.Add(-15*time.Minute), now.Add(-time.Minute)
 	store := NewPGPlaybackAdminStore(pool, nil)
-	started := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
-	duration := 3600.0
-	finalize := func(watched float64, completed bool, ended time.Time) {
+	finalize := func(position float64, completed bool, watch playback.WatchTime) {
 		t.Helper()
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
-			SessionID: sessionID, UserID: account, ProfileID: "profile-1", ProfileName: "Main",
-			MediaItemID: "movie-" + suffix, PlayMethod: "direct_play",
+			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
-			WatchedSeconds: watched, DurationSeconds: &duration, Completed: completed,
+			WatchedSeconds: position, Completed: completed, Watch: watch,
 		}); err != nil {
-			t.Fatalf("RecordHistory(%v): %v", watched, err)
+			t.Fatal(err)
 		}
 	}
-	finalize(60, false, started.Add(2*time.Hour))
-	finalize(3500, true, started.Add(time.Hour))
-	finalize(1800, false, started.Add(3*time.Hour))
-
-	var watched float64
-	var completed bool
-	var ended time.Time
-	if err := pool.QueryRow(ctx, `SELECT watched_seconds, completed, ended_at FROM admin_playback_history WHERE session_id=$1`, sessionID).Scan(&watched, &completed, &ended); err != nil {
+	// Resumed at 1:30:00, watched two minutes; then a copy on another replica
+	// that only served media finalizes further along with no measurement. A
+	// copy that recorded completion short of that position marks the play
+	// completed without moving it back, and an incomplete copy can't clear it.
+	finalize(5520, false, playback.WatchTime{Measured: true, StartPosition: 5400, PlayedSeconds: 120, PausedSeconds: 30})
+	finalize(5600, false, playback.WatchTime{})
+	finalize(5500, true, playback.WatchTime{})
+	finalize(5590, false, playback.WatchTime{})
+	// A one-minute play recorded before measurement, ending at 100 seconds.
+	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
+		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, "legacy-"+suffix, account, now.Add(-2*time.Hour), now.Add(-2*time.Hour+time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if watched != 3500 || !completed || !ended.Equal(started.Add(2*time.Hour)) {
-		t.Fatalf("row = watched %v, completed %v, ended %v; want 3500, completed, ended %v", watched, completed, ended, started.Add(2*time.Hour))
+
+	var watched, played float64
+	var measured, completed bool
+	if err = pool.QueryRow(ctx, `SELECT watched_seconds, played_seconds, measured, completed FROM admin_playback_history WHERE session_id=$1`, "resumed-"+suffix).Scan(&watched, &played, &measured, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if watched != 5600 || played != 120 || !measured || !completed {
+		t.Fatalf("resumed row = watched %v, played %v, measured %v, completed %v; want 5600, 120, measured, completed", watched, played, measured, completed)
+	}
+	got, err := (&AdminHandler{pool: pool}).ReadAdminWatchSummary(ctx, AdminWatchSummaryQuery{UserID: account, Days: 7, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Plays != 2 || got.WatchedSeconds != 180 {
+		t.Fatalf("summary = %d plays, %v seconds; want 2 plays, 180 seconds (120 measured + 60 capped)", got.Plays, got.WatchedSeconds)
+	}
+
+	// A session finalized, rebuilt under the same id and finalized again
+	// watched two stretches; a copy that overlaps one of them, or the same
+	// copy finalized twice, is not another stretch.
+	rebuilt := "rebuilt-" + suffix
+	stretch := func(from, to time.Duration, played float64) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: rebuilt, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(to).Format(time.RFC3339Nano),
+			WatchedSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stretch(0, 2*time.Minute, 120)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(time.Minute, 7*time.Minute, 200)
+	if err = pool.QueryRow(ctx, `SELECT played_seconds FROM admin_playback_history WHERE session_id=$1`, rebuilt).Scan(&played); err != nil {
+		t.Fatal(err)
+	}
+	if played != 300 {
+		t.Fatalf("rebuilt session played = %v, want 300 (two stretches of 120 and 180)", played)
 	}
 }

@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -65,11 +66,7 @@ func (h *countingHerdHost) startCount() int {
 
 func TestEnsureClientSingleFlightsConcurrentLaunch(t *testing.T) {
 	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := newFakeServiceInstallationStore(&Installation{
-		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
-		InstallPath: installPath, Enabled: true,
-	})
+	store := installedPluginStore(t, 7, manifest)
 	host := &countingHerdHost{
 		startResult: &fakePluginClient{manifest: manifest},
 		startDelay:  25 * time.Millisecond,
@@ -198,11 +195,7 @@ func (h *ctxCaptureHost) canceledDuringLaunch() bool {
 // shared launch (which other waiters depend on) must continue.
 func TestEnsureClientLaunchIsolatedFromLeaderCancellation(t *testing.T) {
 	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := newFakeServiceInstallationStore(&Installation{
-		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
-		InstallPath: installPath, Enabled: true,
-	})
+	store := installedPluginStore(t, 7, manifest)
 	host := &ctxCaptureHost{
 		startResult: &fakePluginClient{manifest: manifest},
 		entered:     make(chan struct{}),
@@ -244,13 +237,27 @@ func TestEnsureClientLaunchIsolatedFromLeaderCancellation(t *testing.T) {
 	}
 }
 
+// TestEnsureClientLaunchWithoutClientFails pins that a Host reporting a
+// successful start with no client fails the caller instead of panicking on
+// the shared launch result.
+func TestEnsureClientLaunchWithoutClientFails(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	store := installedPluginStore(t, 7, manifest)
+	host := &countingHerdHost{} // Start returns (nil, nil)
+	service := &Service{installations: store, host: host}
+
+	client, err := service.ensureClient(context.Background(), 7)
+	if !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+		t.Fatalf("ensureClient err = %v, want ErrPluginUnhealthy", err)
+	}
+	if client != nil {
+		t.Fatalf("ensureClient client = %#v, want nil", client)
+	}
+}
+
 func TestEnsureClientFailedLaunchPropagatesToAllCallers(t *testing.T) {
 	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := newFakeServiceInstallationStore(&Installation{
-		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
-		InstallPath: installPath, Enabled: true,
-	})
+	store := installedPluginStore(t, 7, manifest)
 	host := &countingHerdHost{startErr: context.DeadlineExceeded, startDelay: 15 * time.Millisecond}
 	service := &Service{installations: store, host: host}
 

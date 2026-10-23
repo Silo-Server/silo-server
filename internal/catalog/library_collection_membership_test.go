@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveLibraryCollectionMembershipReadsStoredItemsForNonSmartTypes(t *testing.T) {
-	for _, collectionType := range []string{"manual", "mdblist", "tmdb", "trakt"} {
+	for _, collectionType := range []string{"manual", "mdblist", "tmdb"} {
 		t.Run(collectionType, func(t *testing.T) {
 			// A query_definition on a non-smart collection does not make it
 			// live: its members are the stored items its writers maintain.

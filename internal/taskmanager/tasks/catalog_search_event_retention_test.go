@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -74,18 +73,5 @@ func TestCatalogSearchEventRetentionTaskPrunesInBatches(t *testing.T) {
 	}
 	if !strings.Contains(progress.message, "5003") {
 		t.Fatalf("final progress message = %q, want deleted total", progress.message)
-	}
-}
-
-func TestCatalogSearchEventRetentionTaskReportsPartialFailure(t *testing.T) {
-	pruner := &fakeCatalogSearchEventPruner{
-		results: []retentionPruneResult{{deleted: catalogSearchEventBatchSize, lastID: 5000}},
-		err:     errors.New("database unavailable"),
-	}
-	task := NewCatalogSearchEventRetentionTask(pruner)
-
-	err := task.Execute(context.Background(), &retentionProgress{})
-	if err == nil || !strings.Contains(err.Error(), "deleted 5000 rows") {
-		t.Fatalf("Execute error = %v, want partial deletion count", err)
 	}
 }

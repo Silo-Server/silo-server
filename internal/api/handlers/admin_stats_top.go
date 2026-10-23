@@ -220,11 +220,8 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 	// before the cutoff but stopped inside the window counts toward both plays
 	// and watch time rather than only the former.
 	//
-	// watched_seconds records the final absolute position, not elapsed viewing
-	// time, so a session resumed at the one-hour mark would claim the first
-	// hour again; each session's contribution is therefore capped at its
-	// wall-clock length. Still an estimate — recording true elapsed playback
-	// needs a session start position, which does not exist yet.
+	// Each session contributes its measured watch time, or the capped estimate
+	// for rows recorded before measurement (see adminPlaybackWatchTimeSQL).
 	//
 	// The ranking is computed and limited first so the title lookup and the
 	// watched-seconds aggregate only run over the rows that survive.
@@ -243,8 +240,7 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 		),
 		watched AS (
 			SELECT COALESCE(ep.series_id, p.media_item_id) AS item_id,
-			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
-			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
+			       SUM(`+adminPlaybackWatchTimeSQL("p")+`) AS total_seconds
 			FROM admin_playback_history p
 			LEFT JOIN episodes ep ON ep.content_id = p.media_item_id
 			WHERE p.ended_at >= now() - make_interval(days => $1)
@@ -309,8 +305,7 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 		watched AS (
 			SELECT p.user_id,
 			       p.profile_id,
-			       SUM(LEAST(GREATEST(p.watched_seconds, 0),
-			                 GREATEST(EXTRACT(EPOCH FROM (p.ended_at - p.started_at)), 0))) AS total_seconds
+			       SUM(`+adminPlaybackWatchTimeSQL("p")+`) AS total_seconds
 			FROM admin_playback_history p
 			WHERE p.ended_at >= now() - make_interval(days => $1)
 			  AND EXISTS (

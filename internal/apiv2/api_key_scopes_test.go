@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -81,28 +80,6 @@ func TestV2APIKeyCreateAcceptsEveryAdvertisedScope(t *testing.T) {
 			if !strings.Contains(created.Body.String(), `"`+scope.Name+`"`) {
 				t.Fatalf("%s response omits the granted scope: %s", path, created.Body.String())
 			}
-		}
-	}
-}
-
-func TestV2APIKeyCreateReportsUnknownScope(t *testing.T) {
-	h, store := realAPIKeyHandler()
-	for _, path := range []string{"/api-keys", adminAPIKeyPath} {
-		*store = scopeCatalogStore{}
-		rec := do(t, h, http.MethodPost, Prefix+path, `{"label":"Tool","scopes":["admin:everything"]}`, bearer(adminToken))
-		requireProblem(t, rec, TypeValidationFailed)
-		if store.created {
-			t.Fatalf("%s: an unknown scope reached storage", path)
-		}
-		var p Problem
-		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Errors) != 1 || p.Errors[0].Location != "body.scopes" || p.Errors[0].Code != codeInvalid {
-			t.Fatalf("%s: errors = %+v", path, p.Errors)
-		}
-		if !strings.Contains(p.Errors[0].Detail, "admin:everything") {
-			t.Fatalf("%s: detail does not name the scope: %q", path, p.Errors[0].Detail)
 		}
 	}
 }

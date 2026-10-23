@@ -2,7 +2,6 @@ package userdb
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -12,14 +11,7 @@ import (
 // it already holds, land on the current schema version, and advance the
 // revision on the next PIN change.
 func TestMigrateToV30AddsProfilePINRevision(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
@@ -63,8 +55,8 @@ func TestMigrateToV30AddsProfilePINRevision(t *testing.T) {
 	if old.PINRevision != 0 {
 		t.Fatalf("migrated PINRevision = %d, want 0", old.PINRevision)
 	}
-	pin := "1234"
-	if err := store.UpdateProfile(ctx, "old", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	pin := "hash-of-1234"
+	if err := store.UpdateProfile(ctx, "old", userstore.UpdateProfileInput{PINHash: &pin}); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
 	if got, _ := store.GetProfile(ctx, "old"); got == nil || got.PINRevision != 1 {
@@ -83,14 +75,7 @@ func TestMigrateToV30AddsProfilePINRevision(t *testing.T) {
 // pin_hash, and the profiles_pin_revision trigger must advance the revision
 // anyway, or the new release keeps accepting tokens for the replaced PIN.
 func TestPINRevisionAdvancesOnPINHashOnlyWrite(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
@@ -124,14 +109,7 @@ func TestPINRevisionAdvancesOnPINHashOnlyWrite(t *testing.T) {
 }
 
 func TestPINRevisionTriggerAllowsOlderSchemaRenames(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := newSchemaDB(t)
 	if err := runMigrations(db); err != nil {
 		t.Fatal(err)
 	}
@@ -164,14 +142,7 @@ UPDATE profiles SET pin_hash = 'new-hash' WHERE id = 'old';`); err != nil {
 }
 
 func TestCurrentSchemaInstallsMissingPINRevisionTrigger(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := newSchemaDB(t)
 	if err := runMigrations(db); err != nil {
 		t.Fatal(err)
 	}

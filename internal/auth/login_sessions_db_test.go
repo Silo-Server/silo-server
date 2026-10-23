@@ -156,7 +156,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, target).Scan(&passwordHash); err != nil {
 		t.Fatal(err)
 	}
-	if !CheckPassword(&models.User{PasswordHash: passwordHash}, "password") {
+	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte("password")) != nil {
 		t.Fatal("revocation changed password")
 	}
 	var ownerID int

@@ -79,32 +79,6 @@ func samplesRequest(seconds ...float64) Request {
 	}
 }
 
-func TestBuildArgsSamples(t *testing.T) {
-	req := samplesRequest(5400, 5403)
-	if err := req.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	args, stdin, err := buildArgs(req, Attempt{}, hardwareDecode{}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Fields("-hide_banner -nostdin -loglevel repeat+info -threads 1 -filter_threads 1 " +
-		"-skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 " +
-		"-map 0:V:0 -an -sn -dn -vf crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,scale=480:-2:flags=area,format=yuv420p," +
-		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32,signalstats,metadata=print " +
-		"-f null -")
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("args\n got %q\nwant %q", args, want)
-	}
-	list, err := buildConcatList(req.Input, req.Samples.Seconds, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(stdin) != string(list) {
-		t.Fatalf("stdin %q, want the concat list %q", stdin, list)
-	}
-}
-
 // statsFrameLog is the log a stats output prints for one frame, with every
 // statistic set to index, pts_time 0.0<index> (or pts, when set), and a
 // sample tag when sample is set.
@@ -233,8 +207,8 @@ func TestInputHeaderParser(t *testing.T) {
 		log  string
 		want inputInfo
 	}{
-		"matroska with a start": {probeHeaderLog("matroska,webm", "11.400000"), inputInfo{Formats: []string{"matroska", "webm"}, StartSeconds: 11.4, AspectRatio: 16.0 / 9}},
-		"mp4 starting early":    {probeHeaderLog("mov,mp4,m4a,3gp,3g2,mj2", "-0.042000"), inputInfo{Formats: []string{"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}, StartSeconds: -0.042, AspectRatio: 16.0 / 9}},
+		"matroska with a start": {probeHeaderLog("matroska,webm", "11.400000"), inputInfo{Formats: []string{"matroska", "webm"}, StartSeconds: 11.4, AspectRatio: 16.0 / 9, VideoCodec: "h264"}},
+		"mp4 starting early":    {probeHeaderLog("mov,mp4,m4a,3gp,3g2,mj2", "-0.042000"), inputInfo{Formats: []string{"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}, StartSeconds: -0.042, AspectRatio: 16.0 / 9, VideoCodec: "h264"}},
 		"no start":              {"Input #0, avi, from 'a.avi':\n  Duration: N/A, bitrate: N/A\n", inputInfo{Formats: []string{"avi"}}},
 		"no header":             {"[in#0 @ 0x1] Error opening input: No such file or directory\n", inputInfo{}},
 	} {

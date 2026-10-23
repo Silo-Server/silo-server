@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -20,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -83,7 +85,13 @@ type Dependencies struct {
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.
 	FrontendFS fs.FS
+	// HTTPClient fetches images the compat image routes proxy. The default
+	// uses a netguard transport; see ArtworkStore.
 	HTTPClient *http.Client
+	// ArtworkStore is the artwork blob store. A proxied image URL may reach
+	// the server's local network only when it is a direct URL to this store
+	// (artworkurl.FetchContext); every other URL reaches public addresses only.
+	ArtworkStore blobstore.Store
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService
@@ -131,12 +139,16 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer          PlaybackSessionSyncer
-	MarkerPopulation       MarkerPopulationService
-	FileResolver           FilePathResolver
-	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
-	Downloads              DownloadServer         // serves /Items/{id}/Download; nil refuses every download
-	UserStoreProvider      userstore.UserStoreProvider
+	SessionSyncer     PlaybackSessionSyncer
+	MarkerPopulation  MarkerPopulationService
+	FileResolver      FilePathResolver
+	MediaSourceOwners MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
+	Downloads         DownloadServer         // serves /Items/{id}/Download; nil refuses every download
+	UserStoreProvider userstore.UserStoreProvider
+	// AdminDefaults supplies the administrator's defaults for settings that
+	// declare admin_default, such as Next Up ordering (the node's shared
+	// *config.AdminDefaults). Nil uses the contract defaults.
+	AdminDefaults          settingsresolve.ServerSettings
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver
 	AccessFilterFn         AccessFilterResolver
@@ -145,6 +157,9 @@ type Dependencies struct {
 	JWTSecret              string
 	Recommender            recommendations.Recommender
 	RecWorker              *recommendations.Worker
+	// RecommendationReader serves /Movies/Recommendations from the cached
+	// rows the native API reads; nil answers an empty list.
+	RecommendationReader RecommendationRowReader
 
 	// CollectionPosters picks each viewer's BoxSet poster; without it BoxSets
 	// show only uploaded and template posters.

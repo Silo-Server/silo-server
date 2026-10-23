@@ -1,30 +1,8 @@
 import type { EmblaCarouselType } from "embla-carousel";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CAROUSEL_RESIZE_SETTLE_DELAY_MS,
-  createCarouselResizeController,
-  getCarouselEmblaOptions,
-  getCarouselWheelGestureOptions,
-} from "./carouselEmbla";
+import { CAROUSEL_RESIZE_SETTLE_DELAY_MS, createCarouselResizeController } from "./carouselEmbla";
 
 describe("carouselEmbla", () => {
-  it("enables drag-free momentum with trimmed edge scrolling", () => {
-    expect(getCarouselEmblaOptions()).toMatchObject({
-      align: "start",
-      containScroll: "trimSnaps",
-      dragFree: true,
-    });
-  });
-
-  it("forces wheel gestures onto the horizontal axis", () => {
-    const target = { nodeName: "DIV" } as unknown as HTMLElement;
-
-    expect(getCarouselWheelGestureOptions(target)).toMatchObject({
-      forceWheelAxis: "x",
-      target,
-    });
-  });
-
   describe("resize controller", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

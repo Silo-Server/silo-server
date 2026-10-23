@@ -3,7 +3,7 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useMyDevices, useForgetDevice, useClearDeviceSettings } from "./devices";
+import { useMyDevices, useForgetDevice, useClearDeviceSettings, useRenameDevice } from "./devices";
 import { deviceKeys, settingsKeys } from "./keys";
 
 const request = vi.hoisted(() => vi.fn());
@@ -66,4 +66,49 @@ describe("device settings v2", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: [...settingsKeys.all, "values"] });
     },
   );
+  it.each([
+    ["Den", "Den"],
+    [null, null],
+  ])("sends the name %s for the selected profile's device", async (name, sent) => {
+    const { client, wrapper } = setup();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    request.mockResolvedValueOnce({
+      ...device,
+      profile_id: "sibling",
+      custom_name: sent ?? undefined,
+    });
+    const { result } = renderHook(() => useRenameDevice(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        device: { deviceId: "tv/shared", profileId: "sibling" },
+        name,
+      });
+    });
+    expect(request).toHaveBeenCalledWith("PATCH /api/v2/devices/{device_id}", {
+      path: { device_id: "tv/shared" },
+      query: { profile_id: "sibling" },
+      body: { custom_name: sent },
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+  it("keeps the saved name on screen when the refresh after it fails", async () => {
+    const { client, wrapper } = setup();
+    const own = { ...device, device_id: "tv" };
+    const sibling = { ...device, device_id: "tv", profile_id: "sibling" };
+    client.setQueryData(deviceKeys.list("household"), [own, sibling]);
+    request
+      .mockResolvedValueOnce({ ...own, custom_name: "Living Room" })
+      .mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useRenameDevice(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        device: { deviceId: "tv" },
+        name: "  Living   Room ",
+      });
+    });
+    expect(client.getQueryData(deviceKeys.list("household"))).toEqual([
+      { ...own, custom_name: "Living Room" },
+      sibling,
+    ]);
+  });
 });

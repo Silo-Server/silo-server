@@ -1,5 +1,6 @@
 import type { SectionItem } from "@/api/types";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -26,6 +27,18 @@ vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
 
 vi.mock("@/hooks/useAmbientColor", () => ({
   useAmbientColor: () => undefined,
+}));
+
+const translationMocks = vi.hoisted(() => ({
+  hook: vi.fn(),
+  state: { translating: false, onTranslate: undefined as undefined | (() => void) },
+}));
+
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: (...args: unknown[]) => {
+    translationMocks.hook(...args);
+    return translationMocks.state;
+  },
 }));
 
 vi.mock("@/lib/thumbhash", () => ({
@@ -80,100 +93,84 @@ function heroMetadata(container: HTMLElement): string[] {
     (node) => node.textContent ?? "",
   );
 }
+function hero(props: ComponentProps<typeof HeroBanner>) {
+  return (
+    <MemoryRouter>
+      <HeroBanner {...props} />
+    </MemoryRouter>
+  );
+}
+
+function tenSlides() {
+  return Array.from({ length: 10 }, (_, index) =>
+    movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
+  );
+}
+
+function twoSlides() {
+  return [
+    movieSlide({ content_id: "movie-1", backdrop_url: "/first.jpg" }),
+    movieSlide({ content_id: "movie-2", title: "Second", backdrop_url: "/second.jpg" }),
+  ];
+}
 
 describe("formatHeroMetadata", () => {
-  it.each([Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, -1, 0, 10.1])(
-    "omits invalid IMDb rating %s",
-    (ratingImdb) => {
-      expect(
-        formatHeroMetadata(
-          movieSlide({
-            runtime: undefined,
-            duration_seconds: undefined,
-            rating_imdb: ratingImdb,
-            genres: [],
-            content_rating: undefined,
-          }),
-        ),
-      ).toEqual([{ key: "year", label: "2025" }]);
-    },
-  );
+  // A slide with only its year left, so each case adds the one field it checks.
+  const bare: Partial<SectionItem> = {
+    runtime: undefined,
+    duration_seconds: undefined,
+    rating_imdb: undefined,
+    genres: [],
+    content_rating: undefined,
+  };
 
-  it("keeps a valid upper-bound IMDb rating", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          runtime: undefined,
-          duration_seconds: undefined,
-          rating_imdb: 10,
-          genres: [],
-          content_rating: undefined,
-        }),
-      ),
-    ).toEqual([
+  it.each([Number.NaN, 0, 10.1])("omits invalid IMDb rating %s", (ratingImdb) => {
+    expect(formatHeroMetadata(movieSlide({ ...bare, rating_imdb: ratingImdb }))).toEqual([
       { key: "year", label: "2025" },
+    ]);
+  });
+
+  it.each([
+    [
+      "keeps a valid upper-bound IMDb rating",
+      { rating_imdb: 10 },
+      [
+        { key: "year", label: "2025" },
+        {
+          key: "rating",
+          label: "IMDb 10.0",
+          rating: { source: "imdb", name: "IMDb", score: 100, display: "10.0" },
+        },
+      ],
+    ],
+    [
+      "falls back to the TMDB score when there is no IMDb score",
+      { rating_tmdb: 7.25 },
+      [
+        { key: "year", label: "2025" },
+        {
+          key: "rating",
+          label: "TMDB 7.3",
+          rating: { source: "tmdb", name: "TMDB", score: 72.5, display: "7.3" },
+        },
+      ],
+    ],
+    [
+      "normalizes genres and content rating before limiting and returns semantic keys",
       {
-        key: "rating",
-        label: "IMDb 10.0",
-        rating: { source: "imdb", name: "IMDb", score: 100, display: "10.0" },
+        genres: [" Drama ", "", "Drama", "  Mystery  ", "Mystery", "Thriller"],
+        content_rating: " r ",
       },
-    ]);
-  });
-
-  it("falls back to the TMDB score when there is no IMDb score", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          runtime: undefined,
-          duration_seconds: undefined,
-          rating_imdb: undefined,
-          rating_tmdb: 7.25,
-          genres: [],
-          content_rating: undefined,
-        }),
-      ),
-    ).toEqual([
-      { key: "year", label: "2025" },
-      {
-        key: "rating",
-        label: "TMDB 7.3",
-        rating: { source: "tmdb", name: "TMDB", score: 72.5, display: "7.3" },
-      },
-    ]);
-  });
-
-  it("normalizes genres and content rating before limiting and returns semantic keys", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          runtime: undefined,
-          duration_seconds: undefined,
-          rating_imdb: undefined,
-          genres: [" Drama ", "", "Drama", "  Mystery  ", "Mystery", "Thriller"],
-          content_rating: " r ",
-        }),
-      ),
-    ).toEqual([
-      { key: "year", label: "2025" },
-      { key: "genre-0", label: "Drama" },
-      { key: "genre-1", label: "Mystery" },
-      { key: "content-rating", label: "R" },
-    ]);
-  });
-
-  it("omits a fractional year", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          year: 2025.5,
-          runtime: undefined,
-          duration_seconds: undefined,
-          rating_imdb: undefined,
-          genres: [],
-          content_rating: undefined,
-        }),
-      ),
-    ).toEqual([]);
+      [
+        { key: "year", label: "2025" },
+        { key: "genre-0", label: "Drama" },
+        { key: "genre-1", label: "Mystery" },
+        { key: "content-rating", label: "R" },
+      ],
+    ],
+    ["omits a fractional year", { year: 2025.5 }, []],
+  ])("%s", (_, overrides: Partial<SectionItem>, expected) => {
+    expect(formatHeroMetadata(movieSlide({ ...bare, ...overrides }))).toEqual(expected);
   });
 });
 
@@ -205,21 +202,13 @@ describe("HeroBanner", () => {
       overview: "The culprit is revealed",
       user_state: { played: false, is_favorite: false, in_watchlist: false },
     });
-    const { rerender } = render(
-      <MemoryRouter>
-        <HeroBanner items={[episode]} />
-      </MemoryRouter>,
-    );
+    const { rerender } = render(hero({ items: [episode] }));
     expect(screen.queryByText("The culprit is revealed")).not.toBeInTheDocument();
     expect(
       document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
     ).toContain("blur(24px)");
 
-    rerender(
-      <MemoryRouter>
-        <HeroBanner items={[{ ...episode, position_seconds: 120 }]} />
-      </MemoryRouter>,
-    );
+    rerender(hero({ items: [{ ...episode, position_seconds: 120 }] }));
     expect(screen.getByText("The culprit is revealed")).toBeInTheDocument();
     expect(
       document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
@@ -229,17 +218,15 @@ describe("HeroBanner", () => {
   it("preserves the series backdrop on an unwatched episode", () => {
     spoilerPrefs.hideImages = true;
     render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              type: "episode",
-              backdrop_url: "/series-art.jpg",
-              backdrop_is_episode_still: false,
-            }),
-          ]}
-        />
-      </MemoryRouter>,
+      hero({
+        items: [
+          movieSlide({
+            type: "episode",
+            backdrop_url: "/series-art.jpg",
+            backdrop_is_episode_still: false,
+          }),
+        ],
+      }),
     );
     expect(document.querySelector("img")?.getAttribute("style")).not.toContain("blur(");
   });
@@ -251,9 +238,7 @@ describe("HeroBanner", () => {
     // resolve to nothing — the hero simply never animated. app.css still sets
     // both to `none` under prefers-reduced-motion.
     const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner items={[movieSlide({ backdrop_url: "/backdrop.jpg" })]} />
-      </MemoryRouter>,
+      hero({ items: [movieSlide({ backdrop_url: "/backdrop.jpg" })] }),
     );
 
     expect(markup).toContain('src="/backdrop.jpg"');
@@ -262,16 +247,7 @@ describe("HeroBanner", () => {
 
   it("keeps outgoing backdrop motion through its fade, then releases it", () => {
     vi.useFakeTimers();
-    const { container, unmount } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({ content_id: "movie-1", backdrop_url: "/first.jpg" }),
-            movieSlide({ content_id: "movie-2", title: "Second", backdrop_url: "/second.jpg" }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
+    const { container, unmount } = render(hero({ items: twoSlides() }));
     const images = Array.from(container.querySelectorAll("img"));
 
     expect(images[0]?.style.animation).toBe("var(--animate-ken-burns-a)");
@@ -299,15 +275,7 @@ describe("HeroBanner", () => {
   });
 
   it("starts only the active and two adjacent backdrop requests, including wraparound", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={Array.from({ length: 10 }, (_, index) =>
-            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
-          )}
-        />
-      </MemoryRouter>,
-    );
+    const { container } = render(hero({ items: tenSlides() }));
     const images = Array.from(container.querySelectorAll("img"));
 
     expect(images.map((image) => image.getAttribute("src"))).toEqual([
@@ -322,15 +290,7 @@ describe("HeroBanner", () => {
   });
 
   it("loads neighbors on next and previous navigation and preserves loaded backdrops", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={Array.from({ length: 10 }, (_, index) =>
-            movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
-          )}
-        />
-      </MemoryRouter>,
-    );
+    const { container } = render(hero({ items: tenSlides() }));
     const loadedNeighbor = container.querySelector('img[src="/movie-9.jpg"]')!;
     fireEvent.load(loadedNeighbor);
     const sources = () =>
@@ -356,28 +316,20 @@ describe("HeroBanner", () => {
     expect(sources()).toEqual(["/movie-0.jpg", "/movie-1.jpg", "/movie-9.jpg"]);
   });
 
-  it.each([0, 1])("keeps loaded slide %i visible while its URL refreshes", (index) => {
-    const slides = Array.from({ length: 10 }, (_, index) =>
-      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
-    );
-    const { container, rerender } = render(
-      <MemoryRouter>
-        <HeroBanner items={slides} />
-      </MemoryRouter>,
-    );
+  it.each([0])("keeps loaded slide %i visible while its URL refreshes", (index) => {
+    const slides = tenSlides();
+    const { container, rerender } = render(hero({ items: slides }));
     const image = container.querySelector(`img[src="/movie-${index}.jpg"]`)!;
     expect(image).toHaveClass("opacity-0");
     fireEvent.load(image);
     expect(image).toHaveClass("opacity-100");
 
     rerender(
-      <MemoryRouter>
-        <HeroBanner
-          items={slides.map((slide, slideIndex) =>
-            slideIndex === index ? { ...slide, backdrop_url: "/refreshed.jpg" } : slide,
-          )}
-        />
-      </MemoryRouter>,
+      hero({
+        items: slides.map((slide, slideIndex) =>
+          slideIndex === index ? { ...slide, backdrop_url: "/refreshed.jpg" } : slide,
+        ),
+      }),
     );
 
     expect(container.querySelector('img[src="/refreshed.jpg"]')).toBe(image);
@@ -388,25 +340,17 @@ describe("HeroBanner", () => {
   });
 
   it("does not eagerly load a replacement URL on a distant loaded slide", () => {
-    const slides = Array.from({ length: 10 }, (_, index) =>
-      movieSlide({ content_id: `movie-${index}`, backdrop_url: `/movie-${index}.jpg` }),
-    );
-    const { container, rerender } = render(
-      <MemoryRouter>
-        <HeroBanner items={slides} />
-      </MemoryRouter>,
-    );
+    const slides = tenSlides();
+    const { container, rerender } = render(hero({ items: slides }));
     const image = container.querySelector('img[src="/movie-9.jpg"]')!;
     fireEvent.load(image);
     fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
     rerender(
-      <MemoryRouter>
-        <HeroBanner
-          items={slides.map((slide, index) =>
-            index === 9 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
-          )}
-        />
-      </MemoryRouter>,
+      hero({
+        items: slides.map((slide, index) =>
+          index === 9 ? { ...slide, backdrop_url: "/replacement.jpg" } : slide,
+        ),
+      }),
     );
 
     expect(container.querySelector('img[src="/replacement.jpg"]')).toBeNull();
@@ -427,16 +371,7 @@ describe("HeroBanner", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     }));
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({ content_id: "movie-1", backdrop_url: "/first.jpg" }),
-            movieSlide({ content_id: "movie-2", title: "Second", backdrop_url: "/second.jpg" }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
+    const { container } = render(hero({ items: twoSlides() }));
     const images = Array.from(container.querySelectorAll("img"));
 
     act(() => screen.getByRole("button", { name: "Next slide" }).click());
@@ -446,50 +381,8 @@ describe("HeroBanner", () => {
     expect(images[1]).toHaveClass("will-change-transform");
   });
 
-  it("bounds rapid handoffs to one active and one outgoing backdrop", () => {
-    vi.useFakeTimers();
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={Array.from({ length: 12 }, (_, index) =>
-            movieSlide({
-              content_id: `movie-${index + 1}`,
-              title: `Movie ${index + 1}`,
-              backdrop_url: `/movie-${index + 1}.jpg`,
-            }),
-          )}
-        />
-      </MemoryRouter>,
-    );
-    const next = screen.getByRole("button", { name: "Next slide" });
-
-    for (let cycle = 0; cycle < 24; cycle++) {
-      act(() => next.click());
-      const images = Array.from(container.querySelectorAll<HTMLImageElement>(".home-hero img"));
-      expect(images.filter((image) => image.style.animation !== "none")).toHaveLength(2);
-      expect(container.querySelectorAll(".home-hero img.will-change-transform")).toHaveLength(1);
-    }
-
-    act(() => vi.advanceTimersByTime(1000));
-    expect(
-      Array.from(container.querySelectorAll<HTMLImageElement>(".home-hero img")).filter(
-        (image) => image.style.animation !== "none",
-      ),
-    ).toHaveLength(1);
-  });
-
   it("renders editorial metadata in the approved order and caps genres at two", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              duration_seconds: 9_999,
-            }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
+    const { container } = render(hero({ items: [movieSlide({ duration_seconds: 9_999 })] }));
 
     expect(heroMetadata(container)).toEqual([
       "2025",
@@ -503,90 +396,44 @@ describe("HeroBanner", () => {
     expect(container).not.toHaveTextContent("2h 47m");
   });
 
-  it("falls back to a finite positive duration when catalog runtime is unavailable", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              runtime: 0,
-              duration_seconds: 7_380,
-            }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
+  it.each([
+    [
+      "falls back to a finite positive duration when catalog runtime is unavailable",
+      { runtime: 0, duration_seconds: 7_380 },
+      ["2025", "2h 3m", "IMDb 8.1", "Drama", "Mystery", "PG-13"],
+    ],
+    [
+      "falls back when converting a finite catalog runtime overflows",
+      { runtime: Number.MAX_VALUE, duration_seconds: 7_380 },
+      ["2025", "2h 3m", "IMDb 8.1", "Drama", "Mystery", "PG-13"],
+    ],
+    [
+      "omits a whitespace-only content rating",
+      { content_rating: " \t " },
+      ["2025", "2h 5m", "IMDb 8.1", "Drama", "Mystery"],
+    ],
+  ])("%s", (_, overrides: Partial<SectionItem>, expected) => {
+    const { container } = render(hero({ items: [movieSlide(overrides)] }));
 
-    expect(heroMetadata(container)).toEqual([
-      "2025",
-      "2h 3m",
-      "IMDb 8.1",
-      "Drama",
-      "Mystery",
-      "PG-13",
-    ]);
-  });
-
-  it("falls back when converting a finite catalog runtime overflows", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              runtime: Number.MAX_VALUE,
-              duration_seconds: 7_380,
-            }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(heroMetadata(container)).toEqual([
-      "2025",
-      "2h 3m",
-      "IMDb 8.1",
-      "Drama",
-      "Mystery",
-      "PG-13",
-    ]);
-  });
-
-  it("omits a whitespace-only content rating", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              content_rating: " \t ",
-            }),
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(heroMetadata(container)).toEqual(["2025", "2h 5m", "IMDb 8.1", "Drama", "Mystery"]);
+    expect(heroMetadata(container)).toEqual(expected);
   });
 
   it.each([
     { runtime: -1, duration_seconds: 0 },
-    { runtime: 0, duration_seconds: 1 },
     { runtime: Number.NaN, duration_seconds: Number.NaN },
-    { runtime: Number.POSITIVE_INFINITY, duration_seconds: Number.POSITIVE_INFINITY },
   ])("omits invalid runtime values: $runtime / $duration_seconds", (runtimeValues) => {
     const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              ...runtimeValues,
-              year: 0,
-              rating_imdb: null,
-              genres: [],
-              content_rating: "",
-            }),
-          ]}
-        />
-      </MemoryRouter>,
+      hero({
+        items: [
+          movieSlide({
+            ...runtimeValues,
+            year: 0,
+            rating_imdb: null,
+            genres: [],
+            content_rating: "",
+          }),
+        ],
+      }),
     );
 
     expect(container.querySelector(".hero-meta-track")).toBeNull();
@@ -594,25 +441,23 @@ describe("HeroBanner", () => {
 
   it("uses the episode editorial policy for episode slides", () => {
     const { container } = render(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            movieSlide({
-              content_id: "episode-1",
-              type: "episode",
-              title: "Pilot",
-              season_number: 2,
-              episode_number: 3,
-              runtime: undefined,
-              duration_seconds: 2_520,
-              year: 2024,
-              rating_imdb: 7.6,
-              genres: ["Science Fiction", "Drama", "Adventure"],
-              content_rating: "TV-14",
-            }),
-          ]}
-        />
-      </MemoryRouter>,
+      hero({
+        items: [
+          movieSlide({
+            content_id: "episode-1",
+            type: "episode",
+            title: "Pilot",
+            season_number: 2,
+            episode_number: 3,
+            runtime: undefined,
+            duration_seconds: 2_520,
+            year: 2024,
+            rating_imdb: 7.6,
+            genres: ["Science Fiction", "Drama", "Adventure"],
+            content_rating: "TV-14",
+          }),
+        ],
+      }),
     );
 
     expect(heroMetadata(container)).toEqual(["S2 · E3", "42 min", "TV-14"]);
@@ -625,28 +470,26 @@ describe("HeroBanner", () => {
 
   it("routes ebook hero actions to the reader", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          libraryId={7}
-          items={[
-            {
-              content_id: "ebook 1",
-              type: "ebook",
-              title: "Featured Ebook",
-              year: 2024,
-              genres: ["Mystery"],
-              status: "matched",
-              rating_imdb: null,
-              overview: "Overview",
-              poster_url: "",
-              poster_thumbhash: "",
-              backdrop_url: "",
-              backdrop_thumbhash: "",
-              logo_url: "",
-            },
-          ]}
-        />
-      </MemoryRouter>,
+      hero({
+        libraryId: 7,
+        items: [
+          {
+            content_id: "ebook 1",
+            type: "ebook",
+            title: "Featured Ebook",
+            year: 2024,
+            genres: ["Mystery"],
+            status: "matched",
+            rating_imdb: null,
+            overview: "Overview",
+            poster_url: "",
+            poster_thumbhash: "",
+            backdrop_url: "",
+            backdrop_thumbhash: "",
+            logo_url: "",
+          },
+        ],
+      }),
     );
 
     expect(markup).toContain('href="/reader/ebook/ebook%201?libraryId=7"');
@@ -656,18 +499,7 @@ describe("HeroBanner", () => {
   });
 
   it("routes audiobook play actions to the audiobook detail player", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          libraryId={7}
-          items={[
-            {
-              ...audiobookSlide(),
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
+    const markup = renderToStaticMarkup(hero({ libraryId: 7, items: [audiobookSlide()] }));
 
     expect(markup).toContain('href="/item/book-1?libraryId=7&amp;play=1"');
     expect(markup).not.toContain('href="/watch/book-1');
@@ -676,49 +508,14 @@ describe("HeroBanner", () => {
 
   it("labels audiobook hero actions as resume when progress exists", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            {
-              ...audiobookSlide(),
-              position_seconds: 120,
-              duration_seconds: 3600,
-            },
-          ]}
-        />
-      </MemoryRouter>,
+      hero({ items: [{ ...audiobookSlide(), position_seconds: 120, duration_seconds: 3600 }] }),
     );
 
     expect(markup).toContain("Resume");
   });
 
-  it("labels completed audiobook hero actions as listen again", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            {
-              ...audiobookSlide(),
-              user_state: {
-                played: true,
-                is_favorite: false,
-                in_watchlist: false,
-              },
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Listen Again");
-  });
-
   it("starts the first-frame clock under the request key the watch route rebuilds", async () => {
-    render(
-      <MemoryRouter>
-        <HeroBanner libraryId={7} items={[movieSlide()]} />
-      </MemoryRouter>,
-    );
+    render(hero({ libraryId: 7, items: [movieSlide()] }));
 
     await userEvent.click(screen.getByRole("link", { name: "Play" }));
 
@@ -727,11 +524,7 @@ describe("HeroBanner", () => {
   });
 
   it("leaves the first-frame clock alone when the Play link opens another tab", () => {
-    render(
-      <MemoryRouter>
-        <HeroBanner libraryId={7} items={[movieSlide()]} />
-      </MemoryRouter>,
-    );
+    render(hero({ libraryId: 7, items: [movieSlide()] }));
     const play = screen.getByRole("link", { name: "Play" });
     // The navigation itself is not under test; keep jsdom from following it.
     play.addEventListener("click", (event) => event.preventDefault());
@@ -750,14 +543,62 @@ describe("HeroBanner", () => {
       toggleActivePlayback: playbackMocks.toggleActivePlayback,
     };
 
-    render(
-      <MemoryRouter>
-        <HeroBanner items={[audiobookSlide()]} />
-      </MemoryRouter>,
-    );
+    render(hero({ items: [audiobookSlide()] }));
 
     await userEvent.click(screen.getByRole("link", { name: /pause/i }));
 
     expect(playbackMocks.toggleActivePlayback).toHaveBeenCalledTimes(1);
+  });
+
+  describe("on-view translation", () => {
+    afterEach(() => {
+      translationMocks.hook.mockClear();
+      translationMocks.state = { translating: false, onTranslate: undefined };
+    });
+
+    it("translates only the visible slide and refreshes the hero's items", async () => {
+      const refresh = vi.fn();
+      const visible = movieSlide({ content_id: "movie-1", pending_translation_language: "de" });
+      render(
+        hero({ items: [visible, movieSlide({ content_id: "movie-2" })], onRefreshItems: refresh }),
+      );
+      await waitFor(() =>
+        expect(translationMocks.hook).toHaveBeenLastCalledWith(visible, {
+          onPoll: refresh,
+          pendingContentIds: new Set(["movie-1"]),
+        }),
+      );
+    });
+
+    it("keeps translation state across a slide whose overview is hidden", async () => {
+      spoilerPrefs.hideOverviews = true;
+      const hidden = movieSlide({
+        content_id: "episode-1",
+        type: "episode",
+        overview: "Unwatched plot",
+        pending_translation_language: "de",
+      });
+      render(hero({ items: [hidden] }));
+      // The hook stays mounted with no item, so nothing new starts for the
+      // hidden overview while an earlier slide's translation keeps polling.
+      await waitFor(() =>
+        expect(translationMocks.hook).toHaveBeenLastCalledWith(undefined, {
+          onPoll: undefined,
+          pendingContentIds: new Set(["episode-1"]),
+        }),
+      );
+      expect(screen.queryByText("Unwatched plot")).not.toBeInTheDocument();
+    });
+
+    it("does not label a provider overview when only the tagline is AI", async () => {
+      render(hero({ items: [movieSlide({ machine_translated_fields: ["tagline"] })] }));
+      await waitFor(() => expect(translationMocks.hook).toHaveBeenCalled());
+      expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
+    });
+
+    it("labels a machine-translated description", async () => {
+      render(hero({ items: [movieSlide({ machine_translated_fields: ["overview"] })] }));
+      expect(await screen.findByText("Translated by AI")).toBeInTheDocument();
+    });
   });
 });

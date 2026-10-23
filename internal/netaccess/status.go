@@ -179,14 +179,16 @@ func (c *StatusCache) ConnectedOrigins() []string {
 }
 
 // NormalizeOrigin reduces raw to lowercase scheme://host[:port] and reports
-// whether raw was an http(s) origin at all.
+// whether raw was an http(s) origin at all. An IPv6 zone ID (fe80::1%eth0)
+// is refused: it names an interface on this host, so no other device can use
+// the origin, and u.Host holds it unescaped, which no URL parser accepts back.
 func NormalizeOrigin(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil {
+	if err != nil || u.Host == "" || u.User != nil || strings.Contains(u.Host, "%") {
 		return "", false
 	}
 	scheme := strings.ToLower(u.Scheme)

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -91,6 +92,9 @@ type Service struct {
 	launchGroup      singleflight.Group
 	runtimeRefreshMu sync.RWMutex
 	resident         *ResidentSupervisor
+	// lazyStartFailures records failed launches of non-resident plugins for
+	// the admin runtime state; see RuntimeState.
+	lazyStartFailures lazyStartFailures
 	// lifecycleBus, when set by PublishLifecycleChanges, carries every
 	// lifecycle change to the proxy nodes running the same installations.
 	lifecycleBus cache.EventBus
@@ -409,7 +413,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("binary data is required")
 	}
 
-	manifest, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +422,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	var result *InstallResult
 	if s.installations == nil {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -431,7 +435,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("list existing plugin installations for %q: %w", manifest.GetPluginId(), err)
 	}
 	if len(existing) == 0 {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +448,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, nil)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -511,13 +515,14 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		if installation == nil {
 			continue
 		}
-		// Builtin installations have no archive or binary; skip them explicitly
-		// instead of leaning on the tolerated ErrArchiveNotFound branch below
-		// (any other load error here is fatal to startup).
+		// Builtin installations have no archive or binary.
 		if installation.IsBuiltin() {
 			continue
 		}
 		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			if errors.Is(err, ErrArchiveNotFound) {
 				slog.WarnContext(ctx,
 					"plugin preload skipped: archive not found for enabled installation", "component", "plugins",
@@ -527,7 +532,17 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 				)
 				continue
 			}
-			return fmt.Errorf("preload plugin installation %d: %w", installation.ID, err)
+			// One plugin whose stored archive no longer verifies must not
+			// keep the server from starting; a fresh node loads every plugin
+			// from its archive, so a fatal error here would crash-loop it.
+			// The plugin stays unavailable and its RPCs report the same error.
+			slog.ErrorContext(ctx,
+				"plugin preload failed; continuing without it", "component", "plugins",
+				"installation_id", installation.ID,
+				"plugin_id", installation.PluginID,
+				"version", installation.Version,
+				"error", err,
+			)
 		}
 	}
 	s.OnLifecycleChange(ctx)
@@ -540,12 +555,37 @@ func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, 
 	return s.start(ctx, installationID, true)
 }
 
-func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
-	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
+func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (client pluginClient, err error) {
+	installation, err := s.loadInstallation(ctx, installationID, true)
 	if err != nil {
+		// No launch was attempted: a disabled, missing or unreadable row says
+		// nothing about whether the plugin can start.
+		return nil, err
+	}
+	// Record why a lazy launch failed, including an archive or config that
+	// cannot be loaded, so the admin API can show a plugin that cannot start.
+	// The failure is tied to the snapshot that was tried, not re-read, so an
+	// update that lands mid-launch is not marked failed. The supervisor
+	// reports failures of the resident plugins it launches itself; a refused
+	// resident says nothing about the plugin.
+	var manifest *pluginv1.PluginManifest
+	refusedResident := false
+	defer func() {
+		supervised := allowResident && (manifest == nil || isResidentManifest(manifest))
+		switch {
+		case err == nil:
+			s.lazyStartFailures.clear(installationID)
+		case !supervised && !refusedResident:
+			s.lazyStartFailures.record(installation, err)
+		}
+	}()
+	manifest, err = s.ensureLoadedInstallation(ctx, installation)
+	if err != nil {
+		manifest = nil
 		return nil, err
 	}
 	if !allowResident && isResidentManifest(manifest) {
+		refusedResident = true
 		return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
 	}
 	configEntries, err := s.globalConfigEntries(ctx, installation.ID)
@@ -852,7 +892,12 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int, 
 	if err != nil {
 		return nil, err
 	}
-	return v.(pluginClient), nil
+	// A Host that reports success without a client leaves v nil.
+	client, ok := v.(pluginClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: plugin installation %d started without a client", pluginhost.ErrPluginUnhealthy, installationID)
+	}
+	return client, nil
 }
 
 func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
@@ -891,7 +936,9 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 			)
 			return client, nil
 		}
-		if cachedManifest != nil && proto.Equal(cachedManifest, installedManifest) {
+		// Compared without fields and enum values from a newer SDK, as the
+		// host compares them at start.
+		if cachedManifest != nil && proto.Equal(pluginhost.KnownManifest(cachedManifest), pluginhost.KnownManifest(installedManifest)) {
 			return client, nil
 		}
 		slog.WarnContext(ctx, "plugin client manifest drift detected; restarting", "component", "plugins",

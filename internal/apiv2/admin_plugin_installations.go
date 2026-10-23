@@ -57,12 +57,12 @@ type AdminPluginPresentation struct {
 	Summary             string `json:"summary"`
 	DescriptionMarkdown string `json:"description_markdown"`
 	SetupMarkdown       string `json:"setup_markdown"`
-	HomepageURL         string `json:"homepage_url"`
-	SourceURL           string `json:"source_url"`
-	SupportURL          string `json:"support_url"`
-	ChangelogURL        string `json:"changelog_url"`
+	HomepageURL         string `json:"homepage_url" format:"uri-reference"`
+	SourceURL           string `json:"source_url" format:"uri-reference"`
+	SupportURL          string `json:"support_url" format:"uri-reference"`
+	ChangelogURL        string `json:"changelog_url" format:"uri-reference"`
 	PublisherName       string `json:"publisher_name"`
-	PublisherURL        string `json:"publisher_url"`
+	PublisherURL        string `json:"publisher_url" format:"uri-reference"`
 	LicenseSPDX         string `json:"license_spdx"`
 }
 type AdminFormOption struct {
@@ -133,9 +133,19 @@ type AdminPluginCapability struct {
 	// SignInMode, CallbackURL and PostLogoutRedirectURL describe an
 	// auth_provider.v1 capability whether or not a binding row exists yet,
 	// so the admin page can show a fresh installation's registration URLs.
-	SignInMode            string  `json:"sign_in_mode,omitempty" enum:"oauth,credentials,network" doc:"How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types" example:"oauth"`
-	CallbackURL           *string `json:"callback_url,omitempty" doc:"On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
-	PostLogoutRedirectURL *string `json:"post_logout_redirect_url,omitempty" doc:"On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/login"`
+	SignInMode            string                    `json:"sign_in_mode,omitempty" enum:"oauth,credentials,network" doc:"How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types" example:"oauth"`
+	CallbackURL           *string                   `json:"callback_url,omitempty" format:"uri-reference" doc:"On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	PostLogoutRedirectURL *string                   `json:"post_logout_redirect_url,omitempty" format:"uri-reference" doc:"On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/login"`
+	RequestRouter         *AdminPluginRequestRouter `json:"request_router,omitempty" doc:"On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types"`
+}
+
+// AdminPluginRequestRouter says which request server fields a
+// request_router.v1 plugin can do without, from its manifest. Both are false
+// for a plugin that declares neither, including every plugin built before
+// the flags existed.
+type AdminPluginRequestRouter struct {
+	APIKeyOptional  bool `json:"api_key_optional" doc:"The plugin works without an API key: a request server for it can be saved and tested without one, and gets requests without one"`
+	BaseURLOptional bool `json:"base_url_optional" doc:"The plugin works without a base URL: a request server for it can be saved and tested without one"`
 }
 type AdminPluginConfigValue struct {
 	Key               string          `json:"key"`
@@ -150,8 +160,8 @@ type AdminPluginAuthBinding struct {
 	DefaultLogin  bool   `json:"default_login"`
 	// CallbackURL and PostLogoutRedirectURL are what the administrator
 	// registers at an OAuth provider for this binding.
-	CallbackURL           string  `json:"callback_url" doc:"Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
-	PostLogoutRedirectURL string  `json:"post_logout_redirect_url" doc:"Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/login"`
+	CallbackURL           string  `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	PostLogoutRedirectURL string  `json:"post_logout_redirect_url" format:"uri-reference" doc:"Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/login"`
 	CreatedAt             Instant `json:"created_at"`
 	UpdatedAt             Instant `json:"updated_at"`
 }
@@ -168,10 +178,10 @@ type AdminPluginCatalogEntry struct {
 	RepositoryID       ID                        `json:"repository_id"`
 	PluginID           string                    `json:"plugin_id"`
 	Version            string                    `json:"version"`
-	ArchiveURL         string                    `json:"archive_url"`
+	ArchiveURL         string                    `json:"archive_url" format:"uri-reference"`
 	SourceKind         string                    `json:"source_kind" enum:"silo,approved_community,external"`
 	RepositoryName     string                    `json:"repository_name"`
-	RepoURL            string                    `json:"repo_url,omitempty"`
+	RepoURL            string                    `json:"repo_url,omitempty" doc:"Source repository the catalog lists for the plugin; not validated as a URI"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
 	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
@@ -186,10 +196,12 @@ type AdminPluginCatalogEntry struct {
 // access provider) is supervised: started at boot, restarted after a crash
 // with exponential backoff, and parked as failed after repeated failures
 // until an administrator restarts or reconfigures it. Other plugins start on
-// first use and report only running or stopped.
+// first use and report running, stopped, or failed when their last launch on
+// this server failed (with last_error); a later successful launch, an
+// administrator restart, an update or a configuration change clears the failure.
 type AdminPluginRuntime struct {
 	Resident      bool     `json:"resident" doc:"True when the server supervises this plugin's process"`
-	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; backoff and failed occur only for resident plugins"`
+	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed"`
 	RestartCount  int      `json:"restart_count" doc:"Automatic restarts since the plugin last ran stably or was restarted by an administrator"`
 	LastError     string   `json:"last_error,omitempty" doc:"Why the process last stopped or failed to start"`
 	LastStartedAt *Instant `json:"last_started_at,omitempty"`
@@ -210,7 +222,7 @@ type AdminPluginInstallation struct {
 	AvailableVersion   string                    `json:"available_version,omitempty"`
 	SourceKind         string                    `json:"source_kind" enum:"silo,approved_community,external"`
 	RepositoryName     string                    `json:"repository_name,omitempty"`
-	RepoURL            string                    `json:"repo_url,omitempty"`
+	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
 	UpdatesPaused      bool                      `json:"updates_paused"`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
@@ -303,6 +315,12 @@ func adminPluginCapabilitiesOf(views []handlers.PluginCapabilityView) ([]AdminPl
 		capability := AdminPluginCapability{Type: v.Type, ID: v.ID, DisplayName: v.DisplayName, Description: v.Description, Subscriptions: NonNil(v.Subscriptions), ConfigSchema: schemas, Metadata: NonNilMap(PluginJSONValue(v.Metadata))}
 		if v.Type == sdkcapability.AuthProvider {
 			capability.SignInMode = auth.ProviderModeForAuthModes(v.AuthModes)
+		}
+		if v.Type == sdkcapability.RequestRouter {
+			capability.RequestRouter = &AdminPluginRequestRouter{
+				APIKeyOptional:  v.RequestRouter.GetApiKeyOptional(),
+				BaseURLOptional: v.RequestRouter.GetBaseUrlOptional(),
+			}
 		}
 		out = append(out, capability)
 	}

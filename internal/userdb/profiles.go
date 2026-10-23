@@ -2,10 +2,9 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -101,7 +100,7 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.PINRevision, &p.CreatedAt, &p.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -152,8 +151,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 }
 
 // UpdateProfile applies partial updates to a profile. Only non-nil fields
-// in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
-// before storage.
+// in the UpdateProfileInput are changed.
 func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -179,19 +177,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 		setClauses = append(setClauses, "avatar = ?")
 		args = append(args, *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, "")
-		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, string(hash))
-		}
+	if u.PINHash != nil {
+		setClauses = append(setClauses, "pin_hash = ?")
+		args = append(args, *u.PINHash)
 		// The profiles_pin_revision trigger advances pin_revision whenever
 		// pin_hash changes, which invalidates every token minted for the old
 		// PIN, and only this profile's.
@@ -301,8 +289,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 	return nil
 }
 
-// DeleteProfile removes a profile and cascades deletion to favorites,
-// watchlist, watch_progress, and personal_collections (plus their items).
+// DeleteProfile removes a profile and every row of its own: lists, watch
+// progress and history, preferences, settings and personal collections
+// (plus their items), matching the Postgres store.
 func DeleteProfile(db *sql.DB, id string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -330,7 +319,11 @@ func DeleteProfile(db *sql.DB, id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
-	if _, err := tx.Exec(`DELETE FROM personal_collection_profiles WHERE profile_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`
+		DELETE FROM personal_collection_profiles
+		WHERE profile_id = ? OR collection_id IN (
+			SELECT id FROM personal_collections WHERE creator_profile_id = ?
+		)`, id, id); err != nil {
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
@@ -340,12 +333,22 @@ func DeleteProfile(db *sql.DB, id string) error {
 	cascadeTables := []string{
 		"favorites",
 		"watchlist",
+		"not_interested",
 		"watch_progress",
+		"watch_history",
+		"hidden_history_items",
+		"home_item_dismissals",
 		"collection_sort_preferences",
 		"personal_collections",
 		"profile_allowed_libraries",
+		sqliteAudioPreferencesTable,
+		sqliteSubtitlePreferencesTable,
 		"series_playback_preferences",
 		"library_playback_preferences",
+		"profile_onboarding",
+		"profile_section_overrides",
+		"user_devices",
+		"user_device_settings",
 		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
@@ -356,6 +359,12 @@ func DeleteProfile(db *sql.DB, id string) error {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, column), id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
+	}
+
+	// Jellyfin display preferences carry the profile in their key.
+	prefix := userstore.ProfileDisplayPrefsPrefix(id)
+	if _, err := tx.Exec(`DELETE FROM jellycompat_displayprefs WHERE substr(prefs_id, 1, length(?)) = ?`, prefix, prefix); err != nil {
+		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
 	}
 
 	// Delete the profile itself.
@@ -372,30 +381,4 @@ func DeleteProfile(db *sql.DB, id string) error {
 	}
 
 	return tx.Commit()
-}
-
-// VerifyPIN checks a plaintext PIN against the bcrypt hash stored for a
-// profile. Returns true if the PIN matches, false otherwise. Returns an
-// error if the profile is not found or has no PIN set.
-func VerifyPIN(db *sql.DB, profileID string, pin string) (bool, error) {
-	var pinHash string
-	err := db.QueryRow("SELECT pin_hash FROM profiles WHERE id = ?", profileID).Scan(&pinHash)
-	if err == sql.ErrNoRows {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }

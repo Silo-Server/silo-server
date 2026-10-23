@@ -22,15 +22,15 @@ type LibraryViewInput struct {
 
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
-	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	ArtworkQuery
 }
 
 // LibrarySectionItemsInput is the getLibrarySectionItems query.
 type LibrarySectionItemsInput struct {
 	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
 	SectionID string `path:"section_id" minLength:"1" doc:"Section identifier from the layout" example:"recently_added"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // SectionLayoutEntry is one section of a page layout, without items.
@@ -95,11 +95,11 @@ type CuratedCollection struct {
 	SortOrder         int             `json:"sort_order" example:"0"`
 	GroupID           *string         `json:"group_id" doc:"null when ungrouped"`
 	Featured          bool            `json:"featured" example:"false"`
-	PosterURL         string          `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
-	BackdropURL       string          `json:"backdrop_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL         string          `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	BackdropURL       string          `json:"backdrop_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
-	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from; empty otherwise"`
+	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI"`
 	QueryDefinition   json.RawMessage `json:"query_definition" doc:"Smart collection query; null when not a smart collection"`
 	SortConfig        json.RawMessage `json:"sort_config" doc:"Sort configuration document; null when default"`
 	SourceConfig      json.RawMessage `json:"source_config" doc:"Import source configuration; null when not imported"`
@@ -121,7 +121,7 @@ type CuratedCollection struct {
 type LibraryCollectionCard struct {
 	ID               string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
 	Title            string  `json:"title" example:"Oscar Winners"`
-	PosterURL        string  `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL        string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	ItemCount        int     `json:"item_count" example:"12"`
 	Featured         bool    `json:"featured,omitempty"`
@@ -166,7 +166,7 @@ type UserCollection struct {
 	Description      string  `json:"description,omitempty"`
 	CollectionType   string  `json:"collection_type" example:"manual"`
 	ItemCount        int     `json:"item_count" example:"4"`
-	PosterURL        string  `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterURL        string  `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	PosterIsCollage  bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt        Instant `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
@@ -219,12 +219,8 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func sectionViewer(ctx context.Context, imageSize string) handlers.SectionViewer {
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}
+func sectionViewer(ctx context.Context, art imagesize.Request) handlers.SectionViewer {
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -288,7 +284,7 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -312,7 +308,7 @@ func (reg *Registry) getLibrarySectionItems(ctx context.Context, in *LibrarySect
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

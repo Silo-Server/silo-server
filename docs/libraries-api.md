@@ -4,14 +4,15 @@ The native v2 library administration operations are acting-admin operations. The
 complete request and response schemas are generated in `contracts/api/v2/openapi.json`.
 The frozen v1 bridge keeps its existing responses.
 
-`GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`, and
-`GET /api/v2/libraries/stale-ids` return `{items, page, total}` collections, where `total`
+`GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`,
+`GET /api/v2/libraries/stale-ids`, and `GET /api/v2/libraries/unmatched-items` return
+`{items, page, total}` collections, where `total`
 counts the matches across every page. `limit` defaults to 50 and is
 at most 200. Continue with `page.next_cursor` while `page.has_more` is true. A cursor
 is bound to the acting administrator and query filters; changing a filter starts a
 new listing without a cursor.
 
-All three operations accept a trimmed, case-insensitive substring query `q`. Search
+All four operations accept a trimmed, case-insensitive substring query `q`. Search
 runs before database pagination, so a match can be found without loading preceding
 pages. Percent signs and underscores are literal characters.
 
@@ -20,14 +21,48 @@ pages. Percent signs and underscores are literal characters.
 | Roots | Root path, title, sample file path | Required `library_id`; optional `state` |
 | Skipped roots | Root path, library name, reason | None |
 | Stale IDs | Title, provider, provider ID, library name | Actionable provider IDs only |
+| Unmatched items | Title, type, status, library name | Optional `ignored` |
 
 The web administration page loads diagnostics when their section opens. It requests
 more results through **Load more** and starts a new first page when the search changes.
+Unmatched items are the exception: they load with the page, for the section's count,
+and page through a page bar.
 Sorting controls on diagnostic tables sort the loaded results.
 
 Library poster uploads allow a file of up to 10 MiB plus 1 MiB of multipart framing.
 The file limit is checked separately from the total request size. Accepted library
 deletion and metadata-refresh jobs return their canonical job URI in `Location`.
+
+## Unmatched items
+
+`GET /api/v2/libraries/unmatched-items` (`listUnmatchedItems`) lists the items still
+`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items an
+administrator marked as intentionally unmatched; with `ignored=true` it lists only
+those, each with `ignored_at`. The cursor is bound to `q` and `ignored`. The frozen v1
+listing also leaves ignored items out; its response shape is unchanged.
+
+`PUT /api/v2/libraries/unmatched-items/{content_id}/ignore` (`ignoreUnmatchedItem`)
+marks a movie or series as intentionally unmatched, for media no provider lists. It
+answers `204`. Only an `unmatched`, `pending`, or `ambiguous` movie or series can be
+ignored; a matched item or a book answers `409 conflict` (books keep their own
+enrichment), and an unknown item `404`. Ignoring an ignored item again keeps its first
+`ignored_at`. While the mark is set, automatic matching skips the item: the matcher
+queues drop its files, a scan neither retries it nor reports it as still unmatched, a
+library refresh leaves it out, an item refresh completes without changes, and a season
+or episode refresh stops before any provider search and counts as a failed attempt. The
+item stays in its library and playable with its local metadata. Match Item
+still works, and a successful match clears the mark. A root override saved for an
+ignored item waits: the matcher applies it only after the item is restored, when it
+matches the item's queued files again. Match Item is the way to give an ignored item a
+provider identity directly.
+
+`DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore`
+(`unignoreUnmatchedItem`) clears the mark and answers `204`; an item without the mark is
+left as it is, and an unknown one answers `404`. The item returns to the listing and its
+files are queued for matching again.
+
+The mark lives on the item, and an unmatched item's `local-` ID comes from its file
+path, so a renamed or moved file comes back as a new unmatched item.
 
 ## Real-time monitoring
 
@@ -65,8 +100,8 @@ is ignored. `state` is the first that applies:
 
 `GET /api/v2/libraries/capabilities` (`getLibraryCapabilities`, administrators
 only) is the feature-detection document for these library features; it answers
-`realtime_monitoring: true` and `trickplay: true` alongside the common capability
-members. `trickplay_supported` reports whether public asset storage is configured,
+`realtime_monitoring: true`, `trickplay: true`, and `ignore_unmatched: true` (the
+unmatched-item ignore operations above) alongside the common capability members. `trickplay_supported` reports whether public asset storage is configured,
 so administrators can enable seek previews when creating the first library.
 
 Scans the monitor queues carry the trigger `realtime_monitor`.

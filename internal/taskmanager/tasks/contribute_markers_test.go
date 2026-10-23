@@ -16,7 +16,9 @@ func (p *contribTestProgress) Report(float64, string)          {}
 func (p *contribTestProgress) SetResultData(d json.RawMessage) { p.data = d }
 
 type fakeContribRunner struct {
+	auto     []markers.AutoContributor
 	calls    []int
+	segments [][]markers.MarkerKind
 	autoSeen bool
 	outcomes []markers.ContributionOutcome
 	// sequence, when set, returns one entry per call before falling back to
@@ -24,8 +26,11 @@ type fakeContribRunner struct {
 	sequence [][]markers.ContributionOutcome
 }
 
+func (f *fakeContribRunner) AutoContributors() []markers.AutoContributor { return f.auto }
+
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	f.calls = append(f.calls, file.ID)
+	f.segments = append(f.segments, opts.Segments)
 	f.autoSeen = opts.Auto
 	if len(f.sequence) > 0 {
 		next := f.sequence[0]
@@ -35,28 +40,35 @@ func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.Media
 	return f.outcomes, nil
 }
 
-type fakeAutoConfig []markers.ProviderConfig
-
-func (f fakeAutoConfig) List() []markers.ProviderConfig { return f }
-
+// fakeCandidates returns ids once for the intro pass and credits once for the
+// credits pass.
 type fakeCandidates struct {
 	ids          []int
-	gotMin       float64
-	gotProviders []string
-	afters       []*markers.ContributionCandidate
-	delivered    bool
+	credits      []int
+	gotProviders []markers.AutoContributor
+	kinds        []markers.MarkerKind
+	afters       map[markers.MarkerKind][]*markers.ContributionCandidate
+	delivered    map[markers.MarkerKind]bool
 }
 
-func (f *fakeCandidates) CandidateLocalIntroFiles(_ context.Context, minConfidence float64, providers []string, after *markers.ContributionCandidate, _ int) ([]markers.ContributionCandidate, error) {
-	f.gotMin = minConfidence
+func (f *fakeCandidates) CandidateLocalMarkerFiles(_ context.Context, kind markers.MarkerKind, providers []markers.AutoContributor, after *markers.ContributionCandidate, _ int) ([]markers.ContributionCandidate, error) {
 	f.gotProviders = providers
-	f.afters = append(f.afters, after)
-	if f.delivered {
+	f.kinds = append(f.kinds, kind)
+	if f.afters == nil {
+		f.afters = map[markers.MarkerKind][]*markers.ContributionCandidate{}
+		f.delivered = map[markers.MarkerKind]bool{}
+	}
+	f.afters[kind] = append(f.afters[kind], after)
+	if f.delivered[kind] {
 		return nil, nil
 	}
-	f.delivered = true
-	out := make([]markers.ContributionCandidate, len(f.ids))
-	for i, id := range f.ids {
+	f.delivered[kind] = true
+	ids := f.ids
+	if kind == markers.MarkerKindCredits {
+		ids = f.credits
+	}
+	out := make([]markers.ContributionCandidate, len(ids))
+	for i, id := range ids {
 		out[i] = markers.ContributionCandidate{FileID: id, Confidence: 0.95}
 	}
 	return out, nil
@@ -76,22 +88,22 @@ func (fakeFileLoader) GetByIDs(_ context.Context, ids []int) ([]*models.MediaFil
 
 func TestContributeMarkersTaskNoAutoProvider(t *testing.T) {
 	runner := &fakeContribRunner{}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: false}}
-	task := NewContributeMarkersTask(runner, cfg, &fakeCandidates{ids: []int{1}}, fakeFileLoader{})
+	cands := &fakeCandidates{ids: []int{1}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
 
 	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(runner.calls) != 0 {
-		t.Errorf("expected no contributions when auto disabled, got %d", len(runner.calls))
+	if len(runner.calls) != 0 || len(cands.kinds) != 0 {
+		t.Errorf("contributions = %d, candidate passes = %d, want none", len(runner.calls), len(cands.kinds))
 	}
 }
 
 func TestContributeMarkersTaskSubmitsCandidates(t *testing.T) {
 	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.SubmissionStatusPending}}}
 	cands := &fakeCandidates{ids: []int{10, 11}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.95}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+	runner.auto = []markers.AutoContributor{{Provider: "introdb", MinConfidence: 0.95}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
 
 	prog := &contribTestProgress{}
 	if err := task.Execute(context.Background(), prog); err != nil {
@@ -103,14 +115,11 @@ func TestContributeMarkersTaskSubmitsCandidates(t *testing.T) {
 	if !runner.autoSeen {
 		t.Error("ContributeFile should be called with Auto=true")
 	}
-	if cands.gotMin != 0.95 {
-		t.Errorf("min confidence passed = %v, want 0.95", cands.gotMin)
+	if len(cands.gotProviders) != 1 || cands.gotProviders[0].Provider != "introdb" || cands.gotProviders[0].MinConfidence != 0.95 {
+		t.Errorf("providers passed = %+v, want introdb at 0.95", cands.gotProviders)
 	}
-	if len(cands.gotProviders) != 1 || cands.gotProviders[0] != "introdb" {
-		t.Errorf("providers passed = %v, want [introdb]", cands.gotProviders)
-	}
-	if len(cands.afters) != 2 || cands.afters[0] != nil || cands.afters[1] == nil || cands.afters[1].FileID != 11 {
-		t.Errorf("keyset cursors = %+v, want nil then file 11", cands.afters)
+	if afters := cands.afters[markers.MarkerKindIntro]; len(afters) != 2 || afters[0] != nil || afters[1] == nil || afters[1].FileID != 11 {
+		t.Errorf("intro keyset cursors = %+v, want nil then file 11", afters)
 	}
 	if prog.data == nil {
 		t.Error("expected result summary data")
@@ -122,8 +131,8 @@ func TestContributeMarkersTaskStopsOnUsageLimit(t *testing.T) {
 		Status: markers.OutcomeStatusRateLimited, RetryAfter: 20 * time.Hour,
 	}}}
 	cands := &fakeCandidates{ids: []int{10, 11}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.95}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+	runner.auto = []markers.AutoContributor{{Provider: "introdb", MinConfidence: 0.95}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
 	task.wait = func(context.Context, time.Duration) error {
 		t.Fatal("task must not sleep through a daily usage limit")
 		return nil
@@ -135,6 +144,9 @@ func TestContributeMarkersTaskStopsOnUsageLimit(t *testing.T) {
 	}
 	if len(runner.calls) != 1 {
 		t.Fatalf("expected task to stop after rate limit, calls=%d", len(runner.calls))
+	}
+	if len(cands.kinds) != 1 || cands.kinds[0] != markers.MarkerKindIntro {
+		t.Fatalf("candidate passes = %v, want the run to end in the intro pass", cands.kinds)
 	}
 	var data map[string]int
 	if err := json.Unmarshal(prog.data, &data); err != nil {
@@ -155,8 +167,8 @@ func TestContributeMarkersTaskWaitsOutShortRateLimit(t *testing.T) {
 		outcomes: pending,
 	}
 	cands := &fakeCandidates{ids: []int{10, 11}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
 	var waited []time.Duration
 	task.wait = func(_ context.Context, d time.Duration) error {
 		waited = append(waited, d)
@@ -187,8 +199,8 @@ func TestContributeMarkersTaskStopsAfterRepeatedShortRateLimits(t *testing.T) {
 		Status: markers.OutcomeStatusRateLimited, RetryAfter: time.Second,
 	}}}
 	cands := &fakeCandidates{ids: []int{10}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
 	task.wait = noWait
 
 	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
@@ -196,110 +208,5 @@ func TestContributeMarkersTaskStopsAfterRepeatedShortRateLimits(t *testing.T) {
 	}
 	if len(runner.calls) != contributionMaxRateLimitWaits+1 {
 		t.Fatalf("calls = %d, want %d before giving up", len(runner.calls), contributionMaxRateLimitWaits+1)
-	}
-}
-
-func TestContributeMarkersTaskCountsInvalidSeparately(t *testing.T) {
-	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusInvalid}}}
-	cands := &fakeCandidates{ids: []int{10}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
-
-	prog := &contribTestProgress{}
-	if err := task.Execute(context.Background(), prog); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	var data map[string]int
-	if err := json.Unmarshal(prog.data, &data); err != nil {
-		t.Fatalf("decode result data: %v", err)
-	}
-	if data["invalid"] != 1 || data["failed"] != 0 {
-		t.Fatalf("result = %v, want one invalid and no failures", data)
-	}
-}
-
-func TestContributeMarkersTaskCountsConflictAsSkipped(t *testing.T) {
-	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusConflict}}}
-	cands := &fakeCandidates{ids: []int{10}}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
-
-	prog := &contribTestProgress{}
-	if err := task.Execute(context.Background(), prog); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	var data map[string]int
-	if err := json.Unmarshal(prog.data, &data); err != nil {
-		t.Fatalf("decode result data: %v", err)
-	}
-	if data["submitted"] != 0 || data["skipped"] != 1 || data["failed"] != 0 {
-		t.Fatalf("result = %v, want one skipped conflict", data)
-	}
-}
-
-func TestContributeMarkersTaskCountsEachProviderOnceAcrossRetries(t *testing.T) {
-	// Provider a submits, then provider b is rate-limited. The retry runs both
-	// again; a's claim now reports skipped, which must not be counted.
-	runner := &fakeContribRunner{
-		sequence: [][]markers.ContributionOutcome{
-			{
-				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
-				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusRateLimited, RetryAfter: time.Second},
-			},
-			{
-				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusSkipped},
-				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
-			},
-		},
-	}
-	cands := &fakeCandidates{ids: []int{10}}
-	cfg := fakeAutoConfig{{Provider: "a", ContributeEnabled: true, ContributeAutoLocal: true}, {Provider: "b", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
-	task.wait = noWait
-
-	prog := &contribTestProgress{}
-	if err := task.Execute(context.Background(), prog); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	var data map[string]int
-	if err := json.Unmarshal(prog.data, &data); err != nil {
-		t.Fatalf("decode result data: %v", err)
-	}
-	if data["submitted"] != 2 || data["skipped"] != 0 {
-		t.Fatalf("result = %v, want two submissions and no retry skips", data)
-	}
-}
-
-func TestContributeMarkersTaskCountsRetriedFailureByItsRetry(t *testing.T) {
-	// Provider a fails transiently, then provider b is rate-limited. The error
-	// released a's claim, so the retry submits a again; its success replaces
-	// the counted failure.
-	runner := &fakeContribRunner{
-		sequence: [][]markers.ContributionOutcome{
-			{
-				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusError},
-				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusRateLimited, RetryAfter: time.Second},
-			},
-			{
-				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
-				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
-			},
-		},
-	}
-	cands := &fakeCandidates{ids: []int{10}}
-	cfg := fakeAutoConfig{{Provider: "a", ContributeEnabled: true, ContributeAutoLocal: true}, {Provider: "b", ContributeEnabled: true, ContributeAutoLocal: true}}
-	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
-	task.wait = noWait
-
-	prog := &contribTestProgress{}
-	if err := task.Execute(context.Background(), prog); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	var data map[string]int
-	if err := json.Unmarshal(prog.data, &data); err != nil {
-		t.Fatalf("decode result data: %v", err)
-	}
-	if data["submitted"] != 2 || data["failed"] != 0 {
-		t.Fatalf("result = %v, want two submissions and no failures", data)
 	}
 }

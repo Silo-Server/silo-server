@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -36,58 +36,63 @@ export function StreamBitrateLimitInput({
   id,
   label,
   value,
-  invalidDraft,
   onValueChange,
+  invalidDraft,
   onInvalidDraftChange,
   disabled = false,
 }: {
   id: string;
   label: string;
   value: number | null;
-  // Custom text that did not parse, kept by the form so it survives the
-  // Limits tab unmounting. Undefined means the current value is saveable.
-  invalidDraft?: string;
   onValueChange: (kbps: number | null) => void;
+  // The invalid custom text left behind when the input last unmounted, or
+  // undefined. The input reopens on Custom with that text instead of `value`,
+  // except that an empty draft with no value reopens with nothing picked.
+  invalidDraft?: string;
+  // Reports the custom text while it holds no valid value, and undefined once
+  // it does or another choice is picked.
   onInvalidDraftChange?: (draft: string | undefined) => void;
   disabled?: boolean;
 }) {
   const [choice, setChoice] = useState(() =>
-    invalidDraft !== undefined ? CUSTOM : choiceFor(value),
+    invalidDraft !== undefined && (invalidDraft !== "" || value !== null)
+      ? CUSTOM
+      : choiceFor(value),
   );
-  const [draft, setDraft] = useState(() =>
-    invalidDraft !== undefined
-      ? invalidDraft
-      : value !== null && choiceFor(value) === CUSTOM
-        ? streamBitrateLimitMbpsText(value)
-        : "",
+  const [draft, setDraft] = useState(
+    () =>
+      invalidDraft ??
+      (value !== null && choiceFor(value) === CUSTOM ? streamBitrateLimitMbpsText(value) : ""),
   );
   const custom = choice === CUSTOM;
   const draftValue = parseStreamBitrateMbps(draft);
+  const draftRef = useRef<HTMLInputElement>(null);
+
+  // Surrounding forms block submission on this, so native validation and the
+  // parser can't disagree about what is saveable, including for a draft
+  // restored on mount.
+  useLayoutEffect(() => {
+    draftRef.current?.setCustomValidity(draftValue === null ? INVALID_STREAM_BITRATE_MBPS : "");
+  }, [custom, draftValue]);
 
   function handleChoiceChange(next: string) {
     if (next === "") return;
     setChoice(next);
     if (next !== CUSTOM) {
-      onInvalidDraftChange?.(undefined);
       onValueChange(Number(next));
+      onInvalidDraftChange?.(undefined);
       return;
     }
     // Start from the current cap so picking Custom alone changes nothing.
     const seed = value !== null && value > 0 ? streamBitrateLimitMbpsText(value) : "";
-    setDraft(seed);
-    const parsed = parseStreamBitrateMbps(seed);
-    onInvalidDraftChange?.(parsed === null ? seed : undefined);
-    onValueChange(parsed);
+    handleDraftChange(seed);
   }
 
-  function handleDraftChange(input: HTMLInputElement) {
-    const parsed = parseStreamBitrateMbps(input.value);
-    // Surrounding forms block submission on this, so native validation and the
-    // parser can't disagree about what is saveable.
-    input.setCustomValidity(parsed === null ? INVALID_STREAM_BITRATE_MBPS : "");
-    setDraft(input.value);
-    onInvalidDraftChange?.(parsed === null ? input.value : undefined);
+  function handleDraftChange(raw: string) {
+    const parsed = parseStreamBitrateMbps(raw);
+    setDraft(raw);
     onValueChange(parsed);
+    onInvalidDraftChange?.(parsed === null ? raw : undefined);
   }
 
   return (
@@ -110,18 +115,15 @@ export function StreamBitrateLimitInput({
         {custom && (
           <div className="relative min-w-0 flex-1">
             <Input
+              ref={draftRef}
               aria-label={`${label} in Mbps`}
               inputMode="decimal"
               autoComplete="off"
               required
-              ref={(input) => {
-                if (input && draftValue === null)
-                  input.setCustomValidity(INVALID_STREAM_BITRATE_MBPS);
-              }}
               aria-invalid={draft !== "" && draftValue === null}
               placeholder="e.g. 1.5"
               value={draft}
-              onChange={(event) => handleDraftChange(event.target)}
+              onChange={(event) => handleDraftChange(event.target.value)}
               className="pr-14"
             />
             <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">

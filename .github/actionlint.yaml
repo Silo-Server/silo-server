@@ -1,0 +1,6 @@
+# These five trusted-tool checkouts use job.workflow_sha, which the runner
+# provides but actionlint 1.7.12 does not yet include in its job context model.
+paths:
+  .github/workflows/trusted-linux-ci.yml:
+    ignore:
+      - '^property "workflow_sha" is not defined in object type \{check_run_id: number; container: \{id: string; network: string\}; services: \{string => \{id: string; network: string; ports: \{string => string\}\}\}; status: string\}$'

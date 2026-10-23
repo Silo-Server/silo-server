@@ -73,6 +73,10 @@ type Config struct {
 	// artifact or hash.
 	HWAccel  string
 	HWDevice string
+
+	// attemptTimeout, when positive, replaces every analysis run's deadline
+	// (see analysisDeadline). Tests set it.
+	attemptTimeout time.Duration
 }
 
 // Intro duration bounds for a Chromaprint match. Twelve seconds keeps most

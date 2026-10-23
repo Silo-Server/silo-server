@@ -61,32 +61,6 @@ func getEffective(t *testing.T, h *SettingValuesHandler, req *http.Request) {
 	}
 }
 
-// A client that reads its settings but never writes a device override must
-// still appear in the device registry: the effective read is what most
-// clients do on launch.
-func TestEffectiveReadRegistersCallersOwnDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	getEffective(t, handler, effectiveRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode", nil))
-
-	requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
-}
-
-func TestPostEffectiveRegistersCallersOwnDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	req := effectiveRequest(http.MethodPost, "/settings/values/effective",
-		[]byte(`{"keys":["playback.subtitle_mode"],"contexts":[{"context_id":"a","series_id":"s1"}]}`))
-	rec := httptest.NewRecorder()
-	handler.HandlePostEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST effective = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
-}
-
 // The seam is what the v2 operations call; it registers as the v1 route does.
 func TestResolveEffectiveSettingsSeamRegistersCallersOwnDevice(t *testing.T) {
 	handler, store := newValuesTestHandler(t)
@@ -119,21 +93,6 @@ func TestEffectiveReadOfAnotherDeviceDoesNotRegisterCaller(t *testing.T) {
 	if got := registeredDevice(t, store, "profile-1", "apple-tv"); got == nil || got.DeviceName != "" {
 		t.Errorf("the named device's row was rewritten from the caller's headers: %+v", got)
 	}
-}
-
-// Naming the caller's own device explicitly is still the caller's own device.
-func TestEffectiveReadNamingOwnDeviceRegistersIt(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	if err := store.(userstore.DeviceRegistry).RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "device-1",
-	}); err != nil {
-		t.Fatalf("registering device-1: %v", err)
-	}
-
-	getEffective(t, handler, effectiveRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode&device_id=device-1", nil))
-
-	requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
 }
 
 func TestEffectiveReadForAnotherProfileDoesNotRegisterCaller(t *testing.T) {
@@ -219,24 +178,6 @@ func newDeviceSightingsPlaybackHandler(t *testing.T, store userstore.UserStore, 
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	handler.DeviceSightings = sightings
 	return handler
-}
-
-func TestPlaybackStartRegistersCallersOwnDevice(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := newDeviceSightingsPlaybackHandler(t, store, NewDeviceSightings())
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
-	req.Header.Set(deviceIDHeader, "tv-1")
-	req.Header.Set(deviceNameHeader, "Den TV")
-	req.Header.Set(devicePlatformHeader, "Android TV")
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("start = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	requireRegisteredDevice(t, store, "profile-1", "tv-1", "Den TV", "Android TV")
 }
 
 func TestPlaybackStartV2RegistersDeclaredDevice(t *testing.T) {

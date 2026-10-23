@@ -20,6 +20,9 @@ export function shuffleNextEpisodeRef(shuffle: Shuffle): EpisodeRef {
     title: next.title,
     runtime: next.runtime ?? 0,
     overview: next.overview,
+    // The shuffle card comes from the localized detail, so an AI-translated
+    // overview carries its marker here too.
+    machineTranslatedFields: next.machine_translated_fields,
     stillUrl: urlFromPoster ? next.poster_url : next.backdrop_url,
     stillThumbhash: thumbhashFromPoster ? next.poster_thumbhash : next.backdrop_thumbhash,
     // Unprotected only when neither image is known to be an episode still.

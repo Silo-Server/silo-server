@@ -55,6 +55,21 @@ describe("ProfilePinDialog", () => {
     await waitFor(() => expect((screen.getByLabelText("PIN") as HTMLInputElement).value).toBe(""));
   });
 
+  it("ignores a check that finishes after the dialog was cancelled", async () => {
+    let answer: (value: { valid: boolean; profile_token: string }) => void = () => {};
+    const { onVerified } = renderDialog(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    submitPin("1234");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    answer({ valid: true, profile_token: "late-token" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy());
+    expect(onVerified).not.toHaveBeenCalled();
+  });
+
   it("keeps the generic failure for other errors", async () => {
     renderDialog(vi.fn().mockRejectedValue(new Error("offline")));
     submitPin("1234");

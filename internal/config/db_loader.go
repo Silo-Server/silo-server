@@ -224,6 +224,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
 	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
 	cfg.Server.PublicURL = stringOr(m, "server.public_url", "")
+	cfg.Server.LocalURL = stringOr(m, ServerLocalURLSettingKey, "")
 	lanDiscovery, err := boolOr(m, ServerLANDiscoverySettingKey, true)
 	if err != nil {
 		return nil, err
@@ -449,7 +450,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.JellyfinCompat.SessionTTL = sessionTTL
-	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 6*time.Hour)
+	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 24*time.Hour)
 	if err != nil {
 		return nil, err
 	}

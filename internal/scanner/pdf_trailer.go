@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 )
 
 var errPDFTrailer = errors.New("invalid or unsupported PDF trailer")
@@ -27,7 +28,7 @@ func pdfDocumentEncrypted(file io.ReaderAt, size int64) (bool, error) {
 		return false, errPDFTrailer
 	}
 	idx := bytes.LastIndex(tail, []byte("startxref"))
-	if idx < 0 || (idx > 0 && !bytes.ContainsRune([]byte(pdfWhitespace), rune(tail[idx-1]))) {
+	if idx < 0 || (idx > 0 && !strings.ContainsRune(pdfWhitespace, rune(tail[idx-1]))) {
 		return false, errPDFTrailer
 	}
 	p := pdfTrailerParser{data: tail[idx:]}
@@ -263,7 +264,7 @@ func pdfTrailerNumber(text string) bool {
 func (p *pdfTrailerParser) token() pdfTrailerValue {
 	for p.pos < len(p.data) {
 		b := p.data[p.pos]
-		if bytes.ContainsRune([]byte(pdfWhitespace), rune(b)) {
+		if strings.ContainsRune(pdfWhitespace, rune(b)) {
 			p.pos++
 			continue
 		}
@@ -294,7 +295,7 @@ func (p *pdfTrailerParser) token() pdfTrailerValue {
 				if b == '>' {
 					return pdfTrailerValue{kind: 's'}
 				}
-				if fromHex(b) < 0 && !bytes.ContainsRune([]byte(pdfWhitespace), rune(b)) {
+				if fromHex(b) < 0 && !strings.ContainsRune(pdfWhitespace, rune(b)) {
 					break
 				}
 			}

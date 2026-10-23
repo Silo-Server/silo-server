@@ -99,6 +99,9 @@ type VideoTrackInfo struct {
 	BitDepth            int
 	PixelFormat         string
 	ReferenceFrames     int
+	// HDR10PlusUnchecked marks a PQ track whose first frame was not read;
+	// see models.VideoTrack.HDR10PlusUnchecked.
+	HDR10PlusUnchecked bool
 }
 
 // AudioTrackInfo describes a probed audio track.
@@ -132,11 +135,12 @@ type SubtitleTrackInfo struct {
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.
 type ExternalSubtitleInfo struct {
-	Path     string
-	Language string
-	Format   string // srt, vtt, ass, ssa, sub
-	Title    string
-	Forced   bool
+	Path            string
+	Language        string
+	Format          string // srt, vtt, ass, ssa, sub
+	Title           string
+	Forced          bool
+	HearingImpaired bool
 }
 
 // ChapterInfo describes an embedded chapter extracted from ffprobe.

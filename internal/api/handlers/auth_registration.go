@@ -195,6 +195,9 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return h.tokenPairView(ctx, pair, user), nil
@@ -235,6 +238,11 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 			return TokenPairView{}, &APIError{Status: http.StatusBadRequest, Code: "code_disabled", Message: "This invite code is no longer active", Field: fieldInviteCode}
 		case auth.IsDuplicate(err):
 			return TokenPairView{}, apiError(http.StatusBadRequest, "duplicate", "Username or email already taken")
+		}
+		// A busy sign-in after the account was created must not invite a
+		// retry, which could only fail as a duplicate.
+		if apiErr := busyError(err); apiErr != nil && !errors.Is(err, auth.ErrSignupSessionStart) {
+			return TokenPairView{}, apiErr
 		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr

@@ -22,7 +22,9 @@ const hlsJS = vi.hoisted(() => ({
   latest: null as null | { emit: (event: string, data: unknown) => void },
 }));
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), info: vi.fn(), success: vi.fn(), message: vi.fn() },
+}));
 vi.mock("../hooks/usePlaybackRealtime", () => ({
   usePlaybackRealtime: () => ({ connectionState: "connected" }),
 }));
@@ -32,6 +34,11 @@ vi.mock("../hooks/useWatchProgress", () => ({
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useSubtitleTracks", () => ({ useSubtitleTracks: () => [] }));
 vi.mock("../hooks/useASSSubtitles", () => ({ useASSSubtitles: () => ({ isActive: false }) }));
+// The delay is the profile's saved offset; plain state stands in for the query.
+vi.mock("../hooks/useSubtitleDelay", async () => {
+  const { useState } = await import("react");
+  return { useSubtitleDelay: () => useState(0) };
+});
 vi.mock("../hooks/useSubtitleAppearance", () => ({
   useSubtitleAppearance: () => ({
     settings: { position: "bottom", fontSize: "large" },
@@ -58,6 +65,11 @@ vi.mock("hls.js", () => ({
       BUFFER_APPENDED: "bufferAppended",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+    static ErrorDetails = {
+      MANIFEST_LOAD_ERROR: "manifestLoadError",
+      MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
+      MANIFEST_PARSING_ERROR: "manifestParsingError",
+    };
     static isSupported = () => true;
 
     handlers = new Map<string, (event: string, data: unknown) => void>();
@@ -279,6 +291,38 @@ afterEach(() => {
 });
 
 describe("VideoPlayer with the playback session: reconnect", () => {
+  it("leaves a session an administrator ended when a resumed remux reopens", async () => {
+    const remuxPlan = directPlan({
+      delivery: "server_remux_progressive",
+      timeline: { ...directPlan().timeline, can_seek_anywhere: false },
+    });
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", remuxPlan), 201),
+      replan: () =>
+        jsonResponse(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/playback_session_ended",
+            title: "Playback session ended",
+            status: 410,
+            detail: "An administrator ended this playback session",
+          },
+          410,
+        ),
+    });
+    renderHarness();
+    const video = await startWatching();
+    const now = Date.now();
+    fireEvent.pause(video);
+
+    // The viewer comes back after ten minutes, so the player reopens the stream.
+    vi.spyOn(Date, "now").mockReturnValue(now + 10 * 60_000);
+    fireEvent.play(video);
+
+    await waitFor(() => expect(sessionRef.current?.connectionStatus).toBe("ended"));
+    expect(requests.replans.map((replan) => replan.body.operation)).toEqual(["seek_reanchor"]);
+    expect(requests.starts).toHaveLength(1);
+  });
+
   it("keeps playing after a reconnect that follows a failed HLS startup", async () => {
     // HLS goes through hls.js: the browser reports no native support.
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");

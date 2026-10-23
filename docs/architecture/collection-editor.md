@@ -54,10 +54,12 @@ then position). That order reaches viewers in two places:
   in their stored order. Arrange draws them in a band at the start of the shelf. A move never places
   a card above the band, and the order a move saves is the order Arrange shows. A shelf that sorts
   itself (by name, recently updated or most titles) ignores `featured` (`applyCollectionSort`).
-- **The Server collections list** on every profile's Collections page is capped per library
-  (`ListServerCollections`, `capServerCollections`), so pinned collections are the ones that lead
-  it, whatever their shelf's order. This is why Pin stays available on a shelf that sorts itself,
-  and why its help line names that list.
+- **The Server collections list** on every profile's Collections page opens with each
+  library's first 20 in this order (`ListServerCollections`, `capServerCollections`) and adds the
+  rest of each library's Collections tab list after them, straight away for a picked library and
+  one library at a time at the end of the grid in the default view (All, or the only library).
+  Pinned collections lead each library's collections there, whatever their shelf's order. This is
+  why Pin stays available on a shelf that sorts itself, and why its help line names that list.
 
 `featured` is a column on the collection, so a Pin set from one library's Arrange applies in every
 library the collection is in, while its shelf and position stay per library. Pin's help line says so
@@ -152,16 +154,14 @@ list follows counts once, as the list.
 - **What can change depends on the source.** A server MDBList or TMDB list changes its link; a
   server TMDB chart changes its chart or moves to a TMDB list; a franchise list changes its TMDB
   collection ID. A profile changes its MDBList or TMDB list link; a chart it follows stays as it was
-  made. Discover lists (from Starter packs) and legacy Trakt lists show their source read-only.
+  made. Discover lists (from Starter packs) show their source read-only.
 - **What a server save sends.** The PATCH carries every field and rebuilds the source whole
   (`source_url` and `source_config`), as the server stores it: a changed MDBList link loses its
   `?query`, `#fragment` and trailing slash, and a TMDB list link becomes its canonical
   `https://www.themoviedb.org/list/{id}`. A Discover list and a franchise list with no ID yet send
-  no source unless max titles changed, and then send their stored config with the new limit; every
-  Trakt list sends no source, so the server keeps the stored one. A new chart unticks libraries that
-  can't hold its titles, as on create, because the server doesn't check library kinds on update. A Trakt list's
-  libraries and max titles are locked, and a stopped Trakt schedule can't be turned on, because
-  the server refuses those changes. A save never sends `featured`.
+  no source unless max titles changed, and then send their stored config with the new limit. A new
+  chart unticks libraries that can't hold its titles, as on create, because the server doesn't
+  check library kinds on update. A save never sends `featured`.
 - **What a personal save sends.** Name, sharing, libraries, the Collections tab switch and Show
   only always go; description, order, the link (`source_url`), max titles (`max_items`, `0` for the
   whole list) and the schedule go only when they changed.

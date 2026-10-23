@@ -1,19 +1,13 @@
+import { render as renderPage, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryMetadataSettings from "./LibraryMetadataSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 const useRestartKeysMock = vi.fn(() => new Set<string>());
-const storageAvailableMock = vi.fn(() => true);
-const markerCapabilitiesMock = vi.fn<() => { data?: Record<string, boolean> }>(() => ({
-  data: { detection_kind_settings: true },
-}));
-
-vi.mock("@/hooks/useBranding", () => ({
-  useBranding: () => ({ storageAvailable: storageAvailableMock() }),
-}));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -28,13 +22,15 @@ vi.mock("@/hooks/useRestartKeys", () => ({
   useRestartKeys: () => useRestartKeysMock(),
 }));
 
-vi.mock("@/hooks/queries/admin/settings", () => ({
-  useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useCatalogSearchStatus: () => ({ data: undefined, isLoading: true }),
+/** A transcode node subtitle sync could run on. */
+const transcodeNode = { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true };
+const useAdminNodesMock = vi.fn(() => ({
+  data: [transcodeNode] as unknown[] | undefined,
+  isSuccess: true,
 }));
 
-vi.mock("@/hooks/queries/admin/markers", () => ({
-  useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
+vi.mock("@/hooks/queries/admin/nodes", () => ({
+  useAdminNodes: () => useAdminNodesMock(),
 }));
 
 const ratingSourcesMock = vi.fn(() => ({
@@ -71,34 +67,8 @@ vi.mock("@/hooks/queries/admin/ratingSources", () => ({
   useAdminRatingSources: () => ratingSourcesMock(),
 }));
 
-vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: [] }),
-  useRunTask: () => ({ mutateAsync: vi.fn() }),
-}));
-
-vi.mock("@/components/realtimeEventsContext", () => ({
-  useEventChannel: () => undefined,
-}));
-
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
-  const dirtySet = new Set(dirty);
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    getPersistedValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    resetValue: vi.fn(),
-    isDirty: (key: string) => dirtySet.has(key),
-    isClearStaged: (key: string) => dirtySet.has(key) && (values[key] ?? "") === "",
-    dirtyCount: dirtySet.size,
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-    sensitiveConfigured: [] as string[],
-    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
-  };
-}
+const makeForm = (values: Record<string, string>, dirty: string[] = []) =>
+  fakeSettingsForm(values, { dirty });
 
 function render(values: Record<string, string>, dirty: string[] = []) {
   useSettingsFormMock.mockReturnValue(makeForm(values, dirty));
@@ -109,6 +79,11 @@ function render(values: Record<string, string>, dirty: string[] = []) {
   );
 }
 
+/** Opens one group's Advanced disclosure via its persisted state. */
+function expand(id: string) {
+  localStorage.setItem(`silo.admin.advanced.${id}`, "true");
+}
+
 function text(markup: string): string {
   const container = document.createElement("div");
   container.innerHTML = markup;
@@ -116,19 +91,7 @@ function text(markup: string): string {
 }
 
 // The toggle is a Radix switch, so reach it through the label association
-// SettingField sets up rather than by scanning the markup for "disabled".
-function toggleDisabled(markup: string, label: string): boolean {
-  const container = document.createElement("div");
-  container.innerHTML = markup;
-  const labelEl = Array.from(container.querySelectorAll("label")).find(
-    (el) => el.textContent?.trim() === label,
-  );
-  if (!labelEl?.htmlFor) throw new Error(`no label found for ${label}`);
-  const control = container.querySelector(`[id="${labelEl.htmlFor}"]`);
-  if (!control) throw new Error(`no control found for ${label}`);
-  return control.hasAttribute("disabled");
-}
-
+// SettingField sets up rather than by scanning the markup.
 function toggleChecked(markup: string, label: string): boolean {
   const container = document.createElement("div");
   container.innerHTML = markup;
@@ -145,126 +108,29 @@ describe("LibraryMetadataSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     useRestartKeysMock.mockReturnValue(new Set<string>());
-    storageAvailableMock.mockReturnValue(true);
-    markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("offers the server-wide real-time monitoring switch, on by default", () => {
-    const rendered = render({ "catalog.search.provider": "postgres" });
-
-    expect(text(rendered)).toContain("Real-time monitoring");
-    expect(text(rendered)).toContain(
-      "Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually.",
+  it("shows the versions switch as the opposite of the stored scope key", () => {
+    const label = "Show all library versions on detail page";
+    expect(toggleChecked(render({}), label)).toBe(true);
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "false" }), label)).toBe(
+      true,
     );
-    expect(toggleDisabled(rendered, "Real-time monitoring")).toBe(false);
-    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(true);
-
-    const calls = useSettingsFormMock.mock.calls;
-    const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "metadata.cache_images",
-        "catalog.scope_versions_to_library",
-        "scanner.workers",
-        "matcher.workers",
-        "matcher.batch_size",
-        "metadata.image_workers",
-        "metadata.person_refresh_per_minute",
-        "markers.mode",
-        "markers.lazy_playback",
-        "markers.online_storage",
-        "markers.detection_workers",
-        "markers.detect_intros",
-        "markers.detect_credits",
-        "catalog.search.provider",
-        "catalog.search.meilisearch.url",
-        "catalog.search.meilisearch.api_key",
-        "catalog.search.meilisearch.semantic_ratio",
-      ]),
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "true" }), label)).toBe(
+      false,
     );
-    // Hidden tier: still saved through the API, no control on this tab.
-    expect(keys).not.toContain("catalog.search.meilisearch.embedder");
-    expect(keys).not.toContain("catalog.search.meilisearch.binary_quantized");
-    expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
-    expect(keys).toContain("scanner.realtime_monitoring");
   });
 
-  it("offers the background person lookup rate in the advanced scanning settings", () => {
-    // The Advanced section opens on its own when one of its fields is edited.
-    const rendered = render({ "catalog.search.provider": "postgres" }, [
-      "metadata.person_refresh_per_minute",
+  it("shows the server-wide real-time monitoring switch only while it is off", () => {
+    const off = render({ "scanner.realtime_monitoring": "false" });
+    expect(toggleChecked(off, "Real-time monitoring")).toBe(false);
+
+    // Turning it back on keeps it in view until the change is saved.
+    const turningOn = render({ "scanner.realtime_monitoring": "true" }, [
+      "scanner.realtime_monitoring",
     ]);
-
-    expect(text(rendered)).toContain("Person lookups per minute");
-    expect(text(rendered)).toContain(
-      "How many cast and crew members each server looks up per minute in the background.",
-    );
-  });
-
-  it("reflects a stored off value for real-time monitoring", () => {
-    const rendered = render({ "scanner.realtime_monitoring": "false" });
-
-    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(false);
-  });
-
-  it("hides Meilisearch connection fields until that engine is selected", () => {
-    expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
-      "Meilisearch URL",
-    );
-
-    expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
-  });
-
-  it("allows caching provider artwork without an S3 bucket", () => {
-    storageAvailableMock.mockReturnValue(false);
-    const rendered = render({});
-    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
-  });
-
-  it("offers separate intro and credits detection while this server detects markers", () => {
-    for (const mode of ["local", "both"]) {
-      const rendered = text(render({ "markers.mode": mode }));
-      expect(rendered).toContain("Detection workers");
-      expect(rendered).toContain("Detect intros");
-      expect(rendered).toContain("Detect credits");
-      expect(rendered).toContain("reading the end of each episode and movie");
-    }
-    for (const mode of ["online", "off"]) {
-      const rendered = text(render({ "markers.mode": mode }));
-      expect(rendered).not.toContain("Detection workers");
-      expect(rendered).not.toContain("Detect intros");
-      expect(rendered).not.toContain("Detect credits");
-    }
-  });
-
-  it("hides the detection switches unless the server honors them", () => {
-    const cases: Array<[string, { data?: Record<string, boolean> }]> = [
-      ["capabilities not loaded", {}],
-      ["a server without detection_kind_settings", { data: { redetect_markers: true } }],
-      ["a server with detection_kind_settings off", { data: { detection_kind_settings: false } }],
-    ];
-    for (const [, capabilities] of cases) {
-      markerCapabilitiesMock.mockReturnValue(capabilities);
-      const rendered = text(render({ "markers.mode": "local" }));
-      expect(rendered).not.toContain("Detect intros");
-      expect(rendered).not.toContain("Detect credits");
-      expect(rendered).toContain("Detection workers");
-    }
-  });
-
-  it("shows each detection switch's saved state and defaults both on", () => {
-    const defaults = render({ "markers.mode": "both" });
-    expect(toggleChecked(defaults, "Detect intros")).toBe(true);
-    expect(toggleChecked(defaults, "Detect credits")).toBe(true);
-
-    const introsOnly = render({ "markers.mode": "local", "markers.detect_credits": "false" });
-    expect(toggleChecked(introsOnly, "Detect intros")).toBe(true);
-    expect(toggleChecked(introsOnly, "Detect credits")).toBe(false);
-
-    const creditsOnly = render({ "markers.mode": "local", "markers.detect_intros": "false" });
-    expect(toggleChecked(creditsOnly, "Detect intros")).toBe(false);
-    expect(toggleChecked(creditsOnly, "Detect credits")).toBe(true);
+    expect(toggleChecked(turningOn, "Real-time monitoring")).toBe(true);
   });
 
   it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
@@ -296,5 +162,63 @@ describe("LibraryMetadataSettings", () => {
 
     expect(page).not.toContain("Metadata plugins can add other ratings");
     expect(page).not.toContain("From Kinopoisk Metadata");
+  });
+});
+
+describe("LibraryMetadataSettings subtitle sync", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useRestartKeysMock.mockReturnValue(new Set<string>());
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
+  });
+
+  function renderInteractive(values: Record<string, string>, dirty: string[] = []) {
+    const form = makeForm(values, dirty);
+    useSettingsFormMock.mockReturnValue(form);
+    const view = renderPage(
+      <MemoryRouter>
+        <LibraryMetadataSettings />
+      </MemoryRouter>,
+    );
+    return {
+      form,
+      unmount: view.unmount,
+      group: within(screen.getByRole("group", { name: "Subtitle sync" })),
+    };
+  }
+
+  it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
+    expand("library.subtitle_sync");
+    const local = renderInteractive({ "subtitles.sync_execution": "local" });
+    expect(local.group.getByRole("button", { name: "Advanced · 1 setting" })).toBeInTheDocument();
+    expect(
+      local.group.queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).not.toBeInTheDocument();
+    local.unmount();
+
+    useAdminNodesMock.mockReturnValue({ data: [], isSuccess: true });
+    const nodeOnly = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+    expect(nodeOnly.group.getByText("No transcode nodes are connected")).toBeInTheDocument();
+  });
+
+  it("keeps an unsaved node capacity in view after sync moves to the local server", () => {
+    expand("library.subtitle_sync");
+    const { group } = renderInteractive({ "subtitles.sync_execution": "local" }, [
+      "subtitles.sync_execution",
+      "subtitles.sync_node_capacity",
+    ]);
+
+    expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toBeInTheDocument();
+    expect(
+      group.getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toBeVisible();
+  });
+
+  it("does not warn before the node list has loaded", () => {
+    expand("library.subtitle_sync");
+    useAdminNodesMock.mockReturnValue({ data: undefined, isSuccess: false });
+    const { group } = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+
+    expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
   });
 });

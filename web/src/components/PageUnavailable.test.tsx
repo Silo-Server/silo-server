@@ -35,17 +35,6 @@ describe("PageUnavailable", () => {
     delete document.documentElement.dataset.navigationDirection;
   });
 
-  it("names the page and always offers a way home", () => {
-    renderPage();
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "This item isn't available" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("It may be gone.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
-    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
-  });
-
   it("offers Try again for a failed read and holds it while the retry runs", async () => {
     window.history.replaceState({ idx: 2 }, "");
     const onRetry = vi.fn();

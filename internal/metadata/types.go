@@ -101,8 +101,9 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
-	// Pinned reports that automatic matching skipped an item an admin split
-	// left unmatched on purpose. It is a completed outcome, not a failure.
+	// Pinned reports that automatic matching skipped an item an admin left
+	// unmatched on purpose, by ignoring it or by splitting it off unmatched.
+	// It is a completed outcome, not a failure.
 	Pinned bool
 }
 
@@ -217,7 +218,7 @@ type SearchResult struct {
 // TitleAlias is a provider-confirmed title for the same work.
 type TitleAlias struct {
 	Title    string `json:"title"`
-	Language string `json:"language,omitempty"`
+	Language string `json:"language,omitempty" doc:"Language of the alias as the provider reports it, usually ISO 639-1"`
 	Kind     string `json:"kind"`
 	Provider string `json:"provider,omitempty"`
 }

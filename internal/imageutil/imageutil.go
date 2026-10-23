@@ -62,9 +62,10 @@ func PixelDataUndecodable(data []byte) bool {
 }
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant. Provider artwork wider than this is downscaled on ingest, so a
-// client asking for the original size never receives more pixels than this.
-const MaxCachedOriginalDimension = 1920
+// variant at 4K. Provider artwork is rarely larger (TMDB backdrops top out at
+// 3840 wide, posters at 2000x3000), so the original keeps the provider's full
+// resolution; the cap bounds an outlier upload rather than everyday art.
+const MaxCachedOriginalDimension = 3840
 
 // Variant holds a named image variant (e.g. "original", "w500").
 type Variant struct {
@@ -289,13 +290,19 @@ func Thumbhash(data []byte) (string, error) {
 }
 
 func decodeThumbhashSource(data []byte) (image.Image, error) {
-	if normalized, err := normalizeThumbhashSource(data); err == nil {
+	normalized, normalizeErr := normalizeThumbhashSource(data)
+	if normalizeErr == nil {
 		if img, _, err := image.Decode(bytes.NewReader(normalized)); err == nil {
 			return img, nil
 		}
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
+		// Bytes neither libvips nor the standard library can read keep
+		// ErrInvalidImage, as GenerateVariants reports them.
+		if errors.Is(normalizeErr, ErrInvalidImage) {
+			return nil, fmt.Errorf("%w: decode for thumbhash: %w", ErrInvalidImage, err)
+		}
 		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
 	}
 	return img, nil

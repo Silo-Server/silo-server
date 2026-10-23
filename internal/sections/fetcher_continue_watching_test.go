@@ -1,7 +1,6 @@
 package sections
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -149,29 +148,7 @@ func TestParseContinueTypeRejectsUnknownExplicitType(t *testing.T) {
 	}
 }
 
-func TestEbookContinueWatchingProgressQueryGatesHiddenHistory(t *testing.T) {
-	t.Parallel()
-
-	query := strings.Join(strings.Fields(ebookContinueWatchingProgressQuery), " ")
-
-	// Continue Reading must honor user_history_hidden_items with the same
-	// semantics as the video path (pgstore ListProgress "in_progress"): a row
-	// is hidden while updated_at <= hidden_before and counts again once new
-	// reading activity lands after hidden_before.
-	for _, term := range []string{
-		"FROM ebook_reader_progress",
-		"NOT EXISTS",
-		"FROM user_history_hidden_items hhi",
-		"hhi.media_item_id = ebook_reader_progress.content_id",
-		"ebook_reader_progress.updated_at <= hhi.hidden_before",
-	} {
-		if !strings.Contains(query, term) {
-			t.Fatalf("ebook continue watching query missing %q:\n%s", term, query)
-		}
-	}
-}
-
-func TestAppendUniqueContinueItemsDedupesAcrossPages(t *testing.T) {
+func TestAppendContinuePageDedupesAcrossPages(t *testing.T) {
 	t.Parallel()
 
 	seen := make(map[string]struct{})
@@ -181,7 +158,7 @@ func TestAppendUniqueContinueItemsDedupesAcrossPages(t *testing.T) {
 		{ContentID: "book-a"},
 		{ContentID: "book-b"},
 	}
-	ordered := appendUniqueContinueItems(nil, pageOne, seen, limit)
+	ordered := appendContinuePage(nil, pageOne, nil, seen, limit, false)
 
 	// A progress write between pages shifts rows across the LIMIT/OFFSET
 	// boundary, so page two re-serves book-b.
@@ -189,7 +166,7 @@ func TestAppendUniqueContinueItemsDedupesAcrossPages(t *testing.T) {
 		{ContentID: "book-b"},
 		{ContentID: "book-c"},
 	}
-	ordered = appendUniqueContinueItems(ordered, pageTwo, seen, limit)
+	ordered = appendContinuePage(ordered, pageTwo, nil, seen, limit, false)
 
 	got := contentIDs(ordered)
 	want := []string{"book-a", "book-b", "book-c"}
@@ -203,19 +180,57 @@ func TestAppendUniqueContinueItemsDedupesAcrossPages(t *testing.T) {
 	}
 }
 
-func TestAppendUniqueContinueItemsRespectsLimit(t *testing.T) {
+// TestAppendContinuePageCollapsesBeforeTrimming pins that a series' second
+// in-progress episode does not take a row slot: the page's next card fills it,
+// rather than the slot going unfilled or to an older card from a later page.
+func TestAppendContinuePageCollapsesBeforeTrimming(t *testing.T) {
 	t.Parallel()
 
-	seen := make(map[string]struct{})
+	seriesID := "series-1"
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	page := []*models.MediaItem{
-		{ContentID: "a"},
-		{ContentID: "b"},
-		{ContentID: "c"},
+		{ContentID: "ep-2", Type: "episode"},
+		{ContentID: "ep-1", Type: "episode"},
+		{ContentID: "movie-1", Type: "movie"},
+		{ContentID: "movie-2", Type: "movie"},
+	}
+	meta := map[string]SectionItemMeta{
+		"ep-2":    {SeriesID: &seriesID, SeasonNumber: intPtr(1), EpisodeNumber: intPtr(2), ItemSource: "in_progress", SortTimestamp: base},
+		"ep-1":    {SeriesID: &seriesID, SeasonNumber: intPtr(1), EpisodeNumber: intPtr(1), ItemSource: "in_progress", SortTimestamp: base.Add(-time.Hour)},
+		"movie-1": {ItemSource: "in_progress", SortTimestamp: base.Add(-2 * time.Hour)},
+		"movie-2": {ItemSource: "in_progress", SortTimestamp: base.Add(-3 * time.Hour)},
 	}
 
-	ordered := appendUniqueContinueItems(nil, page, seen, 2)
-	if got := contentIDs(ordered); len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Fatalf("ordered IDs = %v, want [a b]", got)
+	ordered := appendContinuePage(nil, page, meta, make(map[string]struct{}), 2, true)
+	if got := contentIDs(ordered); len(got) != 2 || got[0] != "ep-2" || got[1] != "movie-1" {
+		t.Fatalf("ordered IDs = %v, want [ep-2 movie-1]", got)
+	}
+}
+
+func TestContinueNextUpCutoff(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	items := []*models.MediaItem{{ContentID: "a"}, {ContentID: "b"}, {ContentID: "c"}}
+	meta := map[string]SectionItemMeta{
+		"a": {SortTimestamp: base},
+		"b": {SortTimestamp: base.Add(-2 * time.Hour)},
+		"c": {SortTimestamp: base.Add(-time.Hour)},
+	}
+
+	if got := continueNextUpCutoff(items, meta, 4); got != nil {
+		t.Fatalf("cutoff for a row short of its limit = %v, want nil", got)
+	}
+	got := continueNextUpCutoff(items, meta, 3)
+	if got == nil || !got.Equal(base.Add(-2*time.Hour)) {
+		t.Fatalf("cutoff for a full row = %v, want the oldest card %v", got, base.Add(-2*time.Hour))
+	}
+
+	// A card without a timestamp sorts last, so a next-up card older than
+	// every other card could still outrank it.
+	meta["c"] = SectionItemMeta{}
+	if got := continueNextUpCutoff(items, meta, 3); got != nil {
+		t.Fatalf("cutoff with an untimed card = %v, want nil", got)
 	}
 }
 
@@ -229,38 +244,4 @@ func contentIDs(items []*models.MediaItem) []string {
 
 func intPtr(v int) *int {
 	return &v
-}
-
-func TestCollapseContinueWatchingSeriesCandidatesCollapsesMangaChapters(t *testing.T) {
-	t.Parallel()
-
-	seriesID := "manga-7"
-	older := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
-	newer := time.Date(2025, 3, 5, 12, 0, 0, 0, time.UTC)
-
-	// Two in-progress chapters (ebook items) of one manga series, plus an
-	// unrelated ebook with no series — mirrors applyMangaChapterSeriesMeta's
-	// output feeding the shared collapse.
-	items := []*models.MediaItem{
-		{ContentID: "ch-12", Type: "ebook", Title: "Series v12"},
-		{ContentID: "ch-09", Type: "ebook", Title: "Series v09"},
-		{ContentID: "book-x", Type: "ebook", Title: "A standalone ebook"},
-	}
-	meta := map[string]SectionItemMeta{
-		"ch-12": {SeriesID: &seriesID, ItemSource: "in_progress", SortTimestamp: newer},
-		"ch-09": {SeriesID: &seriesID, ItemSource: "in_progress", SortTimestamp: older},
-	}
-
-	collapsed := collapseContinueWatchingSeriesCandidates(items, meta)
-
-	gotIDs := contentIDs(collapsed)
-	wantIDs := []string{"ch-12", "book-x"} // most-recent chapter kept; standalone untouched
-	if len(gotIDs) != len(wantIDs) {
-		t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
-	}
-	for i := range wantIDs {
-		if gotIDs[i] != wantIDs[i] {
-			t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
-		}
-	}
 }

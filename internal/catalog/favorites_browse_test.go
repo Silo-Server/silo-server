@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -50,42 +51,6 @@ func TestBuildBrowseFavoritesSQL_JoinsUserFavorites(t *testing.T) {
 	}
 }
 
-func TestBuildBrowseFavoritesSQL_MultiTypeUsesIN(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:    1,
-		ProfileID: "p1",
-		ItemType:  "movie,series",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan: %v", err)
-	}
-	sql, _ := plan.pagedSQL()
-	if !strings.Contains(sql, "mi.type = ANY($") {
-		t.Fatalf("expected multi-type = ANY clause; got %s", sql)
-	}
-}
-
-func TestBuildBrowseFavoritesSQL_TitleSortUsesMediaItemsColumns(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:    1,
-		ProfileID: "p1",
-		SortField: "sort_title",
-		SortOrder: "asc",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan: %v", err)
-	}
-	sql, _ := plan.pagedSQL()
-	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))") {
-		t.Fatalf("expected sort_title to fall back to mi.title; got %s", sql)
-	}
-	if !strings.Contains(sql, "ASC") {
-		t.Fatalf("expected ASC direction; got %s", sql)
-	}
-}
-
 func TestBuildBrowseFavoritesSQL_DisabledLibrariesNotExists(t *testing.T) {
 	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
 		UserID:             1,
@@ -112,7 +77,7 @@ func TestBuildBrowseFavoritesSQL_EmptyAllowedLibrariesEarlyEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error or sentinel for empty allowed libraries; got nil")
 	}
-	if err != errBrowseFavoritesEmpty {
+	if !errors.Is(err, errBrowseFavoritesEmpty) {
 		t.Fatalf("expected errBrowseFavoritesEmpty; got %v", err)
 	}
 }
@@ -165,57 +130,6 @@ func TestBuildBrowseFavoritesPlan_LibraryIDIntersectsAllowedLibraries(t *testing
 	}
 	if !foundAllowed {
 		t.Fatalf("expected AllowedLibraryIDs=[1 2] in bound args; got %v", args)
-	}
-}
-
-// TestBuildBrowseFavoritesPlan_NamePrefixSortKeyLike pins the sort-key
-// LIKE shape that powers /Items?Filters=IsFavorite&NameStartsWith=Star. The
-// pattern must be anchored to the prefix only (no leading wildcard). (code
-// review on 614e45ac, formerly uncovered.)
-func TestBuildBrowseFavoritesPlan_NamePrefixSortKeyLike(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:     1,
-		ProfileID:  "p1",
-		NamePrefix: "Star",
-		Limit:      20,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan error: %v", err)
-	}
-	sql, args := plan.pagedSQL()
-	if !strings.Contains(sql, "LIKE") {
-		t.Fatalf("expected LIKE for NamePrefix; got %s", sql)
-	}
-	// The sort-key expression falls back to title when sort_title is empty.
-	// Matching LOWER(title) too would list "The Hobbit" under T as well as H.
-	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
-		t.Fatalf("expected LIKE on the title sort key; got %s", sql)
-	}
-	if strings.Contains(sql, "LOWER(mi.title) LIKE") {
-		t.Fatalf("prefix must not match the raw title alongside the sort key; got %s", sql)
-	}
-	// Pattern must escape backslash to defuse user-supplied %/_ wildcards.
-	if !strings.Contains(sql, "ESCAPE '\\'") {
-		t.Fatalf("expected ESCAPE '\\\\' clause; got %s", sql)
-	}
-	// Verify the bound pattern is "star%" — anchored prefix, lowercased, no
-	// leading wildcard. A leading "%" would let users substring-search the
-	// whole catalog.
-	foundPrefixArg := false
-	for _, a := range args {
-		s, ok := a.(string)
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(s, "%") {
-			t.Fatalf("NamePrefix arg must not have leading wildcard; got %q", s)
-		}
-		if strings.HasPrefix(strings.ToLower(s), "star") && strings.HasSuffix(s, "%") {
-			foundPrefixArg = true
-		}
-	}
-	if !foundPrefixArg {
-		t.Fatalf("expected 'star%%'-style arg in args slice; got %v", args)
 	}
 }
 

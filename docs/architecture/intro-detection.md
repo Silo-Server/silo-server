@@ -59,6 +59,17 @@ Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
 intro chapters move both boundaries back.
 
+Every ffmpeg attempt that detection makes (fingerprints, tail passes, and
+silence detection) has a deadline of two minutes plus the running time of
+the media it reads, so a ten-minute opening gets twelve minutes. Storage
+that can play a file reads it at least as fast as it plays, so a run still
+going at its deadline has almost always stalled; a host busy enough to
+starve background decoding can also reach it. ffmpeg is killed and the run
+fails as a `timeout`, which is not permanent: a fingerprint counts as a
+failed extraction and leaves its group partial, a tail pass is stored
+`failed` with backoff, and the other files carry on. A tail pass whose
+hardware attempt times out tries software on a deadline of its own.
+
 ## Confidence
 
 Chromaprint confidence is the rate at which markers of the same kind covered
@@ -251,8 +262,9 @@ These rules were validated on frame-checked episodes and movies from several
 series; every start they placed early was checked against frames and cut no
 story.
 
-Automatic contribution to online providers stays intro-only; detected credits
-are contributed only on request.
+Automatic contribution to online providers shares detected credits as it does
+intros, when they meet the provider's minimum confidence. At the default 0.95,
+that is chapter credits and season-agreed audio credits that video moved.
 
 Credits versions and caches:
 
@@ -343,7 +355,8 @@ metadata (no video, or an all-intra codec) is decided on every analysis and
 never stored, and an unusable row an earlier build stored that way does not
 keep a movie out. Such movies, like movies whose credits come from a chapter,
 are listed on every run, but analyzing them reads no artifact and runs no
-ffmpeg. The run lists movies 200 at a time, each page starting after the
+ffmpeg. Once the probe metadata no longer rules the tail out, a failed tail
+pass replaces such a row, so the movie backs off like any other failure. The run lists movies 200 at a time, each page starting after the
 last movie of the one before in that order, so a movie analyzed in this run
 that is still eligible is not listed again in it. The run starts no new
 movie, and lists no further page, once 60 minutes have passed since it

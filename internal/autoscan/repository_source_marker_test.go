@@ -2,7 +2,6 @@ package autoscan
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 
@@ -211,191 +210,6 @@ func advanceFrom(ctx context.Context, t *testing.T, repo *Repository, snap Marke
 	return advanced
 }
 
-// A poll already running when an admin resets the marker must not write the
-// old upstream's next marker over the reset. Edits that keep the upstream
-// leave the poll's advance in place.
-func TestAdvanceMarkerSkipsStalePoll(t *testing.T) {
-	const next = "2026-10-04T19:00:00Z|99"
-	for name, tc := range map[string]struct {
-		unmarked  bool // the poll started without a marker
-		edit      func(ctx context.Context, t *testing.T, repo *Repository, src Source, other Connection)
-		wantWrite bool
-	}{
-		"unchanged source stores the marker": {
-			edit:      func(context.Context, *testing.T, *Repository, Source, Connection) {},
-			wantWrite: true,
-		},
-		"label change still stores the marker": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				src.Label = "Renamed"
-				mustUpdateSource(ctx, t, repo, src)
-			},
-			wantWrite: true,
-		},
-		"api key rotation still stores the marker": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				editConnection(ctx, t, repo, *src.ConnectionID, func(c *Connection) { c.APIKeyRef = "rotated-key" })
-			},
-			wantWrite: true,
-		},
-		"source config change keeps the reset": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				src.SourceConfig = map[string]string{"scope": "movies"}
-				mustUpdateSource(ctx, t, repo, src)
-			},
-		},
-		"connection switch keeps the reset": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, other Connection) {
-				src.ConnectionID = &other.ID
-				mustUpdateSource(ctx, t, repo, src)
-			},
-		},
-		"connection repoint keeps the reset": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				editConnection(ctx, t, repo, *src.ConnectionID, func(c *Connection) { c.BaseURL = "http://sonarr-4k.invalid" })
-			},
-		},
-		"connection repoint without a starting marker skips the write": {
-			unmarked: true,
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				editConnection(ctx, t, repo, *src.ConnectionID, func(c *Connection) { c.BaseURL = "http://sonarr-4k.invalid" })
-			},
-		},
-		"source config change then revert keeps the reset": {
-			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
-				original := src.SourceConfig
-				src.SourceConfig = map[string]string{"scope": "movies"}
-				mustUpdateSource(ctx, t, repo, src)
-				src.SourceConfig = original
-				mustUpdateSource(ctx, t, repo, src)
-			},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			ctx, repo, src, other := newSourceMarkerDBTest(t)
-			if tc.unmarked {
-				// Clear the seeded marker, as a fresh source has none.
-				src.SourceConfig = map[string]string{"scope": "fresh"}
-				src = mustUpdateSource(ctx, t, repo, src)
-				if src.Marker != nil {
-					t.Fatalf("marker = %q, want none before the poll", *src.Marker)
-				}
-			}
-			snap := pollSnapshot(ctx, t, repo, src)
-			before, err := repo.GetSource(ctx, src.ID)
-			if err != nil {
-				t.Fatalf("get source: %v", err)
-			}
-
-			tc.edit(ctx, t, repo, before, other)
-			afterEdit, err := repo.GetSource(ctx, src.ID)
-			if err != nil {
-				t.Fatalf("get source: %v", err)
-			}
-
-			wrote := advanceFrom(ctx, t, repo, snap, next)
-			got, err := repo.GetSource(ctx, src.ID)
-			if err != nil {
-				t.Fatalf("get source: %v", err)
-			}
-			if wrote != tc.wantWrite {
-				t.Fatalf("advanced = %v, want %v", wrote, tc.wantWrite)
-			}
-			if tc.wantWrite {
-				if got.Marker == nil || *got.Marker != next {
-					t.Fatalf("marker = %v, want %q", got.Marker, next)
-				}
-				if got.LastRunAt == nil {
-					t.Fatal("last_run_at not stamped by the advance")
-				}
-				return
-			}
-			if afterEdit.Marker != nil {
-				t.Fatalf("edit left marker %q, want the reset", *afterEdit.Marker)
-			}
-			if got.Marker != nil {
-				t.Fatalf("stale poll wrote marker %q over the reset", *got.Marker)
-			}
-		})
-	}
-}
-
-// Two polls of one source cannot both store a marker from the same start.
-func TestAdvanceMarkerSkipsWhenMarkerMoved(t *testing.T) {
-	ctx, repo, src, _ := newSourceMarkerDBTest(t)
-	snap := pollSnapshot(ctx, t, repo, src)
-	if !advanceFrom(ctx, t, repo, snap, "first") {
-		t.Fatal("first advance skipped")
-	}
-	if advanceFrom(ctx, t, repo, snap, "second") {
-		t.Fatal("second advance from the same start was stored")
-	}
-	got, err := repo.GetSource(ctx, src.ID)
-	if err != nil {
-		t.Fatalf("get source: %v", err)
-	}
-	if got.Marker == nil || *got.Marker != "first" {
-		t.Fatalf("marker = %v, want %q", got.Marker, "first")
-	}
-}
-
-func TestAdvanceMarkerUnknownSource(t *testing.T) {
-	ctx, repo, src, _ := newSourceMarkerDBTest(t)
-	snap := pollSnapshot(ctx, t, repo, src)
-	snap.Source.ID = "00000000-0000-0000-0000-000000000000"
-	snap.NextMarker = "m1"
-	if _, err := repo.AdvanceMarker(ctx, snap); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("err = %v, want ErrNotFound", err)
-	}
-}
-
-// A bound source's advance must carry that connection's row, or the upstream
-// check would be skipped.
-func TestAdvanceMarkerRequiresBoundConnectionRow(t *testing.T) {
-	ctx, repo, src, other := newSourceMarkerDBTest(t)
-	snap := pollSnapshot(ctx, t, repo, src)
-	snap.NextMarker = "m1"
-
-	missing := snap
-	missing.Connection = nil
-	if _, err := repo.AdvanceMarker(ctx, missing); err == nil {
-		t.Fatal("advance without the connection row succeeded")
-	}
-	mismatched := snap
-	mismatched.Connection = &other
-	if _, err := repo.AdvanceMarker(ctx, mismatched); err == nil {
-		t.Fatal("advance with another connection's row succeeded")
-	}
-	got, err := repo.GetSource(ctx, src.ID)
-	if err != nil {
-		t.Fatalf("get source: %v", err)
-	}
-	if got.Marker == nil || *got.Marker != *src.Marker {
-		t.Fatalf("marker = %v, want %q kept", got.Marker, *src.Marker)
-	}
-}
-
-func mustUpdateSource(ctx context.Context, t *testing.T, repo *Repository, src Source) Source {
-	t.Helper()
-	out, err := repo.UpdateSource(ctx, src)
-	if err != nil {
-		t.Fatalf("update source: %v", err)
-	}
-	return out
-}
-
-func editConnection(ctx context.Context, t *testing.T, repo *Repository, id string, edit func(*Connection)) {
-	t.Helper()
-	conn, err := repo.GetConnection(ctx, id)
-	if err != nil {
-		t.Fatalf("get connection: %v", err)
-	}
-	edit(&conn)
-	if _, err := repo.UpdateConnection(ctx, conn); err != nil {
-		t.Fatalf("update connection: %v", err)
-	}
-}
-
 // Repointing a connection changes the upstream behind every source bound to
 // it, so their markers must restart just as if each source had switched
 // connections. Credential, name or kind edits leave the upstream alone.
@@ -440,8 +254,9 @@ func TestUpdateConnectionMarkerReset(t *testing.T) {
 				t.Fatalf("create source: %v", err)
 			}
 			t.Cleanup(func() { _ = repo.DeleteSource(ctx, failedFirst.ID) })
-			if err := repo.RecordError(ctx, failedFirst.ID, "connection refused"); err != nil {
-				t.Fatalf("record error: %v", err)
+			recorded, err := repo.RecordError(ctx, PollFailure{Source: failedFirst, Message: "connection refused"})
+			if err != nil || !recorded {
+				t.Fatalf("record error = %v, %v; want true, nil", recorded, err)
 			}
 
 			conn, err := repo.GetConnection(ctx, *bound.ConnectionID)

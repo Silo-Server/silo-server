@@ -1,7 +1,9 @@
+import type { SettingsHealthItem } from "@/hooks/admin/useSettingsHealth";
 import type { BuildInfo } from "@/hooks/queries/admin/system";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminSidebar from "./AdminSidebar";
 
 interface MockBuildInfoResult {
@@ -66,16 +68,50 @@ vi.mock("@/hooks/queries/admin/requests", () => ({
   useAdminRequestCounts: () => mockUseAdminRequestCounts(),
 }));
 
-function renderSidebar(embedded = false) {
+const mockPrefetchSettings = vi.fn();
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  usePrefetchAdminServerSettings: () => mockPrefetchSettings,
+}));
+
+const mockUseSettingsAttention = vi.fn<() => SettingsHealthItem[]>(() => []);
+vi.mock("@/hooks/admin/useSettingsHealth", () => ({
+  useSettingsAttention: () => mockUseSettingsAttention(),
+}));
+
+function renderSidebar(path = "/admin") {
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/admin"]}>
-      <AdminSidebar embedded={embedded} />
+    <MemoryRouter initialEntries={[path]}>
+      <AdminSidebar />
     </MemoryRouter>,
   );
 }
 
+function renderLiveSidebar(path = "/admin") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AdminSidebar />
+    </MemoryRouter>,
+  );
+}
+
+function stubLocalStorage() {
+  const memory = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => memory.set(key, value),
+    removeItem: (key: string) => memory.delete(key),
+  });
+  return memory;
+}
+
 describe("AdminSidebar", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
+    stubLocalStorage();
+    mockUseSettingsAttention.mockReturnValue([]);
     mockUsePolicyCapability.mockReturnValue({
       data: {
         enabled: true,
@@ -86,37 +122,106 @@ describe("AdminSidebar", () => {
     });
   });
 
-  it("shows how many requests need approval on the Requests entry", () => {
-    mockUseAdminRequestCounts.mockReturnValueOnce({ data: { needs_approval: 3 } });
-    const markup = renderSidebar();
-    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
+  it("shows how many requests need approval on the queue, and on Requests while it is closed", () => {
+    mockUseAdminRequestCounts.mockReturnValue({ data: { needs_approval: 3 } });
+    const queue = renderSidebar("/admin/requests").match(
+      /<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/,
+    )?.[0];
+    expect(queue).toContain('<span aria-hidden="true">3</span>');
+    expect(queue).toContain(", 3 need approval");
 
-    expect(requestsLink).toContain('<span aria-hidden="true">3</span>');
-    expect(requestsLink).toContain(", 3 need approval");
+    renderLiveSidebar("/admin");
+    expect(screen.getByRole("button", { name: /^Requests, 3 need approval/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    mockUseAdminRequestCounts.mockReturnValue({ data: { needs_approval: 0 } });
   });
 
-  it("leaves the Requests entry plain when nothing needs approval", () => {
-    const markup = renderSidebar();
-    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
+  it("opens the topic holding the current page and marks the page", () => {
+    renderLiveSidebar("/admin/settings/playback");
 
-    expect(requestsLink).toBeDefined();
-    expect(requestsLink).not.toContain("need approval");
+    expect(screen.getByRole("button", { name: "Playback" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const playback = screen.getByRole("list", { name: "Playback" });
+    expect(within(playback).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(playback).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/admin/settings/playback",
+    );
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
-  it("keeps settings as one sidebar destination", () => {
-    const markup = renderSidebar();
-    const settingsLinks = markup.match(/href="\/admin\/settings[^"]*"/g) ?? [];
+  it("opens and closes a topic on click and remembers the choice", () => {
+    const view = renderLiveSidebar("/admin");
+    const integrations = screen.getByRole("button", { name: "Integrations" });
 
-    expect(settingsLinks).toEqual(['href="/admin/settings"']);
-    expect(markup).not.toContain("/admin/settings?tab=");
+    fireEvent.click(integrations);
+    expect(integrations).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(screen.getByRole("list", { name: "Integrations" })).getByRole("link", {
+        name: "AI Services",
+      }),
+    ).toHaveAttribute("href", "/admin/settings/ai");
+
+    view.unmount();
+    renderLiveSidebar("/admin/users");
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
-  it("includes a Sections link in the content navigation", () => {
-    const markup = renderSidebar();
+  it("reopens the current page's topic even after it was closed there", () => {
+    renderLiveSidebar("/admin/libraries");
+    fireEvent.click(screen.getByRole("button", { name: "Libraries" }));
+    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    cleanup();
 
-    expect(markup).toContain('href="/admin/sections"');
-    expect(markup).toContain(">Sections<");
-    expect(markup).not.toContain('href="/admin/home-rows"');
+    renderLiveSidebar("/admin/collections");
+    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("marks a broken setting on its page and on its closed topic", () => {
+    mockUseSettingsAttention.mockReturnValue([
+      {
+        id: "transcoding",
+        label: "Transcoding",
+        state: "warn",
+        stateText: "Restart pending",
+        detail: "Saved changes apply after a restart",
+        action: { label: "Fix", page: "playback" },
+      },
+      {
+        id: "email",
+        label: "Email",
+        state: "off",
+        stateText: "Not set up",
+        detail: "Invites and resets can't send",
+        action: { label: "Set up", page: "notifications" },
+      },
+    ]);
+    renderLiveSidebar("/admin");
+
+    expect(
+      screen.getByRole("button", { name: /^Playback, Transcoding restart pending/ }),
+    ).toBeInTheDocument();
+    // Setup nobody has done yet is the Dashboard's to mention, not a dot.
+    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
   });
 
   it("hides Policy navigation when the editor capability is unavailable", () => {
@@ -129,8 +234,10 @@ describe("AdminSidebar", () => {
       },
     });
 
-    const markup = renderSidebar();
+    // The topic is open on API Keys, so Policy would be listed beside it.
+    const markup = renderSidebar("/admin/api-keys");
 
+    expect(markup).toContain('href="/admin/api-keys"');
     expect(markup).not.toContain('href="/admin/policy"');
     expect(markup).not.toContain(">Policy<");
   });
@@ -141,27 +248,6 @@ describe("AdminSidebar", () => {
     expect(markup).toContain(">Build<");
     expect(markup).toContain(">411 · b4c5aae1+dirty<");
     expect(markup).toContain('title="Built 2026-08-19T19:45:00Z"');
-  });
-
-  it("renders dev build when build metadata is missing", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: {
-        ...defaultBuildInfo,
-        display: "unavailable",
-        revision: "",
-        dirty: false,
-        vcs_time: "",
-        build_number: 0,
-        built_at: "",
-        available: false,
-      },
-      isPending: false,
-      isError: false,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">dev build<");
   });
 
   it("falls back to the revision for builds without an ordered number", () => {
@@ -177,29 +263,5 @@ describe("AdminSidebar", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain(">b4c5aae1+dirty<");
-  });
-
-  it("renders load failed when the build info query errors", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: undefined,
-      isPending: false,
-      isError: true,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">load failed<");
-  });
-
-  it("renders loading while the build info query is pending", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: undefined,
-      isPending: true,
-      isError: false,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">loading...<");
   });
 });

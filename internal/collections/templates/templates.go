@@ -1,5 +1,5 @@
 // Package templates exposes a curated catalog of pre-configured Library
-// Collections. Each Template encapsulates a source provider (TMDB, Trakt,
+// Collections. Each Template encapsulates a source provider (TMDB,
 // MDBList) plus the parameters needed for the existing import endpoints, so
 // the admin UI can offer a one-click "create from template" flow analogous to
 // the section recipe gallery.
@@ -25,7 +25,6 @@ type Source string
 
 const (
 	SourceTMDB           Source = "tmdb"
-	SourceTrakt          Source = "trakt"
 	SourceMDBList        Source = "mdblist"
 	SourceTMDBDiscover   Source = "tmdb_discover"
 	SourceTMDBCollection Source = "tmdb_collection"
@@ -50,22 +49,16 @@ type TMDBSpec struct {
 	TimeWindow string `json:"time_window,omitempty"`
 }
 
-// TraktSpec is the Trakt-specific portion of a template.
-type TraktSpec struct {
-	Preset    string `json:"preset"`
-	MediaType string `json:"media_type"`
-}
-
 // MDBListSpec is the MDBList-specific portion of a template.
 type MDBListSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" format:"uri-reference"`
 }
 
 // TMDBListSpec is the portion of a template that follows a public TMDB list.
 // An empty URL is a "bring your own list" placeholder: the admin UI asks for
 // the list URL before creating the collection.
 type TMDBListSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" format:"uri-reference"`
 }
 
 // TMDBCollectionSpec is the TMDB `/collection/{id}` portion of a template.
@@ -96,12 +89,12 @@ type TMDBDiscoverSpec struct {
 	CertificationLte string   `json:"certification_lte,omitempty"`
 	WithRuntimeGte   int      `json:"with_runtime_gte,omitempty"`
 	WithRuntimeLte   int      `json:"with_runtime_lte,omitempty"`
-	OriginalLanguage string   `json:"original_language,omitempty"`
+	OriginalLanguage string   `json:"original_language,omitempty" doc:"TMDB original-language code (ISO 639-1)"`
 }
 
 // Template is a single pre-configured collection blueprint.
 //
-// Exactly one of TMDB, Trakt, or MDBList is populated, matching Source. The
+// Exactly one source spec is populated, matching Source. The
 // admin UI hands the template's source-specific fields to the corresponding
 // import endpoint, allowing a one-click create flow.
 type Template struct {
@@ -120,7 +113,6 @@ type Template struct {
 	Featured            bool                `json:"featured,omitempty"`
 	Tags                []string            `json:"tags,omitempty"`
 	TMDB                *TMDBSpec           `json:"tmdb,omitempty"`
-	Trakt               *TraktSpec          `json:"trakt,omitempty"`
 	MDBList             *MDBListSpec        `json:"mdblist,omitempty"`
 	TMDBDiscover        *TMDBDiscoverSpec   `json:"tmdb_discover,omitempty"`
 	TMDBCollection      *TMDBCollectionSpec `json:"tmdb_collection,omitempty"`

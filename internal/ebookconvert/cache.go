@@ -145,7 +145,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		// Convert to a temp file in the cache dir, then atomically rename in.
 		tmp, tmpErr := os.CreateTemp(c.opts.Dir, "converting-*.epub")
 		if tmpErr != nil {
-			return "", fmt.Errorf("%w: cache temp: %v", ErrConversionFailed, tmpErr)
+			return "", fmt.Errorf("%w: cache temp: %v", ErrConversionFailed, tmpErr) //nolint:errorlint // callers classify by the verdict sentinel; the filesystem error is only reported
 		}
 		tmpPath := tmp.Name()
 		_ = tmp.Close()
@@ -158,7 +158,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		}
 		if renErr := os.Rename(tmpPath, dst); renErr != nil {
 			_ = os.Remove(tmpPath)
-			return "", fmt.Errorf("%w: cache rename: %v", ErrConversionFailed, renErr)
+			return "", fmt.Errorf("%w: cache rename: %v", ErrConversionFailed, renErr) //nolint:errorlint // callers classify by the verdict sentinel; the filesystem error is only reported
 		}
 		c.enforceBudget(dst)
 		return dst, nil
@@ -169,7 +169,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		if res.Err != nil {
 			return "", res.Err
 		}
-		return res.Val.(string), nil
+		return res.Val.(string), nil //nolint:errcheck,forcetypeassert // c.group's only DoChan closure returns a string
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}

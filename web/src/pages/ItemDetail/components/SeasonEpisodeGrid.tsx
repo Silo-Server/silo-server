@@ -17,6 +17,7 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
+import EpisodeCardCaption from "./EpisodeCardCaption";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
@@ -168,6 +169,7 @@ function SeasonEpisodeCard({
           showCollectionActions={false}
           showWatchedShortcut
           hasPartialProgress={hasPartialProgress}
+          hasResumePosition={(episode.user_data?.position_seconds ?? 0) > 0}
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={episodeTitle}
@@ -178,31 +180,12 @@ function SeasonEpisodeCard({
         state={episodeLinkState}
         className="block"
       >
-        <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
-          <span>Episode {episode.episode_number}</span>
-          {episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
-          {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
-        </div>
-        <p className="text-foreground truncate text-sm font-semibold">{episodeTitle}</p>
-        <div className="mt-1.5 space-y-1">
-          <div className="text-muted-foreground flex items-center gap-2 text-xs">
-            {episode.runtime > 0 && <span>{episode.runtime}m</span>}
-            {episode.air_date && (
-              <span>
-                {new Intl.DateTimeFormat(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }).format(new Date(episode.air_date))}
-              </span>
-            )}
-          </div>
-          {episode.overview && !hideOverview && (
-            <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">
-              {episode.overview}
-            </p>
-          )}
-        </div>
+        <EpisodeCardCaption
+          episode={episode}
+          hideOverview={hideOverview}
+          badges={episode.user_data?.played && <WatchedCheckIndicator />}
+          notice={episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
+        />
       </ViewTransitionLink>
     </div>
   );

@@ -168,10 +168,12 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	}
 	// A previous scan may have retired an ignored part without rebuilding the
 	// remaining files' presentation. Matching sizes and mtimes do not make that
-	// incomplete multipart book safe to skip.
+	// incomplete multipart book safe to skip. A single-file book carries no
+	// presentation or edition; earlier builds' filename variant pass could
+	// leave both behind, so rebuild such a book once.
 	for _, file := range existing {
 		if len(existing) == 1 {
-			if file.PresentationKind == audiobookMultipartKind {
+			if file.PresentationKind != "" || file.EditionKey != "" {
 				return "", false, nil
 			}
 		} else if file.PresentationKind != audiobookMultipartKind || file.PresentationPartTotal != len(existing) {
@@ -667,7 +669,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
 					slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue

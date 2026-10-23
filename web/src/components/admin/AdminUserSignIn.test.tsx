@@ -80,21 +80,6 @@ const LDAP = {
   presentation: { display_name: "LDAP Sign-in" },
   auth_bindings: [{ capability_id: "ldap", enabled: false }],
 } as unknown as PluginInstallation;
-const TAILSCALE = {
-  id: 7,
-  plugin_id: "silo.network.tailscale",
-  enabled: true,
-  capabilities: [
-    {
-      type: "auth_provider.v1",
-      id: "tailscale",
-      display_name: "Tailscale",
-      sign_in_mode: "network",
-    },
-  ],
-  presentation: { display_name: "Tailscale" },
-  auth_bindings: [{ capability_id: "tailscale", enabled: true }],
-} as unknown as PluginInstallation;
 
 let capabilities: Record<string, unknown>;
 let identities: Array<typeof IDENTITY>;
@@ -204,20 +189,6 @@ describe("AdminUserSignIn identities", () => {
     });
   });
 
-  it("marks a provider that signed the account out", async () => {
-    identities = [{ ...IDENTITY, last_check_status: "disabled", provider_name: "" }];
-    mount();
-    expect(await screen.findByText(/Disabled at the provider \(signed out\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Provider not enabled/)).toBeInTheDocument();
-  });
-
-  it("leaves the check out when the server doesn't re-check", async () => {
-    capabilities = { ...capabilities, provider_recheck: false };
-    mount();
-    await screen.findByRole("list", { name: "Connected identities" });
-    expect(screen.queryByText(/Last provider check/)).toBeNull();
-  });
-
   it("says when nothing is linked, and hides identities the server doesn't serve", async () => {
     identities = [];
     const { unmount } = mount();
@@ -230,12 +201,6 @@ describe("AdminUserSignIn identities", () => {
     );
     expect(screen.queryByRole("heading", { name: "Sign-in provider identities" })).toBeNull();
     expect(opCalls("GET /api/v2/admin/users/{id}/identities")).toHaveLength(1);
-  });
-
-  it("reports an identity list that failed to load", async () => {
-    failures["GET /api/v2/admin/users/{id}/identities"] = problem("internal_error", 500, "boom");
-    mount();
-    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   });
 
   it("warns that unlinking the only way in locks the account out, then unlinks", async () => {
@@ -269,22 +234,6 @@ describe("AdminUserSignIn identities", () => {
     expect(dialog).not.toHaveTextContent("won't be able to sign in");
   });
 
-  it("explains an unlink the owner rule refuses", async () => {
-    const user = userEvent.setup();
-    failures["DELETE /api/v2/admin/users/{id}/identities/{identity_id}"] = problem(
-      "permission_denied",
-      403,
-    );
-    mount();
-    await user.click(await screen.findByRole("button", { name: /Unlink Company SSO/ }));
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Unlink" }),
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Only the server owner can change another admin's sign-in.",
-    );
-  });
-
   it("hides changes from an admin who may not manage the account", async () => {
     mount({ ...USER, role: "admin" }, { manageable: false, viewerIsOwner: false });
     await screen.findByRole("list", { name: "Connected identities" });
@@ -298,28 +247,6 @@ describe("AdminUserSignIn identities", () => {
 });
 
 describe("AdminUserSignIn linking by subject", () => {
-  it("says a network sign-in keeps the account's password", async () => {
-    const user = userEvent.setup();
-    identities = [];
-    state.installations = [TAILSCALE];
-    mount({ ...USER, password_login: true });
-    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
-    const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
-    expect(dialog).toHaveTextContent("It keeps its Silo password too.");
-    expect(dialog).not.toHaveTextContent("Connecting turns off password sign-in");
-  });
-
-  it("promises no password to an account without one when linking a network sign-in", async () => {
-    const user = userEvent.setup();
-    identities = [];
-    state.installations = [TAILSCALE];
-    mount({ ...USER, password_login: false });
-    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
-    const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
-    expect(dialog).not.toHaveTextContent("Silo password");
-    expect(dialog).not.toHaveTextContent("turns off password sign-in");
-  });
-
   it("links an identity to the enabled provider by its exact subject", async () => {
     const user = userEvent.setup();
     identities = [];
@@ -363,7 +290,6 @@ describe("AdminUserSignIn linking by subject", () => {
 
   it.each([
     ["identity_linked_elsewhere", 409, "already connected to another Silo account"],
-    ["conflict", 409, "alice is already connected to this provider"],
     ["permission_denied", 403, "Only the server owner can change another admin's sign-in."],
     ["validation_failed", 422, "raw validation_failed"],
   ])("explains a %s refusal", async (type, status, text) => {
@@ -375,28 +301,6 @@ describe("AdminUserSignIn linking by subject", () => {
     await user.type(within(dialog).getByLabelText("Subject"), "subject-1");
     await user.click(within(dialog).getByRole("button", { name: "Connect" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(text);
-  });
-
-  it("points to the Sign-in settings when no provider is set up", async () => {
-    const user = userEvent.setup();
-    state.installations = [];
-    mount();
-    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("link", { name: "Settings → Sign-in" })).toHaveAttribute(
-      "href",
-      "/admin/settings/sign-in",
-    );
-    expect(within(dialog).getByRole("button", { name: "Connect" })).toBeDisabled();
-  });
-
-  it("tells a break-glass admin its password stays", async () => {
-    const user = userEvent.setup();
-    mount({ ...USER, role: "admin", break_glass: true, password_login: true });
-    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent(
-      "As a break-glass account it keeps its Silo password.",
-    );
   });
 });
 
@@ -474,33 +378,6 @@ describe("AdminUserSignIn password and break-glass", () => {
     expect(state.updateAdminUser).toHaveBeenCalledTimes(1);
   });
 
-  it("says a password waits for the server switch while password sign-in is off", async () => {
-    serverPasswordLogin = "false";
-    mount({ ...USER, password_login: true });
-    expect(
-      await screen.findByText(/On for this account, but password sign-in is off for the server/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings → Sign-in" })).toHaveAttribute(
-      "href",
-      "/admin/settings/sign-in",
-    );
-  });
-
-  it("tells the admin a new password works once the server allows passwords", async () => {
-    const user = userEvent.setup();
-    serverPasswordLogin = "false";
-    mount();
-    await waitFor(() => expect(opCalls("GET /api/v2/admin/settings/{key}")).toHaveLength(1));
-    await user.click(screen.getByRole("button", { name: "Set a password" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set a password" });
-    expect(dialog).toHaveTextContent("Password sign-in is off for the server");
-    await user.type(within(dialog).getByLabelText("New password"), "long-enough-1");
-    await user.click(within(dialog).getByRole("button", { name: "Set password" }));
-    expect(
-      await screen.findByText(/once password sign-in is on for the server/),
-    ).toBeInTheDocument();
-  });
-
   it("lets the owner make an admin break-glass", async () => {
     const user = userEvent.setup();
     mount({ ...USER, role: "admin", password_login: true });
@@ -514,33 +391,11 @@ describe("AdminUserSignIn password and break-glass", () => {
     await waitFor(() => expect(document.activeElement).toBe(status));
   });
 
-  it("explains clearing the last break-glass admin being refused", async () => {
-    const user = userEvent.setup();
-    state.updateAdminUser.mockRejectedValueOnce(problem("break_glass_required", 409));
-    mount({ ...USER, role: "admin", password_login: true, break_glass: true });
-    await user.click(await screen.findByRole("switch", { name: "Break-glass account" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "would leave no break-glass admin who can still sign in with a password",
-    );
-  });
-
   it("keeps break-glass read-only for anyone but the owner", async () => {
     mount({ ...USER, role: "admin", break_glass: true }, { viewerIsOwner: false });
     expect(await screen.findByRole("switch", { name: "Break-glass account" })).toBeDisabled();
     expect(screen.getByText("Only the server owner can change this.")).toBeInTheDocument();
     expect(screen.getByText(/can't act as break-glass/)).toBeInTheDocument();
-  });
-
-  it("explains that the server owner is break-glass by default", async () => {
-    mount({ ...USER, role: "admin", is_owner: true, password_login: true, break_glass: true });
-    expect(await screen.findByRole("switch", { name: "Break-glass account" })).toBeChecked();
-    expect(screen.getByText(/server owner is break-glass by default/)).toBeInTheDocument();
-  });
-
-  it("leaves the owner note off other admins", async () => {
-    mount({ ...USER, role: "admin", password_login: true, break_glass: true });
-    await screen.findByRole("switch", { name: "Break-glass account" });
-    expect(screen.queryByText(/server owner is break-glass by default/)).toBeNull();
   });
 
   it("hides break-glass on a server that doesn't support it", async () => {

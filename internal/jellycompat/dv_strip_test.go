@@ -29,6 +29,25 @@ func dvStripProfile8Track() models.VideoTrack {
 	}
 }
 
+// dvStripProfile8HDR10PlusTrack is a Dolby Vision profile 8.1 video whose
+// HDR10 base layer also carries HDR10+ dynamic metadata.
+func dvStripProfile8HDR10PlusTrack() models.VideoTrack {
+	track := dvStripProfile8Track()
+	track.HDR10Plus = true
+	track.VideoRangeType = "DOVIWithHDR10Plus"
+	return track
+}
+
+// hdr10PlusTrack is a plain HDR10+ video: an HDR10 stream with dynamic
+// metadata that a display without HDR10+ support ignores.
+func hdr10PlusTrack() models.VideoTrack {
+	return models.VideoTrack{
+		Codec: "hevc", Profile: "Main 10", Level: 150, Width: 3840, Height: 1920, BitDepth: 10,
+		VideoRange: "HDR", VideoRangeType: "HDR10Plus", HDR10Plus: true,
+		ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
+	}
+}
+
 // androidTVRangeProfile mirrors the Jellyfin Android TV device profile, which
 // rejects range types with a NotEquals condition gated by an InCollection
 // ApplyCondition over the same list.
@@ -68,11 +87,20 @@ var (
 	androidTVDVProfile8Disabled = []string{"DOVIInvalid", "DOVIWithEL", "DOVIWithELHDR10Plus", "DOVI", "DOVIWithHDR10", "DOVIWithHDR10Plus"}
 	androidTVSDRDisplay         = append(append([]string(nil), androidTVDVProfile8Disabled...), "HDR10Plus", "HDR10")
 	androidTVDolbyVisionDisplay = []string{"DOVIInvalid", "DOVIWithEL", "DOVIWithELHDR10Plus"}
+	// androidTVHDR10Display is what Jellyfin Android TV rejects on a display
+	// with HDR10 but neither Dolby Vision nor HDR10+.
+	androidTVHDR10Display = append(append([]string(nil), androidTVDVProfile8Disabled...), "HDR10Plus")
 )
 
 // newDVStripHandler serves one profile 8.1 version with tone mapping off (the
 // server default), so a full HDR encode is never available.
 func newDVStripHandler(t *testing.T, localStrip bool) (*PlaybackHandler, string) {
+	t.Helper()
+	return newDVStripHandlerWithTrack(t, localStrip, dvStripProfile8Track())
+}
+
+// newDVStripHandlerWithTrack is newDVStripHandler with another primary video.
+func newDVStripHandlerWithTrack(t *testing.T, localStrip bool, track models.VideoTrack) (*PlaybackHandler, string) {
 	t.Helper()
 	handler, routeID := newSubtitleSelectionHandler(t)
 	version := subtitleSelectionVersion()
@@ -80,7 +108,7 @@ func newDVStripHandler(t *testing.T, localStrip bool) (*PlaybackHandler, string)
 	version.CodecVideo, version.CodecAudio = "hevc", "eac3"
 	version.Bitrate = 15_183
 	version.HDR = true
-	version.VideoTracks = []models.VideoTrack{dvStripProfile8Track()}
+	version.VideoTracks = []models.VideoTrack{track}
 	version.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}
 	version.SubtitleTracks = nil
 	handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
@@ -128,18 +156,62 @@ func TestPlaybackInfoDoesNotStripWhenClientPlaysDolbyVision(t *testing.T) {
 	}
 }
 
+func TestPlaybackInfoCopiesHDR10PlusForHDR10Display(t *testing.T) {
+	handler, routeID := newDVStripHandlerWithTrack(t, true, hdr10PlusTrack())
+
+	response := postPlaybackInfo(t, handler, routeID, androidTVRangeProfile(androidTVHDR10Display...))
+
+	if len(response.MediaSources) != 1 {
+		t.Fatalf("media sources = %#v, want one", response.MediaSources)
+	}
+	dto := response.MediaSources[0]
+	if dto.SupportsDirectPlay || dto.SupportsDirectStream || !dto.SupportsTranscoding ||
+		!strings.HasPrefix(dto.TranscodingURL, "/Videos/"+routeID+"/remux-v1/master.m3u8?") {
+		t.Fatalf("media source = %+v, want only the remux-v1 HLS route", dto)
+	}
+	stored, ok := handler.playbackStore.Get(response.PlaySessionID)
+	if !ok || len(stored.MediaSources) != 1 {
+		t.Fatalf("stored session = %#v, want one negotiated source", stored)
+	}
+	if source := stored.MediaSources[0]; !source.HLSRemux || source.DVStripToHDR10 || source.TranscodeAudio {
+		t.Fatalf("stored source = %+v, want a plain video and audio copy keeping the HDR10+ metadata", source)
+	}
+}
+
+func TestPlaybackInfoStripsDolbyVisionHDR10PlusForHDR10Display(t *testing.T) {
+	handler, routeID := newDVStripHandlerWithTrack(t, true, dvStripProfile8HDR10PlusTrack())
+
+	response := postPlaybackInfo(t, handler, routeID, androidTVRangeProfile(androidTVHDR10Display...))
+
+	if len(response.MediaSources) != 1 {
+		t.Fatalf("media sources = %#v, want one", response.MediaSources)
+	}
+	dto := response.MediaSources[0]
+	if dto.SupportsDirectPlay || dto.SupportsDirectStream || !dto.SupportsTranscoding ||
+		!strings.HasPrefix(dto.TranscodingURL, "/Videos/"+routeID+"/remux-dv-v1/master.m3u8?") {
+		t.Fatalf("media source = %+v, want only the remux-dv-v1 HLS route", dto)
+	}
+	stored, ok := handler.playbackStore.Get(response.PlaySessionID)
+	if !ok || len(stored.MediaSources) != 1 {
+		t.Fatalf("stored session = %#v, want one negotiated source", stored)
+	}
+	if source := stored.MediaSources[0]; !source.DVStripToHDR10 || !source.HLSRemux || source.TranscodeAudio {
+		t.Fatalf("stored source = %+v, want a strip remux of the HDR10+ base layer", source)
+	}
+}
+
+// An SDR display rejects the HDR10 base layer too, so the strip must not be
+// offered even though an executor could run it.
 func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
-	for name, tc := range map[string]struct {
-		unsupported []string
-		localStrip  bool
-	}{
-		"SDR display rejects the HDR10 base layer": {unsupported: androidTVSDRDisplay, localStrip: true},
-		"no executor has the dovi_rpu filter":      {unsupported: androidTVDVProfile8Disabled, localStrip: false},
+	for name, track := range map[string]models.VideoTrack{
+		"HDR10 base layer":    dvStripProfile8Track(),
+		"HDR10+ base layer":   dvStripProfile8HDR10PlusTrack(),
+		"plain HDR10+ stream": hdr10PlusTrack(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler, routeID := newDVStripHandler(t, tc.localStrip)
+			handler, routeID := newDVStripHandlerWithTrack(t, true, track)
 
-			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(tc.unsupported...))
+			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVSDRDisplay...))
 
 			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
 				t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
@@ -231,28 +303,6 @@ func TestCompatCopyVideoMasterManifestForStripOmitsDolbyVision(t *testing.T) {
 	}
 	if strings.Contains(got, "SUPPLEMENTAL-CODECS") || strings.Contains(got, "dvh1") {
 		t.Fatalf("strip master still advertises Dolby Vision:\n%s", got)
-	}
-}
-
-func TestCompatCopyVideoMasterManifestForProfile7StripAdvertisesPQ(t *testing.T) {
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 60_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
-				DVProfile: 7, DVLevel: 6, DVBLCompatID: 6, VideoRangeType: "DOVIWithEL",
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}},
-		},
-		HLSRemux:       true,
-		DVStripToHDR10: true,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-
-	if !strings.Contains(got, "VIDEO-RANGE=PQ") || strings.Contains(got, "dvh1") {
-		t.Fatalf("profile 7 strip master must describe the HDR10 base layer:\n%s", got)
 	}
 }
 

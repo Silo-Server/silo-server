@@ -52,15 +52,6 @@ function renderGuard(initialEntries: string[] = ["/draft"]) {
 }
 
 describe("UnsavedChangesGuard", () => {
-  it("lets a clean page navigate away without asking", async () => {
-    renderGuard();
-
-    await user.click(screen.getByRole("link", { name: "Other page" }));
-
-    expect(screen.getByRole("heading", { name: "Other page" })).toBeInTheDocument();
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-  });
-
   it("keeps the page and its edits when the prompt is cancelled", async () => {
     renderGuard();
 

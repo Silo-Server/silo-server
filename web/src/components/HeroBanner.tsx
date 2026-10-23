@@ -1,9 +1,19 @@
-import { memo, useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  type MouseEvent,
+} from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { HeroOverviewText } from "./HeroOverviewText";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -15,6 +25,10 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
+
+// On-view translation for the visible slide loads after the hero itself, so
+// it stays out of the launch bundle; the plain overview shows meanwhile.
+const HeroOverview = lazy(() => import("./HeroOverview"));
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -40,6 +54,11 @@ interface HeroBannerProps {
    * param so the watch/item routes can scope back to the right library.
    */
   libraryId?: number;
+  /**
+   * Refetches the items while an on-view translation of the shown slide runs,
+   * so the translated description replaces the original in place.
+   */
+  onRefreshItems?: () => void;
 }
 
 /**
@@ -149,9 +168,19 @@ export default function HeroBanner({
   bleed = false,
   reserveHeaderSpace = false,
   libraryId,
+  onRefreshItems,
 }: HeroBannerProps) {
   const spoilerPrefs = useEpisodeSpoilerPrefs();
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
+  const pendingSlideIds = useMemo(
+    () =>
+      new Set(
+        slides
+          .filter((slide) => slide.pending_translation_language)
+          .map((slide) => slide.content_id),
+      ),
+    [slides],
+  );
   const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
     activeIndex: 0,
     outgoingIndex: null as number | null,
@@ -222,6 +251,16 @@ export default function HeroBanner({
   useAmbientColor(current?.backdrop_thumbhash);
   if (slides.length === 0) return null;
   if (!current) return null;
+  const overviewShown =
+    Boolean(current.overview) &&
+    !(
+      spoilerPrefs.hideOverviews &&
+      current.type === "episode" &&
+      isEpisodeUnwatched({
+        played: current.user_state?.played,
+        position_seconds: current.position_seconds,
+      })
+    );
 
   const metadata = formatHeroMetadata(current);
 
@@ -334,19 +373,21 @@ export default function HeroBanner({
                 )}
               </div>
             )}
-            {current.overview &&
-              !(
-                spoilerPrefs.hideOverviews &&
-                current.type === "episode" &&
-                isEpisodeUnwatched({
-                  played: current.user_state?.played,
-                  position_seconds: current.position_seconds,
-                })
-              ) && (
-                <p className="text-foreground/72 mb-7 line-clamp-2 max-w-2xl text-sm leading-7 sm:line-clamp-none sm:text-base">
-                  {current.overview}
-                </p>
-              )}
+            <Suspense
+              fallback={
+                overviewShown ? (
+                  <div className="mb-7 max-w-2xl">
+                    <HeroOverviewText overview={current.overview} />
+                  </div>
+                ) : null
+              }
+            >
+              <HeroOverview
+                item={overviewShown ? current : undefined}
+                pendingContentIds={pendingSlideIds}
+                onRefreshItems={onRefreshItems}
+              />
+            </Suspense>
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 to={playHref}

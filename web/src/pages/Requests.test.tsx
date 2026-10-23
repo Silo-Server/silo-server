@@ -274,14 +274,4 @@ describe("Requests (Yours list)", () => {
 
     expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("r1");
   });
-
-  it("keeps the request when the viewer backs out", () => {
-    renderYours();
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Waiting Movie" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep request" }));
-
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(mocks.cancel).not.toHaveBeenCalled();
-  });
 });

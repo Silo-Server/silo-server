@@ -67,9 +67,12 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name             *string
-	Avatar           *string
-	PIN              *string
+	Name   *string
+	Avatar *string
+	// PINHash replaces the profile's PIN: a bcrypt hash the caller made
+	// (passwordhash.Generate) before opening any transaction, or "" to remove
+	// the PIN.
+	PINHash          *string
 	IsChild          *bool
 	MaxContentRating *string
 	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
@@ -104,10 +107,10 @@ type ProgressKey struct {
 	MediaItemID string
 }
 
-// ListKey is the keyset position ListFavoritesPage and ListWatchlistPage
-// resume after: the (AddedAt, MediaItemID) of the last row a caller already
-// holds, copied verbatim from a Favorite or WatchlistEntry the page returned.
-// media_item_id is unique per profile in both tables, so with the fixed
+// ListKey is the keyset position ListFavoritesPage, ListWatchlistPage and
+// ListNotInterestedPage resume after: the (AddedAt, MediaItemID) of the last
+// row a caller already holds, copied verbatim from an entry the page
+// returned. media_item_id is unique per profile in each table, so with the fixed
 // ORDER BY added_at DESC, media_item_id DESC the pair orders every row
 // totally, and a row added or removed between pages neither repeats nor
 // hides another.
@@ -227,6 +230,13 @@ type Favorite struct {
 
 // WatchlistEntry represents a watchlist item.
 type WatchlistEntry struct {
+	ProfileID   string
+	MediaItemID string
+	AddedAt     string
+}
+
+// NotInterestedEntry is a movie or series a profile marked Not interested.
+type NotInterestedEntry struct {
 	ProfileID   string
 	MediaItemID string
 	AddedAt     string
@@ -444,6 +454,10 @@ type SeriesPlaybackPreference struct {
 	Resolution string `json:"resolution"`
 	HDR        bool   `json:"hdr"`
 	CodecVideo string `json:"codec_video"`
+	// FileID and EditionKey name the exact version for a row keyed by a
+	// movie's own content ID; series rows leave them empty.
+	FileID     int    `json:"file_id,omitempty"`
+	EditionKey string `json:"edition_key,omitempty"`
 	UpdatedAt  string `json:"updated_at"`
 }
 

@@ -79,9 +79,9 @@ type AdminTaskJob struct {
 	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
 	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
 	ArtifactSizeBytes       int64                                `json:"artifact_size_bytes"`
-	DownloadURL             string                               `json:"download_url,omitempty"`
+	DownloadURL             string                               `json:"download_url,omitempty" format:"uri-reference"`
 	DownloadExpiresAt       *Instant                             `json:"download_expires_at,omitempty"`
-	PublicURL               string                               `json:"public_url,omitempty"`
+	PublicURL               string                               `json:"public_url,omitempty" format:"uri-reference"`
 	PublicLinkSupported     bool                                 `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
 }
 type AdminTaskJobsInput struct {
@@ -109,11 +109,11 @@ func registerAdminTaskJobs(reg *Registry) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, reg.getAdminTaskJob)
-	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.")
+	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.")
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
 	cancel.Responses = map[string]*huma.Response{"200": {
-		Description: "The job was already canceled.",
+		Description: "The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once.",
 		Content:     map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: adminTaskJobSchemaRef}}},
 	}}
 	Register(reg, Operation{Operation: cancel, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}, reg.cancelAdminTaskJob)
@@ -130,8 +130,8 @@ func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInp
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	if job.JobType != adminjob.JobTypeStorageTransition {
-		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
+	if !adminjob.IsCancellableJobType(job.JobType) {
+		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled")
 	}
 	canceller, ok := reg.deps.AdminTaskJobs.(interface {
 		RequestAdminTaskJobCancellation(context.Context, string) (*models.AdminJob, error)
@@ -192,7 +192,10 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 			}
 			out.LibraryName = request.LibraryName
 		}
-		if job.Status == adminjob.StatusCompleted {
+		// A canceled image cache cleanup keeps the totals deleted before the
+		// cancel, so report them the same way as a completed job.
+		if job.Status == adminjob.StatusCompleted ||
+			(job.JobType == adminjob.JobTypeImageCacheCleanup && job.Status == adminjob.StatusCancelled) {
 			var result AdminTaskJobLibraryResult
 			if json.Unmarshal(job.ResultPayload, &result) == nil {
 				out.LibraryResult = &result

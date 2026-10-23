@@ -36,8 +36,8 @@ its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
-by default: processed search index events, activity log, task history, expired
-login sessions, policy decision log, and notifications. The log steps also
+by default: processed search index events, activity log, task history, autoscan
+events, expired login sessions, policy decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Every server fires
 the same trigger, so a PostgreSQL advisory lock lets one server run the steps;
 the others record a completed run that did nothing. Each step keeps its
@@ -130,11 +130,24 @@ documents for this job type.
 
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for storage-transition jobs. Library refresh cancellation uses its separate
-library-job endpoint above. Cancellation retains completed effects and verified
-storage-copy checkpoints. An accepted cancellation returns `202`; an already
-canceled job returns `200`; a succeeded or failed job returns
-`409 job_not_cancelable`. A queued storage-transition cancellation also releases
-its staged target so a later transition can choose a different destination. The
-administrator task section does not add a generic durable scheduler or change
+for library refresh, storage-transition, and image cache cleanup jobs. A job's
+`cancelable` field is true exactly when it is one of these types and not
+terminal, and every job resource that reports `cancelable: true` accepts the
+cancellation through its own cancel operation. A library refresh can therefore
+be canceled through either `cancelAdminJob` or the library-job endpoint; both
+record the same request. Other job types return `409 job_not_cancelable`.
+Cancellation retains
+completed effects and verified storage-copy checkpoints. An accepted
+cancellation returns `202`; an already canceled job returns `200`; a succeeded
+or failed job returns `409 job_not_cancelable`. A queued storage-transition
+cancellation also releases its staged target so a later transition can choose a
+different destination. A queued image cache cleanup, including one waiting
+between slices, is canceled at once and returns `200`. A running cleanup stops
+at the prefix it is deleting, so the cancel can take partial effect: cached
+images already deleted stay deleted and any not yet deleted remain in storage.
+The canceled job reports the totals it reached in `library_result`:
+`deleted_prefixes` counts fully deleted prefixes and `deleted_s3_objects` counts
+every deleted object, including any from the prefix the cancel interrupted. A
+cleanup canceled before it deleted anything reports zeros. The administrator
+task section does not add a generic durable scheduler or change
 the retention and dispatch guarantees of existing job owners.

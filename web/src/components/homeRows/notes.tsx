@@ -33,7 +33,7 @@ function Key({ children, label }: { children: string; label?: string }) {
   return (
     <kbd
       aria-label={label}
-      className="border-border bg-background text-foreground inline-grid h-5 min-w-5 place-items-center rounded-md border px-1.5 text-[11px] font-medium"
+      className="border-border bg-background text-foreground inline-grid h-5 min-w-5 place-items-center rounded-md border px-1.5 text-xs font-medium"
     >
       {children}
     </kbd>

@@ -398,7 +398,6 @@ function WatchPagePlayer({
         index,
         tracks: playableSubtitles,
         inventoryTrack,
-        showForcedSubtitles,
       });
       for (const request of requests) {
         void sendSubtitleChoiceRequest(config, request).catch(() => {
@@ -406,7 +405,7 @@ function WatchPagePlayer({
         });
       }
     },
-    [config, seriesContext, contentId, playableSubtitles, showForcedSubtitles],
+    [config, seriesContext, contentId, playableSubtitles],
   );
 
   useEffect(() => {
@@ -674,8 +673,11 @@ function WatchPagePlayer({
       streamUrl={session.streamUrl}
       plan={session.plan}
       planRevision={session.planRevision}
+      browserEngine={session.browserEngine}
+      nativeOriginalSupport={session.nativeOriginalSupport}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
+      replacing={session.replacing}
       replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}

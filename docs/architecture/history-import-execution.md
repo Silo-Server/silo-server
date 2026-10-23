@@ -88,7 +88,10 @@ Silo progress. Favorite-only records add the favorite without creating progress.
 
 Source servers are user-supplied, so what an import reads from one is bounded
 (`internal/historyimport/upstream_limits.go`): each successful response is decoded only up
-to 16 MiB, and each paged listing stops at 5,000 pages, 500,000 items, or 512 MiB in total.
+to 16 MiB and 250,000 JSON values, and each paged listing stops at 5,000 pages, 500,000
+items, or 512 MiB in total. One budget also covers the whole run, across every listing,
+Plex section, ID lookup, and metadata sweep: 2 GiB read and an estimated 256 MiB of kept
+items. Lookups by ID keep only the items they asked for, one per ID.
 Going over a limit fails the run with its own message. That includes lists whose other
 failures only add a warning (resume positions, favorites, the watchlist, Plex sections, and
 metadata lookups), so an import never completes without a list the source sent.

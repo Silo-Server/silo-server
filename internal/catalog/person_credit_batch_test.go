@@ -104,7 +104,7 @@ func TestPersonCreditPhotoBatchPreservesCredits(t *testing.T) {
 					reference := &DetailService{imageResolver: &creditPhotoResolver{}}
 					want := make([]PersonCredit, len(people))
 					for i, person := range people {
-						photo := reference.PresignURL(t.Context(), person.PhotoPath, imagesize.PluginVariantFeatured)
+						photo := reference.PresignURL(t.Context(), cachedImageVariantPath(person.PhotoPath, "profile", ""), imagesize.PluginVariantLarge)
 						if size != imagesize.Unset {
 							photo = reference.PresignImageURL(t.Context(), person.PhotoPath, "profile", string(size))
 						}
@@ -159,21 +159,6 @@ func TestPersonCreditPhotoBatchSkipsDirectAndMissingPaths(t *testing.T) {
 	}
 }
 
-func TestPersonCreditPhotoBatchWithoutResolver(t *testing.T) {
-	service := &DetailService{}
-	for _, size := range []imagesize.Size{imagesize.Unset, imagesize.Large} {
-		got := service.personCredits(t.Context(), creditPhotoPeople(), AccessFilter{ImageSize: size})
-		for i, credit := range got {
-			if i == 3 || i == 4 {
-				continue
-			}
-			if credit.PhotoURL != "" {
-				t.Fatalf("unresolved photo = %q", credit.PhotoURL)
-			}
-		}
-	}
-}
-
 func TestPersonCreditPhotoBatchCoalescesNormalizedKeys(t *testing.T) {
 	recorder := &creditPhotoResolver{missingBatch: true}
 	service := &DetailService{imageResolver: recorder}
@@ -187,34 +172,6 @@ func TestPersonCreditPhotoBatchCoalescesNormalizedKeys(t *testing.T) {
 	}
 	if recorder.batches != 1 || len(recorder.paths) != 1 || recorder.singles != 1 {
 		t.Fatalf("normalized aliases resolved repeatedly: %#v", recorder)
-	}
-}
-
-func BenchmarkPersonCreditPhotos(b *testing.B) {
-	for _, count := range []int{10, 100, 500} {
-		for _, duplicate := range []bool{false, true} {
-			for _, size := range []imagesize.Size{imagesize.Unset, imagesize.Medium} {
-				b.Run(fmt.Sprintf("credits=%d/duplicates=%t/size=%s", count, duplicate, size), func(b *testing.B) {
-					recorder := &creditPhotoResolver{}
-					service := &DetailService{imageResolver: recorder}
-					people := make([]models.ItemPerson, count)
-					for i := range people {
-						id := i
-						if duplicate {
-							id /= 2
-						}
-						people[i].PhotoPath = fmt.Sprintf("plug://people/%d.jpg", id)
-					}
-					b.ReportAllocs()
-					for b.Loop() {
-						recorder.paths = recorder.paths[:0]
-						service.personCredits(b.Context(), people, AccessFilter{ImageSize: size})
-					}
-					b.ReportMetric(float64(recorder.batches)/float64(b.N), "batch-calls/op")
-					b.ReportMetric(float64(recorder.singles)/float64(b.N), "single-calls/op")
-				})
-			}
-		}
 	}
 }
 

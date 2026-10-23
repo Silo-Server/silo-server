@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -146,7 +145,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 		_ = tx.Rollback(rollbackCtx)
 	}()
 	if !includeTotal && options.exactSQL != "" {
-		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...)
+		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -163,7 +162,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return items, wrapped.keys, 0, nil
 		}
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -306,7 +305,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 		floor = fuzzyAugmentSimilarityFloor
 	}
 	options := &searchCursorSQL{request: searchOptions(request)}
-	sql, _, args := r.buildFuzzySearchCursorSQL(parsed, itemTypes, fuzzyMaxResults+1, 0, filter, false, contentIDsFromMediaItems(fts), floor, options)
+	sql, _, args := r.buildFuzzySearchCursorSQL(parsed, itemTypes, fuzzyCandidatePool+1, 0, filter, false, contentIDsFromMediaItems(fts), floor, options)
 	if options.err != nil {
 		return nil, false, options.err
 	}
@@ -325,7 +324,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, err
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, false, err
 	}
@@ -335,9 +334,9 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if err != nil {
 		return nil, false, err
 	}
-	truncated := len(fuzzy) > fuzzyMaxResults
+	truncated := len(fuzzy) > fuzzyCandidatePool
 	if truncated {
-		fuzzy = fuzzy[:fuzzyMaxResults]
+		fuzzy = fuzzy[:fuzzyCandidatePool]
 	}
 	aliases, err := loadFuzzyRerankAliases(ctx, tx, searchTextFromParsed(parsed), fuzzy)
 	if err != nil {
@@ -346,43 +345,23 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, err
 	}
-	query := normalizeTitleForComparison(searchTextFromParsed(parsed))
-	tokens, validTokens := boundedFuzzyTokens(query, fuzzyRerankMaxQueryTokens)
-	ranks := make([]fuzzyRankedItem, len(fuzzy))
-	keysByID := map[string][]QueryCursorValue{}
-	for i, item := range fuzzy {
-		if err := ctx.Err(); err != nil {
-			return nil, false, err
-		}
-		score := fuzzyTitleScore{}
-		if validTokens && len(tokens) > 0 {
-			score = fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
-			variants := append([]string(nil), aliases[item.ContentID]...)
-			if len(item.Title) <= fuzzyRerankMaxTitleBytes {
-				variants = append(variants, item.Title)
-			}
-			for _, variant := range variants {
-				candidate := scoreFuzzyTitleVariant(query, tokens, variant)
-				if fuzzyTitleScoreBetter(candidate, score) {
-					score = candidate
-				}
-			}
-		}
-		ranks[i] = fuzzyRankedItem{item: item, score: score, order: i}
-		keys := []QueryCursorValue{boolCursorValue(score.exact), numberCursorValue(score.matchedTokens), boolCursorValue(score.contiguous), numberCursorValue(score.editDistance), numberCursorValue(score.extraTokens)}
-		keysByID[item.ContentID] = append(keys, wrapped.keys[i].Keys...)
+	ranks, required, err := rankFuzzyItems(ctx, searchTextFromParsed(parsed), fuzzy, aliases)
+	if err != nil {
+		return nil, false, err
 	}
-	slices.SortStableFunc(ranks, func(a, b fuzzyRankedItem) int {
-		if fuzzyTitleScoreBetter(a.score, b.score) {
-			return -1
-		}
-		if fuzzyTitleScoreBetter(b.score, a.score) {
-			return 1
-		}
-		return 0
-	})
+	if required > 0 {
+		ranks = admitFuzzyRanks(ranks, required, len(fts) > 0)
+	}
+	if len(ranks) > fuzzyMaxResults {
+		ranks, truncated = ranks[:fuzzyMaxResults], true
+	}
+	// Admitted ranks share one missingWords value, so these keys order them
+	// exactly as fuzzyTitleScoreBetter does.
 	for _, rank := range ranks {
-		candidates = append(candidates, searchCandidate{item: rank.item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFuzzy, Keys: keysByID[rank.item.ContentID]}})
+		score := rank.score
+		keys := []QueryCursorValue{boolCursorValue(score.exact), numberCursorValue(score.matchedTokens), boolCursorValue(score.contiguous), numberCursorValue(score.editDistance), numberCursorValue(score.extraTokens)}
+		keys = append(keys, wrapped.keys[rank.order].Keys...)
+		candidates = append(candidates, searchCandidate{item: rank.item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFuzzy, Keys: keys}})
 	}
 	candidates, err = r.groupSearchCandidates(ctx, candidates, searchOptions(request).GroupByWork, searchOptions(request).Definition.Limit)
 	return candidates, truncated, err

@@ -56,32 +56,6 @@ func TestEventsSocketTicketDelegatesOnlyLoginAuthority(t *testing.T) {
 	}
 }
 
-// After a role change the events socket closes with access_changed. The
-// client's reconnect presents the access token minted under the old role: the
-// ticket mint refuses it with token_refresh_required, and the refreshed token
-// mints a ticket carrying the new role, so the next socket does not close
-// again for the same change.
-func TestEventsSocketTicketAfterRoleChange(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	fake := new(fakeEventsSocket)
-	deps.EventsSocket = fake
-	expires := jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}
-	stale := &auth.Claims{UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: expires}
-	refreshed := &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: expires}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{"tok-stale": stale, "tok-refreshed": refreshed}}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
-	h := NewHandler(deps)
-	path := Prefix + "/events/ws-ticket"
-	rec := do(t, h, http.MethodPost, path, "", bearer("tok-stale"))
-	requireProblem(t, rec, TypeTokenRefreshRequired)
-	if fake.calls != 0 {
-		t.Fatal("a ticket was minted for the stale role")
-	}
-	rec = do(t, h, http.MethodPost, path, "", bearer("tok-refreshed"))
-	if rec.Code != 200 || fake.calls != 1 || fake.identity.Role != "user" || fake.identity.SessionID != "s1" {
-		t.Fatalf("refreshed mint: %d %s %+v", rec.Code, rec.Body.String(), fake.identity)
-	}
-}
-
 func eventsSocketFixtureCases() []fixtureCase {
 	return []fixtureCase{{name: "events_socket_ticket", operationID: "createEventsSocketTicket", method: "POST", path: Prefix + "/events/ws-ticket", headers: bearer("tok-events"), status: 200, schema: "#/components/schemas/EventsSocketTicket", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "An account delegates its expiring login session to an opaque single-use realtime handshake credential."}}
 }

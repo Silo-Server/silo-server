@@ -2,12 +2,14 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -116,7 +118,7 @@ func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, 
 		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
 
 	p, err := scanProfile(row)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -173,7 +175,7 @@ func updateProfile(
 	var setClauses []string
 	var args []any
 	argIdx := 1
-	accessPolicyChanged := u.PIN != nil ||
+	accessPolicyChanged := u.PINHash != nil ||
 		u.IsChild != nil ||
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
@@ -194,17 +196,8 @@ func updateProfile(
 	if u.Avatar != nil {
 		addArg("avatar", *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			addArg("pin_hash", "")
-		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			addArg("pin_hash", string(hash))
-		}
+	if u.PINHash != nil {
+		addArg("pin_hash", *u.PINHash)
 		// The user_profiles_pin_revision trigger advances pin_revision in
 		// this same UPDATE whenever pin_hash changes, which invalidates every
 		// token minted for the old PIN, and only this profile's. It lives in
@@ -306,12 +299,71 @@ func updateProfile(
 	return nil
 }
 
+// profileCascadeTables are the tables DeleteProfile clears of the profile's
+// rows by (user_id, profile_id). Tables are listed rather than left to a
+// foreign key so both backends delete identically: the per-user SQLite store
+// has no foreign keys at all. Account-scope rows carry a NULL profile_id and
+// are untouched, which is what removing one household member has to mean.
+// TestPostgresDeleteProfileCoversEveryProfileTable keeps the list complete.
+var profileCascadeTables = []string{
+	"user_favorites",
+	"user_watchlist",
+	"user_watch_progress",
+	"user_watch_history",
+	"user_history_hidden_items",
+	"user_home_item_dismissals",
+	"user_collection_sort_preferences",
+	"user_personal_collections",
+	"user_personal_collection_profiles",
+	"user_audio_preferences",
+	"user_subtitle_preferences",
+	"user_series_playback_preferences",
+	"user_library_playback_preferences",
+	"user_profile_allowed_libraries",
+	"user_profile_onboarding",
+	"user_setting_values",
+	"user_dropped_series",
+	// Leaves titles no profile watchlists any more; the profile
+	// handler's watchlist-title purge sweeps those under the title lock.
+	"user_watchlist_titles",
+	// Recommendation state. A deleted profile's ratings would otherwise
+	// keep shaping other accounts' Similar Users rows, and its taste
+	// would be rebuilt every night.
+	"user_ratings",
+	"user_not_interested",
+	"user_taste_profiles",
+	"user_taste_clusters",
+	"recommendation_cache",
+	// Ebook reading data. Like the recommendation state, it lives in
+	// Postgres whichever store holds the profile; the profile handler
+	// purges it after a delete from any other store.
+	"ebook_reader_progress",
+	"ebook_reader_config",
+	"ebook_reader_annotations",
+}
+
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Lock every collection whose revision the deletes below advance, in id
+	// order, before taking any revision row: the profile's own collections
+	// and those it has visibility rows on. The visibility and item deletes
+	// advance revisions through triggers, and a collection update, or
+	// another profile's delete, locks collections first; taking them in
+	// another order can deadlock.
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM user_personal_collections
+		WHERE user_id = $1 AND (profile_id = $2 OR id IN (
+			SELECT collection_id FROM user_personal_collection_profiles WHERE user_id = $1 AND profile_id = $2
+		))
+		ORDER BY id FOR UPDATE`,
+		s.userID, id); err != nil {
+		return fmt.Errorf("locking collections of profile %s: %w", id, err)
+	}
 
 	// Preferences belong to viewers, not creators, so remove every override
 	// for collections owned by the profile before those collections disappear.
@@ -332,25 +384,27 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
-	// user_setting_values is listed rather than left to its composite profile
-	// FK so both backends delete identically: the per-user SQLite store has no
-	// foreign keys at all. Account-scope rows carry a NULL profile_id and are
-	// untouched, which is what removing one household member has to mean.
-	cascadeTables := []string{
-		"user_favorites",
-		"user_watchlist",
-		"user_watch_progress",
-		"user_collection_sort_preferences",
-		"user_personal_collections",
-		"user_series_playback_preferences",
-		"user_library_playback_preferences",
-		"user_setting_values",
-		"user_dropped_series",
-		// Leaves titles no profile watchlists any more; the profile
-		// handler's watchlist-title purge sweeps those under the title lock.
-		"user_watchlist_titles",
+	// Visibility rows of the profile's own collections go with them, as
+	// their items do.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_personal_collection_profiles
+		WHERE user_id = $1 AND collection_id IN (
+			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
+		)`, s.userID, id); err != nil {
+		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
-	for _, table := range cascadeTables {
+
+	// Jellyfin display preferences carry the profile in their key.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1 AND left(prefs_id, length($2)) = $2`,
+		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
+		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
+	}
+	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
+		return err
+	}
+
+	for _, table := range profileCascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
@@ -367,28 +421,49 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	return tx.Commit(ctx)
 }
 
-func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string) (bool, error) {
-	var pinHash string
-	err := s.pool.QueryRow(ctx,
-		"SELECT pin_hash FROM user_profiles WHERE user_id = $1 AND id = $2",
-		s.userID, profileID,
-	).Scan(&pinHash)
-	if err == pgx.ErrNoRows {
-		return false, fmt.Errorf("profile %s not found", profileID)
+// deleteProfileSectionOverrides takes a profile's entries out of the account's
+// section-override settings, which hold every profile's overrides for one
+// scope and library in one JSON value (see SaveSectionOverrides). A value left
+// with no entries is deleted, as ResetSectionOverrides does.
+func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	if err := lockSectionOverrides(ctx, tx, userID); err != nil {
+		return err
 	}
+	rows, err := tx.Query(ctx,
+		`SELECT key, value FROM user_settings WHERE user_id = $1 AND key LIKE 'section\_overrides:%' FOR UPDATE`, userID)
 	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
+		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
 	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
-		return false, nil
-	}
+	type setting struct{ key, value string }
+	settings, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (setting, error) {
+		var s setting
+		err := row.Scan(&s.key, &s.value)
+		return s, err
+	})
 	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
+		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
 	}
-	return true, nil
+	for _, st := range settings {
+		var overrides []userstore.SectionOverride
+		if err := json.Unmarshal([]byte(st.value), &overrides); err != nil {
+			return fmt.Errorf("decoding section overrides %s: %w", st.key, err)
+		}
+		kept := slices.DeleteFunc(overrides, func(o userstore.SectionOverride) bool { return o.ProfileID == profileID })
+		if len(kept) == len(overrides) {
+			continue
+		}
+		if len(kept) == 0 {
+			_, err = tx.Exec(ctx, `DELETE FROM user_settings WHERE user_id = $1 AND key = $2`, userID, st.key)
+		} else {
+			var data []byte
+			if data, err = json.Marshal(kept); err != nil {
+				return fmt.Errorf("encoding section overrides %s: %w", st.key, err)
+			}
+			_, err = tx.Exec(ctx, `UPDATE user_settings SET value = $3 WHERE user_id = $1 AND key = $2`, userID, st.key, string(data))
+		}
+		if err != nil {
+			return fmt.Errorf("writing section overrides %s: %w", st.key, err)
+		}
+	}
+	return nil
 }
