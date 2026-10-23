@@ -220,11 +220,14 @@ var ErrMeilisearchCheckKeyRejected = errors.New("meilisearch rejected the API ke
 // other as ErrMeilisearchCheckRedirected. Runtime clients and checks without a
 // key retain their redirect policy.
 //
-// /health answers without a key, so the check also lists one index, which
-// needs the indexes.get action the rebuild cleanup uses. A 401 or 403 there
-// is reported as ErrMeilisearchCheckKeyRejected with the status code only,
-// not Meilisearch's error text.
-func (c *meilisearchClient) checkConnection(ctx context.Context) error {
+// /health answers without a key, so the check then makes two authenticated
+// reads. Listing one index needs the indexes.get action the rebuild cleanup
+// uses. Searching an index under indexPrefix that does not exist needs the
+// search action and an index scope covering Silo's indexes; Meilisearch
+// answers it with index_not_found when the key may search there. A 401 or 403
+// from either read is reported as ErrMeilisearchCheckKeyRejected with the
+// status code only, not Meilisearch's error text.
+func (c *meilisearchClient) checkConnection(ctx context.Context, indexPrefix string) error {
 	if c.apiKey != "" {
 		c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			if !sameCheckAuthority(req.URL, via[0].URL) {
@@ -239,7 +242,20 @@ func (c *meilisearchClient) checkConnection(ctx context.Context) error {
 	if err := c.Health(ctx); err != nil {
 		return err
 	}
-	err := c.do(ctx, http.MethodGet, "/indexes?limit=1", nil, nil)
+	if err := checkKeyAccepted(c.do(ctx, http.MethodGet, "/indexes?limit=1", nil, nil)); err != nil {
+		return err
+	}
+	probeUID := indexPrefix + "_rebuild_check"
+	err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(probeUID)+"/search", meilisearchSearchRequest{}, nil)
+	if isMeilisearchIndexNotFound(err) {
+		return nil
+	}
+	return checkKeyAccepted(err)
+}
+
+// checkKeyAccepted reports a 401 or 403 as ErrMeilisearchCheckKeyRejected and
+// returns any other error unchanged.
+func checkKeyAccepted(err error) error {
 	var httpErr *meilisearchHTTPError
 	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
 		return fmt.Errorf("%w (HTTP %d)", ErrMeilisearchCheckKeyRejected, httpErr.StatusCode)
