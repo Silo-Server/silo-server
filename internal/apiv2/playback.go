@@ -40,7 +40,7 @@ type PlaybackService interface {
 }
 
 type PlaybackCapabilities struct {
-	BandwidthProbeURL           string `json:"bandwidth_probe_url,omitempty"`
+	BandwidthProbeURL           string `json:"bandwidth_probe_url,omitempty" format:"uri"`
 	BandwidthProbeTargetKbps    *int   `json:"bandwidth_probe_target_kbps,omitempty" nullable:"false" doc:"With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from."`
 	BandwidthProbeAutomatic     *bool  `json:"bandwidth_probe_automatic,omitempty" nullable:"false" doc:"With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works."`
 	BandwidthProbeMaxAgeSeconds *int   `json:"bandwidth_probe_max_age_seconds,omitempty" nullable:"false" doc:"With connection_speed_v1: how long a speed reading stays current."`

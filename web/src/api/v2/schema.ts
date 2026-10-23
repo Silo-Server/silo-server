@@ -27564,6 +27564,7 @@ export interface components {
        * @description With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from.
        */
       bandwidth_probe_target_kbps?: number;
+      /** Format: uri */
       bandwidth_probe_url?: string;
       deliveries: string[];
       features: string[];

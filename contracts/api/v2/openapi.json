@@ -38850,6 +38850,7 @@
             "type": "integer"
           },
           "bandwidth_probe_url": {
+            "format": "uri",
             "type": "string"
           },
           "deliveries": {
