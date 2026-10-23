@@ -398,6 +398,46 @@ remaining movies wait for the next run. Run summaries count
 Playback analysis of a movie without credits analyzes that file alone, with
 playback priority. Admin refresh of a movie analyzes each of its files.
 
+## Contribution
+
+Providers with contribution enabled receive this server's markers through
+`markers.ContributionService`: a manual save sends the saved kinds at once,
+and the daily task sends scanner intros and credits at or above each
+provider's minimum confidence to providers with automatic sharing on. Online
+and plugin markers are never sent, so a provider's data does not reach
+another provider through this server. Automated "nothing found" results are
+never sent either.
+
+Each attempt first claims a target in `marker_contributions`, keyed by
+provider, kind, and `target_key`; a partial unique index allows one active
+claim per target. The target key is the item kind, the provider's first
+required external ID (or else TMDB, TVDB, then IMDb), and the season and
+episode. An active claim blocks every later payload for that target, whatever
+times it carries, because most providers keep one submission per account for
+each item. A stale in-flight claim, a retryable error, and an `invalid`
+refusal older than 30 days free the target.
+
+A provider whose marker capability declares `supports_amend` replaces its
+earlier submission instead. For it, the target key adds `|file:<media_file_id>`,
+so each file is its own target, and the content hash also covers the marker's
+source and algorithm, so a new detection version is a change. A claim whose
+content hash differs from the new one is taken over once it is settled, even
+as a `conflict`; an in-flight claim still blocks. The daily candidate query
+recomputes the hash in SQL and offers a file again when it no longer matches
+its active claim. It must hash exactly as `contributeSegment` does; the
+database contract test `TestContributionStoreAmendResubmitsChangedMarkers`
+checks that.
+
+A manual save that keeps an online or plugin provider's marker, with both
+bounds within a second of it, is a confirmation of that provider's data. It is
+contributed to that provider only, never to another one
+(`markers.ConfirmedProvider`). The rule reads the stored marker before the
+save, so it applies when provider markers are stored (`markers.online_storage`
+`stored`, the default); in `on_demand` mode the stored row holds no provider
+marker and the rule does not fire. The saved marker carries no record of the
+confirmation, so a later save or an admin contribution of the same marker is
+not held back.
+
 ## Measuring accuracy
 
 Files with authored intro chapters are ground truth for the Chromaprint path.
