@@ -266,16 +266,16 @@ func (c *SubtitleCache) waitForTextFill(ctx context.Context, inputPath string, t
 	}
 	key := subtitleCacheFormatKey(inputPath, track.Ordinal, src.ModTime(), src.Size(), track.Format)
 	c.mu.Lock()
-	done := c.inflight[key]
+	fill := c.inflight[key]
 	c.mu.Unlock()
-	if done == nil {
+	if fill == nil {
 		return false
 	}
 	if afterTextFillWaitCapture != nil {
 		afterTextFillWaitCapture()
 	}
 	select {
-	case <-done:
+	case <-fill.done:
 		return true
 	case <-ctx.Done():
 		return false
