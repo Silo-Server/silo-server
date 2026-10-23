@@ -340,7 +340,7 @@ season, and the season and episode lists, are members through their series. On t
 native reads an episode is a member when it or its series is in the library: the
 series' lists name every episode under any library that holds the series, so an
 episode with no file in that library still opens from it. The v1 item reads,
-`getWatchDetail`, and the Jellyfin compatibility surface keep the episode's own
+`getWatchState`, and the Jellyfin compatibility surface keep the episode's own
 libraries. The check does not, by default, change which files come back: an item
 stored in several libraries lists every version the viewer may access, so a "Movies"
 and "Movies 4K" split still shows both files from either library.
@@ -348,7 +348,7 @@ and "Movies 4K" split still shows both files from either library.
 The administrator setting `catalog.scope_versions_to_library` (default `false`)
 makes those reads answer only the versions stored in the named library, so an
 episode with no file there lists no versions. A read without `library_id` is
-unaffected, and so is `getWatchDetail`, watch-together selection, and the Jellyfin
+unaffected, and so is `getWatchState`, watch-together selection, and the Jellyfin
 compatibility surface: an item always plays from its full accessible version list.
 No client change is needed: the setting only changes what an existing `library_id`
 request returns.

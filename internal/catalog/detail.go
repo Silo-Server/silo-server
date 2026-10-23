@@ -1334,18 +1334,22 @@ func (s *DetailService) pendingPresentationLanguage(ctx context.Context, filter 
 	return language, err
 }
 
-func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
+// validatePresentationItemAccess checks that the presentation library holds
+// at least one of contentIDs.
+func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentIDs ...string) error {
 	if filter.PresentationLibraryID == nil {
 		return nil
 	}
-	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{contentID}, *filter.PresentationLibraryID)
+	membership, err := s.itemRepo.GetItemsInLibrary(ctx, contentIDs, *filter.PresentationLibraryID)
 	if err != nil {
 		return err
 	}
-	if !membership[contentID] {
-		return ErrItemNotFound
+	for _, contentID := range contentIDs {
+		if membership[contentID] {
+			return nil
+		}
 	}
-	return nil
+	return ErrItemNotFound
 }
 
 func sameMetadataLanguage(a, b string) bool {
@@ -1809,34 +1813,20 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
+	// A read that set SeriesLibraryCoversEpisodes also accepts a library that
+	// holds the episode's series: the series' season and episode lists validate
+	// the series alone and list every episode, so such a library still links to
+	// an episode it has no file for. That episode opens, and a read scoped to the
+	// library lists no versions for it. Other reads keep the episode's own
+	// libraries.
+	memberIDs := []string{episode.ContentID}
+	if filter.SeriesLibraryCoversEpisodes {
+		memberIDs = append(memberIDs, episode.SeriesID)
+	}
+	if err := s.validatePresentationItemAccess(ctx, filter, memberIDs...); err != nil {
 		return nil, err
 	}
 	return &detailTarget{episode: episode}, nil
-}
-
-// validatePresentationEpisodeAccess checks an episode against the presentation
-// library. A read that set SeriesLibraryCoversEpisodes also accepts a library
-// that holds the episode's series: the series' season and episode lists
-// validate the series alone and list every episode, so such a library still
-// links to an episode it has no file for. That episode opens, and a read scoped
-// to the library lists no versions for it. Other reads keep the episode's own
-// libraries.
-func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
-	if filter.PresentationLibraryID == nil {
-		return nil
-	}
-	if !filter.SeriesLibraryCoversEpisodes {
-		return s.validatePresentationItemAccess(ctx, filter, episode.ContentID)
-	}
-	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{episode.ContentID, episode.SeriesID}, *filter.PresentationLibraryID)
-	if err != nil {
-		return err
-	}
-	if !membership[episode.ContentID] && !membership[episode.SeriesID] {
-		return ErrItemNotFound
-	}
-	return nil
 }
 
 // buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
