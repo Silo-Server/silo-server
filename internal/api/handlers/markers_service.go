@@ -110,6 +110,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: manualMarkerAlgorithm}
 	var clears, sets []string
 	confirmed := make(map[markers.MarkerKind]string)
+	var shown *models.MediaFile
 	// Intro comes before credits in markerSegmentNames, so by the credits
 	// check this is the intro the change leaves the file with.
 	introEnd := file.IntroEnd
@@ -140,7 +141,10 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		applyManualSegment(&update, segment, start, end)
 		sets = append(sets, segment)
 		if kind, ok := markerKindForName(segment); ok {
-			if provider := markers.ConfirmedProvider(file, kind, start, end); provider != "" {
+			if shown == nil {
+				shown = h.shownMarkers(ctx, file)
+			}
+			if provider := markers.ConfirmedProvider(shown, kind, start, end); provider != "" {
 				confirmed[kind] = provider
 			}
 		}
@@ -162,6 +166,29 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	}
 	h.maybeContribute(refreshed, sets, confirmed)
 	return h.fileMarkersView(ctx, refreshed), nil
+}
+
+// markerStorageReader reports where provider markers are kept (satisfied by
+// *markers.PopulationService).
+type markerStorageReader interface {
+	OnlineStorage(ctx context.Context) (markers.OnlineStorage, error)
+}
+
+var _ markerStorageReader = (*markers.PopulationService)(nil)
+
+// shownMarkers returns file with the markers a player showed before a save.
+// With markers.online_storage=on_demand provider markers are never stored, so
+// it lays the on-demand lookup over the stored row, as GetMarkers does. Only
+// contribution reads the result, so without a contributor it looks nothing up.
+func (h *MarkersHandler) shownMarkers(ctx context.Context, file *models.MediaFile) *models.MediaFile {
+	reader, ok := h.MarkerPopulation.(markerStorageReader)
+	if h.Contributor == nil || !ok {
+		return file
+	}
+	if storage, err := reader.OnlineStorage(ctx); err != nil || storage != markers.OnlineStorageOnDemand {
+		return file
+	}
+	return populateFileMarkers(ctx, h.MarkerPopulation, file)
 }
 
 // v2-only projection; the legacy writer retains its frozen response shape.

@@ -237,24 +237,42 @@ func TestSetFileMarkersTriggersBackgroundContribution(t *testing.T) {
 	}
 }
 
+type onDemandMarkerPopulation struct{ shown *models.MediaFile }
+
+func (p onDemandMarkerPopulation) Populate(context.Context, *models.MediaFile) (*models.MediaFile, bool, error) {
+	return p.shown, true, nil
+}
+
+func (onDemandMarkerPopulation) OnlineStorage(context.Context) (markers.OnlineStorage, error) {
+	return markers.OnlineStorageOnDemand, nil
+}
+
 // A manual save that keeps an online provider's marker, both bounds within a
-// second, names that provider so its data is not passed on to another one.
+// second, names that provider so its data is not passed on to another one. In
+// on_demand mode the marker kept is the one the lookup showed, never stored.
 func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
+	plugin := func() *models.MediaFile {
+		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
+			IntroMarkersSource: new(models.MarkerSourcePlugin), IntroMarkersProvider: new("theintrodb")}
+	}
+	scanner := plugin()
+	scanner.IntroMarkersSource = new(models.MarkerSourceScanner)
 	for _, tc := range []struct {
-		name   string
-		source string
-		body   string
-		want   string
+		name       string
+		stored     *models.MediaFile
+		population MarkerPopulationService
+		body       string
+		want       string
 	}{
-		{"kept within a second", models.MarkerSourcePlugin, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
-		{"moved", models.MarkerSourcePlugin, `{"intro":{"start":11.5,"end":70}}`, ""},
-		{"local marker", models.MarkerSourceScanner, `{"intro":{"start":10,"end":70}}`, ""},
+		{"kept within a second", plugin(), nil, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
+		{"moved", plugin(), nil, `{"intro":{"start":11.5,"end":70}}`, ""},
+		{"local marker", scanner, nil, `{"intro":{"start":10,"end":70}}`, ""},
+		{"kept an on-demand lookup", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{shown: plugin()}, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			before := &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
-				IntroMarkersSource: new(tc.source), IntroMarkersProvider: new("theintrodb")}
 			called := make(chan markers.ContributeOptions, 1)
-			h := newTestMarkersHandler(fakeMarkerFiles{file: before}, &fakeMarkerWriter{}, signalContributor{called: called}, nil, nil, nil)
+			h := newTestMarkersHandler(fakeMarkerFiles{file: tc.stored}, &fakeMarkerWriter{}, signalContributor{called: called}, nil, nil, nil)
+			h.MarkerPopulation = tc.population
 
 			rec := httptest.NewRecorder()
 			h.HandleSetFileMarkers(rec, markerPutRequest(tc.body))

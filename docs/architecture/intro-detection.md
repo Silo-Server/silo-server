@@ -422,21 +422,29 @@ earlier submission instead. For it, the target key adds `|file:<media_file_id>`,
 so each file is its own target, and the content hash also covers the marker's
 source and algorithm, so a new detection version is a change. A claim whose
 content hash differs from the new one is taken over once it is settled, even
-as a `conflict`; an in-flight claim still blocks. The daily candidate query
-recomputes the hash in SQL and offers a file again when it no longer matches
-its active claim. It must hash exactly as `contributeSegment` does; the
-database contract test `TestContributionStoreAmendResubmitsChangedMarkers`
-checks that.
+as a `conflict`. A claim still in flight blocks the daily task; the daily
+candidate query recomputes the hash in SQL and offers the scanner marker again
+on a later run, when it no longer matches its active claim. It must hash
+exactly as `contributeSegment` does; the database contract test
+`TestContributionStoreAmendResubmitsChangedMarkers` checks that. The candidate
+query never offers a manual marker, so the contribution after a manual save
+waits out an in-flight claim (`ContributeOptions.WaitInFlight`) within its
+30-second budget, after every other provider and kind. A submission still in
+flight when the budget runs out, such as one held by a crashed worker until
+its lease expires, leaves the provider with the earlier marker until the next
+save or admin contribution.
 
 A manual save that keeps an online or plugin provider's marker, with both
-bounds within a second of it, is a confirmation of that provider's data. It is
-contributed to that provider only, never to another one
-(`markers.ConfirmedProvider`). The rule reads the stored marker before the
-save, so it applies when provider markers are stored (`markers.online_storage`
-`stored`, the default); in `on_demand` mode the stored row holds no provider
-marker and the rule does not fire. The saved marker carries no record of the
-confirmation, so a later save or an admin contribution of the same marker is
-not held back.
+bounds within a second of it, is a confirmation of that provider's data
+(`markers.ConfirmedProvider`). The background contribution that follows the
+save sends it to that provider only. The rule compares the save with the
+markers shown before it: the stored row, or with `markers.online_storage`
+set to `on_demand`, the stored row with the on-demand lookup laid over it, as
+`GetMarkers` returns it. When that lookup fails within its read timeout, the
+rule falls back to the stored row and does not fire. The saved marker carries
+no record of the confirmation, so the rule does not cover a later save of the
+same times or an admin contribution of the file; either can send the
+confirmed marker to another provider that holds no claim on the target.
 
 ## Measuring accuracy
 
