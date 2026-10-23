@@ -55,10 +55,10 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 
 	// Older servers stored an ID that reads like a route word under its
 	// rewritten case (#2990); the exact-case document wins once it exists.
-	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "Items"), "emby", `{"SortBy":"DateCreated"}`); err != nil {
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "Items"), "emby", `{"Id":"Items","SortBy":"DateCreated","Client":"emby"}`); err != nil {
 		t.Fatal(err)
 	}
-	if got := readID("profile-1", "items"); got.SortBy != "DateCreated" {
+	if got := readID("profile-1", "items"); got.SortBy != "DateCreated" || got.ID != "items" {
 		t.Fatalf("rewritten-key customization lost: %+v", got)
 	}
 	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "items"), "emby", `{"SortBy":"Random"}`); err != nil {

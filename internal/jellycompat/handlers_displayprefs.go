@@ -104,6 +104,9 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 			writeCompatUpstreamError(w, err)
 			return
 		}
+		// A document read under the rewritten legacy key stored that key as
+		// its Id; answer with the ID the client asked for.
+		dto.ID, dto.Client = id, client
 	} else if err := h.seedFromProfile(r, session, &dto); err != nil {
 		writeCompatUpstreamError(w, err)
 		return
