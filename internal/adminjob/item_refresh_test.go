@@ -132,7 +132,7 @@ type itemRefreshTestScanRuns struct {
 	heartbeats   atomic.Int64
 }
 
-func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string) error {
+func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string, _ *time.Time) error {
 	r.heartbeats.Add(1)
 	return nil
 }
@@ -153,12 +153,12 @@ func (r *itemRefreshTestScanRuns) Start(_ context.Context, id string) (*models.S
 	return &models.ScanRun{ID: id, Status: scanqueue.StatusRunning}, nil
 }
 
-func (r *itemRefreshTestScanRuns) Complete(_ context.Context, id string, _ *events.ScanRunResult) (*models.ScanRun, error) {
+func (r *itemRefreshTestScanRuns) Complete(_ context.Context, id string, _ *time.Time, _ *events.ScanRunResult) (*models.ScanRun, error) {
 	r.completedID = id
 	return &models.ScanRun{ID: id, Status: scanqueue.StatusCompleted}, nil
 }
 
-func (r *itemRefreshTestScanRuns) Fail(_ context.Context, id string, message string) (*models.ScanRun, error) {
+func (r *itemRefreshTestScanRuns) Fail(_ context.Context, id string, _ *time.Time, message string) (*models.ScanRun, error) {
 	r.failedID = id
 	r.failure = message
 	return &models.ScanRun{ID: id, Status: scanqueue.StatusFailed}, nil

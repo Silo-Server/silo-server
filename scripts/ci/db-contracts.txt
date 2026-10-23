@@ -488,6 +488,11 @@
 ./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
 ./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
 
+# A worker stops its scan once its run is cancelled on any replica or claimed
+# again, and a stale worker never heartbeats or ends another worker's claim.
+./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
+./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
+
 # Password sign-in spends one attempt budget per name on every surface.
 ./internal/auth TestSignInNameBudgetDB
 
