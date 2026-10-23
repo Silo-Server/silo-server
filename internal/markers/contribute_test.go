@@ -111,6 +111,8 @@ func (f *fakeRecorder) Record(ctx context.Context, row ContributionRow) error {
 	return nil
 }
 
+func (f *fakeRecorder) Withhold(context.Context, ContributionRow, string) error { return nil }
+
 func floatPtr(v float64) *float64 { return &v }
 func strPtr(v string) *string     { return &v }
 

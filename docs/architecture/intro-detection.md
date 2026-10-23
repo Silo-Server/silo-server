@@ -422,35 +422,47 @@ earlier submission instead. For it, the target key adds `|file:<media_file_id>`,
 so each file is its own target, and the content hash also covers the marker's
 source and algorithm, so a new detection version is a change. A claim whose
 content hash differs from the new one is taken over once it is settled, even
-as a `conflict`. A claim still in flight blocks the daily task; the daily
-candidate query recomputes the hash in SQL and offers the scanner marker again
-on a later run, when it no longer matches its active claim. It must hash
+as a `conflict`. Before taking over a target, `Claim` checks under its lock
+that the payload's times, source, and algorithm are still the file's stored
+marker, so an older save or a run that read the file before a save or a new
+detection never replaces a newer marker at the provider.
+
+The daily candidate query recomputes the amend hash in SQL. It must hash
 exactly as `contributeSegment` does; the database contract test
-`TestContributionStoreAmendResubmitsChangedMarkers` checks that. The candidate
-query never offers a manual marker, so the contribution after a manual save
-waits out an in-flight claim (`ContributeOptions.WaitInFlight`), after every
-other provider and kind. The wait lasts until that claim settles or its
-15-minute lease expires, and a claim won this way gets its own two-minute
-submit limit. Before taking over a target for an amend provider, `Claim`
-checks under its lock that the payload's times and source are still the
-file's stored marker, so an older save or a nightly run that read the file
-before a save never replaces a newer marker at the provider. The wait runs in
-the saving server's process like the rest of that contribution: if the
-server stops during it, the provider keeps the earlier marker until the next
-save or admin contribution.
+`TestContributionStoreAmendResubmitsChangedMarkers` checks that. It offers a
+scanner marker again when it no longer matches its active claim. It also
+offers a manual intro or credits as a correction, sent with the same claim
+rules, when the provider already has a `marker_contributions` row for that
+file and segment and no save withheld this payload from it (below). A save's
+background contribution tries each provider once and never waits, and stops
+at a rate limit like any run. Whatever it did not send reaches the provider
+from the daily task: a skip behind another submission in flight, a rate
+limit or other retryable error, or a run lost when its server stopped. The
+state is in the database, so this works whichever server saved. A manual
+marker at a provider that holds nothing for the file is never offered, as
+before. Providers without `supports_amend` get only scanner markers from the
+daily task. The daily task covers only providers with automatic sharing on,
+and only intros and credits.
 
 A manual save that keeps an online or plugin provider's marker, with both
 bounds within a second of it, is a confirmation of that provider's data
 (`markers.ConfirmedProvider`). The background contribution that follows the
 save sends it to that provider only. The rule compares the save with the
-markers shown before it: the stored row, or with `markers.online_storage`
-set to `on_demand`, the stored row with the on-demand lookup laid over it, as
-`GetMarkers` returns it. When that lookup fails within its read timeout, the
-save is not contributed to any provider, since it may have kept a marker the
-lookup could not show. The saved marker carries
-no record of the confirmation, so the rule does not cover a later save of the
-same times or an admin contribution of the file; either can send the
-confirmed marker to another provider that holds no claim on the target.
+markers shown before it (`PopulationService.ShownMarkers`): the stored row, or
+with `markers.online_storage` set to `on_demand`, the stored row with the
+on-demand lookup laid over it, as `GetMarkers` returns it. That lookup leaves
+out, without an error, a provider in cooldown or error backoff, one whose
+fetch lease another pass holds, and one a short read skips. When it fails or
+leaves any provider out, the save is withheld from every provider, since it
+may have kept a marker the lookup could not show. The lookup runs only when
+some provider takes contributions; a save made while none does is withheld
+too. Before the save is written, `ContributionService.WithholdManualSave`
+records the decision at each provider that supports amend and already has a
+row for the file and segment: a `skipped` row for the payload's content hash,
+inactive, giving the reason. The daily task never offers a payload with such
+a row. A later claim of the same payload replaces the record, so a later
+save of the same times that may reach the provider still sends it. The rule
+does not cover an admin contribution of the file.
 
 ## Measuring accuracy
 

@@ -206,7 +206,7 @@
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
-./internal/markers TestContributionStoreAmendWaitsOutAnInFlightSubmission
+./internal/markers TestContributionStoreAmendSendsAnUnsentManualCorrection
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB

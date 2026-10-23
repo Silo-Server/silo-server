@@ -33,22 +33,14 @@ const (
 	contributionInvalidRecheck = 30 * 24 * time.Hour
 )
 
-// contributionInFlightReason is the skip reason for a target another worker's
-// submission holds; a WaitInFlight run tries that claim again, first after
-// contributionInFlightPoll and backing off to contributionInFlightPollMax.
-// contributionSupersededReason is the skip reason for a marker a later save
-// replaced.
+// contributionInFlightReason is the skip reason for an amend target another
+// worker's submission holds; the daily task sends the marker once that
+// submission settles. contributionSupersededReason is the skip reason for a
+// marker a later save replaced.
 const (
 	contributionInFlightReason   = "another submission for this item is in flight"
 	contributionSupersededReason = "a later save replaced this marker"
-	contributionInFlightPoll     = 500 * time.Millisecond
-	contributionInFlightPollMax  = 5 * time.Second
 )
-
-// ContributionInFlightWait is the run budget a WaitInFlight caller should
-// allow: an in-flight claim goes stale after contributionClaimLease, so a
-// held target can be claimed by then even when the worker holding it died.
-const ContributionInFlightWait = contributionClaimLease + time.Minute
 
 // ContributeOptions scopes a contribution run.
 type ContributeOptions struct {
@@ -59,21 +51,32 @@ type ContributeOptions struct {
 	// Auto marks a background run: a segment is only contributed when the
 	// provider has contribute_auto_local enabled and the segment is a local
 	// (scanner) intro or credits at or above the provider's confidence
-	// threshold.
+	// threshold. A provider that supports amend also gets a manual intro or
+	// credits as a correction (see ContributionRow.Correction).
 	Auto bool
 	// Confirmed maps a kind to the online provider whose marker a manual save
 	// kept (see ConfirmedProvider). The manual marker repeats that provider's
 	// data, so it goes to that provider alone, as a human check of its marker.
 	Confirmed map[MarkerKind]string
-	// WaitInFlight makes a provider that supports amend wait, until ctx ends,
-	// for another worker's in-flight submission of a different marker for the
-	// same target, then send this one unless a later save has replaced it.
-	// The waits come after every other provider and segment, and a claim won
-	// by waiting is submitted with its own contributionSubmitLimit, not what
-	// is left of ctx. A manual save needs it: nothing offers a manual marker
-	// again, so skipping it would leave the provider with the earlier one.
-	// Give ctx ContributionInFlightWait.
-	WaitInFlight bool
+}
+
+// ManualSave describes a manual save for WithholdManualSave.
+type ManualSave struct {
+	// Segments are the kinds the save sets, with their new bounds.
+	Segments []ManualSegment
+	// Algorithm is the algorithm the save stores on its markers.
+	Algorithm string
+	// Confirmed is as in ContributeOptions.
+	Confirmed map[MarkerKind]string
+	// Withheld keeps the save from every provider: the markers shown before
+	// it are unknown, so it may repeat any provider's data.
+	Withheld bool
+}
+
+// ManualSegment is one segment a manual save sets, in seconds.
+type ManualSegment struct {
+	Kind       MarkerKind
+	Start, End float64
 }
 
 // ContributionOutcome is the per (provider, segment) result of a run.
@@ -99,6 +102,7 @@ type providerConfigReader interface {
 type contributionRecorder interface {
 	Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error)
 	Record(ctx context.Context, row ContributionRow) error
+	Withhold(ctx context.Context, row ContributionRow, reason string) error
 }
 
 // ContributionService submits a file's eligible markers to enabled submitter
@@ -221,6 +225,67 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 	return out, nil
 }
 
+// Contributes reports whether any registered provider takes contributions.
+// It reads the stored provider config; a failed read reports none.
+func (s *ContributionService) Contributes(ctx context.Context) bool {
+	if s == nil || s.config == nil {
+		return false
+	}
+	configs, err := s.config.Load(ctx)
+	if err != nil {
+		return false
+	}
+	for _, sub := range s.submitters() {
+		if cfg, ok := configs[sub.ID()]; ok && cfg.ContributeEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+// WithholdManualSave records, at each provider that supports amend, a manual
+// save that provider must never receive: a confirmation of another provider's
+// marker, or every kind of a Withheld save. The daily task sends a manual
+// marker to such a provider as a correction (ContributionRow.Correction)
+// unless this record names it, so call it before the save is written. The
+// save's own contribution, with the same Confirmed, skips the same providers.
+func (s *ContributionService) WithholdManualSave(ctx context.Context, file *models.MediaFile, save ManualSave) error {
+	if s == nil || file == nil || s.resolver == nil || s.store == nil || len(save.Segments) == 0 {
+		return nil
+	}
+	var amenders []Submitter
+	for _, sub := range s.submitters() {
+		if submissionRequirements(sub).SupportsAmend {
+			amenders = append(amenders, sub)
+		}
+	}
+	if len(amenders) == 0 {
+		return nil
+	}
+	ids, err := s.resolver.ResolveForFile(ctx, file)
+	if err != nil || !ids.HasAnyID() {
+		return err
+	}
+	source := models.MarkerSourceManual
+	for _, sub := range amenders {
+		for _, saved := range save.Segments {
+			reason := "the markers shown before this save are unknown"
+			if !save.Withheld {
+				confirmed := save.Confirmed[saved.Kind]
+				if confirmed == "" || confirmed == sub.ID() {
+					continue
+				}
+				reason = "this save kept " + confirmed + "'s marker"
+			}
+			seg := segmentData{kind: saved.Kind, name: markerKindName(saved.Kind), start: &saved.Start, end: &saved.End, source: &source, algorithm: &save.Algorithm}
+			if err := s.store.Withhold(ctx, newContributionRow(sub, file, ids, seg, source), reason); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // ContributeFile submits the file's eligible markers and returns one outcome
 // per (provider, segment) attempted (including explicit skips). It reads the
 // stored provider config for each call, so an opt-out saved on another node
@@ -254,18 +319,6 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 		return false
 	}
 
-	// A target held by an in-flight submission is waited out only after every
-	// other provider and segment has had its turn, so one slow submission does
-	// not use up the run's time.
-	type heldTarget struct {
-		index int
-		sub   Submitter
-		cfg   ProviderConfig
-		seg   segmentData
-	}
-	var held []heldTarget
-	first := opts
-	first.WaitInFlight = false
 	var outcomes []ContributionOutcome
 	for _, sub := range s.submitters() {
 		providerID := sub.ID()
@@ -280,22 +333,12 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 			if !want(seg.kind) {
 				continue
 			}
-			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, first); attempted {
-				if opts.WaitInFlight && outcome.Reason == contributionInFlightReason {
-					held = append(held, heldTarget{len(outcomes), sub, cfg, seg})
-				}
+			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, opts); attempted {
 				outcomes = append(outcomes, outcome)
 				if outcome.Status == OutcomeStatusRateLimited {
 					return outcomes, nil
 				}
 			}
-		}
-	}
-	for _, h := range held {
-		outcome, _ := s.contributeSegment(ctx, h.sub, h.sub.ID(), h.cfg, file, ids, h.seg, opts)
-		outcomes[h.index] = outcome
-		if outcome.Status == OutcomeStatusRateLimited {
-			return outcomes, nil
 		}
 	}
 	return outcomes, nil
@@ -326,8 +369,11 @@ func (s *ContributionService) contributeSegment(
 	if confirmed := opts.Confirmed[seg.kind]; source == models.MarkerSourceManual && confirmed != "" && confirmed != providerID {
 		return ContributionOutcome{}, false
 	}
+	// An automatic run sends a manual marker only as a correction, and only to
+	// a provider that supports amend.
+	correction := opts.Auto && source == models.MarkerSourceManual
 	if opts.Auto {
-		if !cfg.ContributeAutoLocal || source != models.MarkerSourceScanner || !autoContributedKind(seg.kind) {
+		if !cfg.ContributeAutoLocal || !autoContributedKind(seg.kind) || (correction && !submissionRequirements(sub).SupportsAmend) {
 			return ContributionOutcome{}, false
 		}
 		confidence := 0.0
@@ -357,39 +403,12 @@ func (s *ContributionService) contributeSegment(
 		}, true
 	}
 
-	startMs := int64(*seg.start * 1000)
-	endMs := int64(*seg.end * 1000)
-	durMs := int64(file.Duration) * 1000
-	reqs := submissionRequirements(sub)
-	algorithm := ""
-	if seg.algorithm != nil {
-		algorithm = *seg.algorithm
+	row := newContributionRow(sub, file, ids, seg, source)
+	row.Correction = correction
+	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
+	if errors.Is(err, errContributionNotCorrection) {
+		return ContributionOutcome{}, false
 	}
-	// An amend provider replaces this file's earlier submission, so the file
-	// is its own target and a new detection version is a change worth sending.
-	// CandidateLocalMarkerFiles derives the same hash and key in SQL.
-	hashParts := contributionTargetParts(ids)
-	targetKey := contributionTargetKey(ids, reqs.RequiredExternalIDs)
-	if reqs.SupportsAmend {
-		hashParts = append(hashParts, source, algorithm)
-		targetKey += "|file:" + strconv.Itoa(file.ID)
-	}
-	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, hashParts...)
-
-	row := ContributionRow{
-		MediaFileID:      file.ID,
-		Provider:         providerID,
-		SegmentKind:      seg.name,
-		Source:           source,
-		SubmittedStartMs: &startMs,
-		SubmittedEndMs:   &endMs,
-		VideoDurationMs:  &durMs,
-		ContentHash:      hash,
-		TargetKey:        targetKey,
-		Status:           contributionStatusClaim,
-		Amend:            reqs.SupportsAmend,
-	}
-	claim, claimed, err := s.claim(ctx, row, opts.WaitInFlight)
 	if errors.Is(err, errContributionInFlight) {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: contributionInFlightReason}, true
 	}
@@ -422,19 +441,13 @@ func (s *ContributionService) contributeSegment(
 		FileHash:           file.FileHash,
 		FileSize:           file.FileSize,
 		Source:             source,
-		Algorithm:          algorithm,
+		Algorithm:          row.Algorithm,
 	}
 	if seg.confidence != nil {
 		req.Confidence = *seg.confidence
 	}
 
-	// A claim won after a long wait could otherwise be left a fraction of a
-	// second to submit, fail, release the target, and lose the correction.
-	submitBase := ctx
-	if opts.WaitInFlight {
-		submitBase = context.WithoutCancel(ctx)
-	}
-	submitCtx, cancel := context.WithTimeout(submitBase, contributionSubmitLimit)
+	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)
 	result, err := sub.SubmitMarker(submitCtx, req)
 	cancel()
 	if err != nil {
@@ -480,23 +493,38 @@ func (s *ContributionService) contributeSegment(
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
 }
 
-// claim claims row's target. With wait set, it tries again while another
-// worker's submission for an amend target is in flight, until ctx ends.
-func (s *ContributionService) claim(ctx context.Context, row ContributionRow, wait bool) (ContributionClaim, bool, error) {
-	delay := contributionInFlightPoll
-	for {
-		claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
-		if !wait || !errors.Is(err, errContributionInFlight) {
-			return claim, claimed, err
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return claim, claimed, err
-		case <-timer.C:
-		}
-		delay = min(2*delay, contributionInFlightPollMax)
+// newContributionRow is the claim row for submitting seg's marker, from
+// source, to sub. An amend provider replaces this file's earlier submission,
+// so the file is its own target and a new detection version is a change worth
+// sending. CandidateLocalMarkerFiles derives the same hash and key in SQL.
+func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, seg segmentData, source string) ContributionRow {
+	reqs := submissionRequirements(sub)
+	startMs := int64(*seg.start * 1000)
+	endMs := int64(*seg.end * 1000)
+	durMs := int64(file.Duration) * 1000
+	algorithm := ""
+	if seg.algorithm != nil {
+		algorithm = *seg.algorithm
+	}
+	hashParts := contributionTargetParts(ids)
+	targetKey := contributionTargetKey(ids, reqs.RequiredExternalIDs)
+	if reqs.SupportsAmend {
+		hashParts = append(hashParts, source, algorithm)
+		targetKey += "|file:" + strconv.Itoa(file.ID)
+	}
+	return ContributionRow{
+		MediaFileID:      file.ID,
+		Provider:         sub.ID(),
+		SegmentKind:      seg.name,
+		Source:           source,
+		SubmittedStartMs: &startMs,
+		SubmittedEndMs:   &endMs,
+		VideoDurationMs:  &durMs,
+		ContentHash:      ContentHash(seg.name, &startMs, &endMs, &durMs, hashParts...),
+		TargetKey:        targetKey,
+		Status:           contributionStatusClaim,
+		Amend:            reqs.SupportsAmend,
+		Algorithm:        algorithm,
 	}
 }
 
