@@ -224,7 +224,8 @@ var ErrMeilisearchCheckKeyRejected = errors.New("meilisearch rejected the API ke
 // reads. Listing one index needs the indexes.get action the rebuild cleanup
 // uses. Searching an index under indexPrefix that does not exist needs the
 // search action and an index scope covering Silo's indexes; Meilisearch
-// answers it with index_not_found when the key may search there. A 401 or 403
+// answers it with index_not_found when the key may search there. Only a 404
+// carrying that code counts, so a proxy's bare 404 fails the check. A 401 or 403
 // from either read is reported as ErrMeilisearchCheckKeyRejected with the
 // status code only, not Meilisearch's error text.
 func (c *meilisearchClient) checkConnection(ctx context.Context, indexPrefix string) error {
@@ -247,7 +248,8 @@ func (c *meilisearchClient) checkConnection(ctx context.Context, indexPrefix str
 	}
 	probeUID := indexPrefix + "_rebuild_check"
 	err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(probeUID)+"/search", meilisearchSearchRequest{}, nil)
-	if isMeilisearchIndexNotFound(err) {
+	var httpErr *meilisearchHTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && strings.EqualFold(strings.TrimSpace(httpErr.Code), "index_not_found") {
 		return nil
 	}
 	return checkKeyAccepted(err)

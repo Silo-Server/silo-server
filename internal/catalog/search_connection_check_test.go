@@ -21,6 +21,7 @@ func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 		name, key, location string
 		status, indexStatus int
 		searchStatus        int
+		proxyNotFound       bool
 		wantCalls           int
 		wantRedirected      bool
 		wantKeyRejected     bool
@@ -36,6 +37,7 @@ func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 		{name: "credential rejected by authenticated read", key: "SYNTHETIC_CREDENTIAL", indexStatus: http.StatusForbidden, wantCalls: 2, wantKeyRejected: true},
 		{name: "credential read unavailable is not a key error", key: "SYNTHETIC_CREDENTIAL", indexStatus: http.StatusServiceUnavailable, wantCalls: 2},
 		{name: "credential scoped away from Silo's indexes", key: "SYNTHETIC_CREDENTIAL", searchStatus: http.StatusForbidden, wantCalls: 3, wantKeyRejected: true},
+		{name: "credential search answered by a proxy 404", key: "SYNTHETIC_CREDENTIAL", proxyNotFound: true, wantCalls: 3},
 		{name: "no credential rejected by secured instance", indexStatus: http.StatusUnauthorized, wantCalls: 2, wantKeyRejected: true},
 		{name: "no credential direct", wantCalls: 3, wantSuccess: true},
 		{name: "no credential redirect preserved", location: "/health-next", wantCalls: 4, wantSuccess: true},
@@ -72,6 +74,9 @@ func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 					if tc.searchStatus != 0 {
 						body = `{"code":"invalid_api_key"}`
 						status = tc.searchStatus
+					}
+					if tc.proxyNotFound {
+						body = "404 page not found"
 					}
 				}
 				response := &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}
