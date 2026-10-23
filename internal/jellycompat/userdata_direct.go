@@ -61,10 +61,8 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	// ABS-surface favorites (audiobooks/podcasts) are filtered out below, so
 	// the limit/offset window must apply to the *filtered* list — a raw
 	// store-level window would shift or shrink the visible page. Over-fetch
-	// the raw rows, filter, then window. The window is capped at 5000 before
-	// doubling, so the scan stays at most 10000 rows and a huge Limit cannot
-	// wrap the product negative and drop to the 200-row floor.
-	scanLimit := max(min(pageFetchLimit(offset, limit), 5000)*2, 200)
+	// the raw rows, filter, then window.
+	scanLimit := min(max((limit+offset)*2, 200), 10000)
 	favorites, err := store.ListFavorites(ctx, session.ProfileID, scanLimit, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list favorites: %w", err)

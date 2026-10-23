@@ -2751,7 +2751,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	favoriteLimit := max(pageFetchLimit(query.startIndex, query.limit), 200)
+	favoriteLimit := max(query.limit+query.startIndex, 200)
 	if favoriteItemsNeedBrowseFilters(query) {
 		favoriteLimit = 10000
 	}
