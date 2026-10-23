@@ -1234,7 +1234,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
-				segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, decision.WaitTimeout)
+				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
 				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "jellycompat",
 						"segment", segmentName,
@@ -1259,7 +1259,8 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					transcodeSession,
 					segNum,
 				)
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
+				// A restart skipped because the request ended is not a failure.
+				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
 						"segment", segmentName,
@@ -1299,16 +1300,20 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
 
-					segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 30*time.Second)
+					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
 				}
 			}
 		} else if transcodeSession.IsRunning() {
 			// Non-numbered segment (e.g. init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 10*time.Second)
+			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
 		}
 	}
 	if err != nil {
+		if r.Context().Err() != nil {
+			// The client has gone, so there is no one to answer.
+			return
+		}
 		status, code, message := hlsSegmentErrorResponse(err)
 		writeError(w, status, code, message)
 		return

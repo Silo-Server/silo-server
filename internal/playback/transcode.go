@@ -3265,6 +3265,13 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	// A request can wait on the lifecycle lock behind another restart, and a
+	// player that seeks again abandons it. Restarting for it would move FFmpeg
+	// to a position nobody wants and delay the restart the player now waits
+	// on. Once started, a restart runs to completion (see restart).
+	if err := ctx.Err(); err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
@@ -3545,6 +3552,13 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 // closes the stat-to-open race for HTTP serving while preserving the same
 // restart and ffmpeg-exit error contract.
 func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration) (*SegmentLease, error) {
+	return s.WaitForOpenSegmentContext(context.Background(), name, timeout)
+}
+
+// WaitForOpenSegmentContext is WaitForOpenSegment that also returns ctx.Err()
+// as soon as ctx ends, so a request the client abandoned stops polling. It
+// does not stop FFmpeg.
+func (s *TranscodeSession) WaitForOpenSegmentContext(ctx context.Context, name string, timeout time.Duration) (*SegmentLease, error) {
 	deadline := time.After(timeout)
 	for {
 		segment, err := s.OpenSegment(name)
@@ -3563,6 +3577,8 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 
 		if restarting {
 			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			case <-deadline:
 				return nil, ErrSegmentNotFound
 			case <-time.After(100 * time.Millisecond):
@@ -3577,6 +3593,8 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 		}
 
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-deadline:
 			return nil, ErrSegmentNotFound
 		case <-time.After(100 * time.Millisecond):
