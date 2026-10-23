@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -69,7 +70,11 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
-	LoginResolver   loginResolver
+	// EventBus carries cluster events. The playback handler subscribes to
+	// proxies' requests to move a transcode off a node they cannot reach. Nil
+	// leaves proxy-egress transcodes without that failover.
+	EventBus      cache.EventBus
+	LoginResolver loginResolver
 	// ProfilePINAttempts is the native API's profile PIN limiter, shared so
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.

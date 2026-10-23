@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,10 +30,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -67,6 +70,9 @@ type Server struct {
 	egress     *egressMeter
 	clientIP   *clientip.Resolver
 	telemetry  *streamtelemetry.Registry
+	// moves follows a store-backed transcode that central moved off a node
+	// this proxy could not reach. Nil leaves such relays failing.
+	moves *transcodeMoveFollower
 	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
@@ -1148,6 +1154,8 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var errBuildNodeRequest = errors.New("build transcode node request")
+
 // proxyToTranscodeNode forwards the request to the transcode node specified in
 // the claims. forwardToken is the stream token handed to the node out of band
 // (never to the client): the client's own token on a token route, a
@@ -1159,37 +1167,66 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 
-	targetURL := claims.TranscodeNode + path
 	isSegmentRoute := strings.Contains(path, "/segment/")
 	_, segmentParseErr := playback.ParseSegmentNumber(filepath.Base(path))
 	isMediaSegment := segmentParseErr == nil
-	if rawQuery := r.URL.RawQuery; rawQuery != "" {
-		targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
+	relay := func(nodeURL string) (*http.Response, string, error) {
+		targetURL := nodeURL + path
+		if rawQuery := r.URL.RawQuery; rawQuery != "" {
+			targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
+		if err != nil {
+			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
+		}
+		if err := nodeauth.Sign(req, nodeURL, cfg.Auth.JWTSecret); err != nil {
+			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
+		}
+		if isSegmentRoute {
+			transcodeproxy.PrepareRequest(req, r)
+		}
+		// Forward the verified stream token so the transcode node can self-reconstruct
+		// a lost session after its OWN restart: the token carries the full byte-affecting
+		// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
+		// of 404ing (the integrated server already does this from the same token). The
+		// node re-verifies the token independently before trusting it.
+		if forwardToken != "" {
+			req.Header.Set("X-Silo-Stream-Token", forwardToken)
+		}
+		resp, err := transcodeproxy.DoNode(s.httpClient, req, nodeURL, "stream")
+		return resp, targetURL, err
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	// An HLS transcode rebuilt from the shared recipe store follows its record
+	// when central moved it off the token's node.
+	transportID := transcodeTransportIDFromClaims(claims)
+	followMoves := s.moves != nil && strings.HasPrefix(path, "/transcode/") && transcodeRecipeInStore(claims)
+	nodeURL := claims.TranscodeNode
+	if followMoves {
+		nodeURL = s.moves.current(r.Context(), transportID, claims.TranscodeNode)
 	}
-	if err := nodeauth.Sign(req, claims.TranscodeNode, cfg.Auth.JWTSecret); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if isSegmentRoute {
-		transcodeproxy.PrepareRequest(req, r)
-	}
-	// Forward the verified stream token so the transcode node can self-reconstruct
-	// a lost session after its OWN restart: the token carries the full byte-affecting
-	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
-	// of 404ing (the integrated server already does this from the same token). The
-	// node re-verifies the token independently before trusting it.
-	if forwardToken != "" {
-		req.Header.Set("X-Silo-Stream-Token", forwardToken)
-	}
-
-	resp, err := transcodeproxy.DoNode(s.httpClient, req, claims.TranscodeNode, "stream")
-	if err != nil {
+	var resp *http.Response
+	var failedNodes []string
+	for hop := 0; ; hop++ {
+		var targetURL string
+		var err error
+		resp, targetURL, err = relay(nodeURL)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, errBuildNodeRequest) {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if followMoves && hop < maxTranscodeMoveHops && r.Context().Err() == nil && nodepool.IsConnectFailure(err) {
+			slog.WarnContext(r.Context(), "transcode node unreachable; following the transport to its new node", "component", "proxy",
+				"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(err.Error()), "playback_session_id", claims.SessionID)
+			if next, ok := s.moves.follow(r.Context(), transportID, claims.TranscodeNode, nodeURL, failedNodes); ok {
+				failedNodes = append(failedNodes, nodeURL)
+				nodeURL = next
+				continue
+			}
+		}
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
@@ -1205,7 +1242,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, nodeURL, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}
