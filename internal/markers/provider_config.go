@@ -230,15 +230,22 @@ func (s *ProviderConfigStore) EnsureDefaultSharing(ctx context.Context, c Provid
 	return s.Reload(ctx)
 }
 
-// StopDefaultSharingInTx turns contribution and automatic sharing off for
-// providers, inside tx, the transaction that saves markers.share_by_default=false,
-// so the setting and the change commit or fail together. Reload every node's
+// StopDefaultSharingInTx turns contribution and automatic sharing off for the
+// providers that list names, inside tx, the transaction that saves
+// markers.share_by_default=false, so the setting and the change commit or fail
+// together. It calls list only after taking the lock EnsureDefaultSharing
+// takes, so the list sees every provider whose row a seed has committed, and a
+// seed that has not committed waits and reads the opt-out. Reload every node's
 // store after tx commits.
-func StopDefaultSharingInTx(ctx context.Context, tx pgx.Tx, providers []string) error {
+func StopDefaultSharingInTx(ctx context.Context, tx pgx.Tx, list func(context.Context, pgx.Tx) ([]string, error)) error {
 	if tx == nil {
 		return errors.New("stop marker sharing needs the settings transaction")
 	}
 	if err := lockProviderConfig(ctx, tx); err != nil {
+		return err
+	}
+	providers, err := list(ctx, tx)
+	if err != nil {
 		return err
 	}
 	if len(providers) == 0 {

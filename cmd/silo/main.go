@@ -4755,24 +4755,27 @@ func markerContributionDefaults(metadata map[string]any) markers.PluginContribut
 // the registry, so disabled plugins and ones this node has not loaded stop too,
 // and reads them through tx, so the save needs no second connection.
 func stopDefaultMarkerSharingInTx(ctx context.Context, tx pgx.Tx) error {
-	if tx == nil {
-		return errors.New("stop marker sharing needs the settings transaction")
-	}
+	return markers.StopDefaultSharingInTx(ctx, tx, defaultSharingMarkerProviders)
+}
+
+// defaultSharingMarkerProviders lists the installed marker providers whose
+// manifest turns contribution on by default.
+func defaultSharingMarkerProviders(ctx context.Context, tx pgx.Tx) ([]string, error) {
 	capabilities, err := plugins.ListCapabilitiesOfType(ctx, tx, sdkcapability.MarkerProvider)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var providers []string
 	for _, capability := range capabilities {
 		descriptor, err := plugins.DecodeCapability(capability)
 		if err != nil {
-			return fmt.Errorf("decode marker provider capability %d/%s: %w", capability.InstallationID, capability.ID, err)
+			return nil, fmt.Errorf("decode marker provider capability %d/%s: %w", capability.InstallationID, capability.ID, err)
 		}
 		if markerContributionDefaults(markerCapabilityMetadata(descriptor)).Enabled {
 			providers = append(providers, markers.PluginProviderID(capability.InstallationID, capability.ID))
 		}
 	}
-	return markers.StopDefaultSharingInTx(ctx, tx, providers)
+	return providers, nil
 }
 
 func reloadMarkerPluginProviders(

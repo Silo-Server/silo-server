@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,8 +27,11 @@ func TestProviderConfigEnabledForFetchSortsAndFilters(t *testing.T) {
 }
 
 // Turning markers.share_by_default off stops sharing on the providers the
-// server names and keeps their other settings. A provider seeded while the
-// opt-out is being saved starts with sharing off.
+// server names and keeps their other settings. A seed and the opt-out
+// serialize in either order: a provider seeded while the opt-out is being saved
+// starts with sharing off, and an opt-out that starts while a seed is
+// committing lists providers only after the seed commits, so it turns that row
+// off too.
 func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -43,8 +47,9 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 
 	installation := int(time.Now().UnixNano() % 1_000_000_000)
 	sharing, other, seeded := PluginProviderID(installation, "markers"), PluginProviderID(installation+1, "markers"), PluginProviderID(installation+2, "markers")
+	committing := PluginProviderID(installation+3, "markers")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = ANY($1)`, []string{sharing, other, seeded})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = ANY($1)`, []string{sharing, other, seeded, committing})
 		_, _ = pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, SettingShareByDefault)
 	})
 
@@ -60,41 +65,73 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
+	// waitForLockWaiter returns once a transaction waits on the table lock.
+	waitForLockWaiter := func(done <-chan error, what string) {
+		t.Helper()
+		for {
+			var waiting bool
+			if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
+				WHERE NOT granted AND relation = 'marker_provider_config'::regclass
+				AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting); err != nil {
+				t.Fatalf("read locks: %v", err)
+			}
+			if waiting {
+				return
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("%s finished without waiting for the lock: %v", what, err)
+			case <-ctx.Done():
+				t.Fatalf("%s never waited for the lock", what)
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
 
-	// The settings save stops sharing and stores the opt-out in one
-	// transaction. A reload seeding a sharing row meanwhile waits for it.
+	// A seed is committing a sharing row when the opt-out starts. The opt-out
+	// waits for it, and its list, which here reads the committed rows in place
+	// of the plugin capabilities installed with them, then includes the row.
+	seedTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin seed: %v", err)
+	}
+	defer func() { _ = seedTx.Rollback(ctx) }()
+	if err := lockProviderConfig(ctx, seedTx); err != nil {
+		t.Fatalf("lock for seed: %v", err)
+	}
+	if err := insertProviderConfig(ctx, seedTx, on(committing)); err != nil {
+		t.Fatalf("seed %s: %v", committing, err)
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := StopDefaultSharingInTx(ctx, tx, []string{sharing}); err != nil {
+	listSeeded := func(ctx context.Context, tx pgx.Tx) ([]string, error) {
+		var providers []string
+		err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(provider), '{}') FROM marker_provider_config WHERE provider = ANY($1)`,
+			[]string{sharing, committing}).Scan(&providers)
+		return providers, err
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- StopDefaultSharingInTx(ctx, tx, listSeeded) }()
+	waitForLockWaiter(stopDone, "opt-out")
+	if err := seedTx.Commit(ctx); err != nil {
+		t.Fatalf("commit seed: %v", err)
+	}
+	if err := <-stopDone; err != nil {
 		t.Fatalf("StopDefaultSharingInTx: %v", err)
 	}
+
+	// The settings save stores the opt-out in the same transaction. A reload
+	// seeding a sharing row meanwhile waits for it.
 	if _, err := tx.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'false')
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, SettingShareByDefault); err != nil {
 		t.Fatalf("store setting: %v", err)
 	}
 	seedDone := make(chan error, 1)
 	go func() { seedDone <- store.EnsureDefaultSharing(ctx, on(seeded)) }()
-	for {
-		var waiting bool
-		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
-			WHERE NOT granted AND relation = 'marker_provider_config'::regclass
-			AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting); err != nil {
-			t.Fatalf("read locks: %v", err)
-		}
-		if waiting {
-			break
-		}
-		select {
-		case err := <-seedDone:
-			t.Fatalf("seed finished before the opt-out committed: %v", err)
-		case <-ctx.Done():
-			t.Fatal("seed never waited for the opt-out")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	waitForLockWaiter(seedDone, "seed")
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -107,6 +144,9 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 	if got, _ := store.Get(sharing); got.ContributeEnabled || got.ContributeAutoLocal || !got.FetchEnabled || got.ContributeMinConfidence != 0.9 {
 		t.Fatalf("stopped provider = %+v, want only contribution off", got)
+	}
+	if got, ok := store.Get(committing); !ok || got.ContributeEnabled || got.ContributeAutoLocal {
+		t.Fatalf("provider seeded during the opt-out = %+v (exists %v), want sharing off", got, ok)
 	}
 	if got, _ := store.Get(other); !got.ContributeEnabled || !got.ContributeAutoLocal {
 		t.Fatalf("other provider = %+v, want contribution left on", got)
