@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -1166,6 +1167,37 @@ func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
 	}
 	if entry.MediaItemID != "movie-1" {
 		t.Fatalf("MediaItemID = %q, want movie-1", entry.MediaItemID)
+	}
+}
+
+// The finalizing request is not the viewer's: an admin terminate carries the
+// admin's address and an expiry carries none. History keeps the viewer's.
+func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"admin terminate": clientip.SetContext(context.Background(), "198.51.100.7"),
+		"expiry":          context.Background(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+				file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600},
+			})
+			handler.AdminStore = noopPlaybackAdminStore{}
+
+			entry, err := handler.buildAdminHistoryEntry(ctx, &playback.Session{
+				ID:          "session-1",
+				UserID:      1,
+				ProfileID:   "profile-1",
+				MediaFileID: 42,
+				ClientIP:    "203.0.113.20",
+				StartedAt:   time.Now().Add(-time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("buildAdminHistoryEntry: %v", err)
+			}
+			if entry == nil || entry.ClientIP != "203.0.113.20" {
+				t.Fatalf("entry = %+v, want ClientIP 203.0.113.20", entry)
+			}
+		})
 	}
 }
 
