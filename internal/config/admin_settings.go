@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -152,6 +153,16 @@ const MetadataImageWorkersSettingKey = "metadata.image_workers"
 // on provider limits a scan shares. On-demand lookups (a person page) aren't
 // counted.
 const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
+
+// MetadataFallbackLanguageSettingKey is the ISO 639-1 language metadata
+// refreshes fall back to when providers have no title or description in a
+// library's metadata language, before the original language.
+// MetadataFallbackOriginal turns the fallback off: the original language is
+// used, as before the setting existed.
+const (
+	MetadataFallbackLanguageSettingKey = "metadata.fallback_language"
+	MetadataFallbackOriginal           = "original"
+)
 
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
@@ -331,6 +342,7 @@ var adminSettingDefaults = map[string]string{
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
+	MetadataFallbackLanguageSettingKey:       "en",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
@@ -809,6 +821,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":
 		return normalizeAdminEnum(key, value, "off", "button", "auto")
+	case MetadataFallbackLanguageSettingKey:
+		value = strings.ToLower(value)
+		if value == "" || value == MetadataFallbackOriginal || (len(value) == 2 && lang.RegisteredTag(value) == value) {
+			return value, nil
+		}
+		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
 		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
 	case "ai.reasoning_effort":

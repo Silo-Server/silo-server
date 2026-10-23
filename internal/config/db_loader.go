@@ -341,6 +341,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.PersonRefreshPerMinute = personRefreshPerMinute
+	cfg.Metadata.FallbackLanguage = strings.ToLower(stringOr(m, MetadataFallbackLanguageSettingKey, "en"))
+	if cfg.Metadata.FallbackLanguage == MetadataFallbackOriginal {
+		cfg.Metadata.FallbackLanguage = ""
+	}
 	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
 	if err != nil {
 		return nil, err

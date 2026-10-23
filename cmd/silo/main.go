@@ -2134,6 +2134,10 @@ func main() {
 		// Scans and the scheduled refresh re-apply local NFO and artwork
 		// metadata whose sidecar files changed.
 		metadataService.SetLocalSidecarStore(metadata.NewLocalSidecarRepository(deps.DB))
+		metadataService.SetFallbackLanguage(cfg.Metadata.FallbackLanguage)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			metadataService.SetFallbackLanguage(updated.Metadata.FallbackLanguage)
+		})
 
 		// Wire the image cacher whenever object storage is available so explicit
 		// admin image applies can succeed even if automatic metadata caching is off.
