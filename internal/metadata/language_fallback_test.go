@@ -172,7 +172,10 @@ func TestRefreshPrefersLibraryLanguageEpisodeTextOverOriginal(t *testing.T) {
 	}{
 		{
 			name: "fallback on", fallback: "en",
-			want: map[int][2]string{1: {"Mob and Reigen", "English overview 1."}, 2: {"Avsnitt två", "Svensk beskrivning."}},
+			want: map[int][2]string{
+				1: {"Mob and Reigen", "English overview 1."}, 2: {"Avsnitt två", "Svensk beskrivning."},
+				3: {"An Invitation", "English overview 3."},
+			},
 		},
 		{
 			name: "fallback off", fallback: "",
@@ -180,8 +183,8 @@ func TestRefreshPrefersLibraryLanguageEpisodeTextOverOriginal(t *testing.T) {
 		},
 		{
 			name: "a numbered title from the library's files stands", fallback: "en",
-			local: []EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, Title: "Del 1"}},
-			want:  map[int][2]string{1: {"Del 1", "English overview 1."}, 2: {"Avsnitt två", "Svensk beskrivning."}},
+			local: []EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, Title: "Episode 1"}},
+			want:  map[int][2]string{1: {"Episode 1", "English overview 1."}, 2: {"Avsnitt två", "Svensk beskrivning."}},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,10 +205,11 @@ func TestRefreshPrefersLibraryLanguageEpisodeTextOverOriginal(t *testing.T) {
 				items:   map[string]*MetadataResult{"sv": {Title: "Mob Psycho 100", Overview: "An overview.", ProviderIDs: map[string]string{"tvdb": "1"}}},
 				seasons: map[string][]SeasonResult{"sv": {{SeasonNumber: 1}}},
 				episodes: map[string][]EpisodeResult{
-					"sv": {original(1, "第１話"), original(2, "第２話")},
+					"sv": {original(1, "第１話"), original(2, "第２話"), original(3, "")},
 					"en": {
 						{SeasonNumber: 1, EpisodeNumber: 1, Title: "Mob and Reigen", Overview: "English overview 1."},
 						{SeasonNumber: 1, EpisodeNumber: 2, Title: "Doubts About Youth", Overview: "English overview 2."},
+						{SeasonNumber: 1, EpisodeNumber: 3, Title: "An Invitation", Overview: "English overview 3."},
 					},
 				},
 			}

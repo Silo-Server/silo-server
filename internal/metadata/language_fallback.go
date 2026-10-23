@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
@@ -85,10 +86,10 @@ func preferRequestedLanguageText(current, currentLanguage *string, next, nextLan
 }
 
 // episodeTitleMissing reports whether an episode has no title in requested:
-// its title is marked as another language, or is a numbered stand-in such as
-// "Avsnitt 3" that did not come from the library's own files.
+// it has none, its title is marked as another language, or it is a numbered
+// stand-in such as "Avsnitt 3" that did not come from the library's own files.
 func episodeTitleMissing(episode EpisodeResult, requested string) bool {
-	return isForeignText(episode.Title, episode.TitleLanguage, requested) ||
+	return textMissing(episode.Title, episode.TitleLanguage, requested) ||
 		(!episode.titleLocal && titleutil.IsNumberedEpisodeTitle(episode.Title, episode.EpisodeNumber))
 }
 
@@ -224,7 +225,7 @@ func canonicalMetadataLanguage(req ProcessRequest, existing *models.MediaItem, l
 // requested.
 func childGaps(seasons []SeasonResult, episodes []EpisodeResult, requested string) (seasonGaps []SeasonResult, episodeGaps []EpisodeResult) {
 	for _, season := range seasons {
-		if isForeignText(season.Title, season.TitleLanguage, requested) || textMissing(season.Overview, season.OverviewLanguage, requested) {
+		if textMissing(season.Title, season.TitleLanguage, requested) || textMissing(season.Overview, season.OverviewLanguage, requested) {
 			seasonGaps = append(seasonGaps, season)
 		}
 	}
@@ -251,7 +252,7 @@ func (f *fallbackText) blockingStoredText(text string, number int) string {
 func (f *fallbackText) fetchedChildGaps(seasonGaps []SeasonResult, episodeGaps []EpisodeResult, requested string) (seasonGap bool, episodeSeasons []int) {
 	for _, season := range seasonGaps {
 		stored, storedRow := f.storedSeasons[season.SeasonNumber]
-		if f.policy.fetches(isForeignText(season.Title, season.TitleLanguage, requested), season.Title,
+		if f.policy.fetches(textMissing(season.Title, season.TitleLanguage, requested), season.Title,
 			f.blockingStoredText(stored.Title, season.SeasonNumber), storedRow) ||
 			f.policy.fetches(textMissing(season.Overview, season.OverviewLanguage, requested), season.Overview,
 				strings.TrimSpace(stored.Overview), storedRow) {
@@ -417,9 +418,12 @@ func remoteTextProviders(chain []Provider) []Provider {
 
 // logFallbackFetchError records a failed fallback fetch. It never touches
 // provider-ID state: a 404 in another language says nothing about identity.
+// Plugin errors can carry URLs and key=value diagnostics, so the message is
+// redacted the way the operational log stores it.
 func logFallbackFetchError(ctx context.Context, p Provider, language, what string, err error) {
 	slog.WarnContext(ctx, "metadata: fallback language fetch failed", "component", "metadata",
-		"provider", p.Slug(), "language", language, "fetch", what, "error", err)
+		"provider", p.Slug(), "language", language, "fetch", what,
+		"error", logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error()))
 }
 
 func fetchFallbackItem(ctx context.Context, chain []Provider, providerIDs map[string]string, contentType, language string) *MetadataResult {
@@ -472,7 +476,7 @@ func fetchFallbackSeasons(ctx context.Context, chain []Provider, providerIDs map
 func collectFallbackSeasons(out map[int]SeasonResult, seasons []SeasonResult, language string) {
 	for _, season := range seasons {
 		found := out[season.SeasonNumber]
-		if found.Title == "" && !isForeignText(season.Title, season.TitleLanguage, language) {
+		if found.Title == "" && !textMissing(season.Title, season.TitleLanguage, language) {
 			found.Title = season.Title
 		}
 		if found.Overview == "" && !isForeignText(season.Overview, season.OverviewLanguage, language) {
@@ -616,7 +620,7 @@ func (f *fallbackText) applyToChildren(seasons []SeasonResult, episodes []Episod
 		if keep {
 			stored = f.storedSeasons[season.SeasonNumber]
 		}
-		fillChildText(&season.Title, &season.TitleLanguage, isForeignText(season.Title, season.TitleLanguage, requested),
+		fillChildText(&season.Title, &season.TitleLanguage, textMissing(season.Title, season.TitleLanguage, requested),
 			found.Title, realStoredText(stored.Title, season.SeasonNumber), f.language)
 		fillChildText(&season.Overview, &season.OverviewLanguage, textMissing(season.Overview, season.OverviewLanguage, requested),
 			found.Overview, stored.Overview, f.language)
