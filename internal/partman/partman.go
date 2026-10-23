@@ -22,10 +22,11 @@ const pgCheckViolation = "23514"
 
 const deleteBatchSize = 10000
 
-// dropLockTimeout bounds how long dropping a partition waits for its locks.
-// The drop needs ACCESS EXCLUSIVE on the parent, and every later query on the
-// parent queues behind the waiting drop, so one long reader or writer would
-// otherwise stall all traffic to the table until it finished.
+// dropLockTimeout bounds each lock wait when dropping a partition. The drop
+// takes ACCESS EXCLUSIVE on the parent, then on the partition and the default
+// partition, and every later query on the parent queues behind it, so one long
+// reader or writer would otherwise stall all traffic to the table until it
+// finished.
 const dropLockTimeout = 5 * time.Second
 
 var partitionBoundsRE = regexp.MustCompile(`FROM \('([^']+)'\) TO \('([^']+)'\)`)
@@ -226,9 +227,9 @@ func (m *Manager) DropExpiredPartitions(ctx context.Context, cutoff time.Time) (
 	})
 
 	// A drop that runs out of lock wait fails with lock_not_available (55P03).
-	// Stop there: the remaining drops need the same parent lock and would
-	// stall the table again. Callers fall back to row deletes, and the next
-	// scheduled run retries the drop.
+	// Stop at the first failure: the remaining drops need the same parent lock
+	// and would stall the table again. Callers fall back to row deletes, and
+	// the next scheduled run retries the drop.
 	dropped := make([]string, 0, len(partitions))
 	for _, partition := range partitions {
 		if err := m.dropPartition(ctx, partition.name); err != nil {
@@ -252,7 +253,7 @@ func (m *Manager) dropPartition(ctx context.Context, name string) error {
 	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, strconv.FormatInt(max(m.dropWait.Milliseconds(), 1), 10)); err != nil {
 		return fmt.Errorf("set lock timeout: %w", err)
 	}
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE public.%s`, quoteIdent(name))); err != nil {
+	if _, err := tx.Exec(ctx, "DROP TABLE public."+quoteIdent(name)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
