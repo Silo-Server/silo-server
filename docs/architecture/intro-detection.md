@@ -113,6 +113,34 @@ Both cover every version of the episode. The nightly movie pass does not list
 movies whose credits came online, so a movie's credits chapter replaces weaker
 online credits only on re-detection.
 
+### Absent answers
+
+The host sets `accepts_absent` on every marker fetch, so a provider may answer
+that an item has no segment of a kind: a `MarkerSegment` with `absent` set and
+no bounds. `markerFromPluginSegment` maps it to a `Marker` with `Absent` set,
+never to a range; a segment without bounds would otherwise default to the
+whole file. Between providers an absent answer competes for its kind like a
+marker, through the same comparator and minimum confidence. A provider that
+returns both a range and an absent answer for one kind answered with the
+range.
+
+The writer stores an absent answer as a tombstone, the same shape a manual
+clear stores: NULL bounds and no ranges, with the provider's source, ID,
+algorithm, and confidence. `SegmentPayload.Absent` names that shape. Under
+`CanWriteMarkerUpdate` it holds its kind like the provider's marker would: a
+manual marker or clear keeps it out, it replaces scanner results, and a
+chapter marker and an absent answer are weighed by confidence under the rule
+above. With `markers.online_storage` set to `on_demand`, `ApplyResult` and
+`OverlayOnline` project it the same way without saving it. A refreshed
+provider that no longer gives the answer withdraws the tombstone like any
+withdrawn range.
+
+Local analysis treats a provider tombstone as that provider's marker: the
+analyzer leaves the kind alone (`Candidate.hasHigherPriority`) unless the
+chapter rule lets a chapter replace it, and lazy playback does not ask local
+analysis for the kind. Playback, jellycompat, and the APIs read bounds, so a
+tombstone is no marker to clients, as a manual clear is.
+
 ## Versions and caches
 
 - `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
@@ -406,7 +434,15 @@ and the daily task sends scanner intros and credits at or above each
 provider's minimum confidence to providers with automatic sharing on. Online
 and plugin markers are never sent, so a provider's data does not reach
 another provider through this server. Automated "nothing found" results are
-never sent either.
+never sent either: a detector that finds nothing is no evidence of absence.
+
+A manual clear is sent as an absent submission (`absent` set, no times,
+source `manual`, algorithm `manual:v1`, confidence 1), only to providers whose
+marker capability declares `supports_absent`. Every clear path sends it: the
+v1 segment clear (`HandleClearFileSegment`) and the set-markers clear that the
+v1 and v2 marker writes share. Its content hash and claim carry NULL times,
+which `currentAmendHashSQL` hashes as `ContentHash` does, so the amend check
+below matches them against the stored tombstone.
 
 Each attempt first claims a target in `marker_contributions`, keyed by
 provider, kind, and `target_key`; a partial unique index allows one active
@@ -455,7 +491,7 @@ correction again. The run uses
 enabled that supports amend, whether or not automatic sharing is on, before
 the scanner passes. The state is in the database, so this works whichever
 server saved. A manual marker at a provider that holds nothing for the file
-is never offered. Providers without
+is never offered, and neither is a manual clear. Providers without
 `supports_amend` get only scanner markers from the daily task.
 
 A manual save of a kind whose bounds are both within a second of a marker an
@@ -465,32 +501,35 @@ of the kind). The save stores that kind with source `manual` and algorithm
 `manual:withheld:v1` instead of `manual:v1`, and no contribution path sends
 it: not the save's own run, the daily task, an admin contribution, or an amend
 resend, to any provider, including the one whose marker it kept. A save that
-keeps an earlier withheld marker stays withheld. The comparison uses the
-stored row, which is what a player is shown unless online lookups run with
-`markers.online_storage` set to `on_demand`
-(`PopulationService.ShowsStoredMarkers`). In that mode a player is shown
-provider answers that each replica caches in its own memory for a while and
-never stores, and a provider's answer can change between playback and the
-save, so no lookup at save time can say which marker the user saw. Every kind
-such a save sets is withheld, except a kind the file already held as a
-`manual:v1` marker: no provider marker replaces one, and since every other
-save in that mode is withheld, the kind already held it when any editor still
-open loaded the file. A withheld marker or a manual clear does not exempt a
-save, because an editor opened before the save that wrote it may still show a
-provider's marker. Provenance is written with the marker in one statement, so
-it survives restarts, races between saves, and changes to the item's metadata.
-Everywhere else, including write priority, local detection, the API, and
-jellycompat, `manual:withheld:v1` is a manual marker like `manual:v1`.
-`/api/v2` reports the stored algorithm; the frozen `/api/v1` reports
-`manual:v1` for both.
+keeps an earlier withheld marker stays withheld. A manual clear of a kind
+that, as the user was shown it, held an online or plugin provider's absent
+answer, or an earlier withheld clear, repeats that answer
+(`markers.KeepsProviderAbsence`); its tombstone stores `manual:withheld:v1`
+the same way. The comparison uses the stored row, which is what a player is
+shown unless online lookups run with `markers.online_storage` set to
+`on_demand` (`PopulationService.ShowsStoredMarkers`). In that mode a player is
+shown provider answers that each replica caches in its own memory for a while
+and never stores, and a provider's answer can change between playback and the
+save, so no lookup at save time can say which marker or answer the user saw.
+Every kind such a save sets or clears is withheld, except a kind the file
+already held as a `manual:v1` marker: no provider marker replaces one, and
+since every other save in that mode is withheld, the kind already held it when
+any editor still open loaded the file. A withheld marker or a manual clear
+does not exempt a save, because an editor opened before the save that wrote it
+may still show a provider's marker. Provenance is written with the marker in
+one statement, so it survives restarts, races between saves, and changes to
+the item's metadata. Everywhere else, including write priority, local
+detection, the API, and jellycompat, `manual:withheld:v1` is a manual marker
+like `manual:v1`. `/api/v2` reports the stored algorithm; the frozen `/api/v1`
+reports `manual:v1` for both.
 
 With stored markers, a save is compared with the row as it is when the save
 arrives, not with what the editor showed, which the API does not send. If the
 stored kind changes while an editor is open, through a provider refresh or
-another user's save, a save that keeps the provider marker the editor showed
-can be stored as `manual:v1` and shared. Closing this needs the save to name
-the state it edited, such as an `If-Match` precondition on the `/api/v2`
-marker write.
+another user's save, a save that keeps the provider marker or answer the
+editor showed can be stored as `manual:v1` and shared. Closing this needs the
+save to name the state it edited, such as an `If-Match` precondition on the
+`/api/v2` marker write.
 
 Builds from before this rule do not know `manual:withheld:v1`. During a
 rolling upgrade from one, an older replica can still send a withheld marker
