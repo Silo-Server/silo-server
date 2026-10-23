@@ -202,7 +202,7 @@
 ./internal/markers TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
 ./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
-./internal/markers TestStopDefaultSharingTurnsOffManifestDefaultProvidersDB
+./internal/markers TestProviderConfigStopSharingDB
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB

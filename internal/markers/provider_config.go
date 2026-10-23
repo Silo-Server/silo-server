@@ -2,6 +2,7 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -199,35 +200,29 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 	return s.Reload(ctx)
 }
 
-// StopDefaultSharing turns contribution and automatic sharing off for every
-// registered provider whose manifest declares default_contribute_enabled. It
-// runs when an admin turns markers.share_by_default off, which may happen after
-// such a provider was installed with contribution on. It reports whether any
-// row changed.
-func StopDefaultSharing(ctx context.Context, registry *Registry, store *ProviderConfigStore) (bool, error) {
-	if registry == nil || store == nil || store.pool == nil {
-		return false, nil
-	}
-	var providers []string
-	for _, provider := range registry.Providers() {
-		if described, ok := provider.(DescribedProvider); ok && described.ProviderDescription().DefaultContributeEnabled {
-			providers = append(providers, provider.ID())
-		}
+// StopSharing turns contribution and automatic sharing off for the given
+// providers. The server calls it for providers whose manifest declares
+// default_contribute_enabled once an admin turns markers.share_by_default off,
+// which may happen after such a provider was installed with contribution on. It
+// reports whether any row changed.
+func (s *ProviderConfigStore) StopSharing(ctx context.Context, providers []string) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, errors.New("marker provider config store unavailable")
 	}
 	if len(providers) == 0 {
 		return false, nil
 	}
-	tag, err := store.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE marker_provider_config
 		SET contribute_enabled = false, contribute_auto_local = false, updated_at = now()
 		WHERE provider = ANY($1) AND (contribute_enabled OR contribute_auto_local)`,
 		providers,
 	)
 	if err != nil {
-		return false, fmt.Errorf("stop default marker sharing: %w", err)
+		return false, fmt.Errorf("stop marker sharing: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return false, nil
 	}
-	return true, store.Reload(ctx)
+	return true, s.Reload(ctx)
 }

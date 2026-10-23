@@ -25,9 +25,9 @@ func TestProviderConfigEnabledForFetchSortsAndFilters(t *testing.T) {
 	}
 }
 
-// Turning markers.share_by_default off must stop every provider that started
-// sharing because its manifest asked to, and leave the others alone.
-func TestStopDefaultSharingTurnsOffManifestDefaultProvidersDB(t *testing.T) {
+// Turning markers.share_by_default off must stop sharing on the providers the
+// server names, keep their other settings, and leave the rest alone.
+func TestProviderConfigStopSharingDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -40,23 +40,7 @@ func TestStopDefaultSharingTurnsOffManifestDefaultProvidersDB(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	installation := int(time.Now().UnixNano() % 1_000_000_000)
-	registry := NewRegistry(nil)
-	var providers []Provider
-	for i, shares := range []bool{true, false} {
-		provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
-			InstallationID:           installation + i,
-			CapabilityID:             "markers",
-			DefaultContributeEnabled: shares,
-		}, func(context.Context, int, string) (pluginMarkerClient, error) { return nil, nil })
-		if err != nil {
-			t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
-		}
-		providers = append(providers, provider)
-	}
-	if err := registry.SetProviders(providers); err != nil {
-		t.Fatalf("SetProviders: %v", err)
-	}
-	sharing, other := providers[0].ID(), providers[1].ID()
+	sharing, other := PluginProviderID(installation, "markers"), PluginProviderID(installation+1, "markers")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = ANY($1)`, []string{sharing, other})
 	})
@@ -72,16 +56,16 @@ func TestStopDefaultSharingTurnsOffManifestDefaultProvidersDB(t *testing.T) {
 	}
 
 	for _, wantChanged := range []bool{true, false} {
-		changed, err := StopDefaultSharing(ctx, registry, store)
+		changed, err := store.StopSharing(ctx, []string{sharing})
 		if err != nil {
-			t.Fatalf("StopDefaultSharing: %v", err)
+			t.Fatalf("StopSharing: %v", err)
 		}
 		if changed != wantChanged {
 			t.Fatalf("changed = %v, want %v", changed, wantChanged)
 		}
 	}
 	if got, _ := store.Get(sharing); got.ContributeEnabled || got.ContributeAutoLocal || !got.FetchEnabled || got.ContributeMinConfidence != 0.9 {
-		t.Fatalf("manifest-default provider = %+v, want only contribution off", got)
+		t.Fatalf("stopped provider = %+v, want only contribution off", got)
 	}
 	if got, _ := store.Get(other); !got.ContributeEnabled || !got.ContributeAutoLocal {
 		t.Fatalf("other provider = %+v, want contribution left on", got)

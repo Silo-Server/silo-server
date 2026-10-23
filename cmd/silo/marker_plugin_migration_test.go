@@ -28,11 +28,17 @@ func (f *fakeMarkerRuntimeConfigs) ListGlobalConfigs(_ context.Context, installa
 
 type fakeMarkerCapabilities struct {
 	installations []*plugins.Installation
-	capabilities  map[int][]*plugins.Capability
+	// disabled installations are listed by List only.
+	disabled     []*plugins.Installation
+	capabilities map[int][]*plugins.Capability
 }
 
 func (f *fakeMarkerCapabilities) ListEnabled(context.Context) ([]*plugins.Installation, error) {
 	return append([]*plugins.Installation(nil), f.installations...), nil
+}
+
+func (f *fakeMarkerCapabilities) List(context.Context) ([]*plugins.Installation, error) {
+	return append(append([]*plugins.Installation(nil), f.installations...), f.disabled...), nil
 }
 
 func (f *fakeMarkerCapabilities) ListCapabilities(_ context.Context, installationID int) ([]*plugins.Capability, error) {
@@ -78,6 +84,33 @@ func (f fakeMarkerProviderConfigs) Ensure(_ context.Context, c markers.ProviderC
 		f[c.Provider] = c
 	}
 	return nil
+}
+
+func (f fakeMarkerProviderConfigs) StopSharing(_ context.Context, providers []string) (bool, error) {
+	changed := false
+	for _, provider := range providers {
+		if c, ok := f[provider]; ok && (c.ContributeEnabled || c.ContributeAutoLocal) {
+			c.ContributeEnabled, c.ContributeAutoLocal = false, false
+			f[provider] = c
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
+// shareTurnedOffMidReload answers markers.share_by_default as unset on the
+// first read and false afterwards, as if an admin saved it during a reload.
+type shareTurnedOffMidReload struct{ reads int }
+
+func (s *shareTurnedOffMidReload) Get(_ context.Context, key string) (string, error) {
+	if key != markers.SettingShareByDefault {
+		return "", nil
+	}
+	s.reads++
+	if s.reads == 1 {
+		return "", nil
+	}
+	return "false", nil
 }
 
 func TestCopyLegacyIntroDBPluginConfigCopiesAPIKeyOnce(t *testing.T) {
@@ -237,7 +270,7 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		metadata   map[string]any
-		settings   fakeMarkerLegacySettings
+		settings   markerSettingsStore
 		wantSubmit bool
 		wantAmend  bool
 		wantAbsent bool
@@ -273,6 +306,14 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			name:             "share_by_default=false keeps contribution off",
 			metadata:         map[string]any{"metadata": sharingDefaults},
 			settings:         fakeMarkerLegacySettings{markers.SettingShareByDefault: "false"},
+			wantSubmit:       true,
+			wantConfig:       markers.ProviderConfig{ContributeMinConfidence: 0.9},
+			wantShareDefault: true,
+		},
+		{
+			name:             "share_by_default turned off during the reload stops contribution",
+			metadata:         map[string]any{"metadata": sharingDefaults},
+			settings:         &shareTurnedOffMidReload{},
 			wantSubmit:       true,
 			wantConfig:       markers.ProviderConfig{ContributeMinConfidence: 0.9},
 			wantShareDefault: true,
@@ -316,5 +357,33 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 				t.Fatalf("submission requirements = %+v, want amend=%v absent=%v", reqs, test.wantAmend, test.wantAbsent)
 			}
 		})
+	}
+}
+
+// Turning markers.share_by_default off must reach every installed provider
+// whose manifest shares by default, including disabled ones the registry does
+// not hold.
+func TestMarkerDefaultSharingProvidersReadsEveryInstallation(t *testing.T) {
+	sharing := map[string]any{"metadata": map[string]any{"default_contribute_enabled": true}}
+	capability := func(installationID int, metadata map[string]any) []*plugins.Capability {
+		return []*plugins.Capability{{InstallationID: installationID, Type: sdkcapability.MarkerProvider, ID: "markers", Metadata: metadata}}
+	}
+	store := &fakeMarkerCapabilities{
+		installations: []*plugins.Installation{{ID: 1, Enabled: true}, {ID: 2, Enabled: true}, {ID: 3, Enabled: true}},
+		disabled:      []*plugins.Installation{{ID: 4}},
+		capabilities: map[int][]*plugins.Capability{
+			1: capability(1, sharing),
+			2: capability(2, nil),
+			3: capability(3, map[string]any{"metadata": map[string]any{"default_contribute_enabled": true, "supports_contribution": false}}),
+			4: capability(4, sharing),
+		},
+	}
+	got, err := markerDefaultSharingProviders(context.Background(), store)
+	if err != nil {
+		t.Fatalf("markerDefaultSharingProviders: %v", err)
+	}
+	want := []string{markers.PluginProviderID(1, "markers"), markers.PluginProviderID(4, "markers")}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("providers = %v, want %v", got, want)
 	}
 }
