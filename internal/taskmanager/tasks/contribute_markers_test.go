@@ -30,7 +30,9 @@ func (f *fakeContribRunner) AutoContributors(context.Context) ([]markers.AutoCon
 	return f.auto, nil
 }
 
-func (f *fakeContribRunner) AmendContributors(context.Context) ([]string, error) { return nil, nil }
+func (f *fakeContribRunner) AmendContributors(context.Context) ([]markers.AmendContributor, error) {
+	return nil, nil
+}
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	f.calls = append(f.calls, file.ID)
@@ -78,7 +80,7 @@ func (f *fakeCandidates) CandidateLocalMarkerFiles(_ context.Context, kind marke
 	return out, nil
 }
 
-func (f *fakeCandidates) CandidateManualCorrections(context.Context, []string, *markers.ContributionCandidate, int) ([]markers.ContributionCandidate, error) {
+func (f *fakeCandidates) CandidateManualCorrections(context.Context, []markers.AmendContributor, *markers.ContributionCandidate, int) ([]markers.ContributionCandidate, error) {
 	return nil, nil
 }
 

@@ -258,7 +258,7 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 // that support amend. The daily task resends manual corrections to them
 // whether or not they share local markers automatically. It reads the stored
 // provider config; a failed read lists none.
-func (s *ContributionService) AmendContributors(ctx context.Context) ([]string, error) {
+func (s *ContributionService) AmendContributors(ctx context.Context) ([]AmendContributor, error) {
 	if s == nil || s.config == nil {
 		return nil, nil
 	}
@@ -266,10 +266,14 @@ func (s *ContributionService) AmendContributors(ctx context.Context) ([]string, 
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []AmendContributor
 	for _, sub := range s.submitters() {
-		if cfg, ok := configs[sub.ID()]; ok && cfg.ContributeEnabled && submissionRequirements(sub).SupportsAmend {
-			out = append(out, sub.ID())
+		cfg, ok := configs[sub.ID()]
+		if !ok || !cfg.ContributeEnabled {
+			continue
+		}
+		if reqs := submissionRequirements(sub); reqs.SupportsAmend {
+			out = append(out, AmendContributor{Provider: sub.ID(), SupportsAbsent: reqs.SupportsAbsent})
 		}
 	}
 	return out, nil

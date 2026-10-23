@@ -516,13 +516,14 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 
 // AutoContributors lists only registered submitters with automatic sharing on,
 // carrying each one's own minimum and required IDs. AmendContributors lists
-// every enabled one that supports amend, automatic sharing on or off. Both
-// list none when the stored config cannot be read.
+// every enabled one that supports amend, automatic sharing on or off, with
+// whether it takes manual clears. Both list none when the stored config cannot
+// be read.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
 		{id: "keyed", required: []string{ExternalIDKeyTVDB}, amend: true},
-		{id: "manual-only", amend: true},
+		{id: "manual-only", amend: true, absent: true},
 		{id: "disabled", amend: true},
 	} {
 		_ = reg.Register(sub)
@@ -538,14 +539,14 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 		name      string
 		config    providerConfigReader
 		want      []AutoContributor
-		wantAmend []string
+		wantAmend []AmendContributor
 		wantErr   bool
 	}{
 		{
 			name:      "stored config",
 			config:    stored,
 			want:      []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
-			wantAmend: []string{"keyed", "manual-only"},
+			wantAmend: []AmendContributor{{Provider: "keyed"}, {Provider: "manual-only", SupportsAbsent: true}},
 		},
 		{
 			name:    "config unreadable",

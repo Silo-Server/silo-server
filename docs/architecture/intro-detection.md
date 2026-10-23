@@ -488,13 +488,14 @@ stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
 a movie or an episode, when the provider already has a `marker_contributions`
 row for that file and segment and none of its active claims there has the
 marker's current content hash. A change to the item's IDs therefore sends a
-correction again. The run uses
+correction again. It offers a manual clear the same way, but only to a
+provider that declares `supports_absent`. The run uses
 `ContributeOptions.Corrections`, which `Claim` accepts only with such a row
 (`ContributionRow.Correction`). It runs for every provider with contribution
 enabled that supports amend, whether or not automatic sharing is on, before
 the scanner passes. The state is in the database, so this works whichever
-server saved. A manual marker at a provider that holds nothing for the file
-is never offered, and neither is a manual clear. Providers without
+server saved. A manual marker or clear at a provider that holds nothing for
+the file is never offered. Providers without
 `supports_amend` get only scanner markers from the daily task.
 
 A manual save of a kind whose bounds are both within a second of a marker an
