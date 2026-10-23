@@ -1,11 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "updateAdminItemMetadata",
-      "change_id": "request-property-became-enum",
-      "fingerprint": "11d6d72799842704d7dc478fc3139a1e50945a2fb14a662b3f6717eeebc34030",
-      "reason": "Pre-lock fix: status is the item's match status, and any other string hides the item from search, enrichment and sidecar queries until a refresh. The bundled web client no longer sends it; silo-apple and silo-android never send it.",
-      "approved_in": "#2940"
-    }
-  ]
+  "approvals": []
 }
