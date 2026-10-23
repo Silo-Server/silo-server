@@ -42,8 +42,8 @@ type ContributionRow struct {
 	// different content hash. It is set for providers that support amend and
 	// is not stored.
 	Amend bool
-	// Algorithm is the marker's detection version, which Claim compares with
-	// the file's stored marker for an amend row. It is not stored.
+	// Algorithm is the marker's detection version, sent with the submission.
+	// It is not stored.
 	Algorithm string
 	// Correction makes Claim take a manual marker only as a correction of
 	// an earlier submission: the provider has a row for the file's segment.
@@ -89,15 +89,41 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
+// currentAmendHashSQL is the content hash newContributionRow gives an amend
+// provider's row for the segment seg (kind, start_s, end_s, source,
+// algorithm) of media file mf, from the database's current state: the
+// marker, the file's duration, and the IDs DBExternalIDResolver reads for the
+// file. It is NULL when the resolver would find no item.
+const currentAmendHashSQL = `left(encode(sha256(convert_to(
+	    seg.kind
+	    || '|' || trunc(seg.start_s * 1000)::bigint
+	    || '|' || trunc(seg.end_s * 1000)::bigint
+	    || '|' || COALESCE(mf.duration, 0) * 1000
+	    || '|' || COALESCE(
+	        (SELECT 'episode|' || COALESCE(si.tmdb_id, '') || '|' || COALESCE(si.imdb_id, '') || '|' || COALESCE(si.tvdb_id, '')
+	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(e.season_number, 0) < 0 THEN COALESCE(mf.season_number, 0)
+	                                               ELSE COALESCE(e.season_number, 0) END, 0)::text, '')
+	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(e.episode_number, 0) <= 0 THEN COALESCE(mf.episode_number, 0)
+	                                               ELSE e.episode_number END, 0)::text, '')
+	         FROM episodes e
+	         LEFT JOIN media_items si ON si.content_id = e.series_id
+	         WHERE e.content_id = NULLIF(BTRIM(mf.episode_id), '')),
+	        (SELECT 'movie|' || COALESCE(mi.tmdb_id, '') || '|' || COALESCE(mi.imdb_id, '') || '|' || COALESCE(mi.tvdb_id, '') || '||'
+	         FROM media_items mi
+	         WHERE NULLIF(BTRIM(mf.episode_id), '') IS NULL
+	           AND mi.content_id = NULLIF(BTRIM(mf.content_id), '') AND mi.type = 'movie'))
+	    || '|' || seg.source || '|' || COALESCE(seg.algorithm, ''),
+	    'UTF8')), 'hex'), 32)`
+
 // errContributionInFlight is Claim's answer when row.Amend is set and another
 // worker is still submitting a different marker for the target. The daily
 // task offers the marker once that submission settles.
 var errContributionInFlight = errors.New("another marker submission for this target is in flight")
 
-// errContributionSuperseded is Claim's answer when row.Amend is set and the
-// file's stored marker for the segment no longer has row's times, source, and
-// algorithm: a later save or detection replaced it, and its own contribution
-// sends the new one.
+// errContributionSuperseded is Claim's answer when row.Amend is set and row's
+// content hash is no longer the one the file's current state gives
+// (currentAmendHashSQL): a later save, detection, probe, or metadata change
+// replaced something the payload carries, and the new state is sent instead.
 var errContributionSuperseded = errors.New("the file's marker changed since it was read")
 
 // errContributionNotCorrection is Claim's answer when row.Correction is set
@@ -109,12 +135,12 @@ var errContributionNotCorrection = errors.New("the manual marker is not a correc
 // whatever times it carried, unless row.Amend is set and the row is settled
 // with a different content hash: the provider then replaces its earlier
 // submission. A fresh in-flight row with a different hash returns
-// errContributionInFlight for an amend row, and an amend row whose marker is
-// no longer the file's stored one returns errContributionSuperseded, checked
-// under the claim lock so an older payload never replaces a newer one at the
-// provider. A row.Correction the provider may not take returns
-// errContributionNotCorrection. A stale in-flight row, or an invalid refusal
-// older than contributionInvalidRecheck, can be reclaimed;
+// errContributionInFlight for an amend row, and an amend row whose content
+// hash no longer matches the file's current state returns
+// errContributionSuperseded, checked under the claim lock so an older payload
+// never replaces a newer one at the provider. A row.Correction the provider
+// may not take returns errContributionNotCorrection. A stale in-flight row, or
+// an invalid refusal older than contributionInvalidRecheck, can be reclaimed;
 // recording a retryable error releases the claim. The advisory lock and
 // partial unique index serialize claims across local media files and server
 // workers.
@@ -155,11 +181,8 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 			        ('preview', mf.preview_start, mf.preview_end, mf.preview_markers_source, mf.preview_markers_algorithm)
 			    ) AS seg(kind, start_s, end_s, source, algorithm)
 			    WHERE mf.id = $1 AND seg.kind = $2
-			      AND trunc(seg.start_s * 1000)::bigint = $3
-			      AND trunc(seg.end_s * 1000)::bigint = $4
-			      AND seg.source = $5
-			      AND COALESCE(seg.algorithm, '') = $6
-			)`, row.MediaFileID, row.SegmentKind, row.SubmittedStartMs, row.SubmittedEndMs, row.Source, row.Algorithm).Scan(&current); err != nil {
+			      AND `+currentAmendHashSQL+` = $3
+			)`, row.MediaFileID, row.SegmentKind, row.ContentHash).Scan(&current); err != nil {
 			return ContributionClaim{}, false, fmt.Errorf("check marker contribution is current: %w", err)
 		}
 		if !current {
@@ -446,11 +469,11 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 // marker (ManualAlgorithm, any kind, movie or episode) that one of providers,
 // all supporting amend, may take as a correction (ContributionRow.Correction)
 // and does not hold yet: the provider has a row for the file's segment, none
-// of its active claims there carries the marker's source, times, and
-// duration, and none is a fresh in-flight claim, which Claim would refuse.
-// A stale in-flight claim and an invalid refusal due for its recheck do not
-// count. The marker is compared by value, not by content hash, since the hash
-// covers external IDs this query does not resolve. Paging is by keyset: pass
+// of its active claims there has the content hash the file's current state
+// gives (currentAmendHashSQL), and none is a fresh in-flight claim, which
+// Claim would refuse. A claim on a target the file's IDs no longer name never
+// matches, since the hash covers those IDs. A stale in-flight claim and an
+// invalid refusal due for its recheck do not count. Paging is by keyset: pass
 // the last candidate returned (nil for the first page).
 func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
 	if s == nil || s.pool == nil || len(providers) == 0 || limit <= 0 {
@@ -486,11 +509,7 @@ func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, prov
 		              AND mc.claim_active
 		              AND NOT (mc.status = $6 AND mc.updated_at < now() - ($7 * interval '1 second'))
 		              AND NOT (mc.status = $8 AND mc.updated_at < now() - ($9 * interval '1 second'))
-		              AND (mc.status = $6
-		                   OR (mc.source = seg.source
-		                       AND mc.submitted_start_ms = trunc(seg.start_s * 1000)::bigint
-		                       AND mc.submitted_end_ms = trunc(seg.end_s * 1000)::bigint
-		                       AND mc.video_duration_ms = COALESCE(mf.duration, 0) * 1000))
+		              AND (mc.status = $6 OR mc.content_hash = `+currentAmendHashSQL+`)
 		        )
 		  )
 		ORDER BY mf.id

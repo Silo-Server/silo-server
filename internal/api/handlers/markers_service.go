@@ -175,7 +175,8 @@ var _ markerShownReader = (*markers.PopulationService)(nil)
 // a player was shown before it, which in on_demand mode means running the
 // lookup GetMarkers runs. When that lookup fails or leaves a provider out,
 // every kind is withheld, since the save may keep a marker the lookup could
-// not show.
+// not show, except a kind the file already holds as manual, which no
+// provider marker replaces (markers.HoldsManualMarker).
 func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate) {
 	shown, known := file, true
 	if reader, ok := h.MarkerPopulation.(markerShownReader); ok {
@@ -200,7 +201,10 @@ func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *
 		{markers.MarkerKindRecap, update.RecapStart, update.RecapEnd, &update.RecapProvenance},
 		{markers.MarkerKindPreview, update.PreviewStart, update.PreviewEnd, &update.PreviewProvenance},
 	} {
-		if seg.start != nil && seg.end != nil && (!known || markers.KeepsProviderMarker(shown, seg.kind, *seg.start, *seg.end)) {
+		if seg.start == nil || seg.end == nil {
+			continue
+		}
+		if (!known && !markers.HoldsManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(shown, seg.kind, *seg.start, *seg.end) {
 			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence, Algorithm: markers.ManualWithheldAlgorithm}
 		}
 	}

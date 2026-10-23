@@ -2,6 +2,7 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -127,6 +128,30 @@ func (f contributionStoreFixture) seedEpisodeFile(t *testing.T, name string, sea
 		_, _ = f.pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, file.ID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = $1`, seriesID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+	})
+	return file
+}
+
+// seedMovieFile seeds a movie with TMDB 1396, IMDb and TVDB IDs and a
+// 30-minute file of it without markers.
+func (f contributionStoreFixture) seedMovieFile(t *testing.T, name string) *models.MediaFile {
+	t.Helper()
+	ctx := context.Background()
+	file := &models.MediaFile{ContentID: fmt.Sprintf("claim-test-%s-%d", name, f.suffix), Duration: 1800}
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres, tmdb_id, imdb_id, tvdb_id)
+		VALUES ($1, 'movie', $1, 'matched', '{}'::text[], '1396', 'tt0903747', '81189')`, file.ContentID); err != nil {
+		t.Fatalf("seed movie: %v", err)
+	}
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO media_files (media_folder_id, file_path, content_id, duration)
+		VALUES ($1, $2, $3, 1800)
+		RETURNING id`, f.folderID, fmt.Sprintf("/claim-test/%d-%s.mkv", f.suffix, name), file.ContentID).Scan(&file.ID); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, file.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, file.ContentID)
 	})
 	return file
 }
@@ -419,26 +444,63 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 }
 
 // manualCorrections drives one amend provider, with automatic sharing off,
-// and a seeded episode file whose marker of kind a test saves by hand.
+// and a seeded episode or movie file whose marker of kind a test saves by
+// hand.
 type manualCorrections struct {
-	t       *testing.T
-	fixture contributionStoreFixture
-	sub     *fakeSubmitter
-	svc     *ContributionService
-	kind    MarkerKind
-	fileID  int
-	episode string
+	t        *testing.T
+	fixture  contributionStoreFixture
+	sub      *fakeSubmitter
+	svc      *ContributionService
+	resolver *DBExternalIDResolver
+	kind     MarkerKind
+	file     models.MediaFile // identity only: ID, EpisodeID or ContentID
+	item     string           // the series or movie whose IDs the file resolves to
 }
 
-func newManualCorrections(t *testing.T, kind MarkerKind) *manualCorrections {
+func newManualCorrections(t *testing.T, kind MarkerKind, movie bool) *manualCorrections {
 	fixture := newContributionStoreFixture(t)
-	file := fixture.seedEpisodeFile(t, "manual", 1, 3)
+	var file *models.MediaFile
+	var item string
+	if movie {
+		file = fixture.seedMovieFile(t, "manual")
+		item = file.ContentID
+	} else {
+		file = fixture.seedEpisodeFile(t, "manual", 1, 3)
+		item = fmt.Sprintf("claim-test-manual-%d", fixture.suffix)
+	}
 	sub := &fakeSubmitter{id: fixture.provider, amend: true}
 	reg := NewRegistry(nil)
 	_ = reg.Register(sub)
 	cfg := fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true}}
-	svc := NewContributionService(reg, NewDBExternalIDResolver(fixture.pool), cfg, fixture.store, nil)
-	return &manualCorrections{t: t, fixture: fixture, sub: sub, svc: svc, kind: kind, fileID: file.ID, episode: file.EpisodeID}
+	resolver := NewDBExternalIDResolver(fixture.pool)
+	svc := NewContributionService(reg, resolver, cfg, fixture.store, nil)
+	return &manualCorrections{t: t, fixture: fixture, sub: sub, svc: svc, resolver: resolver, kind: kind,
+		file: models.MediaFile{ID: file.ID, EpisodeID: file.EpisodeID, ContentID: file.ContentID}, item: item}
+}
+
+// ids resolves the file's external IDs as they are now.
+func (m *manualCorrections) ids() ExternalIDs {
+	m.t.Helper()
+	ids, err := m.resolver.ResolveForFile(context.Background(), &m.file)
+	if err != nil || !ids.HasAnyID() {
+		m.t.Fatalf("resolve the file's IDs: %+v, %v", ids, err)
+	}
+	return ids
+}
+
+func (m *manualCorrections) setDuration(seconds int) {
+	m.t.Helper()
+	if _, err := m.fixture.pool.Exec(context.Background(), `UPDATE media_files SET duration = $2 WHERE id = $1`, m.file.ID, seconds); err != nil {
+		m.t.Fatalf("set the file's duration: %v", err)
+	}
+}
+
+// exec runs a statement whose first parameter is the file's item.
+func (m *manualCorrections) exec(query string) {
+	m.t.Helper()
+	if _, err := m.fixture.pool.Exec(context.Background(), query, m.item); err != nil {
+		m.t.Fatalf("%s: %v", query, err)
+	}
 }
 
 // save stores a manual marker from start to 60 s with algorithm and returns
@@ -449,10 +511,11 @@ func (m *manualCorrections) save(start float64, algorithm string) *models.MediaF
 	if _, err := m.fixture.pool.Exec(context.Background(), fmt.Sprintf(`
 		UPDATE media_files SET %[1]s_start = $2, %[1]s_end = 60, %[1]s_markers_source = 'manual',
 		       %[1]s_markers_confidence = 1, %[1]s_markers_algorithm = $3
-		WHERE id = $1`, name), m.fileID, start, algorithm); err != nil {
+		WHERE id = $1`, name), m.file.ID, start, algorithm); err != nil {
 		m.t.Fatalf("save %s: %v", name, err)
 	}
-	file := &models.MediaFile{ID: m.fileID, EpisodeID: m.episode, Duration: 1800}
+	file := m.file
+	file.Duration = 1800
 	source := models.MarkerSourceManual
 	for _, seg := range []struct {
 		kind              MarkerKind
@@ -467,7 +530,7 @@ func (m *manualCorrections) save(start float64, algorithm string) *models.MediaF
 			*seg.start, *seg.end, *seg.source, *seg.algorithm, *seg.confidence = floatPtr(start), floatPtr(60), &source, &algorithm, floatPtr(1)
 		}
 	}
-	return file
+	return &file
 }
 
 func (m *manualCorrections) candidate() bool {
@@ -480,7 +543,7 @@ func (m *manualCorrections) candidate() bool {
 	if err != nil {
 		m.t.Fatalf("CandidateManualCorrections: %v", err)
 	}
-	return slices.ContainsFunc(page, func(c ContributionCandidate) bool { return c.FileID == m.fileID })
+	return slices.ContainsFunc(page, func(c ContributionCandidate) bool { return c.FileID == m.file.ID })
 }
 
 // contribute runs file with opts and returns the outcome, or a zero one when
@@ -508,20 +571,75 @@ func (m *manualCorrections) submitted(want ...float64) {
 	}
 }
 
+// sendsTheFilesCurrentState checks, after the file's correction at 4 s was
+// sent, that a run that read the file before its duration or IDs changed
+// cannot claim, that new IDs send the correction again, and that a claim left
+// on a target the IDs no longer name does not hold a restored correction.
+func (m *manualCorrections) sendsTheFilesCurrentState(save, daily ContributeOptions) {
+	m.t.Helper()
+	// A run that read the file before a re-probe changed its duration
+	// cannot claim; the file's current state is sent instead.
+	held := m.save(5, ManualAlgorithm)
+	m.setDuration(1900)
+	if got := m.contribute(held, save); got.Reason != contributionSupersededReason {
+		m.t.Fatalf("correction read before a duration change: %+v, want a superseded skip", got)
+	}
+	m.setDuration(1800)
+	m.contribute(held, daily)
+	m.submitted(2, 3, 4, 5)
+
+	// New IDs send the correction again, and a payload built from the
+	// earlier IDs can no longer take the target.
+	before := m.ids()
+	m.exec(`UPDATE media_items SET imdb_id = 'tt9999999' WHERE content_id = $1`)
+	if !m.candidate() {
+		m.t.Fatal("a correction is not offered after the item's IDs changed")
+	}
+	m.contribute(held, daily)
+	m.submitted(2, 3, 4, 5, 5)
+	seg := fileSegments(held)[slices.IndexFunc(fileSegments(held), func(s segmentData) bool { return s.kind == m.kind })]
+	if _, _, err := m.fixture.store.Claim(context.Background(), newContributionRow(m.sub, held, before, seg, models.MarkerSourceManual), time.Minute); !errors.Is(err, errContributionSuperseded) {
+		m.t.Fatalf("claim with the earlier IDs: %v, want errContributionSuperseded", err)
+	}
+
+	// A new TMDB ID names a new target. The claim left on the old one
+	// matches a restored correction by value but does not hold it.
+	m.exec(`UPDATE media_items SET tmdb_id = '1397' WHERE content_id = $1`)
+	m.contribute(held, daily)
+	m.contribute(m.save(6, ManualAlgorithm), save)
+	restored := m.save(5, ManualAlgorithm)
+	if !m.candidate() {
+		m.t.Fatal("a claim on the item's old target holds back the restored correction")
+	}
+	m.contribute(restored, daily)
+	m.submitted(2, 3, 4, 5, 5, 5, 6, 5)
+}
+
 // An amend provider that holds an earlier submission for a file gets the
 // file's manual correction of any kind from the daily task when the save's
 // own attempt did not send it, whichever server saved it and with automatic
 // sharing off: one skipped behind another submission in flight once that one
 // settles, one whose submit was rate limited, and one whose server stopped
 // before claiming. A manual marker the provider never had anything for is not
-// offered, and an older correction never replaces a newer one. A save that
-// kept a provider's marker is never offered nor sent by any path, even after
-// the series' IDs change.
+// offered, and an older correction, or one read before the file's duration or
+// IDs changed, never replaces a newer one. A change to the IDs sends the
+// correction again, and a claim under IDs the item no longer has does not
+// count as holding it. A save that kept a provider's marker is never offered
+// nor sent by any path, even after the item's IDs change.
 func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 	daily := ContributeOptions{Corrections: true}
-	for _, kind := range []MarkerKind{MarkerKindIntro, MarkerKindRecap} {
-		t.Run(markerKindName(kind), func(t *testing.T) {
-			m := newManualCorrections(t, kind)
+	for _, tc := range []struct {
+		name  string
+		kind  MarkerKind
+		movie bool
+	}{
+		{"episode intro", MarkerKindIntro, false},
+		{"episode recap", MarkerKindRecap, false},
+		{"movie intro", MarkerKindIntro, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := tc.kind
+			m := newManualCorrections(t, kind, tc.movie)
 			ctx := context.Background()
 			save := ContributeOptions{Segments: []MarkerKind{kind}}
 
@@ -532,9 +650,9 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 
 			// Behind a submission in flight: skipped now, offered once it settles.
 			earlier := ContributionRow{
-				MediaFileID: m.fileID, Provider: m.sub.id, SegmentKind: markerKindName(kind), Source: models.MarkerSourceScanner,
+				MediaFileID: m.file.ID, Provider: m.sub.id, SegmentKind: markerKindName(kind), Source: models.MarkerSourceScanner,
 				SubmittedStartMs: new(int64(9000)), SubmittedEndMs: new(int64(60000)),
-				ContentHash: "earlier", TargetKey: fmt.Sprintf("episode|tmdb:1396|1|3|file:%d", m.fileID),
+				ContentHash: "earlier", TargetKey: fmt.Sprintf("%s|file:%d", contributionTargetKey(m.ids(), nil), m.file.ID),
 				Status: contributionStatusClaim,
 			}
 			claim, claimed, err := m.fixture.store.Claim(ctx, earlier, time.Minute)
@@ -583,6 +701,8 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 			m.contribute(newer, daily)
 			m.submitted(2, 3, 4) // 3 was the attempt the rate limit refused
 
+			m.sendsTheFilesCurrentState(save, daily)
+
 			// A save that kept a provider's marker is withheld from every path,
 			// and a change to the series' IDs does not release it.
 			withheld := m.save(5, ManualWithheldAlgorithm)
@@ -595,13 +715,9 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 						t.Fatalf("a withheld save was attempted with %+v: %+v", opts, got)
 					}
 				}
-				if _, err := m.fixture.pool.Exec(ctx, `
-					UPDATE media_items SET imdb_id = 'tt9999999'
-					WHERE content_id = (SELECT series_id FROM episodes WHERE content_id = $1)`, m.episode); err != nil {
-					t.Fatalf("change the series IMDb ID: %v", err)
-				}
+				m.exec(`UPDATE media_items SET imdb_id = 'tt7777777' WHERE content_id = $1`)
 			}
-			m.submitted(2, 3, 4)
+			m.submitted(2, 3, 4, 5, 5, 5, 6, 5)
 		})
 	}
 }

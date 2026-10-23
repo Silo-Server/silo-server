@@ -36,10 +36,11 @@ const (
 // contributionInFlightReason is the skip reason for an amend target another
 // worker's submission holds; the daily task sends the marker once that
 // submission settles. contributionSupersededReason is the skip reason for a
-// marker a later save replaced.
+// payload the file's current state no longer gives: a later save or
+// detection replaced the marker, or the file's duration or IDs changed.
 const (
 	contributionInFlightReason   = "another submission for this item is in flight"
-	contributionSupersededReason = "a later save replaced this marker"
+	contributionSupersededReason = "the file changed since this marker was read"
 )
 
 // ContributeOptions scopes a contribution run.
@@ -151,6 +152,22 @@ func KeepsProviderMarker(shown *models.MediaFile, kind MarkerKind, start, end fl
 		fromProvider := *seg.source == models.MarkerSourceOnline || *seg.source == models.MarkerSourcePlugin ||
 			(seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm)
 		return fromProvider && math.Abs(*seg.start-start) <= manualKeepTolerance && math.Abs(*seg.end-end) <= manualKeepTolerance
+	}
+	return false
+}
+
+// HoldsManualMarker reports whether file holds a manual marker of kind or a
+// manual clear of it. No online or plugin marker replaces either
+// (CanWriteMarkerUpdate), so a player is shown the stored kind whatever an
+// on-demand lookup returns.
+func HoldsManualMarker(file *models.MediaFile, kind MarkerKind) bool {
+	if file == nil {
+		return false
+	}
+	for _, seg := range fileSegments(file) {
+		if seg.kind == kind {
+			return seg.source != nil && *seg.source == models.MarkerSourceManual
+		}
 	}
 	return false
 }

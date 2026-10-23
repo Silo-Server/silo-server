@@ -423,13 +423,16 @@ so each file is its own target, and the content hash also covers the marker's
 source and algorithm, so a new detection version is a change. A claim whose
 content hash differs from the new one is taken over once it is settled, even
 as a `conflict`. Before taking over a target, `Claim` checks under its lock
-that the payload's times, source, and algorithm are still the file's stored
-marker, so an older save or a run that read the file before a save or a new
-detection never replaces a newer marker at the provider.
+that the payload's content hash is still the one the file's current state
+gives (`currentAmendHashSQL`: the stored marker, the file's duration, and the
+item's IDs as the resolver reads them), so an older save, or a run that read
+the file before a save, a new detection, a re-probe, or a metadata change,
+never replaces a newer payload at the provider.
 
-The daily candidate query recomputes the amend hash in SQL. It must hash
-exactly as `contributeSegment` does; the database contract test
-`TestContributionStoreAmendResubmitsChangedMarkers` checks that. It offers a
+The daily candidate queries recompute the amend hash in SQL. They must hash
+exactly as `contributeSegment` does; the database contract tests
+`TestContributionStoreAmendResubmitsChangedMarkers` and
+`TestContributionStoreAmendSendsAnUnsentManualCorrection` check that. It offers a
 scanner marker again when it no longer matches its active claim.
 
 A save's background contribution tries each provider once and never waits,
@@ -438,15 +441,16 @@ the daily task sends what it did not: a skip behind another submission in
 flight, a rate limit or other retryable error, or a run lost when its server
 stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
 a movie or an episode, when the provider already has a `marker_contributions`
-row for that file and segment and none of its active claims there carries
-the marker's source, times, and duration. The run uses
+row for that file and segment and none of its active claims there has the
+marker's current content hash. A change to the item's IDs therefore sends a
+correction again, and a claim left on a target the IDs no longer name never
+counts as holding it. The run uses
 `ContributeOptions.Corrections`, which `Claim` accepts only with such a row
 (`ContributionRow.Correction`). It runs for every provider with contribution
 enabled that supports amend, whether or not automatic sharing is on, before
 the scanner passes. The state is in the database, so this works whichever
 server saved. A manual marker at a provider that holds nothing for the file
-is never offered, and a correction that differs from the provider's claim
-only in the series' external IDs is not offered again. Providers without
+is never offered. Providers without
 `supports_amend` get only scanner markers from the daily task.
 
 A manual save of a kind whose bounds are both within a second of a marker an
@@ -462,7 +466,9 @@ marker stays withheld. The comparison uses the markers shown before the save
 on-demand lookup laid over it, as `GetMarkers` returns it. That lookup leaves
 out, without an error, a provider in cooldown or error backoff, one whose
 fetch lease another pass holds, and one a short read skips. When it fails or
-leaves any provider out, every kind the save sets is withheld. Provenance is
+leaves any provider out, every kind the save sets is withheld, except a kind
+the file already held as manual (a marker or a clear): no provider marker
+replaces one, so the stored row is what the player showed. Provenance is
 written with the marker in one statement, so it survives restarts, races
 between saves, and changes to the item's metadata. Everywhere else,
 including write priority, local detection, the API, and jellycompat,

@@ -258,7 +258,9 @@ func (p onDemandMarkerPopulation) ShownMarkers(_ context.Context, file *models.M
 // stores the withheld algorithm so no contribution passes the provider's data
 // on. In on_demand mode the marker kept is the one the lookup showed, never
 // stored; when that lookup fails or leaves a provider out, the save is
-// withheld too. A save that keeps an earlier withheld save stays withheld.
+// withheld too, unless the file already held the kind as manual, which no
+// provider marker replaces. A save that keeps an earlier withheld save stays
+// withheld.
 func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	plugin := func() *models.MediaFile {
 		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
@@ -287,6 +289,8 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 		{"on-demand lookup found nothing", unmarked, onDemandMarkerPopulation{shown: unmarked}, kept, false},
 		{"on-demand lookup failed", unmarked, onDemandMarkerPopulation{err: context.DeadlineExceeded}, kept, true},
 		{"on-demand lookup left a provider out", unmarked, onDemandMarkerPopulation{shown: unmarked, incomplete: true}, kept, true},
+		{"own correction, on-demand lookup failed", local(models.MarkerSourceManual, markers.ManualAlgorithm), onDemandMarkerPopulation{err: context.DeadlineExceeded}, kept, false},
+		{"earlier withheld save, on-demand lookup failed", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), onDemandMarkerPopulation{err: context.DeadlineExceeded}, kept, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writer := &fakeMarkerWriter{}
