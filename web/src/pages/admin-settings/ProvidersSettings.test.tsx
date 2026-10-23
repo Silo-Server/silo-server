@@ -353,9 +353,11 @@ describe("ProvidersSettings", () => {
     expect(mocks.updateProvider).not.toHaveBeenCalled();
   });
 
-  it("edits marker provider behavior in the tile and sends the whole row", async () => {
+  it("edits marker provider behavior in the tile and sends only what changed", async () => {
     const user = userEvent.setup();
-    markerProviders = [markerProvider()];
+    // The page's copy shows sharing on; a fetch-only edit must not write it
+    // back over an opt-out saved elsewhere.
+    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
 
     render(<ProvidersSettings />);
 
@@ -391,14 +393,7 @@ describe("ProvidersSettings", () => {
 
     expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
       provider: "plugin:6:introdb",
-      patch: {
-        fetch_enabled: true,
-        fetch_priority: 5,
-        fetch_min_confidence: 0,
-        contribute_enabled: false,
-        contribute_auto_local: false,
-        contribute_min_confidence: 0.95,
-      },
+      patch: { fetch_priority: 5 },
     });
   });
 
@@ -421,20 +416,12 @@ describe("ProvidersSettings", () => {
 
     expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
       provider: "plugin:6:introdb",
-      patch: {
-        fetch_enabled: true,
-        fetch_priority: 10,
-        fetch_min_confidence: 0,
-        contribute_enabled: true,
-        contribute_auto_local: true,
-        contribute_min_confidence: 0.95,
-        [key]: percent / 100,
-      },
+      patch: { [key]: percent / 100 },
     });
   });
 
   it.each([0.9500000000000001])(
-    "keeps custom confidence %s clean and exact when another setting changes",
+    "keeps custom confidence %s clean and unsent when another setting changes",
     async (savedConfidence) => {
       const user = userEvent.setup();
       markerProviders = [markerProvider({ contribute_min_confidence: savedConfidence })];
@@ -452,9 +439,7 @@ describe("ProvidersSettings", () => {
       await user.click(tile.getByRole("button", { name: "Save" }));
 
       expect(mocks.updateMarkerProvider).toHaveBeenCalledWith(
-        expect.objectContaining({
-          patch: expect.objectContaining({ contribute_min_confidence: savedConfidence }),
-        }),
+        expect.objectContaining({ patch: { fetch_priority: 5 } }),
       );
     },
   );
@@ -528,13 +513,7 @@ describe("ProvidersSettings", () => {
     await user.click(tile.getByRole("button", { name: "Save" }));
     expect(mocks.updateMarkerProvider).toHaveBeenCalledWith(
       expect.objectContaining({
-        patch: expect.objectContaining({
-          fetch_enabled: false,
-          fetch_priority: 10,
-          contribute_enabled: false,
-          contribute_auto_local: false,
-          contribute_min_confidence: 0.95,
-        }),
+        patch: { fetch_enabled: false, contribute_enabled: false, contribute_auto_local: false },
       }),
     );
   });

@@ -106,19 +106,26 @@ func (h *AdminMarkerProvidersHandler) ListMarkerProviders(ctx context.Context) (
 	if h == nil || h.Config == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 	}
+	// The stored rows, not this node's cache: a node that missed a sharing
+	// opt-out must not show the admin sharing still on.
+	configs, err := h.Config.Load(ctx)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "admin markers: load provider config failed", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load marker providers")
+	}
 	submitters := h.submitterIDs()
 	descriptions := h.providerDescriptions()
 	out := []providerConfigResponse{}
 	if h.Registry != nil {
 		for _, provider := range h.Registry.Providers() {
-			c, ok := h.Config.Get(provider.ID())
+			c, ok := configs[provider.ID()]
 			if !ok {
 				continue
 			}
 			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
 		}
 	} else {
-		for _, c := range h.Config.List() {
+		for _, c := range configs {
 			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
 		}
 	}

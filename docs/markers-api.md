@@ -98,9 +98,11 @@ with the setting: if it fails, the save fails and the setting keeps its old
 value. Changing it back to `true` changes no existing provider. Every
 contribution, whether from the automatic run, a manual marker save, or an admin
 request, reads the stored provider config first, so a node that missed the
-change event still stops; if that read fails, nothing is shared. An admin edit
-to a provider writes only the fields it sends, so it cannot turn sharing back on
-from a node's stale copy.
+change event still stops; if that read fails, nothing is shared. The admin
+provider list reads the stored rows too, and an admin edit writes only the
+fields its request sends; the web provider tile sends only the fields the admin
+changed, so editing another setting cannot turn sharing back on from a stale
+copy.
 
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,
