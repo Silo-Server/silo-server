@@ -252,6 +252,7 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
 ./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/userstore/pgstore TestUpdateProfileRequestsBlockedBumpsAccessPolicyRevision
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

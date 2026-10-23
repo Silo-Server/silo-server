@@ -1348,6 +1348,10 @@ func buildRequestListSQL(baseCondition string, baseArgs []any, filter ListFilter
 		args = append(args, filter.RequestedByUserID)
 		conditions = append(conditions, "requested_by_user_id = $"+strconv.Itoa(len(args)))
 	}
+	if filter.RequestedByProfileID != "" {
+		args = append(args, filter.RequestedByProfileID)
+		conditions = append(conditions, "requested_by_profile_id = $"+strconv.Itoa(len(args)))
+	}
 	if q := strings.TrimSpace(filter.Query); q != "" {
 		args = append(args, "%"+likeEscaper.Replace(q)+"%")
 		cond := "title ILIKE $" + strconv.Itoa(len(args))

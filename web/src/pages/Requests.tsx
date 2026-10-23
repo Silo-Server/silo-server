@@ -22,6 +22,7 @@ import {
   useMyMediaRequests,
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
+import { useProfileRequestsAllowed } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
@@ -105,7 +106,39 @@ export default function Requests() {
 
 function RequestsHub() {
   useDocumentTitle("Requests");
+  const profileRequestsAllowed = useProfileRequestsAllowed();
+  if (!profileRequestsAllowed) return <BlockedProfileRequests />;
+  return <RequestsTabs />;
+}
 
+/**
+ * The hub for a profile the household manager blocked from requests: no
+ * discovery or search, only the requests this profile made (the server
+ * narrows the list to them), which it may still cancel. Titles are not
+ * linked, as their pages are discovery.
+ */
+function BlockedProfileRequests() {
+  const mine = useMyMediaRequests({ limit: 100 });
+  return (
+    <div className="pb-10">
+      <header className={cn(PAGE_GUTTER, "pt-6 pb-4")}>
+        <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">Requests</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Requests are turned off for this profile. You can still see and cancel the requests it
+          made.
+        </p>
+      </header>
+      <YoursTab
+        requests={mine.data ?? []}
+        isLoading={mine.isLoading}
+        isError={mine.isError}
+        onRetry={() => void mine.refetch()}
+      />
+    </div>
+  );
+}
+
+function RequestsTabs() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeRequestTab(searchParams.get("tab"));
   const mine = useMyMediaRequests({ limit: 100 });
@@ -287,7 +320,8 @@ function YoursTab({
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
-  onBrowse: () => void;
+  /** Opens Discover; absent when the profile may not discover or request. */
+  onBrowse?: () => void;
 }) {
   const cancelRequest = useCancelMediaRequest();
   const [cancelTarget, setCancelTarget] = useState<MediaRequest | null>(null);
@@ -315,13 +349,17 @@ function YoursTab({
     body = (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
         <p className="text-foreground text-sm font-medium">You haven&rsquo;t requested anything.</p>
-        <p className="text-muted-foreground max-w-sm text-sm">
-          Find a title on Discover or with search, and request it from its page. It shows up here
-          with its status.
-        </p>
-        <Button variant="outline" size="sm" onClick={onBrowse}>
-          Browse Discover
-        </Button>
+        {onBrowse ? (
+          <>
+            <p className="text-muted-foreground max-w-sm text-sm">
+              Find a title on Discover or with search, and request it from its page. It shows up
+              here with its status.
+            </p>
+            <Button variant="outline" size="sm" onClick={onBrowse}>
+              Browse Discover
+            </Button>
+          </>
+        ) : null}
       </div>
     );
   } else {
@@ -344,6 +382,7 @@ function YoursTab({
                   <RequestRow
                     key={request.id}
                     request={request}
+                    linkTitle={onBrowse !== undefined}
                     // Every request on this tab is the account's own.
                     onCancel={
                       canCancelOwnRequest(request) ? () => setCancelTarget(request) : undefined
@@ -363,7 +402,9 @@ function YoursTab({
     <div className={cn(PAGE_GUTTER, "max-w-5xl space-y-6")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-sm">
-          Requests from your account, grouped by what happens next.
+          {onBrowse
+            ? "Requests from your account, grouped by what happens next."
+            : "Requests this profile made, grouped by what happens next."}
         </p>
         <StatusHelp />
       </div>
@@ -385,10 +426,13 @@ function YoursTab({
 
 function RequestRow({
   request,
+  linkTitle,
   onCancel,
   isCancelling,
 }: {
   request: MediaRequest;
+  /** Links the poster and title to the title's page. */
+  linkTitle: boolean;
   /** Offered only while the request can still be withdrawn. */
   onCancel?: () => void;
   isCancelling: boolean;
@@ -406,33 +450,42 @@ function RequestRow({
       : "",
   ].filter(Boolean);
   const updated = lastChange(request);
+  const posterClass = "bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md";
+  const posterContent = poster ? (
+    <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
+  ) : (
+    <span className="text-muted-foreground flex h-full items-center justify-center">
+      <MediaIcon className="h-4 w-4" />
+    </span>
+  );
 
   return (
     <li className="flex gap-3 py-3 sm:gap-4" data-request-id={request.id}>
-      <ViewTransitionLink
-        to={href}
-        tabIndex={-1}
-        aria-hidden
-        className="bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md"
-      >
-        {poster ? (
-          <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
-        ) : (
-          <span className="text-muted-foreground flex h-full items-center justify-center">
-            <MediaIcon className="h-4 w-4" />
-          </span>
-        )}
-      </ViewTransitionLink>
+      {linkTitle ? (
+        <ViewTransitionLink to={href} tabIndex={-1} aria-hidden className={posterClass}>
+          {posterContent}
+        </ViewTransitionLink>
+      ) : (
+        <div aria-hidden className={posterClass}>
+          {posterContent}
+        </div>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <ViewTransitionLink
-              to={href}
-              className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
-            >
-              {request.title}
-            </ViewTransitionLink>
+            {linkTitle ? (
+              <ViewTransitionLink
+                to={href}
+                className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
+              >
+                {request.title}
+              </ViewTransitionLink>
+            ) : (
+              <span className="text-foreground min-w-0 truncate text-sm font-semibold">
+                {request.title}
+              </span>
+            )}
             {state ? <RequestStatusBadge state={state} /> : null}
           </div>
           <p className="text-muted-foreground text-xs">{details.join(" · ")}</p>

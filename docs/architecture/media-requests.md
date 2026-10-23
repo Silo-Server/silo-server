@@ -318,8 +318,8 @@ A profile that finds a title someone else already requested can follow it
 instead of requesting it again (`PUT`/`DELETE
 /api/v2/requests/follows/{media_type}/{tmdb_id}`). Following needs the same
 access as requesting: requests enabled, the account allowed to request and not
-blocked by its request limit, and the title within the profile's rating
-ceiling. It is refused for a title with no open request (request it instead);
+blocked by its request limit, the profile not blocked from requests, and the
+title within the profile's rating ceiling. It is refused for a title with no open request (request it instead);
 the insert itself checks for the open request and holds a share lock on its
 row until the follow commits, so a follow cannot land just after the request
 was declined, cancelled or completed, and miss that transition's follow
@@ -605,6 +605,26 @@ off server-wide, or the requests switch on the account or its access group
 account are still honored when an API client writes them, but the migration
 that added group limits moved existing ones onto the account's switch and no
 editor offers them.
+
+A household manager can also block one profile from requests while the account
+and its other profiles keep them (`requests_allowed` on the v2 profile, stored
+as `user_profiles.requests_blocked` so existing profiles stay allowed). The
+block layers on the account's switch: a request is allowed only when both
+allow it. It also closes request discovery (search, the discover rails, title
+detail, and the studio, network and genre browse), because discovery browses
+TMDB and the library's parental controls reach it only as a US certification
+filter, and the advisory-age limit not at all. An account denied requests keeps
+discovery, as before; clients hide the feature on the capability's `allowed`.
+For a blocked profile `getRequestStatus` reports `allowed: false` and
+`watchlist_titles_supported: false`: the watchlist's titles outside the library
+come from TMDB, so their operations answer 403 like discovery, and its
+watchlist adds request nothing. The onboarding tour leaves out its requests
+step, as it does for a child profile. It can still list, read and cancel the
+requests it made before the block, and only those: `listMyRequests` leaves
+out the account's other profiles' requests before paging, and `getRequest`
+and cancel answer 403 for them, because their titles come from TMDB too. Like the other profile
+access fields, only the household manager can change it, and changing it bumps
+the account's access policy revision.
 
 The quota counts the requests an account made in the window, except those
 declined or failed: those give their slot back. A cancelled request keeps

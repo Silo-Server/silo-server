@@ -139,9 +139,10 @@ func (g Gates) enabled(ctx context.Context, gate string) bool {
 }
 
 // FlowFor returns the ordered steps for one surface with gated and
-// unsuitable steps removed. isChild drops steps a child profile may not act
-// on (requests) or that write fields a child session can't.
-func FlowFor(ctx context.Context, gates Gates, surface string, isChild bool) Flow {
+// unsuitable steps removed. noRequests drops the requests step for a profile
+// that may not request: a child profile, or one the household manager
+// blocked from requests.
+func FlowFor(ctx context.Context, gates Gates, surface string, noRequests bool) Flow {
 	steps := make([]Step, 0, len(tourSteps))
 	for _, step := range tourSteps {
 		if step.gate != "" && !gates.enabled(ctx, step.gate) {
@@ -153,7 +154,7 @@ func FlowFor(ctx context.Context, gates Gates, surface string, isChild bool) Flo
 		if surface != SurfaceWeb && step.webOnly {
 			continue
 		}
-		if isChild && step.gate == gateRequests {
+		if noRequests && step.gate == gateRequests {
 			continue
 		}
 		steps = append(steps, step)

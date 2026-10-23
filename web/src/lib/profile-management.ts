@@ -22,6 +22,8 @@ export interface ProfileDraft {
   maxPlaybackQuality: PlaybackQualityPreset;
   libraryRestrictionsEnabled: boolean;
   allowedLibraryIDs: number[];
+  /** Whether the profile may use requests and request discovery. */
+  requestsAllowed: boolean;
 }
 
 export interface ContentRatingOption {
@@ -36,6 +38,8 @@ export interface ProfileAccessSummary {
   advisoryAge: string;
   libraries: string;
   playbackQuality: string;
+  /** "" unless the profile is blocked from requests. */
+  requests: string;
   text: string;
 }
 
@@ -106,6 +110,7 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
     maxPlaybackQuality: playbackQualityPresetFromValue(profile?.max_playback_quality),
     libraryRestrictionsEnabled: profile?.library_restrictions_enabled ?? false,
     allowedLibraryIDs: sortUniqueLibraryIDs(profile?.allowed_library_ids),
+    requestsAllowed: profile?.requests_allowed ?? true,
   };
 }
 
@@ -126,6 +131,11 @@ export interface ProfileRequestOptions {
    * (`require_advisory_age_supported`). Same reason: never send it otherwise.
    */
   requireAdvisoryAgeSupported?: boolean;
+  /**
+   * The server accepts `requests_allowed` (`requests_allowed_supported`).
+   * Same reason: never send it otherwise.
+   */
+  requestsAllowedSupported?: boolean;
 }
 
 export function buildProfileRequestFromDraft(
@@ -156,6 +166,9 @@ export function buildProfileRequestFromDraft(
   }
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
     body.max_playback_quality = maxPlaybackQuality;
+  }
+  if (options.requestsAllowedSupported && !draft.requestsAllowed) {
+    body.requests_allowed = false;
   }
   if (!draft.clearPin && draft.pin.trim() !== "") {
     body.pin = draft.pin.trim();
@@ -195,6 +208,9 @@ export function buildProfileUpdateFromDraft(
       body.require_advisory_age = draft.maxAdvisoryAge !== null && draft.requireAdvisoryAge;
     }
   }
+  if (options.requestsAllowedSupported) {
+    body.requests_allowed = draft.requestsAllowed;
+  }
 
   if (draft.clearPin) {
     body.pin = null;
@@ -214,6 +230,7 @@ export function buildProfileAccessSummary(
     | "library_restrictions_enabled"
     | "allowed_library_ids"
     | "max_playback_quality"
+    | "requests_allowed"
   >,
 ): ProfileAccessSummary {
   const contentRating =
@@ -228,13 +245,17 @@ export function buildProfileAccessSummary(
     : "All libraries";
   const qualityLabel = formatPlaybackQualityPreset(profile.max_playback_quality);
   const playbackQuality = `${qualityLabel} quality`;
+  const requests = profile.requests_allowed === false ? "No requests" : "";
 
   return {
     contentRating,
     advisoryAge,
     libraries,
     playbackQuality,
-    text: [contentRating, advisoryAge, libraries, playbackQuality].filter(Boolean).join(" · "),
+    requests,
+    text: [contentRating, advisoryAge, libraries, playbackQuality, requests]
+      .filter(Boolean)
+      .join(" · "),
   };
 }
 
@@ -243,6 +264,8 @@ export function applyKidsPreset(
   options: {
     contentRatingTouched: boolean;
     libraryAccessTouched: boolean;
+    /** The requests switch was changed by hand; leave it as set. */
+    requestsTouched?: boolean;
   },
 ): ProfileDraft {
   const next: ProfileDraft = {
@@ -259,6 +282,12 @@ export function applyKidsPreset(
     next.allowedLibraryIDs = [];
   }
 
+  // Request discovery browses TMDB, where the library's parental controls
+  // reach only partly, so a kids profile starts without it.
+  if (!options.requestsTouched) {
+    next.requestsAllowed = false;
+  }
+
   return next;
 }
 
@@ -272,5 +301,6 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     maxPlaybackQuality: "any",
     libraryRestrictionsEnabled: false,
     allowedLibraryIDs: [],
+    requestsAllowed: true,
   };
 }

@@ -302,8 +302,9 @@ cancel a watchlist-made request. The library watchlist mutations they reuse are
 Discovery results and the title detail carry `in_watchlist`, hydrated with two
 reads per page: title entries by TMDB ID, and the library watchlist by
 `library_content_id`. `GET /api/v2/requests/status` advertises
-`watchlist_titles_supported`, which is false while requests are off: the
-operations then answer `409 capability_disabled` and the entries are kept. See [api-contract.md](api-contract.md#watchlist-titles).
+`watchlist_titles_supported`, which is false while requests are off (the
+operations then answer `409 capability_disabled`) and for a profile blocked from
+requests (they answer `403`); either way the entries are kept. See [api-contract.md](api-contract.md#watchlist-titles).
 
 There is no new realtime event. `user_state.changed` is keyed by `content_id`,
 so other devices pick up entry changes on their next load; promotion emits the

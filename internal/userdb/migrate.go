@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 34
+const schemaVersion = 35
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -353,6 +353,14 @@ WHERE COALESCE(section_id, '') = ''
 			return fmt.Errorf("migration v34 failed: %w", err)
 		}
 		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 34"); err != nil {
+			return err
+		}
+	}
+	if version < 35 {
+		if err := addProfileRequestsBlocked(tx); err != nil {
+			return fmt.Errorf("migration v35 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 35"); err != nil {
 			return err
 		}
 	}
@@ -726,4 +734,15 @@ func migrateToV7(tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+// addProfileRequestsBlocked adds profiles.requests_blocked. Same reasoning as
+// v27: a fresh profiles table already has the column. The Postgres store adds
+// the same column in 20261016213027_profile_requests_blocked.sql.
+func addProfileRequestsBlocked(tx *sql.Tx) error {
+	if columnExists(tx, "profiles", "requests_blocked") {
+		return nil
+	}
+	_, err := tx.ExecContext(context.Background(), `ALTER TABLE profiles ADD COLUMN requests_blocked BOOLEAN NOT NULL DEFAULT false`)
+	return err
 }

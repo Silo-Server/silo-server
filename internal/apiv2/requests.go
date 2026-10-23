@@ -389,10 +389,12 @@ func registerRequests(reg *Registry) {
 	create.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	Register(reg, Operation{Operation: create, Class: ClassProfileScoped, DemoRestricted: isMutatingMethod(create.Method), ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.createRequest)
 
+	listMine := humaOp(http.MethodGet, Prefix+"/requests/mine", opListMyRequests, requestsTag,
+		"List the account's media requests, newest first.")
+	listMine.Description = "Lists the requests every profile on the account made. A profile the household manager blocked from requests sees only the requests it made itself."
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/requests/mine", opListMyRequests, requestsTag,
-			"List the account's media requests, newest first."),
-		Class: ClassProfileScoped, ServiceBacked: true,
+		Operation: listMine,
+		Class:     ClassProfileScoped, ServiceBacked: true,
 	}, func(ctx context.Context, in *MediaRequestListInput) (*MediaRequestCollectionOutput, error) {
 		return reg.listMyRequests(ctx, cursors, in)
 	})
@@ -471,6 +473,7 @@ func registerRequests(reg *Registry) {
 
 	get := humaOp(http.MethodGet, Prefix+"/requests/{id}", opGetRequest, requestsTag,
 		"Get one of the account's media requests.")
+	get.Description = "A profile the household manager blocked from requests gets 403 for a request another profile made, unless it acts as an admin."
 	get.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequest)
 }

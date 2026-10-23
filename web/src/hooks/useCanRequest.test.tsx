@@ -53,6 +53,13 @@ describe("useCanRequest", () => {
       false,
     ],
     [
+      "the profile is blocked from requests",
+      { data: { requests_enabled: true }, isLoading: false },
+      { id: "p1", requests_allowed: false },
+      false,
+      false,
+    ],
+    [
       "the feature status is loading",
       { data: undefined, isLoading: true },
       { id: "p1" },

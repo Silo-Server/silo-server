@@ -56,14 +56,14 @@ func (h *OnboardingHandler) HandleGetFlow(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	isChild := false
+	noRequests := false
 	if store, err := h.storeProvider.ForUser(r.Context(), userID); err == nil {
 		if profile, err := store.GetProfile(r.Context(), profileID); err == nil && profile != nil {
-			isChild = profile.IsChild
+			noRequests = profile.IsChild || profile.RequestsBlocked
 		}
 	}
 
-	writeJSON(w, http.StatusOK, onboarding.FlowFor(r.Context(), h.gates, surface, isChild))
+	writeJSON(w, http.StatusOK, onboarding.FlowFor(r.Context(), h.gates, surface, noRequests))
 }
 
 // HandleGetState handles GET /onboarding/state.

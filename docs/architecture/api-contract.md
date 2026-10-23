@@ -2030,10 +2030,11 @@ by TMDB ID, under the `watchlist` tag:
   library watchlist entry.
 
 The three operations belong to the requests surface: while requests are off
-they answer `409 capability_disabled` and the stored entries are kept. The two
+they answer `409 capability_disabled`, and for a profile blocked from requests
+they answer `403`; either way the stored entries are kept. The two
 mutations are profile-scoped, demo-restricted and `non_retryable`.
 `GET /api/v2/requests/status` advertises `watchlist_titles_supported`, false
-while requests are off, and
+while requests are off or the profile is blocked from requests, and
 `watchlist_requests` when an add by the acting profile will also request the
 title: requests are on, the admin's `watchlist_requests` setting and the
 profile's `requests.watchlist_auto_request` setting are both on, and the

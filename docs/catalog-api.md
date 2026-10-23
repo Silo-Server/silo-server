@@ -483,7 +483,8 @@ Read them with `GET /api/v2/watchlist/titles`, which pages by the same kind of o
 cursor over descending `added_at`, then descending title ID; add and remove them with
 `PUT` and `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`. Check
 `watchlist_titles_supported` on `GET /api/v2/requests/status` first. It is false
-while requests are off, and the operations then answer `409 capability_disabled`.
+while requests are off, when the operations answer `409 capability_disabled`, and
+for a profile blocked from requests, when they answer `403`.
 
 When such a title reaches the library, the next watchlist read moves it onto the
 library watchlist with its original `added_at`: the watchlist list and entry reads,
@@ -917,6 +918,13 @@ book libraries, never carry an advisory age, so the limit never hides them.
   so do not send either field to a server that does not report it.
 
 Frozen v1 responses do not expose these fields.
+
+Because media-request discovery is reached only partly by these limits, a
+household manager can also keep a profile out of requests and request
+discovery with `requests_allowed` (boolean, default `true`); see
+[media requests](architecture/media-requests.md#who-can-request). Detect it with
+`requests_allowed_supported` on the `listProfiles` response; v1 does not expose
+it either.
 
 ## Ratings on title pages
 
