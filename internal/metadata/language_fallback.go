@@ -449,7 +449,8 @@ func fetchFallbackItem(ctx context.Context, chain []Provider, providerIDs map[st
 		}
 		// The same selection a refresh in language makes, so a title alias in
 		// language counts too.
-		if title, _, fallback, _ := preferredMetadataResultTitle(result, language); out.Title == "" && strings.TrimSpace(title) != "" && !fallback {
+		title, titleLanguage, fallback, _ := preferredMetadataResultTitle(result, language)
+		if out.Title == "" && !fallback && !textMissing(title, titleLanguage, language) {
 			out.Title = title
 			if title == result.Title {
 				out.SortTitle = result.SortTitle

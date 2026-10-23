@@ -109,6 +109,14 @@ func TestRefreshFillsMissingTextInFallbackLanguage(t *testing.T) {
 			wantTitle: "Sound! Euphonium", wantOverview: "An English overview.", wantEnglishAsk: true,
 		},
 		{
+			name: "a title marked as another language does not fill the title", fallback: "en", mode: ModeManualRefresh,
+			english: &MetadataResult{
+				Title: "響け！ユーフォニアム", TitleLanguage: "ja",
+				Overview: "An English overview.", ProviderIDs: map[string]string{"tmdb": "7"},
+			},
+			wantTitle: "Film", wantOverview: "An English overview.", wantEnglishAsk: true,
+		},
+		{
 			name: "manual refresh fills title and overview", fallback: "en", mode: ModeManualRefresh,
 			wantTitle: "Sound! Euphonium", wantOverview: "An English overview.", wantEnglishAsk: true,
 		},
