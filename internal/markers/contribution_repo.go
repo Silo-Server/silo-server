@@ -107,14 +107,15 @@ func confidenceHashPart(confidence *float64) string {
 // currentAmendHashSQL is the content hash newContributionRow gives an amend
 // provider's row for the segment seg (kind, start_s, end_s, source,
 // algorithm, confidence) of media file mf, from the database's current state: the
-// marker, the file's duration, hash and size, and the IDs and numbering
+// marker (a manual clear's missing times hash as ContentHash writes them), the
+// file's duration, hash and size, and the IDs and numbering
 // DBExternalIDResolver reads for the file. It is NULL when the resolver would
 // find no item. Claim and both daily candidate queries use it, so they cannot
 // disagree.
 var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	    seg.kind
-	    || '|' || trunc(seg.start_s * 1000)::bigint
-	    || '|' || trunc(seg.end_s * 1000)::bigint
+	    || '|' || COALESCE(trunc(seg.start_s * 1000)::bigint::text, 'null')
+	    || '|' || COALESCE(trunc(seg.end_s * 1000)::bigint::text, 'null')
 	    || '|' || COALESCE(mf.duration, 0) * 1000
 	    || '|' || COALESCE(
 	        (SELECT 'episode|' || COALESCE(si.tmdb_id, '') || '|' || COALESCE(si.imdb_id, '') || '|' || COALESCE(si.tvdb_id, '')

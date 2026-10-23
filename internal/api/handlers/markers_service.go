@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -139,8 +140,8 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		applyManualSegment(&update, segment, start, end)
 		sets = append(sets, segment)
 	}
-	if len(sets) > 0 {
-		h.withholdKeptProviderMarkers(ctx, file, &update)
+	if len(sets) > 0 || len(clears) > 0 {
+		h.withholdKeptProviderMarkers(ctx, file, &update, clears)
 	}
 	if _, err := h.Writer.UpsertAndClearMarkers(ctx, file.ID, update, clears); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -157,7 +158,8 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		h.logger.ErrorContext(ctx, "markers: reload after save failed", "file_id", file.ID, "error", err)
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
-	h.maybeContribute(refreshed, sets)
+	// A clear goes to providers that accept absent submissions.
+	h.maybeContribute(refreshed, slices.Concat(sets, clears))
 	return h.fileMarkersView(ctx, refreshed), nil
 }
 
@@ -171,13 +173,16 @@ var _ markerStorageReader = (*markers.PopulationService)(nil)
 
 // withholdKeptProviderMarkers stores markers.ManualWithheldAlgorithm on each
 // kind update sets that keeps a provider's marker (markers.KeepsProviderMarker),
-// so that no contribution ever sends it. It compares the save with the file's
-// stored markers, which are what a player is shown unless online lookups run
-// in on_demand mode. There a player is shown provider answers that each
-// replica caches for itself and drops, so no lookup at save time can tell
-// which one the user saw, and every kind is withheld, except a kind the file
-// already holds as a shared manual marker (markers.HoldsSharedManualMarker).
-func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate) {
+// and on each kind in clears that repeats a provider's answer that the file
+// has none of it (markers.KeepsProviderAbsence), so that no contribution ever
+// sends it. A withheld clear is written as a manual tombstone through update.
+// It compares the save with the file's stored markers, which are what a
+// player is shown unless online lookups run in on_demand mode. There a player
+// is shown provider answers that each replica caches for itself and drops, so
+// no lookup at save time can tell which one the user saw, and every kind is
+// withheld, except a kind the file already holds as a shared manual marker
+// (markers.HoldsSharedManualMarker).
+func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate, clears []string) {
 	known := true
 	if reader, ok := h.MarkerPopulation.(markerStorageReader); ok {
 		stored, err := reader.ShowsStoredMarkers(ctx)
@@ -187,19 +192,28 @@ func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *
 	}
 	for _, seg := range []struct {
 		kind       markers.MarkerKind
+		name       string
 		start, end *float64
 		provenance **scanner.SegmentProvenance
 	}{
-		{markers.MarkerKindIntro, update.IntroStart, update.IntroEnd, &update.IntroProvenance},
-		{markers.MarkerKindCredits, update.CreditsStart, update.CreditsEnd, &update.CreditsProvenance},
-		{markers.MarkerKindRecap, update.RecapStart, update.RecapEnd, &update.RecapProvenance},
-		{markers.MarkerKindPreview, update.PreviewStart, update.PreviewEnd, &update.PreviewProvenance},
+		{markers.MarkerKindIntro, models.MarkerSegmentIntro, update.IntroStart, update.IntroEnd, &update.IntroProvenance},
+		{markers.MarkerKindCredits, models.MarkerSegmentCredits, update.CreditsStart, update.CreditsEnd, &update.CreditsProvenance},
+		{markers.MarkerKindRecap, models.MarkerSegmentRecap, update.RecapStart, update.RecapEnd, &update.RecapProvenance},
+		{markers.MarkerKindPreview, models.MarkerSegmentPreview, update.PreviewStart, update.PreviewEnd, &update.PreviewProvenance},
 	} {
-		if seg.start == nil || seg.end == nil {
+		cleared := slices.Contains(clears, seg.name)
+		var keeps bool
+		switch {
+		case cleared:
+			keeps = markers.KeepsProviderAbsence(file, seg.kind)
+		case seg.start != nil && seg.end != nil:
+			keeps = markers.KeepsProviderMarker(file, seg.kind, *seg.start, *seg.end)
+		default:
 			continue
 		}
-		if (!known && !markers.HoldsSharedManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(file, seg.kind, *seg.start, *seg.end) {
-			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence, Algorithm: markers.ManualWithheldAlgorithm}
+		if keeps || (!known && !markers.HoldsSharedManualMarker(file, seg.kind)) {
+			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence,
+				Algorithm: markers.ManualWithheldAlgorithm, Absent: cleared}
 		}
 	}
 }

@@ -486,6 +486,33 @@ func wantOneActiveClaim(t *testing.T, fixture contributionStoreFixture, provider
 	}
 }
 
+// A manual clear goes to an amend provider that accepts absent submissions:
+// its missing times hash the same in Claim's SQL as in Go, so the clear still
+// matches the file's stored tombstone under the claim lock.
+func TestContributionStoreAmendSendsManualClears(t *testing.T) {
+	fixture := newContributionStoreFixture(t)
+	ctx := context.Background()
+	file := fixture.seedEpisodeFile(t, "clear", 2, 4)
+	file.IntroMarkersSource, file.IntroMarkersAlgorithm, file.IntroMarkersConfidence = strPtr(models.MarkerSourceManual), strPtr(ManualAlgorithm), floatPtr(1)
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE media_files SET intro_markers_source = 'manual', intro_markers_algorithm = $2, intro_markers_confidence = 1
+		WHERE id = $1`, file.ID, ManualAlgorithm); err != nil {
+		t.Fatalf("seed clear: %v", err)
+	}
+	sub := &fakeSubmitter{id: fixture.provider, amend: true, absent: true}
+	reg := NewRegistry(nil)
+	_ = reg.Register(sub)
+	svc := NewContributionService(reg, NewDBExternalIDResolver(fixture.pool), fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true}}, fixture.store, nil)
+
+	outcomes, err := svc.ContributeFile(ctx, file, ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}})
+	if err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 || !sub.submitted[0].Absent {
+		t.Fatalf("submissions = %+v, outcomes = %+v; want one absent intro", sub.submitted, outcomes)
+	}
+}
+
 // manualCorrections drives one amend provider, with automatic sharing off,
 // and a seeded episode or movie file whose marker of kind a test saves by
 // hand.

@@ -250,11 +250,12 @@ func (p onDemandMarkerPopulation) ShowsStoredMarkers(context.Context) (bool, err
 }
 
 // A manual save that keeps a provider's marker, both bounds within a second,
-// stores the withheld algorithm so no contribution passes the provider's data
-// on. In on_demand mode no replica knows which provider marker a player was
-// shown, so every save is withheld, unless the file already held the kind as
-// a shared manual marker, which no provider marker replaces. A save that
-// keeps an earlier withheld save stays withheld.
+// or a clear that repeats a provider's answer that the file has none of the
+// kind, stores the withheld algorithm so no contribution passes the
+// provider's data on. In on_demand mode no replica knows which provider
+// marker or answer a player was shown, so every save is withheld, unless the
+// file already held the kind as a shared manual marker, which no provider
+// marker replaces. A save that keeps an earlier withheld save stays withheld.
 func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	plugin := func() *models.MediaFile {
 		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
@@ -291,6 +292,10 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 		// An editor opened before the earlier save may show a provider's marker.
 		{"on-demand, moved from an earlier withheld save", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), onDemandMarkerPopulation{}, `{"intro":{"start":20,"end":80}}`, true},
 		{"on-demand, manual clear", cleared, onDemandMarkerPopulation{}, kept, true},
+		{"cleared a provider's absent answer", &models.MediaFile{ID: 5, Duration: 1800,
+			IntroMarkersSource: new(models.MarkerSourcePlugin), IntroMarkersProvider: new("theintrodb")}, nil, `{"intro":null}`, true},
+		{"cleared a provider marker", plugin(), nil, `{"intro":null}`, false},
+		{"clear, on-demand", unmarked, onDemandMarkerPopulation{}, `{"intro":null}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writer := &fakeMarkerWriter{}
@@ -299,12 +304,16 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 
 			rec := httptest.NewRecorder()
 			h.HandleSetFileMarkers(rec, markerPutRequest(tc.body))
-			if rec.Code != http.StatusOK || len(writer.upserts) != 1 {
-				t.Fatalf("status = %d, upserts = %d; want 200 and one; body=%s", rec.Code, len(writer.upserts), rec.Body.String())
+			if rec.Code != http.StatusOK || len(writer.upserts) > 1 {
+				t.Fatalf("status = %d, upserts = %d; want 200 and at most one; body=%s", rec.Code, len(writer.upserts), rec.Body.String())
 			}
-			algorithm := writer.upserts[0].MarkersAlgorithm
-			if p := writer.upserts[0].IntroProvenance; p != nil {
-				algorithm = p.Algorithm
+			// A clear the update leaves alone is stored as ManualAlgorithm.
+			algorithm := markers.ManualAlgorithm
+			if len(writer.upserts) == 1 {
+				algorithm = writer.upserts[0].MarkersAlgorithm
+				if p := writer.upserts[0].IntroProvenance; p != nil {
+					algorithm = p.Algorithm
+				}
 			}
 			if want := map[bool]string{false: markers.ManualAlgorithm, true: markers.ManualWithheldAlgorithm}[tc.withheld]; algorithm != want {
 				t.Fatalf("intro algorithm = %q, want %q", algorithm, want)
@@ -313,21 +322,45 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	}
 }
 
-func TestSetFileMarkersClearOnlyDoesNotContribute(t *testing.T) {
-	called := make(chan markers.ContributeOptions, 1)
-	files := fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}}
-	h := newTestMarkersHandler(files, &fakeMarkerWriter{}, signalContributor{called: called}, nil, nil, nil)
-
-	rec := httptest.NewRecorder()
-	h.HandleSetFileMarkers(rec, markerPutRequest(`{"credits":null}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+// A manual clear is contributed like a save, from both clear paths (the v2
+// clear goes through the set path). ContributeFile sends it only to providers
+// that accept absent submissions.
+func TestManualClearsAreContributed(t *testing.T) {
+	clearRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodDelete, "/markers/files/5/credits", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("fileId", "5")
+		rctx.URLParams.Add("segment", "credits")
+		return withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 	}
+	for _, tc := range []struct {
+		name  string
+		serve func(*MarkersHandler, http.ResponseWriter)
+	}{
+		{"set-markers clear", func(h *MarkersHandler, w http.ResponseWriter) {
+			h.HandleSetFileMarkers(w, markerPutRequest(`{"credits":null}`))
+		}},
+		{"segment clear", func(h *MarkersHandler, w http.ResponseWriter) { h.HandleClearFileSegment(w, clearRequest()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := make(chan markers.ContributeOptions, 1)
+			files := fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}}
+			h := newTestMarkersHandler(files, &fakeMarkerWriter{}, signalContributor{called: called}, nil, nil, nil)
 
-	select {
-	case <-called:
-		t.Fatal("a clear-only save must not trigger contribution")
-	case <-time.After(200 * time.Millisecond):
+			rec := httptest.NewRecorder()
+			tc.serve(h, rec)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			select {
+			case opts := <-called:
+				if len(opts.Segments) != 1 || opts.Segments[0] != markers.MarkerKindCredits {
+					t.Fatalf("contribute segments = %v, want [credits]", opts.Segments)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("expected a background contribution for the cleared credits")
+			}
+		})
 	}
 }
 

@@ -351,3 +351,26 @@ func TestMarkerUpdateWritesAndWithdrawsAbsentAnswer(t *testing.T) {
 		t.Fatalf("withdrawn absent answer kept: applied=%v state=%+v", applied.intro, state.intro)
 	}
 }
+
+// A manual clear that a save withholds is written as a manual tombstone with
+// the withheld algorithm, replacing a provider's absent answer, so no
+// contribution sends it.
+func TestManualClearStoresWithheldProvenance(t *testing.T) {
+	pluginSource, provider, algorithm := models.MarkerSourcePlugin, "plugin:1:markers", "consensus:v1"
+	state := markerMutationState{duration: 1800, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		source: &pluginSource, provider: &provider, confidence: floatPtr(0.9), algorithm: &algorithm,
+	}}
+	update := MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: floatPtr(1), MarkersAlgorithm: markers.ManualAlgorithm,
+		IntroProvenance: &SegmentProvenance{Source: models.MarkerSourceManual, Confidence: floatPtr(1), Algorithm: markers.ManualWithheldAlgorithm, Absent: true}}
+
+	changed, err := applyMarkerMutation(&update, markerSegmentFlags{intro: true}, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply clear: %v", err)
+	}
+	intro := state.intro
+	if !changed.intro || intro.start != nil || intro.end != nil || intro.provider != nil ||
+		intro.source == nil || *intro.source != models.MarkerSourceManual ||
+		intro.algorithm == nil || *intro.algorithm != markers.ManualWithheldAlgorithm {
+		t.Fatalf("withheld clear not stored as a withheld manual tombstone: changed=%v state=%+v", changed.intro, intro)
+	}
+}
