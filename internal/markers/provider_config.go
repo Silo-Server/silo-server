@@ -80,14 +80,20 @@ func (s *ProviderConfigStore) Reload(ctx context.Context) error {
 	if s == nil || s.pool == nil {
 		return nil
 	}
-	_, err := s.Load(ctx)
-	return err
+	next, err := s.Load(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.cache = next
+	s.mu.Unlock()
+	return nil
 }
 
-// Load reads every provider config row, replaces the snapshot with them, and
-// returns what it read. Callers that must not act on a stale snapshot use the
-// returned rows, which a concurrent reload cannot replace. Do not modify the
-// returned map.
+// Load reads every provider config row from the database and returns them
+// without touching the snapshot. Callers that must not act on a stale snapshot
+// use it instead of Get or List. It leaves the snapshot alone so a read that
+// started before an admin edit cannot overwrite the edit's own Reload.
 func (s *ProviderConfigStore) Load(ctx context.Context) (map[string]ProviderConfig, error) {
 	if s == nil || s.pool == nil {
 		return nil, errors.New("marker provider config store unavailable")
@@ -109,10 +115,6 @@ func (s *ProviderConfigStore) Load(ctx context.Context) (map[string]ProviderConf
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate marker provider config: %w", err)
 	}
-
-	s.mu.Lock()
-	s.cache = next
-	s.mu.Unlock()
 	return next, nil
 }
 
