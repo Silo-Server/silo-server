@@ -283,6 +283,30 @@ describe("MovieContent", () => {
     });
   });
 
+  it("opens on the remembered version when the movie has no resume point", () => {
+    const uhd = movieVersion({ file_id: 1, resolution: "2160p", codec_audio: "truehd", hdr: true });
+    const hd = movieVersion({ file_id: 2, resolution: "1080p", codec_audio: "dts", hdr: false });
+
+    // The server omits a zero position, so the remembered version arrives on
+    // its own beside the counts every user_data carries.
+    renderMovie(
+      makeMovieItem({
+        versions: [uhd, hd],
+        user_data: {
+          played: false,
+          watched_count: 0,
+          unplayed_count: 0,
+          in_progress_count: 0,
+          last_file_id: 2,
+        } as ItemDetail["user_data"],
+      }),
+    );
+
+    expect(mocks.capturedQualityBadgesProps.value).toMatchObject({
+      summary: { resolution: "1080p" },
+    });
+  });
+
   it.each([
     [
       "passes restartHref when the movie is partially watched",

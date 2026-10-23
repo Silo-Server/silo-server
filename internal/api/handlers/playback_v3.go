@@ -3656,7 +3656,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
 		return 0, err
 	}
-	seriesID := h.resolveSeriesID(ctx, file)
+	seriesID := h.playbackPreferenceKey(ctx, file)
 	var seriesPref *playback.AudioTrackPreference
 	if seriesID != "" {
 		stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID)

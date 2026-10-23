@@ -1900,7 +1900,61 @@ func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, 
 	if err != nil {
 		return nil
 	}
-	return leafUserDataFromProgress(progress)
+	userData := leafUserDataFromProgress(progress)
+	if itemType == itemTypeMovie {
+		// A failed read keeps the progress row's hints, which is what the
+		// detail page showed before the version choice was stored apart.
+		if choice, err := store.GetSeriesPlaybackPreference(ctx, profileID, contentID); err == nil {
+			userData = applyVersionChoice(userData, progress, choice)
+		}
+	}
+	return userData
+}
+
+// applyVersionChoice reports the version a movie was last started on, from the
+// row playback start keeps under the movie's content ID. That row exists even
+// when the play was too short to leave progress, so a picked version is not
+// forgotten. Progress hints written after the choice (a later play through a
+// path that does not record one) still win.
+func applyVersionChoice(userData *catalog.SeasonUserData, progress *userstore.WatchProgress, choice *userstore.SeriesPlaybackPreference) *catalog.SeasonUserData {
+	if choice == nil || choice.FileID == 0 {
+		return userData
+	}
+	if progress != nil && progress.LastFileID != nil && storedTimeAfter(progress.UpdatedAt, choice.UpdatedAt) {
+		return userData
+	}
+	if userData == nil {
+		userData = &catalog.SeasonUserData{}
+	}
+	fileID := choice.FileID
+	userData.LastFileID = &fileID
+	userData.LastResolution = stringPtrOrNil(choice.Resolution)
+	hdr := choice.HDR
+	userData.LastHDR = &hdr
+	userData.LastCodecVideo = stringPtrOrNil(choice.CodecVideo)
+	userData.LastEditionKey = stringPtrOrNil(choice.EditionKey)
+	return userData
+}
+
+// storedTimeAfter compares two user-store RFC 3339 timestamps. An unparsable
+// value is treated as older, so it never hides a readable one.
+func storedTimeAfter(a, b string) bool {
+	at, aErr := time.Parse(time.RFC3339, a)
+	if aErr != nil {
+		return false
+	}
+	bt, bErr := time.Parse(time.RFC3339, b)
+	if bErr != nil {
+		return true
+	}
+	return at.After(bt)
+}
+
+func stringPtrOrNil(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // listLeafUserData batch-fetches watch progress for the given content IDs in a

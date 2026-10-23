@@ -721,6 +721,29 @@ export interface SeasonUserData {
 
 export type ItemUserData = LeafItemUserData | SeasonUserData;
 
+const LEAF_USER_DATA_KEYS = [
+  "position_seconds",
+  "duration_seconds",
+  "is_in_progress",
+  "last_file_id",
+  "last_resolution",
+  "last_hdr",
+  "last_codec_video",
+  "last_edition_key",
+] as const;
+
+/**
+ * Narrows user data to the leaf shape. The server omits a zero position, so a
+ * movie whose only state is its remembered version carries `last_file_id`
+ * without `position_seconds`; any leaf-only field identifies it.
+ */
+export function leafUserData(userData: ItemUserData | undefined): LeafItemUserData | undefined {
+  if (!userData) return undefined;
+  return LEAF_USER_DATA_KEYS.some((key) => key in userData)
+    ? (userData as LeafItemUserData)
+    : undefined;
+}
+
 export interface Season {
   content_id: string;
   play_content_id?: string;

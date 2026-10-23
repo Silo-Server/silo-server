@@ -193,6 +193,8 @@ CREATE TABLE IF NOT EXISTS series_playback_preferences (
     hdr BOOLEAN NOT NULL DEFAULT false,
     codec_video TEXT,
     updated_at TEXT NOT NULL,
+    file_id INTEGER,
+    edition_key TEXT,
     PRIMARY KEY (profile_id, series_id)
 );
 

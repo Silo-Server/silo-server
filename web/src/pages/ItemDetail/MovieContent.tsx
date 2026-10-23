@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { FileVersion, ItemDetail } from "@/api/types";
+import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
@@ -96,8 +96,7 @@ export default function MovieContent({
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions), [item.versions]);
-  const userData =
-    item.user_data && "position_seconds" in item.user_data ? item.user_data : undefined;
+  const userData = leafUserData(item.user_data);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { FileVersion, ItemDetail } from "@/api/types";
+import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
@@ -89,8 +89,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions ?? []), [item.versions]);
-  const userData =
-    item.user_data && "position_seconds" in item.user_data ? item.user_data : undefined;
+  const userData = leafUserData(item.user_data);
   const { hideOverviews } = useEpisodeSpoilerPrefs();
   // Keyed by episode so a reveal survives an on-view translation of the same
   // episode but not navigation to the next one.
