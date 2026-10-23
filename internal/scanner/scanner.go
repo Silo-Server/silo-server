@@ -1337,10 +1337,10 @@ func (s *Scanner) scanFolderByRoots(
 
 	// When EVERY configured root is unreachable this is an outage, not an
 	// intentionally emptied library: skip the empty-root confirm flow (and do
-	// not consume the operator's one-time cleanup allowance), fall through so
-	// pending scopes mark files missing (hiding them), and let the dead_root
-	// warning below explain the state. All deletion paths are protected by
-	// the unreachable-roots exclusions, so nothing is purged.
+	// not consume the operator's one-time cleanup allowance) and let the
+	// dead_root warning below explain the state. The pending scopes still run,
+	// but every root is in the protected set, so their files are neither
+	// marked missing nor deleted.
 	allRootsUnreachable := len(unreachableRoots) > 0 && len(unreachableRoots) == len(configuredRoots)
 	if !seenAnyFiles && totalExisting > 0 && !allRootsUnreachable {
 		var err error
@@ -3343,6 +3343,17 @@ func identityOnlyFastPathEligible(existing *scanStateFile, reasons []string) boo
 		existing.FileHash != ""
 }
 
+// scanStateUpdateReasons lists why a scan must write an existing file's row.
+// The file's content counts as changed only when its size or modification
+// time differs from the row's. A replacement with the same size and mtime
+// (a copy tool that preserves mtime, or a filesystem whose coarse timestamps
+// hide the rewrite) keeps the old probe data, markers and trickplay until one
+// of them changes; touching the file is the remedy. That limit is accepted:
+// inode numbers are not stable on SMB, FUSE and mergerfs mounts, so comparing
+// them would re-probe whole libraries after a remount; ctime also changes with
+// permissions and ownership; and hashing even part of each file would read
+// every unchanged file on every scan, which the stable-file skip exists to
+// avoid.
 func scanStateUpdateReasons(
 	existing *scanStateFile,
 	fileSize int64,
