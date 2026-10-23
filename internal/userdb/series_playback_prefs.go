@@ -13,6 +13,9 @@ type SeriesPlaybackPreference = userstore.SeriesPlaybackPreference
 // SetSeriesPlaybackPreference creates or replaces a series playback preference
 // for a given profile and series. Timestamps should be ISO 8601 UTC strings.
 func SetSeriesPlaybackPreference(db *sql.DB, pref SeriesPlaybackPreference) error {
+	if pref.UpdatedAt == "" {
+		pref.UpdatedAt = nowUTC()
+	}
 	_, err := db.Exec(`
 		INSERT INTO series_playback_preferences (
 			profile_id, series_id, resolution, hdr, codec_video, file_id, edition_key, updated_at

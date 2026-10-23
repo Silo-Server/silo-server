@@ -217,8 +217,10 @@ func addCompletedHistoryForUserDataTest(t *testing.T, store userstore.UserStore,
 	}
 }
 
-// A movie's stored version choice is the version user_data reports, unless a
-// progress row recorded a different file after the choice was made.
+// A movie's stored version choice is the version user_data reports, even when
+// the progress row was touched later (marking watched or clearing the resume
+// point moves its timestamp but plays no version). Without a stored file the
+// progress row's hint stands.
 func TestApplyVersionChoice(t *testing.T) {
 	fileOf := func(id int) *int { return &id }
 	choice := &userstore.SeriesPlaybackPreference{
@@ -232,16 +234,10 @@ func TestApplyVersionChoice(t *testing.T) {
 	}{
 		{name: "no progress row", choice: choice, wantFileID: fileOf(1080)},
 		{
-			name:       "progress hints are older",
-			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-01T00:00:00Z"},
-			choice:     choice,
-			wantFileID: fileOf(1080),
-		},
-		{
-			name:       "progress hints are newer",
+			name:       "progress row updated after the choice",
 			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-24T00:00:00Z"},
 			choice:     choice,
-			wantFileID: fileOf(2160),
+			wantFileID: fileOf(1080),
 		},
 		{
 			name:       "choice without a file",
@@ -253,7 +249,7 @@ func TestApplyVersionChoice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := applyVersionChoice(leafUserDataFromProgress(tt.progress), tt.progress, tt.choice)
+			got := applyVersionChoice(leafUserDataFromProgress(tt.progress), tt.choice)
 			if tt.wantFileID == nil {
 				if got != nil {
 					t.Fatalf("user data = %+v, want nil", got)
