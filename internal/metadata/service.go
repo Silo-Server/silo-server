@@ -2518,12 +2518,18 @@ func foldProviderResult(accumulator, result *MetadataResult, language, providerS
 		delete(result.ProviderIDs, key)
 	}
 	mergePreferredTitleMetadata(accumulator, result, language, providerSlug, !isIdentityHinter)
-	if preferRequestedLanguageText(&accumulator.Overview, &accumulator.OverviewLanguage, result.Overview, result.OverviewLanguage, language) {
-		// The tagline shares the overview's language.
-		accumulator.Tagline = result.Tagline
+	taglineWasEmpty := strings.TrimSpace(accumulator.Tagline) == ""
+	if preferRequestedLanguageText(&accumulator.Overview, &accumulator.OverviewLanguage, result.Overview, result.OverviewLanguage, language) &&
+		isForeignText(accumulator.Tagline, accumulator.taglineLanguage, language) {
+		// A tagline in another language goes with the overview it came with;
+		// one from another provider, such as the library's own files, stays.
+		accumulator.Tagline, accumulator.taglineLanguage = result.Tagline, result.OverviewLanguage
 	}
 	mergeProviderIDs(accumulator, result)
 	MergeMetadata(result, accumulator, nil, MergeFillEmpty)
+	if taglineWasEmpty && strings.TrimSpace(accumulator.Tagline) != "" {
+		accumulator.taglineLanguage = result.OverviewLanguage
+	}
 }
 
 func mergePreferredTitleMetadata(accumulator, result *MetadataResult, language, provider string, attributeAliases bool) {
@@ -2854,9 +2860,8 @@ func (s *MetadataService) mergeAndPersist(
 		// Text a provider marked as another language is no translation: the
 		// localization row stays empty and falls back to the base row. With
 		// the fallback off the original language is wanted, so it stays.
-		if isForeignText(accumulator.Overview, accumulator.OverviewLanguage, req.Language) {
-			accumulator.Overview, accumulator.Tagline, accumulator.OverviewLanguage = "", "", ""
-		}
+		dropForeignText(&accumulator.Overview, &accumulator.OverviewLanguage, req.Language)
+		dropForeignText(&accumulator.Tagline, &accumulator.taglineLanguage, req.Language)
 		dropForeignChildText(seasons, episodes, req.Language)
 	}
 	// Whether the providers listed any people, before the merge below folds

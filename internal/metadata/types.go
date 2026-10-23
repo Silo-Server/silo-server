@@ -293,6 +293,9 @@ type MetadataResult struct {
 	// reported them in a language other than the requested one; empty means
 	// the requested language or unknown.
 	OverviewLanguage string
+	// taglineLanguage is OverviewLanguage of the provider Tagline came from,
+	// which need not be the one Overview came from.
+	taglineLanguage string
 	// titleAliasProviders records whether each contributing provider declared
 	// its aliases to be an authoritative snapshot. False means merge-only,
 	// which is the safe default for legacy plugins and partial responses.

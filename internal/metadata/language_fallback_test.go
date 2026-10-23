@@ -88,16 +88,26 @@ func TestRefreshFillsMissingTextInFallbackLanguage(t *testing.T) {
 	english := &MetadataResult{
 		Title: "Sound! Euphonium", Overview: "An English overview.", ProviderIDs: map[string]string{"tmdb": "7"},
 	}
+	englishAlias := &MetadataResult{
+		Title: "響け！ユーフォニアム", TitleIsFallback: true, TitleLanguage: "ja",
+		TitleAliases: []TitleAlias{{Title: "Sound! Euphonium", Language: "en", Kind: "localized"}},
+		Overview:     "An English overview.", ProviderIDs: map[string]string{"tmdb": "7"},
+	}
 	tests := []struct {
 		name           string
 		fallback       string
 		mode           RefreshMode
 		stored         models.MediaItem
+		english        *MetadataResult
 		failIn         string
 		wantTitle      string
 		wantOverview   string
 		wantEnglishAsk bool
 	}{
+		{
+			name: "an English title alias fills the title", fallback: "en", mode: ModeManualRefresh, english: englishAlias,
+			wantTitle: "Sound! Euphonium", wantOverview: "An English overview.", wantEnglishAsk: true,
+		},
 		{
 			name: "manual refresh fills title and overview", fallback: "en", mode: ModeManualRefresh,
 			wantTitle: "Sound! Euphonium", wantOverview: "An English overview.", wantEnglishAsk: true,
@@ -132,9 +142,13 @@ func TestRefreshFillsMissingTextInFallbackLanguage(t *testing.T) {
 			stored.DefaultMetadataLanguage = "sv"
 			h := newTestFilmHarness(ctx, t, stored)
 			h.service.SetFallbackLanguage(tt.fallback)
+			inEnglish := english
+			if tt.english != nil {
+				inEnglish = tt.english
+			}
 			provider := &languageTextProvider{
 				slug: "tmdb", types: []string{"movie"}, failIn: tt.failIn,
-				items: map[string]*MetadataResult{"sv": swedish, "en": english},
+				items: map[string]*MetadataResult{"sv": swedish, "en": inEnglish},
 			}
 			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
 				ContentID: testFilmContentID, Mode: tt.mode, Language: "sv",
@@ -152,6 +166,37 @@ func TestRefreshFillsMissingTextInFallbackLanguage(t *testing.T) {
 				t.Errorf("asked for English = %v, want %v", asked, tt.wantEnglishAsk)
 			}
 		})
+	}
+}
+
+// A tagline from the library's own files stays when the overview it sits
+// beside is replaced: it is no part of the provider's original-language text.
+func TestFallbackKeepsLocalTagline(t *testing.T) {
+	ctx := context.Background()
+	h := newTestFilmHarness(ctx, t, models.MediaItem{DefaultMetadataLanguage: "sv"})
+	h.service.SetFallbackLanguage("en")
+	nfo := &localTextProvider{languageTextProvider{
+		slug: "nfo", types: []string{"movie"},
+		items: map[string]*MetadataResult{"sv": {Title: "Film", Tagline: "My local tagline"}},
+	}}
+	remote := &languageTextProvider{
+		slug: "tmdb", types: []string{"movie"},
+		items: map[string]*MetadataResult{
+			"sv": {Title: "Film", Overview: "日本語のあらすじ", OverviewLanguage: "ja", Tagline: "日本語", ProviderIDs: map[string]string{"tmdb": "7"}},
+			"en": {Title: "Film", Overview: "An English overview.", Tagline: "English tagline", ProviderIDs: map[string]string{"tmdb": "7"}},
+		},
+	}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID: testFilmContentID, Mode: ModeManualRefresh, Language: "sv",
+	}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.Overview != "An English overview." || got.Tagline != "My local tagline" {
+		t.Errorf("item = %q / %q, want the English overview and the local tagline", got.Overview, got.Tagline)
 	}
 }
 

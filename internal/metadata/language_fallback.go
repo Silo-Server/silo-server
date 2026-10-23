@@ -441,8 +441,13 @@ func fetchFallbackItem(ctx context.Context, chain []Provider, providerIDs map[st
 		if result == nil || !result.HasMetadata {
 			continue
 		}
-		if out.Title == "" && strings.TrimSpace(result.Title) != "" && !result.TitleIsFallback {
-			out.Title, out.SortTitle = result.Title, result.SortTitle
+		// The same selection a refresh in language makes, so a title alias in
+		// language counts too.
+		if title, _, fallback, _ := preferredMetadataResultTitle(result, language); out.Title == "" && strings.TrimSpace(title) != "" && !fallback {
+			out.Title = title
+			if title == result.Title {
+				out.SortTitle = result.SortTitle
+			}
 		}
 		if out.Overview == "" && !textMissing(result.Overview, result.OverviewLanguage, language) {
 			out.Overview, out.Tagline = result.Overview, result.Tagline
@@ -596,11 +601,14 @@ func (f *fallbackText) applyToItem(item *MetadataResult, requested string, exist
 		switch {
 		case found.Overview != "":
 			item.Overview, item.OverviewLanguage = found.Overview, f.language
-			if foreign || strings.TrimSpace(item.Tagline) == "" {
-				item.Tagline = found.Tagline
+			if textMissing(item.Tagline, item.taglineLanguage, requested) {
+				item.Tagline, item.taglineLanguage = found.Tagline, f.language
 			}
 		case foreign && keep && strings.TrimSpace(existing.Overview) != "":
-			item.Overview, item.Tagline = "", ""
+			item.Overview = ""
+			if isForeignText(item.Tagline, item.taglineLanguage, requested) {
+				item.Tagline = ""
+			}
 		}
 	}
 }
