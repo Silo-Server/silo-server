@@ -304,3 +304,7 @@
 # A Jellyfin NextUp page that asks for detail fields, and an Ids list, fetch
 # their details as one batch and answer exactly what per-item lookups did.
 ./internal/jellycompat TestCompatDetailBatchesMatchPerItemDB
+
+# A Jellyfin item request resolves the viewer access scope once, however many
+# catalog reads in the request need it.
+./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB

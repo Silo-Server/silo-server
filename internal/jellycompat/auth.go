@@ -240,6 +240,7 @@ func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request,
 func serveWithSessionContext(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
 	attributeActivity(r, session)
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
+	ctx = withRequestScope(ctx, session)
 	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
 	next.ServeHTTP(w, r.WithContext(ctx))
 }

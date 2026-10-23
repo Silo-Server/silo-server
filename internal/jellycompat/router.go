@@ -467,6 +467,9 @@ func withDefaults(deps Dependencies) Dependencies {
 	// access filter so all consumers (content service, items/images handlers,
 	// recommendations) inherit them without per-call-site guards.
 	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
+	// The playback bitrate cap reads the same scope as the access filter, so
+	// one request resolves it once for both (see NewScopeAccessFilter).
+	deps.PlaybackScopeResolver = rememberRequestScope(deps.PlaybackScopeResolver)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}

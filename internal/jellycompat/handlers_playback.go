@@ -387,11 +387,7 @@ func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session
 	if h.ScopeResolver == nil {
 		return 0, nil
 	}
-	scope, err := h.ScopeResolver.Resolve(ctx, access.ResolveInput{
-		UserID:              session.StreamAppUserID,
-		ProfileID:           session.ProfileID,
-		SkipPINVerification: true,
-	})
+	scope, err := h.ScopeResolver.Resolve(ctx, compatScopeInput(session.StreamAppUserID, session.ProfileID))
 	if err != nil {
 		return 0, err
 	}
