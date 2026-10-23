@@ -19,7 +19,8 @@ import {
 
 const UNLIMITED = "0";
 const CUSTOM = "custom";
-const INVALID_MBPS = "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).";
+export const INVALID_STREAM_BITRATE_MBPS =
+  "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).";
 
 function choiceFor(kbps: number | null): string {
   if (kbps === null) return "";
@@ -71,7 +72,7 @@ export function StreamBitrateLimitInput({
   // parser can't disagree about what is saveable, including for a draft
   // restored on mount.
   useLayoutEffect(() => {
-    draftRef.current?.setCustomValidity(draftValue === null ? INVALID_MBPS : "");
+    draftRef.current?.setCustomValidity(draftValue === null ? INVALID_STREAM_BITRATE_MBPS : "");
   }, [custom, draftValue]);
 
   function handleChoiceChange(next: string) {
@@ -132,7 +133,7 @@ export function StreamBitrateLimitInput({
         )}
       </div>
       {custom && draftValue === null && (
-        <p className="text-muted-foreground text-xs">{INVALID_MBPS}</p>
+        <p className="text-muted-foreground text-xs">{INVALID_STREAM_BITRATE_MBPS}</p>
       )}
       {custom && draftValue !== null && isLowStreamBitrateLimit(draftValue) && (
         <p className="text-warning text-xs">
