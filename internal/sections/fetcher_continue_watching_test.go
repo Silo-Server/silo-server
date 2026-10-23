@@ -1,86 +1,66 @@
 package sections
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCollapseContinueWatchingSeriesCandidatesPrefersNewestInProgressEpisode(t *testing.T) {
+func TestCollapseContinueWatchingSeriesCandidates(t *testing.T) {
 	t.Parallel()
 
 	seriesID := "series-8"
-	importedAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	localAt := time.Date(2025, 1, 2, 12, 0, 0, 0, time.UTC)
-	nextUpAt := time.Date(2025, 1, 3, 12, 0, 0, 0, time.UTC)
-
-	items := []*models.MediaItem{
-		{ContentID: "movie-1", Type: "movie", Title: "Movie One"},
-		{ContentID: "ep-s8e6", Type: "episode", Title: "Imported partial"},
-		{ContentID: "ep-s8e11", Type: "episode", Title: "Local partial"},
-		{ContentID: "ep-s8e12", Type: "episode", Title: "Next up"},
-		{ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
+	base := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	episode := func(number int, source string, at time.Time) SectionItemMeta {
+		return SectionItemMeta{SeriesID: &seriesID, SeasonNumber: intPtr(8), EpisodeNumber: intPtr(number), ItemSource: source, SortTimestamp: at}
 	}
-	meta := map[string]SectionItemMeta{
-		"ep-s8e6": {
-			SeriesID:      &seriesID,
-			SeasonNumber:  intPtr(8),
-			EpisodeNumber: intPtr(6),
-			ItemSource:    "in_progress",
-			SortTimestamp: importedAt,
+
+	tests := []struct {
+		name  string
+		items []string
+		meta  map[string]SectionItemMeta
+		want  []string
+	}{
+		{
+			name:  "newest in-progress episode wins over next up, movies kept",
+			items: []string{"movie-1", "ep-s8e6", "ep-s8e11", "ep-s8e12", "movie-2"},
+			meta: map[string]SectionItemMeta{
+				"ep-s8e6":  episode(6, "in_progress", base),
+				"ep-s8e11": episode(11, "in_progress", base.Add(24*time.Hour)),
+				"ep-s8e12": episode(12, "next_up", base.Add(48*time.Hour)),
+			},
+			want: []string{"movie-1", "ep-s8e11", "movie-2"},
 		},
-		"ep-s8e11": {
-			SeriesID:      &seriesID,
-			SeasonNumber:  intPtr(8),
-			EpisodeNumber: intPtr(11),
-			ItemSource:    "in_progress",
-			SortTimestamp: localAt,
+		{
+			name:  "next up kept when the series has nothing in progress",
+			items: []string{"ep-s8e12"},
+			meta:  map[string]SectionItemMeta{"ep-s8e12": episode(12, "next_up", base)},
+			want:  []string{"ep-s8e12"},
 		},
-		"ep-s8e12": {
-			SeriesID:      &seriesID,
-			SeasonNumber:  intPtr(8),
-			EpisodeNumber: intPtr(12),
-			ItemSource:    "next_up",
-			SortTimestamp: nextUpAt,
-		},
-	}
-
-	collapsed := collapseContinueWatchingSeriesCandidates(items, meta)
-
-	gotIDs := contentIDs(collapsed)
-	wantIDs := []string{"movie-1", "ep-s8e11", "movie-2"}
-	if len(gotIDs) != len(wantIDs) {
-		t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
-	}
-	for i := range wantIDs {
-		if gotIDs[i] != wantIDs[i] {
-			t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
-		}
-	}
-}
-
-func TestCollapseContinueWatchingSeriesCandidatesKeepsNextUpWhenNoInProgress(t *testing.T) {
-	t.Parallel()
-
-	seriesID := "series-8"
-	items := []*models.MediaItem{
-		{ContentID: "ep-s8e12", Type: "episode", Title: "Next up"},
-	}
-	meta := map[string]SectionItemMeta{
-		"ep-s8e12": {
-			SeriesID:      &seriesID,
-			SeasonNumber:  intPtr(8),
-			EpisodeNumber: intPtr(12),
-			ItemSource:    "next_up",
-			SortTimestamp: time.Date(2025, 1, 3, 12, 0, 0, 0, time.UTC),
+		{
+			name:  "equal progress timestamps prefer the later episode",
+			items: []string{"ep-s8e3", "ep-s8e5"},
+			meta: map[string]SectionItemMeta{
+				"ep-s8e3": episode(3, "in_progress", base),
+				"ep-s8e5": episode(5, "in_progress", base),
+			},
+			want: []string{"ep-s8e5"},
 		},
 	}
 
-	collapsed := collapseContinueWatchingSeriesCandidates(items, meta)
-
-	if len(collapsed) != 1 || collapsed[0].ContentID != "ep-s8e12" {
-		t.Fatalf("collapsed = %v, want only ep-s8e12", contentIDs(collapsed))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := make([]*models.MediaItem, 0, len(tt.items))
+			for _, id := range tt.items {
+				items = append(items, &models.MediaItem{ContentID: id})
+			}
+			got := contentIDs(collapseContinueWatchingSeriesCandidates(items, tt.meta))
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("collapsed IDs = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
