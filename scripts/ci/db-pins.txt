@@ -166,6 +166,9 @@
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestNextUpModeStatementBudgetPostgres
 
+# Home sections: one statement for a content ID lookup of any length.
+./internal/sections TestContentIDLookupsKeepOneStatementPostgres
+
 # Server collection rows: a cached row costs one revision read, which shows an
 # edit on the next read, and lists what the collection's page lists.
 ./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB

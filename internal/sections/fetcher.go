@@ -3013,17 +3013,11 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 		return []*models.MediaItem{}, nil
 	}
 
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	placeholders := make([]string, len(contentIDs))
-	for i, contentID := range contentIDs {
-		placeholders[i] = fmt.Sprintf("$%d", argIdx)
-		args = append(args, contentID)
-		argIdx++
-	}
-	conditions = append(conditions, fmt.Sprintf("mi.content_id IN (%s)", strings.Join(placeholders, ", ")))
+	// One array parameter keeps one statement shape for every list size; a
+	// placeholder per ID made each count new SQL to prepare.
+	conditions := []string{"mi.content_id = ANY($1::text[])"}
+	args := []any{contentIDs}
+	argIdx := 2
 
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
 
@@ -3061,17 +3055,10 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
 	}
 
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	placeholders := make([]string, len(contentIDs))
-	for i, contentID := range contentIDs {
-		placeholders[i] = fmt.Sprintf("$%d", argIdx)
-		args = append(args, contentID)
-		argIdx++
-	}
-	conditions = append(conditions, fmt.Sprintf("e.content_id IN (%s)", strings.Join(placeholders, ", ")))
+	// One array parameter for every list size, as fetchItemsByContentIDsFiltered.
+	conditions := []string{"e.content_id = ANY($1::text[])"}
+	args := []any{contentIDs}
+	argIdx := 2
 
 	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id LEFT JOIN seasons s ON s.content_id = e.season_id"
 	if !applyEpisodeTargetLibraryAccess(filter, libraryID, libraryIDs, &conditions, &args, &argIdx) {
