@@ -282,8 +282,9 @@ func (h *CatalogHandler) BoxSet(ctx context.Context, v ItemViewer, collectionID 
 
 // SearchBoxSets returns the box sets the viewer can see that match query:
 // the collection's name contains every word, or at least two of its movies'
-// titles do. Only libraries with box sets in search take part. A collection
-// in several libraries is listed once, for the library holding most of it.
+// titles the viewer can see do. Only libraries with box sets in search take
+// part. A collection in several libraries is listed once, for the library
+// holding most of it.
 func (h *CatalogHandler) SearchBoxSets(ctx context.Context, v ItemViewer, query string, libraryID, limit int) ([]BoxSetView, error) {
 	if h == nil || h.boxSets == nil || h.resolver == nil || h.itemsH == nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Box sets are not configured")
@@ -303,7 +304,7 @@ func (h *CatalogHandler) SearchBoxSets(ctx context.Context, v ItemViewer, query 
 	// Matches are read a page at a time: the viewer may see too few movies of
 	// the best-ranked ones.
 	for page := range boxSetSearchPages {
-		candidates, err := h.boxSets.SearchCollectionIDs(ctx, query, libraryIDs, boxSetSearchCandidates, page*boxSetSearchCandidates)
+		candidates, err := h.resolver.SearchBoxSetCollectionIDs(ctx, query, libraryIDs, v.Access, boxSetSearchCandidates, page*boxSetSearchCandidates)
 		if err != nil {
 			return nil, boxSetError(ctx, err)
 		}

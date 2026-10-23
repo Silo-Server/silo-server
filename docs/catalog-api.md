@@ -824,7 +824,8 @@ box set with its movies in that library that the viewer can see, in collection
 can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
 (`searchCatalogBoxSets`) answers the box sets of libraries with
 `box_sets_in_search` whose name contains every word of `q`, or that have two
-or more movies in those libraries whose titles do, best match first.
+or more movies in those libraries the viewer can see whose titles do, best
+match first. Movies the viewer cannot see never count toward a title match.
 `library_id` limits the search to one library. Search results keep listing the
 movies themselves; clients show matching box sets ahead of them.
 

@@ -202,33 +202,47 @@ func TestBoxSetGroupedBrowseDB(t *testing.T) {
 func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
-	byName, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib}, 10, 0)
-	if err != nil {
-		t.Fatal(err)
+	executor := &QueryExecutor{Pool: f.pool}
+	search := func(query string, libraryIDs []int, viewer AccessFilter, limit, offset int) []int64 {
+		t.Helper()
+		ids, err := executor.searchBoxSetCollections(ctx, query, libraryIDs, viewer, limit, offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
 	}
-	if !slices.Equal(byName, []int64{f.franchise}) {
+	if byName := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(byName, []int64{f.franchise}) {
 		t.Fatalf("name search = %v, want [%d]", byName, f.franchise)
 	}
-	if next, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib}, 10, 1); err != nil || len(next) != 0 {
-		t.Fatalf("second page = %v, %v; want empty", next, err)
+	if next := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 1); len(next) != 0 {
+		t.Fatalf("second page = %v, want empty", next)
 	}
 	// A library without the collection's movies finds nothing, so matches
 	// elsewhere cannot use up a library's candidates.
-	if other, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib + 1_000_000}, 10, 0); err != nil || len(other) != 0 {
-		t.Fatalf("search in another library = %v, %v; want empty", other, err)
+	everywhere := AccessFilter{}
+	if other := search(f.prefix+" saga", []int{f.lib + 1_000_000}, everywhere, 10, 0); len(other) != 0 {
+		t.Fatalf("search in another library = %v, want empty", other)
 	}
 	// "kappa" is in two of the franchise's titles but one of the single
 	// collection's, and in neither name.
-	byTitle, err := f.repo.SearchCollectionIDs(ctx, "kappa", []int{f.lib}, 50, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(byTitle, f.franchise) || slices.Contains(byTitle, f.single) {
+	if byTitle := search("kappa", []int{f.lib}, f.viewer, 50, 0); !slices.Contains(byTitle, f.franchise) || slices.Contains(byTitle, f.single) {
 		t.Fatalf("title search = %v, want the franchise and not the single", byTitle)
 	}
 	// Titles in another library do not make a match.
-	if elsewhere, err := f.repo.SearchCollectionIDs(ctx, "kappa", []int{f.lib + 1_000_000}, 50, 0); err != nil || slices.Contains(elsewhere, f.franchise) {
-		t.Fatalf("title search in another library = %v, %v; want no franchise", elsewhere, err)
+	if elsewhere := search("kappa", []int{f.lib + 1_000_000}, everywhere, 50, 0); slices.Contains(elsewhere, f.franchise) {
+		t.Fatalf("title search in another library = %v, want no franchise", elsewhere)
+	}
+	// Only titles the viewer can see count: "bravo" is in a visible title and
+	// in the R-rated one, so the PG viewer must not learn the hidden title
+	// matches through the box set.
+	if _, err := f.pool.Exec(ctx, `UPDATE media_items SET title = 'Mike Bravo Three' WHERE content_id = $1`, f.id("third")); err != nil {
+		t.Fatal(err)
+	}
+	if all := search("bravo", []int{f.lib}, everywhere, 50, 0); !slices.Contains(all, f.franchise) {
+		t.Fatalf("unrestricted title search = %v, want the franchise", all)
+	}
+	if restricted := search("bravo", []int{f.lib}, f.viewer, 50, 0); slices.Contains(restricted, f.franchise) {
+		t.Fatalf("PG title search = %v, want no franchise from a hidden title", restricted)
 	}
 
 	// A collection no movie belongs to any more is deleted; one with movies

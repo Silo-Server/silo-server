@@ -105,54 +105,6 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 	return out, nil
 }
 
-// SearchCollectionIDs returns up to limit stored collections with a movie in
-// one of libraryIDs that match query, skipping the first offset: first those
-// whose name contains every word of it, then those with at least two movies
-// in those libraries whose titles do, case-insensitively.
-func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string, libraryIDs []int, limit, offset int) ([]int64, error) {
-	words := strings.Fields(strings.ToLower(query))
-	if r == nil || r.pool == nil || len(words) == 0 || len(libraryIDs) == 0 {
-		return nil, nil
-	}
-	patterns := make([]string, 0, len(words))
-	for _, word := range words {
-		patterns = append(patterns, "%"+escapePrefixForLike(word)+"%")
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT tmdb_collection_id FROM (
-			SELECT tmdb_collection_id, 0 AS match_rank, length(name) AS name_length
-			FROM tmdb_movie_collections
-			WHERE lower(name) LIKE ALL($1::text[])
-			UNION ALL
-			SELECT m.tmdb_collection_id, 1, 0
-			FROM media_item_tmdb_collections m
-			JOIN media_items mi ON mi.content_id = m.content_id AND mi.tmdb_id = m.checked_tmdb_id::text
-			WHERE m.tmdb_collection_id IS NOT NULL AND lower(mi.title) LIKE ALL($1::text[])
-			  AND EXISTS (SELECT 1 FROM media_item_libraries tl WHERE tl.content_id = m.content_id AND tl.media_folder_id = ANY($4))
-			GROUP BY m.tmdb_collection_id
-			HAVING count(*) >= 2
-		) matches
-		-- Only collections with a movie in the searched libraries, so matches
-		-- elsewhere do not use up the candidates a page reads.
-		WHERE EXISTS (
-			SELECT 1 FROM media_item_tmdb_collections lm
-			JOIN media_items li ON li.content_id = lm.content_id AND li.tmdb_id = lm.checked_tmdb_id::text
-			JOIN media_item_libraries mil ON mil.content_id = lm.content_id
-			WHERE lm.tmdb_collection_id = matches.tmdb_collection_id AND mil.media_folder_id = ANY($4))
-		GROUP BY tmdb_collection_id
-		ORDER BY min(match_rank), min(name_length), tmdb_collection_id
-		LIMIT $2 OFFSET $3`, patterns, limit, offset, libraryIDs)
-	if err != nil {
-		return nil, fmt.Errorf("searching tmdb collections: %w", err)
-	}
-	defer rows.Close()
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
-	if err != nil {
-		return nil, fmt.Errorf("reading tmdb collection search: %w", err)
-	}
-	return ids, nil
-}
-
 // CollectionIDsOfContent returns the stored collection of each of the given
 // movies that has one.
 func (r *BoxSetRepository) CollectionIDsOfContent(ctx context.Context, contentIDs []string) (map[string]int64, error) {
@@ -451,13 +403,10 @@ func (e *QueryExecutor) boxSetGroups(ctx context.Context, def QueryDefinition, a
 	if e == nil || e.Pool == nil {
 		return nil, errors.New("query executor requires a database pool")
 	}
-	access.NamePrefix = ""
-	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	with, from, args, err := e.visibleCollectionMovies(def, access)
 	if err != nil {
 		return nil, err
 	}
-	args := append([]any{}, plan.cteArgs...)
-	args = append(args, plan.args...)
 	args = append(args, max(minMovies, MinBoxSetMinMovies))
 	minIdx := len(args)
 	only := ""
@@ -465,21 +414,14 @@ func (e *QueryExecutor) boxSetGroups(ctx context.Context, def QueryDefinition, a
 		args = append(args, onlyCollections)
 		only = fmt.Sprintf(" AND bsm.tmdb_collection_id = ANY($%d)", len(args))
 	}
-	where := plan.whereClause
-	if where == "" {
-		where = "WHERE TRUE"
-	}
 	sql := fmt.Sprintf(`%sSELECT bsm.tmdb_collection_id,
 			array_agg(mi.content_id ORDER BY array_position(c.member_tmdb_ids, bsm.checked_tmdb_id) NULLS LAST, mi.year NULLS LAST, mi.content_id),
 			COALESCE(min(mi.year), 0), COALESCE(max(mi.year), 0)
-		%s
-		JOIN media_item_tmdb_collections bsm ON bsm.content_id = mi.content_id AND bsm.checked_tmdb_id::text = mi.tmdb_id
-		JOIN tmdb_movie_collections c ON c.tmdb_collection_id = bsm.tmdb_collection_id
-		%s AND bsm.tmdb_collection_id IS NOT NULL%s
+		%s%s
 		GROUP BY bsm.tmdb_collection_id
 		HAVING count(*) >= $%d
 		ORDER BY bsm.tmdb_collection_id`,
-		plan.withClause(), plan.fromClauseCount, where, only, minIdx)
+		with, from, only, minIdx)
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying box sets: %w", err)
@@ -497,6 +439,80 @@ func (e *QueryExecutor) boxSetGroups(ctx context.Context, def QueryDefinition, a
 		return nil, fmt.Errorf("reading box sets: %w", err)
 	}
 	return groups, nil
+}
+
+// SearchBoxSetCollectionIDs returns up to limit stored collections that match
+// query among the movies of libraryIDs the viewer can see, skipping the first
+// offset: first those whose name contains every word of it, then those with
+// at least two such movies whose titles do, case-insensitively. Only movies
+// access admits count, so a match cannot reveal a title the viewer may not
+// see.
+func (r *CatalogResolver) SearchBoxSetCollectionIDs(ctx context.Context, query string, libraryIDs []int, access AccessFilter, limit, offset int) ([]int64, error) {
+	if r == nil || r.itemRepo == nil {
+		return nil, errors.New("catalog resolver requires an item repository")
+	}
+	executor := r.queryExecutorForScope(playableTypeMovie, nil)
+	return executor.searchBoxSetCollections(ctx, query, libraryIDs, access, limit, offset)
+}
+
+func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query string, libraryIDs []int, access AccessFilter, limit, offset int) ([]int64, error) {
+	if e == nil || e.Pool == nil {
+		return nil, errors.New("query executor requires a database pool")
+	}
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 || len(libraryIDs) == 0 {
+		return nil, nil
+	}
+	patterns := make([]string, 0, len(words))
+	for _, word := range words {
+		patterns = append(patterns, "%"+escapePrefixForLike(word)+"%")
+	}
+	with, from, args, err := e.visibleCollectionMovies(QueryDefinition{MediaScope: playableTypeMovie, LibraryIDs: libraryIDs}, access)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, patterns, limit, offset)
+	patternIdx := len(args) - 2
+	// Grouping the movies the viewer can see by collection keeps only
+	// collections with such a movie, so matches elsewhere do not use up the
+	// candidates a page reads.
+	sql := fmt.Sprintf(`%sSELECT bsm.tmdb_collection_id
+		%s
+		GROUP BY bsm.tmdb_collection_id, c.name
+		HAVING lower(c.name) LIKE ALL($%[3]d::text[])
+			OR count(*) FILTER (WHERE lower(mi.title) LIKE ALL($%[3]d::text[])) >= 2
+		ORDER BY CASE WHEN lower(c.name) LIKE ALL($%[3]d::text[]) THEN length(c.name) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
+		LIMIT $%[4]d OFFSET $%[5]d`,
+		with, from, patternIdx, patternIdx+1, patternIdx+2)
+	rows, err := e.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searching box sets: %w", err)
+	}
+	defer rows.Close()
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, fmt.Errorf("reading box set search: %w", err)
+	}
+	return ids, nil
+}
+
+// visibleCollectionMovies renders the movies of def that access lets the
+// viewer see and whose current TMDB movie is in a stored collection, as mi
+// (the movie), bsm (its collection lookup) and c (the collection). with goes
+// before the SELECT and from after its select list; args binds both, so
+// further arguments start at $len(args)+1.
+func (e *QueryExecutor) visibleCollectionMovies(def QueryDefinition, access AccessFilter) (with, from string, args []any, err error) {
+	access.NamePrefix = ""
+	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	if err != nil {
+		return "", "", nil, err
+	}
+	args = append(append([]any{}, plan.cteArgs...), plan.args...)
+	from = fmt.Sprintf(`%s
+		JOIN media_item_tmdb_collections bsm ON bsm.content_id = mi.content_id AND bsm.checked_tmdb_id::text = mi.tmdb_id
+		JOIN tmdb_movie_collections c ON c.tmdb_collection_id = bsm.tmdb_collection_id
+		%s AND bsm.tmdb_collection_id IS NOT NULL`, plan.fromClauseCount, browseFilterPrefix(plan.whereClause))
+	return plan.withClause(), from, args, nil
 }
 
 // nonNilSlice binds an absent skip list as an empty array: ANY of NULL is
