@@ -43,11 +43,17 @@ Existing installations retain their configured marker mode, which accepts `off`,
   background synchronization. Request leases, failures, and quota cooldowns are
   still shared through the database. Previously stored markers remain available.
 
-Both paths honor provider priority, manual edits and deletions, and provider quota limits.
+Both paths honor provider selection, manual edits and deletions, and provider quota limits.
+
+When several providers return a marker of the same kind, Silo uses the one with
+the highest confidence, then the lower `fetch_priority`, then the higher
+submission count, then the provider ID. A marker without a confidence counts as
+0, so it loses to any rated marker. Selection runs over cached answers, so a
+priority change applies without fetching again.
 
 Each provider has a minimum confidence for lookups, `fetch_min_confidence` on
 the v2 provider configuration, default 0. A marker the provider rates below it is
-left out, so the next provider by priority or local detection fills its kind,
+left out, so another provider or local detection fills its kind,
 and a stored marker of that provider for the kind is withdrawn, even when the
 provider's answer comes from the cache. A marker without a confidence counts as
 0. The minimum is applied when results are selected, so a change reaches cached
