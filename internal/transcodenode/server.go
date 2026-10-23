@@ -2967,8 +2967,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if r.Context().Err() != nil {
-			// The API server or client has gone, so there is no one to answer.
-			return
+			// net/http also ends the context of a client that only
+			// half-closed and is still reading. Answer it as a timed-out
+			// wait would: writing nothing reaches it as an empty 200.
+			err = playback.ErrSegmentNotFound
 		}
 		if isToneMapRecipeError(err) {
 			writeToneMapRecipeError(w, err)

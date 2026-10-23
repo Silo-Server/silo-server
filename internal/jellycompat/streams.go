@@ -1311,8 +1311,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 	if err != nil {
 		if r.Context().Err() != nil {
-			// The client has gone, so there is no one to answer.
-			return
+			// net/http also ends the context of a client that only
+			// half-closed and is still reading. Answer it as a timed-out
+			// wait would: writing nothing reaches it as an empty 200.
+			err = playback.ErrSegmentNotFound
 		}
 		status, code, message := hlsSegmentErrorResponse(err)
 		writeError(w, status, code, message)

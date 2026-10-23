@@ -492,9 +492,10 @@ exec sleep 30
 	}
 }
 
-// A segment request whose client leaves while it waits for FFmpeg returns at
-// once and writes nothing, instead of holding the request until the wait times
-// out and answering a connection that is gone.
+// A segment request whose context ends while it waits for FFmpeg stops waiting
+// at once, instead of holding the request until the wait times out. It still
+// answers 404: net/http also ends the context of a client that only
+// half-closed, and writing nothing would reach it as an empty 200.
 func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
 	const sessionID = "departed-segment"
 	transcodeSession, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
@@ -534,8 +535,8 @@ func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("segment request waited %v after it ended", elapsed)
 	}
-	if rr.Body.Len() != 0 || rr.Header().Get("Content-Type") != "" {
-		t.Fatalf("wrote %d %q to a request that had ended", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d %q, want 404", rr.Code, rr.Body.String())
 	}
 }
 
