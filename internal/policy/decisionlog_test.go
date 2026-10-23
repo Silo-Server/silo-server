@@ -204,7 +204,10 @@ func testScopeInput() ScopeInput {
 	}
 }
 
-type fakeDecisionLogPartitions struct{ dropErr error }
+type fakeDecisionLogPartitions struct {
+	dropErr        error
+	defaultDeleted int64
+}
 
 func (f fakeDecisionLogPartitions) EnsureFuturePartitions(context.Context) error { return nil }
 
@@ -213,10 +216,10 @@ func (f fakeDecisionLogPartitions) DropExpiredPartitions(context.Context, time.T
 }
 
 func (f fakeDecisionLogPartitions) DeleteExpiredRowsFromDefault(context.Context, time.Time) (int64, error) {
-	return 0, nil
+	return f.defaultDeleted, nil
 }
 
-func TestCleanupDecisionLogsOnceFailsOnlyOnDropErrors(t *testing.T) {
+func TestCleanupDecisionLogsOnceAfterAFailedDrop(t *testing.T) {
 	broken := errors.New("drop failed")
 	for _, tc := range []struct {
 		name    string
@@ -228,9 +231,10 @@ func TestCleanupDecisionLogsOnceFailsOnlyOnDropErrors(t *testing.T) {
 		{"other error", broken, broken},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := CleanupDecisionLogsOnce(t.Context(), nil, nil, fakeDecisionLogPartitions{dropErr: tc.dropErr})
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("err = %v, want %v", err, tc.want)
+			// The row-delete fallback must not drop the default partition's count.
+			deleted, err := CleanupDecisionLogsOnce(t.Context(), nil, nil, fakeDecisionLogPartitions{dropErr: tc.dropErr, defaultDeleted: 3})
+			if !errors.Is(err, tc.want) || deleted != 3 {
+				t.Fatalf("got %d rows, %v; want 3 rows, %v", deleted, err, tc.want)
 			}
 		})
 	}
