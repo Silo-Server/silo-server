@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -340,11 +341,17 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	if end <= start {
 		return Marker{}, false
 	}
+	// Confidence decides between providers, and NaN compares false both ways,
+	// so a non-finite value counts as unrated.
+	confidence := segment.GetConfidence()
+	if math.IsNaN(confidence) || math.IsInf(confidence, 0) {
+		confidence = 0
+	}
 	return Marker{
 		Kind:            kind,
 		Start:           start,
 		End:             end,
-		Confidence:      segment.GetConfidence(),
+		Confidence:      confidence,
 		SubmissionCount: int(segment.GetSubmissionCount()),
 		Algorithm:       strings.TrimSpace(segment.GetAlgorithm()),
 	}, true

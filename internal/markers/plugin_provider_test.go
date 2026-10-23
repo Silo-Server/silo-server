@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	client := &fakePluginMarkerClient{fetchResp: &pluginv1.FetchMarkersResponse{Markers: []*pluginv1.MarkerSegment{
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &end60, Confidence: 0.8, SubmissionCount: 2, Algorithm: "intro:v1"},
 		{Segment: "credits", StartSeconds: &creditsStart, Confidence: 0.9, SubmissionCount: 3},
-		{Segment: "recap", EndSeconds: &start10, Confidence: 0.7},
+		{Segment: "recap", EndSeconds: &start10, Confidence: math.NaN()},
 		{Segment: "preview", StartSeconds: &previewStart, Confidence: 0.6},
 		{Segment: "intro", StartSeconds: &negativeStart},
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &endPastDuration},
@@ -101,8 +102,8 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	if got := byKind[MarkerKindCredits]; got.End != 1800*time.Second {
 		t.Fatalf("credits end = %s, want duration default", got.End)
 	}
-	if got := byKind[MarkerKindRecap]; got.Start != 0 {
-		t.Fatalf("recap start = %s, want zero default", got.Start)
+	if got := byKind[MarkerKindRecap]; got.Start != 0 || got.Confidence != 0 {
+		t.Fatalf("recap start = %s confidence = %v, want zero defaults for a NaN confidence", got.Start, got.Confidence)
 	}
 }
 
