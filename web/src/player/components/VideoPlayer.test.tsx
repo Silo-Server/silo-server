@@ -13,7 +13,7 @@ import type {
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
-import { HLS_STARTUP_TIMEOUT_MS } from "../utils/hlsStartupGuard";
+import { STARTUP_TIMEOUT_MS } from "../utils/startupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 
 const realtimeOptions = vi.hoisted(() => ({
@@ -3495,10 +3495,28 @@ describe("VideoPlayer plan failure recovery", () => {
 
       Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
       fireEvent.canPlay(video);
-      act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
+      act(() => vi.advanceTimersByTime(STARTUP_TIMEOUT_MS));
 
       expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
       expect(onPlanFailure).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails a direct-play start that shows no frame by the startup deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const onPlanFailure = vi.fn();
+      const { container } = renderPlayer({ onPlanFailure });
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      expect(video.src).toContain("/api/v1/stream/session-1");
+
+      act(() => vi.advanceTimersByTime(STARTUP_TIMEOUT_MS));
+      expect(onPlanFailure).toHaveBeenCalledOnce();
+      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
     } finally {
       vi.useRealTimers();
     }
@@ -6132,7 +6150,7 @@ describe("VideoPlayer hls.js request timeouts", () => {
         bufferedEnd = 0;
       });
       if (kbps > 0) loadingFragment(kbps);
-      act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
+      act(() => vi.advanceTimersByTime(STARTUP_TIMEOUT_MS));
       expect(onQualitySelect.mock.calls.map(([, , request]) => request)).toEqual(
         lowers || refused
           ? [

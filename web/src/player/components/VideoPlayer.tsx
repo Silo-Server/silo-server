@@ -69,7 +69,7 @@ import {
   ROOM_HELD_SEEK_TIMEOUT_MS,
 } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
-import { HlsStartupGuard } from "../utils/hlsStartupGuard";
+import { StartupGuard } from "../utils/startupGuard";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
@@ -609,7 +609,7 @@ export function VideoPlayer({
       connection?.removeEventListener?.("change", onConnectionChange);
     };
   }, []);
-  const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
+  const startupGuardRef = useRef<StartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   // Media requests are failing: hls.js reported a failed load, the element a
@@ -959,9 +959,9 @@ export function VideoPlayer({
     setBuffering(false);
   }, [connectionStatus]);
 
-  const failHlsStartup = useCallback(
+  const failStartup = useCallback(
     (cause: "deadline" | "network") => {
-      console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
+      console.error("[player] Playback startup timed out or exhausted recovery attempts");
 
       const activeHls = hlsRef.current;
       hlsRef.current = null;
@@ -976,7 +976,10 @@ export function VideoPlayer({
         if (
           !reportCurrentPlanFailure({
             classification: "startup_timeout",
-            message: "HLS playback exhausted its startup recovery budget.",
+            message:
+              cause === "deadline"
+                ? "Playback showed no frame before its startup deadline."
+                : "HLS playback exhausted its startup recovery budget.",
           })
         ) {
           setError("Playback failed. The media could not be loaded.");
@@ -990,19 +993,23 @@ export function VideoPlayer({
     [reportCurrentPlanFailure],
   );
 
+  // Every transport must show a frame by the startup deadline, the element's
+  // own progressive loads included: a start that never plays otherwise sits
+  // on its spinner with no failure path. The browser engine keeps its own
+  // readiness deadline and stands this one down when it attaches.
   useEffect(() => {
-    if (!isHlsStream || !isPlayerReady) return;
+    if (!isPlayerReady) return;
 
-    const guard = new HlsStartupGuard(failHlsStartup);
-    hlsStartupGuardRef.current = guard;
+    const guard = new StartupGuard(failStartup);
+    startupGuardRef.current = guard;
 
     return () => {
       guard.dispose();
-      if (hlsStartupGuardRef.current === guard) {
-        hlsStartupGuardRef.current = null;
+      if (startupGuardRef.current === guard) {
+        startupGuardRef.current = null;
       }
     };
-  }, [failHlsStartup, isHlsStream, isPlayerReady, planRevision]);
+  }, [failStartup, isPlayerReady, planRevision]);
 
   // The media's full runtime, from the plan and nowhere else: on an HLS copy
   // remux the engine reports only the length produced so far, so substituting it
@@ -2444,7 +2451,7 @@ export function VideoPlayer({
     streamPlayedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
-    if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
+    if (!video || !isPlayerReady || startupGuardRef.current?.hasFailed()) return;
     transportStartupPendingRef.current = true;
     // A source is loading, a replan's as well as the first: speed tests wait
     // for it as for a start.
@@ -2522,7 +2529,7 @@ export function VideoPlayer({
     const settlePaused = () => {
       playbackStarted = true;
       cleanupStartupListeners();
-      hlsStartupGuardRef.current?.markPlaybackStarted();
+      startupGuardRef.current?.markPlaybackStarted();
       transportIdleSinceRef.current = Date.now();
       setAwaitingFirstFrame(false);
       setPlaying(false);
@@ -2532,7 +2539,7 @@ export function VideoPlayer({
 
     const attemptAutoplayWhenReady = () => {
       if (destroyed || playbackStarted || autoplayInFlight) return;
-      if (hlsStartupGuardRef.current?.hasFailed()) return;
+      if (startupGuardRef.current?.hasFailed()) return;
       if (connectionReplacedRef.current) {
         settlePaused();
         return;
@@ -2639,7 +2646,7 @@ export function VideoPlayer({
             },
             preferNativeHLS,
           );
-          if (destroyed || hlsStartupGuardRef.current?.hasFailed()) return;
+          if (destroyed || startupGuardRef.current?.hasFailed()) return;
 
           if (resolution.engine === "native") {
             attachNativeHLS();
@@ -2714,7 +2721,7 @@ export function VideoPlayer({
               lastRecoveryRef.current = now;
 
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (hlsStartupGuardRef.current?.handleFatalNetworkError() ?? true) {
+                if (startupGuardRef.current?.handleFatalNetworkError() ?? true) {
                   console.warn("[hls.js] Fatal network error, attempting recovery...");
                   hls?.startLoad();
                 } else {
@@ -2858,6 +2865,7 @@ export function VideoPlayer({
             const { attachBrowserEngine } = await import("../engine");
             const surface = engineSurfaceRef.current;
             if (destroyed || !surface) return;
+            startupGuardRef.current?.dispose();
             const meter = meterMedia(false);
             // The engine numbers its reads from 0 on each attach, and a
             // transport rebuilt for the plan measures into the same meter, so
@@ -3028,7 +3036,7 @@ export function VideoPlayer({
       setBuffering(false);
     };
     const markPlaybackStarted = () => {
-      hlsStartupGuardRef.current?.markPlaybackStarted();
+      startupGuardRef.current?.markPlaybackStarted();
       streamPlayedRef.current = true;
       setAwaitingFirstFrame(false);
     };

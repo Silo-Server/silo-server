@@ -1,17 +1,17 @@
-export const HLS_STARTUP_TIMEOUT_MS = 60_000;
+export const STARTUP_TIMEOUT_MS = 60_000;
 
 const MAX_FATAL_NETWORK_RECOVERIES = 1;
 
 type StartupState = "starting" | "playable" | "failed" | "disposed";
 
-export class HlsStartupGuard {
+export class StartupGuard {
   private state: StartupState = "starting";
   private fatalNetworkRecoveries = 0;
   private timeoutId: ReturnType<typeof setTimeout> | null;
 
   /** `onFailure` hears whether the deadline passed or fatal network errors ran out. */
   constructor(private readonly onFailure: (cause: "deadline" | "network") => void) {
-    this.timeoutId = setTimeout(() => this.fail("deadline"), HLS_STARTUP_TIMEOUT_MS);
+    this.timeoutId = setTimeout(() => this.fail("deadline"), STARTUP_TIMEOUT_MS);
   }
 
   handleFatalNetworkError(): boolean {
