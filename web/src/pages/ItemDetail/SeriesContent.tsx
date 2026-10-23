@@ -43,9 +43,12 @@ const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
 
 export default function SeriesContent({
   item,
+  libraryId,
   showAdvisoryAge,
 }: {
   item: ItemDetail & { type: "series" };
+  /** The page's ?libraryId= scope; the match and split dialogs search in it. */
+  libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -67,6 +70,11 @@ export default function SeriesContent({
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 
   const refreshMetadataMutation = useRefreshItemMetadata();
+
+  const scopedItem = useMemo(
+    () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
+    [item, libraryId],
+  );
 
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
@@ -273,7 +281,7 @@ export default function SeriesContent({
           {canCurateMetadata && (
             <MatchItemDialog
               key={item.content_id}
-              item={item}
+              item={scopedItem}
               open={matchOpen}
               onOpenChange={setMatchOpen}
               onReplaced={followReplacedItem}
@@ -282,7 +290,7 @@ export default function SeriesContent({
           {canCurateMetadata && (
             <SplitItemDialog
               key={`split-${item.content_id}`}
-              item={item}
+              item={scopedItem}
               open={splitOpen}
               onOpenChange={setSplitOpen}
             />

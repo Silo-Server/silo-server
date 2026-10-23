@@ -48,9 +48,12 @@ import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function MovieContent({
   item,
+  libraryId,
   showAdvisoryAge,
 }: {
   item: ItemDetail & { type: "movie" };
+  /** The page's ?libraryId= scope; the match and split dialogs search in it. */
+  libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -85,6 +88,11 @@ export default function MovieContent({
     markerCapabilities.data?.movie_credits === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
+  const scopedItem = useMemo(
+    () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
+    [item, libraryId],
+  );
+
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
@@ -374,7 +382,7 @@ export default function MovieContent({
           {canCurateMetadata && (
             <MatchItemDialog
               key={item.content_id}
-              item={item}
+              item={scopedItem}
               open={matchOpen}
               onOpenChange={setMatchOpen}
               onReplaced={followReplacedItem}
@@ -383,7 +391,7 @@ export default function MovieContent({
           {canCurateMetadata && (
             <SplitItemDialog
               key={`split-${item.content_id}`}
-              item={item}
+              item={scopedItem}
               open={splitOpen}
               onOpenChange={setSplitOpen}
             />

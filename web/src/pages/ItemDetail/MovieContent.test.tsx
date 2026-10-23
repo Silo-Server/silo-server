@@ -126,11 +126,15 @@ vi.mock("@/components/EditMetadataDialog", () => ({
 }));
 
 vi.mock("@/components/MatchItemDialog", () => ({
-  default: () => <div />,
+  default: ({ item }: { item: { library_id?: number } }) => (
+    <div data-testid="match-dialog" data-library={item.library_id ?? "none"} />
+  ),
 }));
 
 vi.mock("@/components/SplitItemDialog", () => ({
-  default: () => <div />,
+  default: ({ item }: { item: { library_id?: number } }) => (
+    <div data-testid="split-dialog" data-library={item.library_id ?? "none"} />
+  ),
 }));
 
 vi.mock("./components/SubtitleSearchDialog", () => ({
@@ -384,6 +388,24 @@ describe("MovieContent", () => {
     renderMovie();
     expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
     expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(false);
+  });
+
+  it("hands the page's library scope to the match and split dialogs", () => {
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    const scoped = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1?libraryId=5"]}>
+        <MovieContent item={makeMovieItem()} libraryId={5} />
+      </MemoryRouter>,
+    );
+    expect(scoped).toContain('data-testid="match-dialog" data-library="5"');
+    expect(scoped).toContain('data-testid="split-dialog" data-library="5"');
+
+    const unscoped = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+    expect(unscoped).toContain('data-testid="match-dialog" data-library="none"');
   });
 
   it.each([

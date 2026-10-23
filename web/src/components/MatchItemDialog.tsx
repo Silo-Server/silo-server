@@ -9,8 +9,15 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { FileVersion, ItemDetail, ItemMatchSearchRequest, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
-import { useSearchItemMatchCandidates, useApplyItemMatch } from "@/hooks/queries/items";
+import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
+import {
+  useApplyItemMatch,
+  useItemFiles,
+  useSearchItemMatchCandidates,
+} from "@/hooks/queries/items";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
 type MatchableItem = Pick<
@@ -18,6 +25,7 @@ type MatchableItem = Pick<
   "content_id" | "title" | "year" | "series_id" | "season_number"
 > & {
   type: string;
+  /** The library the caller is scoped to, if any; search and apply use it. */
   library_id?: number;
   versions?: FileVersion[];
   folder_paths?: string[];
@@ -82,6 +90,31 @@ export default function MatchItemDialog({
     needsItemDetail ? item.library_id : undefined,
   );
 
+  // Without a library scope, an item in several libraries needs the admin to
+  // pick one: the server refuses to guess. Its file list says which libraries
+  // those are; that list is admin-only, so other curators search unscoped.
+  const isAdmin = useIsActingAdmin();
+  const lookUpLibraries = open && item.library_id === undefined && isAdmin;
+  const { data: filesData, isLoading: libraryLookupLoading } = useItemFiles(
+    lookUpLibraries ? item.content_id : undefined,
+  );
+  const itemLibraryIds = useMemo(
+    () => (lookUpLibraries ? libraryIdsOfFiles(filesData?.files ?? []) : []),
+    [lookUpLibraries, filesData],
+  );
+  const [pickedLibraryId, setPickedLibraryId] = useState<number>();
+  // The dialog stays mounted between opens, so drop a pick the item has since
+  // left (a split moved those files away).
+  const currentPick =
+    pickedLibraryId !== undefined && itemLibraryIds.includes(pickedLibraryId)
+      ? pickedLibraryId
+      : undefined;
+  const needsLibraryPick = item.library_id === undefined && itemLibraryIds.length > 1;
+  const libraryId = needsLibraryPick ? currentPick : item.library_id;
+  // Also blocks Apply: a candidate found in a library the item has since left
+  // would otherwise apply unscoped, which the server refuses.
+  const searchBlocked = libraryLookupLoading || (needsLibraryPick && currentPick === undefined);
+
   const searchMutation = useSearchItemMatchCandidates(item.content_id);
   const applyMutation = useApplyItemMatch();
 
@@ -107,7 +140,7 @@ export default function MatchItemDialog({
     const request: ItemMatchSearchRequest = {
       title: title || undefined,
       year: parsedYear !== undefined && Number.isFinite(parsedYear) ? parsedYear : undefined,
-      library_id: item.library_id,
+      library_id: libraryId,
     };
 
     if (showVideoExternalIds) {
@@ -122,7 +155,7 @@ export default function MatchItemDialog({
   }, [
     title,
     year,
-    item.library_id,
+    libraryId,
     showVideoExternalIds,
     imdbId,
     tmdbId,
@@ -159,7 +192,7 @@ export default function MatchItemDialog({
     if (!selectedCandidate) return;
     applyMutation.mutate(
       {
-        item,
+        item: libraryId === item.library_id ? item : { ...item, library_id: libraryId },
         providerIds: selectedCandidate.provider_ids,
         // Close before following the new ID: the page keys this dialog by
         // content ID, so it unmounts on navigation and the per-call onSuccess
@@ -175,7 +208,18 @@ export default function MatchItemDialog({
         },
       },
     );
-  }, [selectedCandidate, applyMutation, item, onOpenChange, onReplaced]);
+  }, [selectedCandidate, applyMutation, item, libraryId, onOpenChange, onReplaced]);
+
+  // Candidates came from the previous library's search, so they no longer
+  // apply to the new one.
+  const pickLibrary = useCallback(
+    (id: number) => {
+      setPickedLibraryId(id);
+      setSelectedCandidate(null);
+      searchMutation.reset();
+    },
+    [searchMutation],
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -314,9 +358,19 @@ export default function MatchItemDialog({
             )}
           </div>
 
+          {needsLibraryPick && (
+            <div className="shrink-0">
+              <ItemLibraryPicker
+                libraryIds={itemLibraryIds}
+                value={currentPick}
+                onChange={pickLibrary}
+              />
+            </div>
+          )}
+
           <Button
             onClick={handleSearch}
-            disabled={searchMutation.isPending}
+            disabled={searchMutation.isPending || searchBlocked}
             className="w-full shrink-0 gap-2"
           >
             <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
@@ -449,7 +503,7 @@ export default function MatchItemDialog({
           <div className="border-border/50 shrink-0 border-t pt-4">
             <Button
               onClick={handleApply}
-              disabled={applyMutation.isPending}
+              disabled={applyMutation.isPending || searchBlocked}
               className="w-full"
               data-testid="apply-match"
             >

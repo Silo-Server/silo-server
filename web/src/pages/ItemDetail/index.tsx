@@ -213,6 +213,7 @@ export default function ItemDetail() {
       return (
         <MovieContent
           item={item as ItemDetail & { type: "movie" }}
+          libraryId={libraryId}
           showAdvisoryAge={showAdvisoryAge}
         />
       );
@@ -220,6 +221,7 @@ export default function ItemDetail() {
       return (
         <SeriesContent
           item={item as ItemDetail & { type: "series" }}
+          libraryId={libraryId}
           showAdvisoryAge={showAdvisoryAge}
         />
       );
