@@ -47,11 +47,10 @@ func (d profileAuditDB) pinHash(id string) string {
 	return hash
 }
 
-// TestProfileAuditDB drives the shared profile service as v2 createProfile,
-// updateProfile and deleteProfile do, against a migrated database: each
-// access change records one domain row with the PIN as a set/not-set marker,
-// and preference-only and refused writes record none.
-func TestProfileAuditDB(t *testing.T) {
+// newProfileAuditDB connects to the test database and creates a throwaway
+// account, or skips when no database is configured.
+func newProfileAuditDB(t *testing.T) profileAuditDB {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -68,6 +67,16 @@ func TestProfileAuditDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, d.account) })
+	return d
+}
+
+// TestProfileAuditDB drives the shared profile service as v2 createProfile,
+// updateProfile and deleteProfile do, against a migrated database: each
+// access change records one domain row with the PIN as a set/not-set marker,
+// and preference-only and refused writes record none.
+func TestProfileAuditDB(t *testing.T) {
+	d := newProfileAuditDB(t)
+	pool := d.pool
 
 	parent := d.create("", ProfileCreateRequest{Name: "Parent"})
 	row := audittest.One(t, pool, auditmutation.ActionProfileCreated, auditmutation.TargetProfile, parent.ID)
@@ -90,7 +99,7 @@ func TestProfileAuditDB(t *testing.T) {
 
 	checkProfileUpdateAudit(t, d, parent.ID, child.ID, pin)
 
-	err = d.h.DeleteProfile(d.request(http.MethodDelete, "/api/v2/profiles/{id}", "/api/v2/profiles/"+child.ID),
+	err := d.h.DeleteProfile(d.request(http.MethodDelete, "/api/v2/profiles/{id}", "/api/v2/profiles/"+child.ID),
 		ProfileDeleteCommand{UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(string) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
@@ -143,5 +152,70 @@ func checkProfileUpdateAudit(t *testing.T, d profileAuditDB, parentID, childID, 
 	if len(cleared) != 2 || audittest.Value(cleared[1].Change(t, "pin").After) != "false" ||
 		audittest.Value(cleared[1].Change(t, "name").Before) != `"Kid"` || audittest.Value(cleared[1].Change(t, "is_child").After) != "false" {
 		t.Fatalf("clear PIN and rename: %+v", cleared)
+	}
+}
+
+// TestProfileWritesQueueBehindAccountLockDB holds the account lock that
+// deleting the account takes before its delete cascades into the account's
+// profiles, and checks that an audited profile update or delete waits for it
+// instead of locking the profile first and deadlocking on its audit row's
+// account key.
+func TestProfileWritesQueueBehindAccountLockDB(t *testing.T) {
+	d := newProfileAuditDB(t)
+	parent := d.create("", ProfileCreateRequest{Name: "Parent"})
+	child := d.create(parent.ID, ProfileCreateRequest{Name: "Kid"})
+	path := "/api/v2/profiles/" + child.ID
+	writes := map[string]func() error{
+		"update": func() error {
+			_, err := d.h.UpdateProfile(d.request(http.MethodPatch, "/api/v2/profiles/{id}", path), ProfileUpdateCommand{
+				UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, Request: ProfileUpdateRequest{Name: new("Kiddo")},
+				VerifyProfile: func(string) error { return nil }})
+			return err
+		},
+		"delete": func() error {
+			return d.h.DeleteProfile(d.request(http.MethodDelete, "/api/v2/profiles/{id}", path), ProfileDeleteCommand{
+				UserID: d.account, ProfileID: child.ID, ActiveProfileID: parent.ID, VerifyProfile: func(string) error { return nil }})
+		},
+	}
+	for _, name := range []string{"update", "delete"} {
+		t.Run(name, func(t *testing.T) {
+			accountDelete, err := d.pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = accountDelete.Rollback(context.WithoutCancel(t.Context())) }()
+			var holder int
+			if err := accountDelete.QueryRow(t.Context(), `SELECT pg_backend_pid() FROM users WHERE id = $1 FOR UPDATE`, d.account).Scan(&holder); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- writes[name]() }()
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for waiting := false; !waiting; {
+				if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("profile %s finished while the account was locked: %v", name, err)
+				case <-deadline.C:
+					t.Fatalf("profile %s never waited for the account", name)
+				case <-tick.C:
+				}
+			}
+			// The account delete's cascade reaches the profile row next.
+			if _, err := accountDelete.Exec(t.Context(), `DELETE FROM user_profiles WHERE user_id = $1 AND id = $2`, d.account, child.ID); err != nil {
+				t.Fatalf("account delete behind a profile %s: %v", name, err)
+			}
+			if err := accountDelete.Rollback(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("profile %s behind an account delete: %v", name, err)
+			}
+		})
 	}
 }
