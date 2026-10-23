@@ -58,6 +58,10 @@ type UserDataService interface {
 	// episodes superseded by a later-completed episode in the same series.
 	// It mirrors the first-party sections fetcher so both surfaces agree.
 	FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error)
+	// ListResumableProgress returns the in-progress entries among
+	// mediaItemIDs, newest first, with the write times FilterResumeProgress
+	// matches dismissals against, as ListProgress("in_progress") does.
+	ListResumableProgress(ctx context.Context, session *Session, mediaItemIDs []string) ([]upstreamProgress, error)
 	ListProgressByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]*upstreamProgress, error)
 	GetProgress(ctx context.Context, session *Session, contentID string) (*upstreamProgress, error)
 	MarkPlayed(ctx context.Context, session *Session, contentID string) error

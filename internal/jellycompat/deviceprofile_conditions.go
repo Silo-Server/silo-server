@@ -100,6 +100,13 @@ func (p DeviceProfile) codecProfileCompatibility(version catalog.FileVersion, au
 }
 
 func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVersion, audioStreamIndex *int) codecProfileCompatibility {
+	return p.hlsRemuxCodecProfileCompatibilityIn(version, audioStreamIndex, compatContainerMP4)
+}
+
+// hlsRemuxCodecProfileCompatibilityIn evaluates codec profiles for a video
+// copy into container. Only fMP4 writes a sample entry Silo chooses, so the
+// promised VideoCodecTag is set for mp4 alone.
+func (p DeviceProfile) hlsRemuxCodecProfileCompatibilityIn(version catalog.FileVersion, audioStreamIndex *int, container string) codecProfileCompatibility {
 	values := buildConditionValues(version, audioStreamIndex)
 	// Derive the promised sample entry from the same value the serve paths use
 	// (PrimaryDVProfile, the probed integer field) — not from
@@ -109,10 +116,10 @@ func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVer
 	if tag == "" {
 		tag = playback.VideoSampleEntryForDVCopy(compatPrimaryVideoTrack(version).DVProfile)
 	}
-	if tag != "" {
+	if tag != "" && container == compatContainerMP4 {
 		values["videocodectag"] = conditionValue{text: tag}
 	}
-	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, "mp4", true,
+	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, container, true,
 		func(conditions []ProfileCondition, values conditionValues) bool {
 			return hlsRemuxConditionsMatch(conditions, values, version)
 		})

@@ -369,14 +369,25 @@ func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
 	return playback.VideoSampleEntryForDVCopy(video.DVProfile) == playback.VideoSampleEntryDVH1
 }
 
+// compatContainerTS is the MPEG-TS container name in device profiles.
+const compatContainerTS = "ts"
+
 // compatRokuMPEGTS packages a Roku's video-copy HLS stream as MPEG-TS. Roku
 // players can play the audio of an fMP4 copy silently (JellyRock issue #573),
 // and Roku clients list their MPEG-TS transcoding profile first, as Jellyfin
-// would use it. The Dolby Vision strip keeps fMP4, which its hvc1 output needs.
+// would use it. The copy was negotiated for fMP4, so the profile's MPEG-TS
+// rules must accept the same video and audio. The Dolby Vision strip keeps
+// fMP4, which its hvc1 output needs.
 func compatRokuMPEGTS(userAgent string, profile DeviceProfile, source PlaybackMediaSource) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(userAgent)), "roku/") &&
-		compatHLSCopiesVideo(source) && !source.DVStripToHDR10 &&
-		profile.listsHLSVideoContainer("ts")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(userAgent)), "roku/") ||
+		!compatHLSCopiesVideo(source) || source.DVStripToHDR10 {
+		return false
+	}
+	if source.TranscodeAudio {
+		encoded := compatEncodedAudioTrack(compatSourceTargetAudioCodec(source), source.TargetAudioChannels)
+		return profile.supportsHLSRemuxWithAudioTranscodeIn(source.Version, source.SelectedAudioStreamIndex, encoded, compatContainerTS)
+	}
+	return profile.supportsHLSRemuxIn(source.Version, source.SelectedAudioStreamIndex, compatContainerTS)
 }
 
 func compatHLSTranscodesAudio(source PlaybackMediaSource) bool {

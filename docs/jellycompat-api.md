@@ -217,7 +217,9 @@ list field. Roku (BrightScript) clients index some of these arrays without
 checking that they exist.
 
 The Resume lists honor `ParentId`: a library limits them to that library, and
-a series or season to its episodes. As in Jellyfin, a movie or episode
+a series or season to its episodes. A series or season is answered from the
+progress of that series' episodes, not from the profile's recent progress, so
+an episode left long ago still resumes. As in Jellyfin, a movie or episode
 `ParentId` lists nothing. Moonfin for Roku resumes a series by asking for one
 resumable item under it.
 

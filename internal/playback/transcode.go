@@ -1745,7 +1745,7 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		codec = "aac"
 	}
 
-	if codec == "mp3" && opts.TargetAudioChannels > 0 {
+	if codec == audioCodecMP3 && opts.TargetAudioChannels > 0 {
 		// audio_to_mp3 recipe 1. Only a caller that names a channel count asks
 		// for it; any other mp3 target keeps the AAC fallback below.
 		return append(args, "-c:a", "libmp3lame", "-b:a", "192k", "-ac", strconv.Itoa(min(opts.TargetAudioChannels, maxMP3Channels)))

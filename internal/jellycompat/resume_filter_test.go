@@ -317,21 +317,74 @@ func TestDirectUserDataServiceFilterResumeProgressDropsDismissedEntries(t *testi
 // A ParentId must scope Resume. Moonfin for Roku resumes a series by asking
 // for one resumable item under it; ignoring ParentId answered with whatever
 // the profile played last, so Resume started the wrong title.
-func TestLoadProgressPage_ResumeHonorsParentID(t *testing.T) {
-	items := map[string]*models.MediaItem{
-		"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+// resumeSeriesEpisodeRepo lists a fixed set of episodes for each series.
+type resumeSeriesEpisodeRepo struct {
+	countingEpisodeRepo
+	bySeries map[string][]*models.Episode
+}
+
+func (r *resumeSeriesEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {
+	return r.bySeries[seriesID], nil
+}
+
+// resumableUserData answers ListResumableProgress from a fixed set of
+// in-progress entries and records the ids it was asked about.
+type resumableUserData struct {
+	mockUserDataService
+	inProgress map[string]upstreamProgress
+	asked      []string
+}
+
+func (u *resumableUserData) ListResumableProgress(_ context.Context, _ *Session, ids []string) ([]upstreamProgress, error) {
+	u.asked = append(u.asked, ids...)
+	var result []upstreamProgress
+	for _, id := range ids {
+		if entry, ok := u.inProgress[id]; ok {
+			result = append(result, entry)
+		}
 	}
-	userData := &resumeFilteringUserData{entries: []upstreamProgress{
-		{MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
+	return result, nil
+}
+
+// Resume under a series reads that series' episodes, however much else the
+// profile has watched since, and a movie ParentId lists nothing.
+func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
+	episodes := []*models.Episode{
+		{ContentID: "ep-1", SeriesID: "series-1", Title: "Episode One", SeasonNumber: 1, EpisodeNumber: 1},
+		{ContentID: "ep-2", SeriesID: "series-1", Title: "Episode Two", SeasonNumber: 1, EpisodeNumber: 2},
+	}
+	episodeRepo := &resumeSeriesEpisodeRepo{
+		countingEpisodeRepo: countingEpisodeRepo{episodesByID: map[string]*models.Episode{"ep-1": episodes[0], "ep-2": episodes[1]}},
+		bySeries:            map[string][]*models.Episode{"series-1": episodes},
+	}
+	userData := &resumableUserData{inProgress: map[string]upstreamProgress{
+		"ep-2":    {MediaItemID: "ep-2", PositionSeconds: 20, DurationSeconds: 100},
+		"movie-1": {MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
 	}}
-	h := resumeTestHandler(userData, items)
+	h := resumeTestHandler(userData, map[string]*models.MediaItem{
+		"series-1": {ContentID: "series-1", Type: "series", Title: "Series One"},
+		"movie-1":  {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+	})
+	h.episodeRepo = episodeRepo
 	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	dtos, _, err := h.loadProgressPage(context.Background(), session, "in_progress", itemsQuery{limit: 1, parentItemID: "series-1"}, nil, nil)
+
+	dtos, total, err := h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "series-1"}, nil)
 	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
+		t.Fatalf("loadParentResume: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 1 || got[0] != "Episode Two" || total != 1 {
+		t.Fatalf("resume under series-1 = %v (total %d), want [Episode Two]", got, total)
+	}
+	if fmt.Sprint(userData.asked) != "[ep-1 ep-2]" {
+		t.Fatalf("progress read for %v, want only the series' episodes", userData.asked)
+	}
+
+	dtos, _, err = h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "movie-1"}, nil)
+	if err != nil {
+		t.Fatalf("loadParentResume: %v", err)
 	}
 	if got := dtoNames(dtos); len(got) != 0 {
-		t.Fatalf("resume under series-1 = %v, want none", got)
+		t.Fatalf("resume under movie-1 = %v, want none", got)
 	}
 }
 

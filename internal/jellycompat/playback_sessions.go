@@ -123,7 +123,11 @@ type PlaybackMediaSource struct {
 	TargetVideoCodec string
 	// TargetAudioCodec fixes the encoded audio codec the same way. Empty values
 	// are legacy AAC sessions.
-	TargetAudioCodec     string
+	TargetAudioCodec string
+	// encodeAudioCodec is the full encode's audio codec, which a subtitle
+	// burn-in switches an audio-encoding remux to. It is only read while
+	// PlaybackInfo builds the source, so it is not stored.
+	encodeAudioCodec     string
 	ID                   string
 	FileID               int
 	Version              catalog.FileVersion

@@ -104,19 +104,21 @@ func TestRokuProfileNegotiatesAC3WhenAACIsNotListed(t *testing.T) {
 			if source.TargetAudioCodec != tc.wantCodec {
 				t.Fatalf("TargetAudioCodec = %q, want %q", source.TargetAudioCodec, tc.wantCodec)
 			}
-			if tc.wantTranscode {
-				if source.HLSRemux != tc.wantRemux || source.TranscodeAudio != (tc.wantRemux && !tc.wantCopyAudio) {
-					t.Fatalf("HLSRemux=%v TranscodeAudio=%v, want remux=%v copied audio=%v", source.HLSRemux, source.TranscodeAudio, tc.wantRemux, tc.wantCopyAudio)
-				}
-				if got := compatHLSRoutePathSegment(source); got != tc.wantSegment {
-					t.Fatalf("route segment = %q, want %q", got, tc.wantSegment)
-				}
-				if tc.wantCopyAudio {
-					source.HLSRemux = false // as applyCompatSubtitleDelivery does for a burn-in
-					if got := compatHLSRoutePathSegment(source); got != compatAudioCodecV1PathSegment {
-						t.Fatalf("burn-in encode route = %q, want %q", got, compatAudioCodecV1PathSegment)
-					}
-				}
+			if !tc.wantTranscode {
+				return
+			}
+			if source.HLSRemux != tc.wantRemux || source.TranscodeAudio != (tc.wantRemux && !tc.wantCopyAudio) {
+				t.Fatalf("HLSRemux=%v TranscodeAudio=%v, want remux=%v copied audio=%v", source.HLSRemux, source.TranscodeAudio, tc.wantRemux, tc.wantCopyAudio)
+			}
+			if got := compatHLSRoutePathSegment(source); got != tc.wantSegment {
+				t.Fatalf("route segment = %q, want %q", got, tc.wantSegment)
+			}
+			if !tc.wantCopyAudio {
+				return
+			}
+			source.HLSRemux = false // as applyCompatSubtitleDelivery does for a burn-in
+			if got := compatHLSRoutePathSegment(source); got != compatAudioCodecV1PathSegment {
+				t.Fatalf("burn-in encode route = %q, want %q", got, compatAudioCodecV1PathSegment)
 			}
 		})
 	}
@@ -239,6 +241,73 @@ func TestRokuBurnInEncodesVideoWithAC3(t *testing.T) {
 	}
 	if got := compatHLSRoutePathSegment(source); got != compatAudioCodecV1PathSegment {
 		t.Fatalf("route segment = %q, want %q", got, compatAudioCodecV1PathSegment)
+	}
+}
+
+// A burn-in turns an audio-encoding remux into a full encode, so it must take
+// the audio codec the encode's profile matched, which CanBurnSubtitle was
+// checked with, not the one the remux's fMP4 profile matched.
+func TestBurnInTakesTheEncodesAudioCodec(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	profile := withoutAACDecode(rokuProfile(t))
+	profile.TranscodingProfiles = slices.Clone(profile.TranscodingProfiles)
+	for i, transcoding := range profile.TranscodingProfiles {
+		switch {
+		case transcoding.Type == "Video" && transcoding.Container == "ts":
+			profile.TranscodingProfiles[i].AudioCodec = "mp3"
+		case transcoding.Type == "Video" && transcoding.Container == "mp4":
+			profile.TranscodingProfiles[i].AudioCodec = "ac3"
+		}
+	}
+	profile.extraAudioOutputs = []string{compatAudioCodecAC3, compatAudioCodecMP3}
+	version := rokuTestVersion(models.AudioTrack{Codec: "dts", Channels: 6, Default: true})
+	version.SubtitleTracks = []catalog.VersionSubtitleTrack{{Index: 2, Codec: "hdmv_pgs_subtitle", Language: "eng", Default: true}}
+	source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxStreamingBitrate: 140_000_000}, true)
+	if !source.TranscodeAudio || source.TargetAudioCodec != compatAudioCodecAC3 {
+		t.Fatalf("transcode audio=%v codec=%q, want an AC-3 remux", source.TranscodeAudio, source.TargetAudioCodec)
+	}
+	selected := 2
+	source.SelectedSubtitleStreamIndex = &selected
+	applyCompatSubtitleDelivery(&source, profile, true)
+	if !source.SubtitleBurnIn || source.TargetAudioCodec != compatAudioCodecMP3 {
+		t.Fatalf("burn-in=%v codec=%q, want an MP3 encode", source.SubtitleBurnIn, source.TargetAudioCodec)
+	}
+}
+
+// An HEVC encode is held to the profile's HEVC limits, not its H.264 ones.
+func TestHEVCEncodeUsesItsOwnLimits(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID: 42, Container: "mkv", CodecVideo: "vp9", CodecAudio: "aac", Bitrate: 20000, Resolution: "1080p",
+		VideoTracks: []models.VideoTrack{{Codec: "vp9", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+	}
+	limit := func(property, value string) []ProfileCondition {
+		return []ProfileCondition{{Condition: "LessThanEqual", Property: property, Value: value, IsRequired: true}}
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	req := playbackInfoRequest{EnableDirectPlay: new(false), AllowVideoStreamCopy: new(false)}
+	for _, tc := range []struct {
+		name           string
+		hevc, h264     []ProfileCondition
+		wantBitrate    int
+		wantResolution string
+	}{
+		{name: "an HEVC width limit scales the HEVC encode", hevc: limit("Width", "1280"), wantResolution: "720p"},
+		{name: "an H.264 bitrate limit leaves HEVC alone", h264: limit("VideoBitrate", "4000000")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{
+				{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "aac", Conditions: tc.hevc},
+				{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Conditions: tc.h264},
+			}}
+			source := h.buildPlaybackSource("item", "play", version, profile, req, true, true)
+			if !source.SupportsTranscoding || source.TargetVideoCodec != compatVideoCodecHEVC {
+				t.Fatalf("transcoding=%v codec=%q, want an HEVC encode", source.SupportsTranscoding, source.TargetVideoCodec)
+			}
+			if source.TargetBitrateKbps != tc.wantBitrate || source.TargetResolution != tc.wantResolution {
+				t.Fatalf("HEVC encode = %d kb/s at %q, want %d kb/s at %q", source.TargetBitrateKbps, source.TargetResolution, tc.wantBitrate, tc.wantResolution)
+			}
+		})
 	}
 }
 
@@ -382,21 +451,39 @@ func TestRokuVideoCopyUsesMPEGTS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A profile whose MPEG-TS rules refuse the copied video keeps the copy in
+	// the fMP4 it was negotiated for.
+	var tsRefusesH264 DeviceProfile
+	if err := json.Unmarshal(profile, &tsRefusesH264); err != nil {
+		t.Fatal(err)
+	}
+	for i, transcoding := range tsRefusesH264.TranscodingProfiles {
+		if transcoding.Type == "Video" && transcoding.Container == compatContainerTS {
+			tsRefusesH264.TranscodingProfiles[i].VideoCodec = "mpeg2video"
+		}
+	}
+	tsRefusesH264JSON, err := json.Marshal(tsRefusesH264)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
+		name          string
 		userAgent     string
+		profile       []byte
 		wantContainer string
 		wantSegment   string
 	}{
-		{userAgent: "Roku/DVP-16.0 (16.0.4.842-24)", wantContainer: "ts", wantSegment: "/" + compatRemuxTSV1PathSegment + "/"},
-		{userAgent: "Mozilla/5.0", wantContainer: compatContainerMP4, wantSegment: "/" + compatAudioV2PathSegment + "/"},
+		{name: "Roku", userAgent: "Roku/DVP-16.0 (16.0.4.842-24)", profile: profile, wantContainer: "ts", wantSegment: "/" + compatRemuxTSV1PathSegment + "/"},
+		{name: "browser", userAgent: "Mozilla/5.0", profile: profile, wantContainer: compatContainerMP4, wantSegment: "/" + compatAudioV2PathSegment + "/"},
+		{name: "Roku without H.264 in MPEG-TS", userAgent: "Roku/DVP-16.0 (16.0.4.842-24)", profile: tsRefusesH264JSON, wantContainer: compatContainerMP4, wantSegment: "/" + compatAudioV2PathSegment + "/"},
 	} {
-		t.Run(tc.userAgent, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			handler, _ := newSubtitleSelectionHandler(t)
 			handler.SubtitleRepo = nil
 			version := rokuTestVersion(models.AudioTrack{Codec: "eac3", Channels: 6, Default: true})
 			handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
 			routeID := handler.codec.EncodeStringID(EncodedIDItem, "movie-1")
-			req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{"DeviceProfile":`+string(profile)+`}`))
+			req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{"DeviceProfile":`+string(tc.profile)+`}`))
 			req.Header.Set("User-Agent", tc.userAgent)
 			routeCtx := chi.NewRouteContext()
 			routeCtx.URLParams.Add("id", routeID)

@@ -3175,10 +3175,25 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	// narrower requests are still honored. Requests scoped only to types the
 	// watching scope cannot serve (e.g. Series/Season-only) fall through to
 	// loadProgressPage below.
-	// A ParentId scopes the row to one library, series, season or movie; the
-	// Continue Watching fetcher serves the whole profile, so a scoped request
-	// takes the progress scan, which filters by parent.
-	if h.sectionsFetcher != nil && !query.scopesProgressToParent() && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
+	// A series or season ParentId reads that series' episodes, not the
+	// profile's recent progress, so an episode watched long ago still resumes.
+	if query.scopesProgressToParent() {
+		items, total, err := h.loadParentResume(r.Context(), session, query, typeSet)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		h.applyListFileFields(r.Context(), session, items, query)
+		applyItemsResponseOptions(items, query)
+		writeJSON(w, http.StatusOK, queryResultDTO{
+			Items:            items,
+			TotalRecordCount: total,
+			StartIndex:       query.startIndex,
+		})
+		return
+	}
+
+	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
 			h.applyListFileFields(r.Context(), session, items, query)
@@ -3337,10 +3352,68 @@ type progressHydratedItem struct {
 }
 
 // scopesProgressToParent reports whether ParentId names a series, season or
-// item, which a progress listing must filter by. A library ParentId is
-// applied through the libraryID argument instead.
+// item, which Resume serves from that parent's episodes. A library ParentId
+// is applied through the libraryID argument instead.
 func (q itemsQuery) scopesProgressToParent() bool {
 	return q.parentItemID != "" || q.parentSeasonID != ""
+}
+
+// loadParentResume serves Resume for a series or season ParentId from the
+// progress of that series' episodes, so the lookup is bounded by the
+// series' size rather than by how much else the profile has watched. Other
+// item ids, such as a movie, have no episodes and list nothing, as in
+// Jellyfin. Continue Watching's hiding rules still apply.
+func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, query itemsQuery, typeSet map[string]bool) ([]baseItemDTO, int, error) {
+	if (len(typeSet) > 0 && !typeSet["episode"]) || h.episodeRepo == nil {
+		return []baseItemDTO{}, 0, nil
+	}
+	seriesID := query.parentItemID
+	if query.parentSeasonID != "" {
+		if h.seasonRepo == nil {
+			return []baseItemDTO{}, 0, nil
+		}
+		season, err := h.seasonRepo.GetByID(ctx, query.parentSeasonID)
+		if errors.Is(err, catalog.ErrSeasonNotFound) || (err == nil && season == nil) {
+			return []baseItemDTO{}, 0, nil
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		seriesID = season.SeriesID
+	}
+	episodes, err := h.episodeRepo.ListBySeries(ctx, seriesID)
+	if err != nil {
+		return nil, 0, err
+	}
+	episodeIDs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil {
+			episodeIDs = append(episodeIDs, episode.ContentID)
+		}
+	}
+	entries, err := h.userData.ListResumableProgress(ctx, session, episodeIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	if entries, err = h.userData.FilterResumeProgress(ctx, session, entries); err != nil {
+		return nil, 0, err
+	}
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	matched := hydrated[:0]
+	for _, item := range hydrated {
+		if item.inParent(query) {
+			matched = append(matched, item)
+		}
+	}
+	total := len(matched)
+	page := matched[min(query.startIndex, total):]
+	if query.limit > 0 && len(page) > query.limit {
+		page = page[:query.limit]
+	}
+	return h.finishProgressPage(ctx, session, page, query, nil), total, nil
 }
 
 // inParent reports whether the progress item is an episode of the ParentId
@@ -3376,7 +3449,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 	// only safe for the first page; deeper StartIndex values must go through
 	// the scan-from-zero branch, which paginates over visible entries.
 	resumeFiltered := status == "in_progress"
-	if len(typeSet) == 0 && libraryID == nil && !query.scopesProgressToParent() && !query.enableTotalRecordCount && (!resumeFiltered || query.startIndex == 0) {
+	if len(typeSet) == 0 && libraryID == nil && !query.enableTotalRecordCount && (!resumeFiltered || query.startIndex == 0) {
 		batchSize := min(max(query.limit*2, 48), 200)
 		if batchSize <= 0 {
 			batchSize = 48
@@ -3477,9 +3550,6 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		}
 		for _, item := range hydrated {
 			if len(typeSet) > 0 && !typeSet[item.itemType] {
-				continue
-			}
-			if !item.inParent(query) {
 				continue
 			}
 			if matchedCount >= query.startIndex && len(items) < query.limit {
