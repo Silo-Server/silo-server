@@ -11,22 +11,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// A count that fails gives equal weights when the scope has no counts yet,
-// and the scope is not counted again until titleCountRetry passes.
+// A count that fails or panics gives equal weights when the scope has no
+// counts yet, and the scope is not counted again until titleCountRetry
+// passes. The count runs on singleflight's goroutine, where a panic would end
+// the process instead of reaching the request's recovery.
 func TestTitleCountsFallBackToEqualWeightsOnError(t *testing.T) {
-	cache := newTitleCountCache()
-	var calls atomic.Int32
-	failing := func(context.Context, catalog.AccessFilter) ([]int64, error) {
-		calls.Add(1)
-		return nil, errors.New("db down")
-	}
-	for range 2 {
-		if got := cache.get(t.Context(), catalog.AccessFilter{}, failing); !slices.Equal(got, equalTitleCounts()) {
-			t.Fatalf("counts = %v, want equal weights", got)
-		}
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("counts run = %d, want 1 until the retry window passes", calls.Load())
+	for name, fail := range map[string]func() ([]int64, error){
+		"error": func() ([]int64, error) { return nil, errors.New("db down") },
+		"panic": func() ([]int64, error) { panic("count bug") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cache := newTitleCountCache()
+			var calls atomic.Int32
+			failing := func(context.Context, catalog.AccessFilter) ([]int64, error) {
+				calls.Add(1)
+				return fail()
+			}
+			for range 2 {
+				if got := cache.get(t.Context(), catalog.AccessFilter{}, failing); !slices.Equal(got, equalTitleCounts()) {
+					t.Fatalf("counts = %v, want equal weights", got)
+				}
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("counts run = %d, want 1 until the retry window passes", calls.Load())
+			}
+		})
 	}
 }
 
