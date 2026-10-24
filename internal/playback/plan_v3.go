@@ -12,11 +12,15 @@ import (
 )
 
 type PlannerSettingsV3 struct {
-	TranscodeEnabled       bool
-	Allow4KTranscode       bool
-	AllowHEVCEncoding      bool
-	HardwareToneMapEnabled bool
-	SoftwareToneMapEnabled bool
+	TranscodeEnabled  bool
+	Allow4KTranscode  bool
+	AllowHEVCEncoding bool
+	// PreferLowerVersionTranscode lets a lower-resolution version serve the
+	// qualities it reaches when 4K transcoding is allowed too; with 4K
+	// transcoding off the lower version serves them regardless.
+	PreferLowerVersionTranscode bool
+	HardwareToneMapEnabled      bool
+	SoftwareToneMapEnabled      bool
 	// ViewerTranscodeDisabled reflects the viewer's account policy. Session
 	// admission enforces it; the planner only uses it to stop advertising
 	// quality rungs the viewer cannot start.
@@ -25,6 +29,7 @@ type PlannerSettingsV3 struct {
 
 const (
 	TerminalMessage4KTranscodeDisabledV3   = "A lower-resolution source is required because 4K transcoding is disabled."
+	terminalMessageLowerVersionServesV3    = "A lower-resolution version serves this quality."
 	containerMP4V3                         = "mp4"
 	containerMKVV3                         = "mkv"
 	containerHLSV3                         = "hls"
@@ -448,10 +453,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// validated reduced-quality recipe yet, or the client/server lacks the
 	// transcode route entirely), deliver the source at original quality with a
 	// degradation warning instead of refusing playback. Explicit user-selected
-	// rungs keep the existing terminals.
+	// rungs keep the existing terminals. A lower version that serves lower
+	// qualities can carry the reduction, so the planner refuses the source and
+	// the handler's alternate-version fallback transcodes that version instead.
 	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
 		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
-		!videoTranscodeExecutableV3(input, source) {
+		!videoTranscodeExecutableV3(input, source) && !lowerVersionServesQualitiesV3(input) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
 			Code:    "quality_reduction_unavailable",
 			Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality.",
@@ -903,17 +910,35 @@ type LowerVersionV3 struct {
 // quality is lower still. Without HLS or transcoding the 4K source is refused
 // for a reason the fallback does not act on, so the menu stays as it was.
 func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
-	return input.LowerVersion != nil && !input.Settings.Allow4KTranscode && input.Settings.TranscodeEnabled &&
-		deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+	return input.LowerVersion != nil && (!input.Settings.Allow4KTranscode || input.Settings.PreferLowerVersionTranscode) &&
+		input.Settings.TranscodeEnabled && deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+}
+
+// lowerVersionTakesTranscodeV3 reports whether a transcode of a 4K source to
+// height, which 4K transcoding allows, belongs to its lower version instead:
+// the lower version serves lower qualities and reaches height. A quality
+// above the lower version's class still transcodes the 4K source.
+func lowerVersionTakesTranscodeV3(input PlannerInputV3, source SourceDescriptorV3, height int) bool {
+	return input.Settings.Allow4KTranscode && lowerVersionServesQualitiesV3(input) && is4KSourceV3(input.EffectiveFile, source) &&
+		height > 0 && height <= sourceLadderHeightV3(input.LowerVersion.Lower)
 }
 
 // lowerVersionQualitiesV3 is the menu of a 4K version whose lower qualities
-// come from its lower-resolution version: original, the lower version at its
-// resolution class (for example "1080p"), which plays it unchanged, and the
-// transcode rungs below that version.
+// come from its lower-resolution version: original, the 4K rungs above the
+// lower version's class when 4K transcoding is allowed, the lower version at
+// its resolution class (for example "1080p"), which plays it unchanged, and
+// the transcode rungs below that version.
 func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
 	lower := input.LowerVersion.Lower
 	qualities := []AvailableQualityV3{originalQualityEntryV3(input.LowerVersion.Requested)}
+	if input.Settings.Allow4KTranscode {
+		lowerClass := sourceLadderHeightV3(lower)
+		for _, quality := range transcodeRungsV3(input, nil, input.LowerVersion.Requested) {
+			if quality.Height > lowerClass {
+				qualities = append(qualities, quality)
+			}
+		}
+	}
 	if label, ok := lowerVersionLabelV3(input.LowerVersion.Requested, lower); ok {
 		qualities = append(qualities, AvailableQualityV3{
 			Label:       label,
@@ -1212,6 +1237,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but 4K transcoding is disabled.", false)
 		}
 		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
+	}
+	if lowerVersionTakesTranscodeV3(input, source, quality.Height) {
+		// The handler's alternate-version fallback transcodes the lower
+		// version instead, and replans this source without it if that fails.
+		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
 	}
 	if hlsRegistry == nil {
 		hlsRegistry = input.hlsVideoRegistry()

@@ -264,6 +264,19 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
   changes the stored Redis settings in the meantime, the write is refused the
   same way and can be sent again.
 
+### Lower-version transcoding
+
+`playback.prefer_lower_version_transcode` is a boolean setting, default
+`true`. It applies when `allow_4k_transcode` is `true` and a 4K title has a
+lower-resolution version. A quality at or below that version's resolution
+class, such as Auto under a bandwidth estimate, is transcoded from the lower
+version. Qualities above it, such as **4K Medium**, still transcode the 4K
+version. When `false`, every lower quality transcodes the 4K version. With
+`allow_4k_transcode` set to `false`, the lower version serves lower qualities
+whatever this setting says. Changes apply to new playback decisions. The
+Playback settings page shows this policy as **Prefer 1080p
+versions** while 4K transcoding is allowed.
+
 ### HEVC encoding
 
 `playback.allow_hevc_encoding` is a boolean setting, default `false`. When

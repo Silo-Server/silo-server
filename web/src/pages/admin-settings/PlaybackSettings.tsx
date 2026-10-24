@@ -48,6 +48,7 @@ const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
   "playback.hw_accel",
   "allow_4k_transcode",
+  "playback.prefer_lower_version_transcode",
   "playback.allow_hevc_encoding",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
@@ -218,6 +219,7 @@ export default function PlaybackSettings() {
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
   const throttleOn = form.getValue("enable_transcode_throttle") === "true";
+  const allow4KTranscode = form.getValue("allow_4k_transcode") === "true";
   // Every advanced transcoding key has one row, except the device picker,
   // which renders only when it applies.
   const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
@@ -356,6 +358,15 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
+          {allow4KTranscode && (
+            <SettingField
+              label="Prefer 1080p versions"
+              type="toggle"
+              description="Transcode from the 1080p version instead of the 4K file when both exist."
+              value={form.getValue("playback.prefer_lower_version_transcode")}
+              onChange={(v) => form.setValue("playback.prefer_lower_version_transcode", v)}
+            />
+          )}
           <SettingField
             label="Allow HEVC encoding"
             type="toggle"

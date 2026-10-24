@@ -1713,13 +1713,14 @@ func (h *PlaybackHandler) recordStartingDevice(ctx context.Context, userID int, 
 // first authorized version of alternateBase that plans replaces it, with the
 // warnings that choice adds.
 func (h *PlaybackHandler) planStartV3(r *http.Request, req playback.StartRequestV3, requestedFile, alternateBase, effectiveFile *models.MediaFile, audioIndex int, settings playback.PlannerSettingsV3, lowerVersion *playback.LowerVersionV3) (alternateCandidateV3, []playback.DegradationWarningV3) {
-	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
+	input := playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile),
 		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
 		AudioTrackIndex:      audioIndex, Settings: settings,
 		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
-	})
+	}
+	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), input)
 	var warnings []playback.DegradationWarningV3
 	if req.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
 		accessFilter := requestAccessFilter(r)
@@ -1812,7 +1813,29 @@ func (h *PlaybackHandler) planStartV3(r *http.Request, req playback.StartRequest
 			}
 		}
 	}
+	if result.Terminal != nil {
+		if fallback := h.planWithoutLowerVersionV3(r.Context(), input); fallback != nil {
+			return *fallback, nil
+		}
+	}
 	return alternateCandidateV3{file: effectiveFile, request: req, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, warnings
+}
+
+// planWithoutLowerVersionV3 is the last resort when input's lower qualities
+// belonged to a lower version and no version planned: input planned as though
+// the item had none, so the source follows its own policy, transcoded when 4K
+// transcoding allows it and at original quality with a warning when it does
+// not. Nil when no lower version served input or that plan is refused too.
+func (h *PlaybackHandler) planWithoutLowerVersionV3(ctx context.Context, input playback.PlannerInputV3) *alternateCandidateV3 {
+	if input.LowerVersion == nil {
+		return nil
+	}
+	input.LowerVersion = nil
+	result, toneMapErr := h.planPlaybackWithCapabilitiesV3(ctx, input)
+	if result.Terminal != nil {
+		return nil
+	}
+	return &alternateCandidateV3{file: input.EffectiveFile, request: input.Request, audioIndex: input.AudioTrackIndex, result: result, toneMapErr: toneMapErr}
 }
 
 func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byte) (playback.DecisionResponseV3, error) {
@@ -5277,6 +5300,19 @@ func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlannin
 		result = firstFailureResult
 		toneMapCapabilityErr = firstFailureToneMapErr
 	}
+	if result.Terminal != nil {
+		baseInput := playback.PlannerInputV3{
+			Request: baseStart, RequestedFile: p.plannerRequestedFile, EffectiveFile: baseEffectiveFile,
+			LowerVersion:         lowerVersionForFileV3(p.lowerVersion, baseEffectiveFile),
+			ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
+			AudioTrackIndex:      baseAudioIndex, Settings: p.settings,
+			Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(),
+			AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile),
+		}
+		if fallback := h.planWithoutLowerVersionV3(r.Context(), baseInput); fallback != nil {
+			return *fallback, false, false
+		}
+	}
 	return alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, subtitleDegraded, subtitleNotShown
 }
 
@@ -6401,14 +6437,15 @@ func copyOptionalIntV3(value *int) *int {
 }
 
 // lowerVersionV3 finds the version that serves lower qualities of a 4K
-// version when 4K transcoding is disabled: the first non-4K candidate in the
-// alternate-version fallback order, the one that fallback adopts when a lower
-// quality refuses the 4K source. It reads stored metadata only; the menu is
-// built on every start and must not pay for probes. Nil when the policy lets
-// the 4K source be transcoded, the request pins its version, or the item has
-// no lower version.
+// version when 4K transcoding is disabled or the server prefers transcoding a
+// lower version: the first non-4K candidate in the alternate-version fallback
+// order, the one that fallback adopts when a lower quality refuses the 4K
+// source. It reads stored metadata only; the menu is built on every start and
+// must not pay for probes. Nil when the policy transcodes the 4K source, the
+// request pins its version, or the item has no lower version.
 func (h *PlaybackHandler) lowerVersionV3(ctx context.Context, req playback.StartRequestV3, base *models.MediaFile, settings playback.PlannerSettingsV3, filter catalog.AccessFilter) *playback.LowerVersionV3 {
-	if base == nil || settings.Allow4KTranscode || !settings.TranscodeEnabled || !req.AllowsAlternateVersions() || !playback.Is4KMediaFileV3(base) {
+	transcodes4K := settings.Allow4KTranscode && !settings.PreferLowerVersionTranscode
+	if base == nil || transcodes4K || !settings.TranscodeEnabled || !req.AllowsAlternateVersions() || !playback.Is4KMediaFileV3(base) {
 		return nil
 	}
 	alternates, err := h.findAlternateFiles(ctx, base, filter)
@@ -6810,13 +6847,14 @@ func (h *PlaybackHandler) plannerSettingsV3Result(ctx context.Context) (settings
 	viewerTranscodeDisabled := h.viewerTranscodeDisabledV3(ctx)
 	defer func() { settings.ViewerTranscodeDisabled = <-viewerTranscodeDisabled }()
 	if h.SettingsRepo != nil {
-		var values [4]string
-		var errs [4]error
+		var values [5]string
+		var errs [5]error
 		keys := [...]string{
 			config.Allow4KTranscodeSettingKey,
 			config.PlaybackTranscodeHardwareToneMapSettingKey,
 			config.PlaybackTranscodeSoftwareToneMapSettingKey,
 			config.PlaybackAllowHEVCEncodingSettingKey,
+			config.PlaybackPreferLowerVersionTranscodeSettingKey,
 		}
 		var group sync.WaitGroup
 		group.Add(len(keys))
@@ -6839,10 +6877,14 @@ func (h *PlaybackHandler) plannerSettingsV3Result(ctx context.Context) (settings
 		if errs[3] != nil {
 			return settings, fmt.Errorf("load HEVC encoding setting: %w", errs[3])
 		}
+		if errs[4] != nil {
+			return settings, fmt.Errorf("load lower-version transcode setting: %w", errs[4])
+		}
 		settings.Allow4KTranscode = config.AdminSettingEnabled(keys[0], values[0])
 		settings.HardwareToneMapEnabled = config.AdminSettingEnabled(keys[1], values[1])
 		settings.SoftwareToneMapEnabled = config.AdminSettingEnabled(keys[2], values[2])
 		settings.AllowHEVCEncoding = config.AdminSettingEnabled(keys[3], values[3])
+		settings.PreferLowerVersionTranscode = config.AdminSettingEnabled(keys[4], values[4])
 	}
 	return settings, nil
 }

@@ -2827,6 +2827,40 @@ func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *tes
 	}
 }
 
+// A Dolby Vision Profile 7 4K source the client converts to Profile 8.1, under
+// a bandwidth estimate it cannot carry and with 4K transcoding off, played at
+// original quality. With a lower version serving lower qualities it is refused
+// for a reason the alternate-version fallback acts on instead.
+func TestPlanPlaybackV3AutoBandwidthLimitRefusesDV7SourceForLowerVersion(t *testing.T) {
+	file := dv7WithELFixtureV3()
+	hdr := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	request := clientManagedDV7RequestV3(hdr, hdr, hdr,
+		TransformationV3{Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
+	)
+	request.QualityPreference = QualityAutoV3
+	request.BandwidthEstimateKbps = new(4_000)
+	request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, HardwareToneMapEnabled: true, SoftwareToneMapEnabled: true},
+		Registry: NewTransformationRegistryV3(nil),
+	}
+
+	original := PlanPlaybackV3(input)
+	if original.Plan == nil || original.Plan.DecisionReason != "client_dv7_to_dv81" || !hasDegradationWarningV3(original.Plan.DegradationWarnings, "quality_reduction_unavailable") {
+		t.Fatalf("without a lower version = %s, want the source at original quality", ExplainPlannerResultV3(original))
+	}
+
+	input.LowerVersion = &LowerVersionV3{
+		Requested: SourceDescriptorFromFileV3(file, 0),
+		Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 32_000, DynamicRange: DynamicRangeSDRV3},
+	}
+	refused := PlanPlaybackV3(input)
+	if refused.Terminal == nil || (refused.Terminal.Reason != "no_alternate_version" && refused.Terminal.Reason != TerminalHDRTranscodeUnsupportedV3) {
+		t.Fatalf("with a lower version = %s, want a refusal the alternate-version fallback acts on", ExplainPlannerResultV3(refused))
+	}
+}
+
 // A 4K version that may not be transcoded offers the qualities its
 // lower-resolution version serves: that version as it is, then the rungs a
 // transcode of it can reach. Original stays the 4K version.

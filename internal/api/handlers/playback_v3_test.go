@@ -3821,6 +3821,123 @@ func TestHandleStartPlaybackV3LowerVersionMenuFollowsAdoptedVersion(t *testing.T
 	}
 }
 
+// startAutoOverBandwidthV3 starts Auto on a 32 Mbps 4K version with a 1080p,
+// 8 Mbps version beside it, under a 4 Mbps estimate whose 80% fits neither as
+// it is.
+func startAutoOverBandwidthV3(t *testing.T, settings map[string]string, lower func(*models.MediaFile)) (playback.DecisionResponseV3, *models.MediaFile, *models.MediaFile) {
+	t.Helper()
+	source := uhdSourceFileV3(t)
+	alternate := lowerAlternateFileV3(source)
+	if lower != nil {
+		lower(alternate)
+	}
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: settings}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "2", Available: true},
+	})
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = playback.QualityAutoV3
+	startRequest.BandwidthEstimateKbps = new(4_000)
+	startRequest.Capabilities.MaxResolution = "2160p"
+	startRequest.Capabilities.VideoDecode[0].Levels = []int{51}
+	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
+	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
+	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	return started, source, alternate
+}
+
+func qualityLabelsV3(plan *playback.PlanV3) []string {
+	labels := make([]string, 0, len(plan.AvailableQualities))
+	for _, quality := range plan.AvailableQualities {
+		labels = append(labels, quality.Label)
+	}
+	return labels
+}
+
+// Auto on a 4K version whose source a bandwidth estimate cannot carry
+// transcodes the lower version rather than sending the 4K source at full
+// quality: always with 4K transcoding off, and with it on unless the server
+// turns off playback.prefer_lower_version_transcode.
+func TestHandleStartPlaybackV3AutoBandwidthLimitTranscodesLowerVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		settings map[string]string
+		wantMenu []string
+	}{
+		{
+			name:     "4K transcoding off",
+			settings: map[string]string{"allow_4k_transcode": "false"},
+			wantMenu: []string{playback.QualityOriginalV3, "1080p", playback.QualityRung1080pMediumV3, playback.QualityRung1080pLowV3, playback.QualityRung720pHighV3, playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3, "480p"},
+		},
+		{
+			name:     "4K transcoding on, lower version preferred by default",
+			settings: map[string]string{"allow_4k_transcode": "true"},
+			wantMenu: []string{playback.QualityOriginalV3, playback.QualityRung2160pMediumV3, playback.QualityRung2160pLowV3, "1080p", playback.QualityRung1080pMediumV3, playback.QualityRung1080pLowV3, playback.QualityRung720pHighV3, playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3, "480p"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started, _, alternate := startAutoOverBandwidthV3(t, tc.settings, nil)
+			plan := started.PlaybackPlan
+			if plan.EffectiveMediaFileID != alternate.ID || plan.Delivery != playback.DeliveryTranscodeHLSV3 {
+				t.Fatalf("plan = file %d via %s, want a transcode of the 1080p version %d", plan.EffectiveMediaFileID, plan.Delivery, alternate.ID)
+			}
+			if plan.EffectiveRecipe.BitrateKbps == nil || *plan.EffectiveRecipe.BitrateKbps > 3_200 {
+				t.Fatalf("recipe bitrate = %v, want at most 80%% of the estimate", plan.EffectiveRecipe.BitrateKbps)
+			}
+			if slices.ContainsFunc(plan.DegradationWarnings, func(w playback.DegradationWarningV3) bool { return w.Code == "quality_reduction_unavailable" }) {
+				t.Fatalf("warnings = %#v, want no full-quality fallback", plan.DegradationWarnings)
+			}
+			if labels := qualityLabelsV3(plan); !reflect.DeepEqual(labels, tc.wantMenu) {
+				t.Fatalf("menu = %v, want %v", labels, tc.wantMenu)
+			}
+		})
+	}
+}
+
+// With playback.prefer_lower_version_transcode off and 4K transcoding on,
+// Auto transcodes the 4K source itself.
+func TestHandleStartPlaybackV3AutoBandwidthLimitTranscodes4KWhenLowerVersionNotPreferred(t *testing.T) {
+	started, source, _ := startAutoOverBandwidthV3(t, map[string]string{"allow_4k_transcode": "true", "playback.prefer_lower_version_transcode": "false"}, nil)
+	plan := started.PlaybackPlan
+	if plan.EffectiveMediaFileID != source.ID || plan.Delivery != playback.DeliveryTranscodeHLSV3 {
+		t.Fatalf("plan = file %d via %s, want a transcode of the 4K version %d", plan.EffectiveMediaFileID, plan.Delivery, source.ID)
+	}
+	if labels := qualityLabelsV3(plan); slices.Contains(labels, "1080p") {
+		t.Fatalf("menu = %v, want the 4K version's own rungs", labels)
+	}
+}
+
+// When the lower version cannot play, the 4K source still plays by its own
+// policy: at original quality with 4K transcoding off, transcoded with it on.
+func TestHandleStartPlaybackV3AutoBandwidthLimitFallsBackWhenLowerVersionCannotPlay(t *testing.T) {
+	gone := func(alternate *models.MediaFile) { alternate.FilePath = filepath.Join(t.TempDir(), "gone.mp4") }
+	for _, tc := range []struct {
+		allow4K      string
+		wantDelivery playback.DeliveryV3
+	}{
+		{allow4K: "false", wantDelivery: playback.DeliveryOriginalHTTPV3},
+		{allow4K: "true", wantDelivery: playback.DeliveryTranscodeHLSV3},
+	} {
+		t.Run("allow_4k_transcode="+tc.allow4K, func(t *testing.T) {
+			started, source, _ := startAutoOverBandwidthV3(t, map[string]string{"allow_4k_transcode": tc.allow4K}, gone)
+			plan := started.PlaybackPlan
+			if plan.EffectiveMediaFileID != source.ID || plan.Delivery != tc.wantDelivery {
+				t.Fatalf("plan = file %d via %s, want the 4K version %d via %s", plan.EffectiveMediaFileID, plan.Delivery, source.ID, tc.wantDelivery)
+			}
+		})
+	}
+}
+
 func TestHandleReplanPlaybackV3TrackChangeStaysOnEffectiveAlternate(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	source.Resolution = "2160p"
