@@ -9,9 +9,9 @@ type AudioSelectionMode = "auto" | "explicit";
  *
  * A pick saves that track for the whole series (or the movie) and Auto forgets
  * the saved one, so the next episode and the next visit follow the same rule
- * as this Play. When a write fails the selector goes back to what it showed
- * before, unless the viewer has chosen again since: it never shows a choice
- * the server did not keep.
+ * as this Play. When a write fails the selector goes back to the last choice
+ * the server kept, unless the viewer has chosen again since: it never shows a
+ * choice the server did not keep.
  *
  * `clear` only resets the selector (another version or title is selected,
  * where track indexes mean something else); it saves nothing.
@@ -27,6 +27,12 @@ export function usePrePlayAudioSelection(
   const deleteAudioPreference = useDeleteAudioPreference();
   // Bumped by every choice and reset, so a failure only rolls back the latest.
   const latestChoiceRef = useRef(0);
+  // The selector state the server last kept; a failed write returns here, not
+  // to an earlier choice that may never have been saved either.
+  const savedRef = useRef<{ mode: AudioSelectionMode; index: number | null }>({
+    mode: "auto",
+    index: null,
+  });
 
   const [prevContentId, setPrevContentId] = useState(contentId);
   if (prevContentId !== contentId) {
@@ -36,6 +42,7 @@ export function usePrePlayAudioSelection(
   }
   useEffect(() => {
     latestChoiceRef.current += 1;
+    savedRef.current = { mode: "auto", index: null };
   }, [contentId]);
 
   const show = useCallback((nextMode: AudioSelectionMode, nextIndex: number | null) => {
@@ -43,26 +50,33 @@ export function usePrePlayAudioSelection(
     setExplicitIndex(nextIndex);
   }, []);
 
-  const rollbackTo = (previousMode: AudioSelectionMode, previousIndex: number | null) => {
+  // Returns the write's callbacks: success records what the server now keeps,
+  // failure shows that again, unless the viewer has chosen since.
+  const track = (nextMode: AudioSelectionMode, nextIndex: number | null) => {
     const choice = ++latestChoiceRef.current;
-    return () => {
-      if (latestChoiceRef.current === choice) show(previousMode, previousIndex);
+    return {
+      onSuccess: () => {
+        savedRef.current = { mode: nextMode, index: nextIndex };
+      },
+      onError: () => {
+        if (latestChoiceRef.current === choice) show(savedRef.current.mode, savedRef.current.index);
+      },
     };
   };
 
   const select = (trackIndex: number) => {
-    const track = version?.audio_tracks?.[trackIndex];
-    const rollback = rollbackTo(mode, explicitIndex);
+    const audioTrack = version?.audio_tracks?.[trackIndex];
+    const callbacks = track("explicit", trackIndex);
     show("explicit", trackIndex);
-    if (!prefId || !track) return;
-    setAudioPreference.mutate({ prefId, trackIndex, track }, { onError: rollback });
+    if (!prefId || !audioTrack) return;
+    setAudioPreference.mutate({ prefId, trackIndex, track: audioTrack }, callbacks);
   };
 
   const reset = () => {
-    const rollback = rollbackTo(mode, explicitIndex);
+    const callbacks = track("auto", null);
     show("auto", null);
     if (!prefId) return;
-    deleteAudioPreference.mutate(prefId, { onError: rollback });
+    deleteAudioPreference.mutate(prefId, callbacks);
   };
 
   const clear = useCallback(() => {
