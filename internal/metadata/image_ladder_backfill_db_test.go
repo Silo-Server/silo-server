@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -47,20 +48,22 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 }
 
 // TestLadderBackfillSkipsCandidatesHeldByJobsDB checks which job states keep a
-// ladder candidate out of an EnqueueLadderBackfill batch. A job that will still
-// cache the same source (queued, running, or failed and waiting for a later
-// retry) holds the row. No job, a succeeded job, a failed job whose retry is
-// due, or a job for an older source leaves it to be enqueued.
+// ladder candidate out of an EnqueueLadderBackfill batch. A job for the same
+// source that is queued, running, or parked after failing holds the row. No job,
+// a succeeded job, a failed job whose cooldown is over, or a job for an older
+// source or another image type leaves it to be enqueued.
 func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	ctx := t.Context()
 
 	contentID := fmt.Sprintf("zz-ladder-held-%d", time.Now().UnixNano())
 	const source = "https://image.tmdb.org/t/p/original/poster.jpg"
+	base := "tmdb/movies/" + contentID
 	cleanup := func() {
 		bg := context.Background()
 		_, _ = pool.Exec(bg, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID)
 		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(bg, `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1 || '%'`, base)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -69,25 +72,26 @@ func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, tmdb_id, poster_source_path, poster_path)
 		VALUES ($1, 'movie', 'Ladder held', '1', $2, $3)
-	`, contentID, source, "tmdb/movies/"+contentID+"/poster/original.r1.webp"); err != nil {
+	`, contentID, source, base+"/poster/original.r1.webp"); err != nil {
 		t.Fatalf("seed media item: %v", err)
 	}
 
 	cases := []struct {
-		name   string
-		status string // empty for no job
-		source string
-		retry  time.Duration // next_attempt_at relative to now
-		held   bool
+		name      string
+		status    string // empty for no job
+		source    string
+		imageType string        // defaults to poster
+		retry     time.Duration // next_attempt_at relative to now
+		held      bool
 	}{
 		{name: "no job"},
-		{name: "queued", status: ImageCacheStatusQueued, source: source, held: true},
-		{name: "queued for a later retry", status: ImageCacheStatusQueued, source: source, retry: time.Hour, held: true},
+		{name: "queued", status: ImageCacheStatusQueued, source: source, retry: time.Hour, held: true},
 		{name: "running", status: ImageCacheStatusRunning, source: source, held: true},
-		{name: "failed with a later retry", status: ImageCacheStatusFailed, source: source, retry: time.Hour, held: true},
-		{name: "failed with its retry due", status: ImageCacheStatusFailed, source: source, retry: -time.Minute},
+		{name: "failed and parked", status: ImageCacheStatusFailed, source: source, retry: 7 * 24 * time.Hour, held: true},
+		{name: "failed with its cooldown over", status: ImageCacheStatusFailed, source: source, retry: -time.Minute},
 		{name: "succeeded", status: ImageCacheStatusSucceeded, source: source},
 		{name: "queued for an older source", status: ImageCacheStatusQueued, source: "https://image.tmdb.org/t/p/original/old.jpg"},
+		{name: "queued for another image type", status: ImageCacheStatusQueued, source: source, imageType: ImageCacheImageLogo},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,11 +106,11 @@ func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
 						status, next_attempt_at, locked_at
 					)
 					VALUES (
-						'item', $1, $1, $2, 'tmdb', '1', 'movie', 'poster', '',
+						'item', $1, $1, $2, 'tmdb', '1', 'movie', $5, '',
 						$3::text, NOW() + $4::double precision * interval '1 second',
 						CASE WHEN $3::text = 'running' THEN NOW() END
 					)
-				`, contentID, tc.source, tc.status, tc.retry.Seconds()); err != nil {
+				`, contentID, tc.source, tc.status, tc.retry.Seconds(), cmp.Or(tc.imageType, ImageCacheImagePoster)); err != nil {
 					t.Fatalf("seed job: %v", err)
 				}
 			}

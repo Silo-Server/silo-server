@@ -176,8 +176,9 @@
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
 ./internal/metadata TestLadderBackfillCandidatesDB
-# A ladder candidate whose job is queued, running, or waiting to retry stays out
-# of the next batch, so the sweep cannot keep re-enqueueing work already in hand.
+# A ladder candidate whose job is queued, running, or parked after failing stays
+# out of the next batch, so the sweep neither spins on work already in hand nor
+# stops at parked rows.
 ./internal/metadata TestLadderBackfillSkipsCandidatesHeldByJobsDB
 # The database fence reopens a finished backfill only for artwork published
 # without the current ladder's new rung, on every surface it regenerates.

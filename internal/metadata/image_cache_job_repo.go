@@ -1497,10 +1497,13 @@ func ladderCandidateRowsSQL() string {
 `)
 }
 
-// ladderCandidateHeldSQL is true when a job already on the queue will cache
-// ladder candidate ac from the same source: one that is queued, running, or
-// failed and waiting for a later retry. Enqueueing that row again would change
-// nothing, so EnqueueLadderBackfill leaves it out of the batch.
+// ladderCandidateHeldSQL is true when ladder candidate ac already has a job for
+// the same source that a batch must leave alone: one that is queued or running,
+// or one that failed and is parked until its cooldown ends. The upsert counts a
+// queued or running row as enqueued without making it due, so letting one into a
+// batch would keep RunLadderBackfill enqueueing work it cannot drain, and parked
+// rows could fill a batch and end the sweep before it reaches artwork it can
+// enqueue.
 //
 // Only those jobs can hold a candidate, and on a cached catalog they are a few
 // rows beside hundreds of thousands of succeeded ones. Looking for them alone
@@ -1529,7 +1532,7 @@ const ladderCandidateHeldSQL = `EXISTS (
 // destination exists but predates a rung.
 //
 // The job check below is deduplication only: it keeps a row whose job is queued,
-// running, or waiting to retry from being enqueued twice. It is deliberately NOT the
+// running, or parked after failing from being enqueued again. It is deliberately NOT the
 // completion signal: a row held by another node's in-flight job is absent here
 // but is not done. HasLadderBackfillRemaining answers that question instead.
 func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
