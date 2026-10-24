@@ -100,6 +100,16 @@ numbering. The daily task
 also resends to such a provider a manual correction that the save did not
 deliver, when the provider already holds a submission for that file and kind.
 
+The daily **Share detected markers** task is scheduled at 04:00 in server-local
+time by default, after local detection at 03:30. Each scheduled run starts at a
+random point in the four hours after its configured time, so servers in one
+time zone do not reach a shared provider together; a manual run starts at once.
+A run waits out a provider's short rate limit and ends at a longer one. When
+every submission for a file fails, the run waits 30 seconds before the next
+file, doubling for each further failed file in a row up to 10 minutes. Any
+provider answer, a refusal included, resets the wait. After the ninth failed
+file in a row the run ends, and the next scheduled run tries again.
+
 Contribution is off for a new provider unless its plugin manifest asks
 otherwise. The capability metadata keys `default_contribute_enabled`,
 `default_contribute_auto_local`, and `default_contribute_min_confidence` set the

@@ -33,6 +33,8 @@ type ContributionFileLoader interface {
 	GetByIDs(ctx context.Context, ids []int) ([]*models.MediaFile, error)
 }
 
+var _ taskmanager.StartSpreader = (*ContributeMarkersTask)(nil)
+
 // ContributeMarkersTask submits high-confidence local intro and credits markers
 // to providers that have auto-contribution enabled, and resends manual
 // corrections a save did not deliver to providers that support amend. It is a
@@ -53,6 +55,15 @@ const (
 	// contributionMaxRateLimitWaits caps consecutive short waits so a provider
 	// that keeps answering "retry shortly" cannot hold the task open forever.
 	contributionMaxRateLimitWaits = 20
+	// contributionErrorBackoff is the wait before the next file after one
+	// whose submissions all failed. It doubles for each further such file in a
+	// row, up to contributionMaxErrorBackoff, so a failing provider is not sent
+	// a full night's traffic.
+	contributionErrorBackoff    = 30 * time.Second
+	contributionMaxErrorBackoff = 10 * time.Minute
+	// contributionMaxErrorWaits caps those waits: one more failed file ends
+	// the run, and the next scheduled run tries again.
+	contributionMaxErrorWaits = 8
 )
 
 // NewContributeMarkersTask constructs the task.
@@ -87,6 +98,11 @@ func (t *ContributeMarkersTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "04:00"}}
 }
 
+// StartSpread spreads scheduled runs over the four hours after their
+// configured time. Servers in one time zone would otherwise all submit to a
+// shared provider at 04:00.
+func (t *ContributeMarkersTask) StartSpread() time.Duration { return 4 * time.Hour }
+
 func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t.service == nil || t.candidates == nil || t.files == nil {
 		progress.Report(100, "Contribution is not configured")
@@ -106,15 +122,14 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 		return nil
 	}
 
-	var counts contributionCounts
-	rateLimitWaits := 0
+	var state contributionState
 	// Manual corrections first: there are few, and a backlog of local
 	// markers must not hold them back when a provider's daily limit ends the
 	// run.
 	corrections := func(after *markers.ContributionCandidate) ([]markers.ContributionCandidate, error) {
 		return t.candidates.CandidateManualCorrections(ctx, amenders, after, contributionCandidateBatch)
 	}
-	stopped, err := t.contributeCandidates(ctx, progress, markers.ContributeOptions{Corrections: true}, corrections, &counts, &rateLimitWaits)
+	stopped, err := t.contributeCandidates(ctx, progress, markers.ContributeOptions{Corrections: true}, corrections, &state)
 	if err != nil || stopped {
 		return err
 	}
@@ -125,27 +140,38 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 			return t.candidates.CandidateLocalMarkerFiles(ctx, kind, providers, after, contributionCandidateBatch)
 		}
 		opts := markers.ContributeOptions{Segments: []markers.MarkerKind{kind}, Auto: true}
-		stopped, err := t.contributeCandidates(ctx, progress, opts, next, &counts, &rateLimitWaits)
+		stopped, err := t.contributeCandidates(ctx, progress, opts, next, &state)
 		if err != nil || stopped {
 			return err
 		}
 	}
 
+	counts := state.counts
 	counts.write(progress, 0)
 	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, invalid %d, failed %d", counts.submitted, counts.skipped, counts.invalid, counts.failed))
 	return nil
 }
 
+// contributionState is one run's tallies and waits, carried across its
+// passes.
+type contributionState struct {
+	counts         contributionCounts
+	rateLimitWaits int
+	// errorStreak counts the files in a row whose submissions all failed.
+	errorStreak int
+}
+
 // contributeCandidates runs opts for every candidate file next pages through.
-// It reports stopped when a provider's usage limit ends the run.
+// It reports stopped when a provider's usage limit, or a streak of failed
+// files, ends the run.
 func (t *ContributeMarkersTask) contributeCandidates(
 	ctx context.Context,
 	progress taskmanager.ProgressReporter,
 	opts markers.ContributeOptions,
 	next func(after *markers.ContributionCandidate) ([]markers.ContributionCandidate, error),
-	counts *contributionCounts,
-	rateLimitWaits *int,
+	state *contributionState,
 ) (bool, error) {
+	counts := &state.counts
 	var after *markers.ContributionCandidate
 	for {
 		candidates, err := next(after)
@@ -173,36 +199,85 @@ func (t *ContributeMarkersTask) contributeCandidates(
 			if file == nil {
 				continue
 			}
+			if state.errorStreak > 0 {
+				if state.errorStreak > contributionMaxErrorWaits {
+					counts.write(progress, 0)
+					progress.Report(100, fmt.Sprintf("Contribution unavailable after %d failed files in a row; the next scheduled run retries", state.errorStreak))
+					return true, nil
+				}
+				backoff := contributionErrorWait(state.errorStreak)
+				progress.Report(50, fmt.Sprintf("Contribution failing; waiting %s", backoff))
+				if err := t.wait(ctx, backoff); err != nil {
+					return false, err
+				}
+			}
 			// A retry after a rate limit runs every provider again; the ones
 			// that already finished report skips that must not be counted twice.
 			tallied := map[string]string{}
+			failed := false
 			for {
 				outcomes, err := t.service.ContributeFile(ctx, file, opts)
 				if err != nil {
 					counts.failed++
+					failed = true
 					break
 				}
 				retryAfter, limited := counts.add(outcomes, tallied)
 				if !limited {
-					*rateLimitWaits = 0
+					state.rateLimitWaits = 0
 					break
 				}
-				if retryAfter <= 0 || retryAfter > contributionMaxInlineWait || *rateLimitWaits >= contributionMaxRateLimitWaits {
+				if retryAfter <= 0 || retryAfter > contributionMaxInlineWait || state.rateLimitWaits >= contributionMaxRateLimitWaits {
 					counts.write(progress, retryAfter)
 					progress.Report(100, fmt.Sprintf("Contribution usage-limited; retry after %s", formatRetryAfter(retryAfter)))
 					return true, nil
 				}
-				*rateLimitWaits++
+				state.rateLimitWaits++
 				progress.Report(50, fmt.Sprintf("Contribution rate-limited; waiting %s", retryAfter))
 				if err := t.wait(ctx, retryAfter); err != nil {
 					return false, err
 				}
 			}
+			state.noteFile(failed, tallied)
 		}
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
 	}
+}
+
+// noteFile updates the error streak with one file's result: failed reports
+// that ContributeFile itself returned an error, and tallied holds the file's
+// final status for each provider and segment. A file with an error and no
+// provider answer extends the streak. Any answer, a refusal included, shows
+// the provider is up and resets it. A skip never reached a provider and
+// leaves it as it is.
+func (s *contributionState) noteFile(failed bool, tallied map[string]string) {
+	answered := false
+	for _, status := range tallied {
+		switch status {
+		case markers.OutcomeStatusError:
+			failed = true
+		case markers.OutcomeStatusSkipped:
+		default:
+			answered = true
+		}
+	}
+	switch {
+	case answered:
+		s.errorStreak = 0
+	case failed:
+		s.errorStreak++
+	}
+}
+
+// contributionErrorWait is the wait after n failed files in a row.
+func contributionErrorWait(n int) time.Duration {
+	wait := contributionErrorBackoff
+	for i := 1; i < n && wait < contributionMaxErrorBackoff; i++ {
+		wait *= 2
+	}
+	return min(wait, contributionMaxErrorBackoff)
 }
 
 type contributionCounts struct {

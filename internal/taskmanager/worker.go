@@ -85,9 +85,13 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	}
 
 	w.triggers = nil
+	spread := startSpread(w.task)
 	for _, cfg := range configs {
 		tr := factory(cfg)
 		if tr != nil {
+			if spreadable, ok := tr.(SpreadableTrigger); ok && spread > 0 {
+				spreadable.SetStartSpread(spread)
+			}
 			tr.Start(lastResult)
 			w.triggers = append(w.triggers, tr)
 		}

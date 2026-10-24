@@ -14,6 +14,7 @@ type DailyTrigger struct {
 	hour    int
 	minute  int
 	ch      chan struct{}
+	spread  time.Duration
 	nextRun time.Time
 	timer   *time.Timer
 	stopCh  chan struct{}
@@ -31,12 +32,19 @@ func NewDailyTrigger(cfg taskmanager.TriggerConfig) *DailyTrigger {
 	}
 }
 
+// SetStartSpread implements taskmanager.SpreadableTrigger.
+func (d *DailyTrigger) SetStartSpread(spread time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.spread = spread
+}
+
 func (d *DailyTrigger) calcNextRun(now time.Time) time.Time {
-	today := time.Date(now.Year(), now.Month(), now.Day(), d.hour, d.minute, 0, 0, now.Location())
-	if today.After(now) {
-		return today
+	slot := time.Date(now.Year(), now.Month(), now.Day(), d.hour, d.minute, 0, 0, now.Location())
+	if !slot.After(now) {
+		slot = slot.Add(24 * time.Hour)
 	}
-	return today.Add(24 * time.Hour)
+	return spreadStart(slot, d.spread)
 }
 
 func (d *DailyTrigger) Start(_ *taskmanager.ExecutionResult) {

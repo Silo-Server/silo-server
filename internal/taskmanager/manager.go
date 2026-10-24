@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 )
 
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
@@ -375,6 +376,14 @@ func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 func isManualOnly(task Task) bool {
 	manual, ok := task.(ManualOnlyTask)
 	return ok && manual.ManualOnly()
+}
+
+func startSpread(task Task) time.Duration {
+	spreader, ok := task.(StartSpreader)
+	if !ok {
+		return 0
+	}
+	return spreader.StartSpread()
 }
 
 func servesAnyLibrary(task Task, libraryTypes []string) bool {
