@@ -23793,6 +23793,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "show_title_rules": {
+            "description": "Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [

@@ -21545,6 +21545,8 @@ export interface components {
        * @description Fixed Meilisearch ranking-session lifetime; requests do not extend it
        */
       session_ttl_seconds?: number;
+      /** @description Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match */
+      show_title_rules?: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}

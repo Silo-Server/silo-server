@@ -21,7 +21,6 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -1195,7 +1194,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		WatchedSeconds:  session.Position,
 		DurationSeconds: durationPtr,
 		Completed:       completed,
-		ClientIP:        clientip.FromContext(ctx),
+		ClientIP:        session.ClientIP,
 		Watch:           session.Watch,
 	}
 	return entry, nil

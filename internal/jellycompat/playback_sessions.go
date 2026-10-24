@@ -158,6 +158,13 @@ type PlaybackMediaSource struct {
 	// delivery for sessions read by older binaries during a rolling update.
 	SubtitleDeliveries map[int]PlaybackSubtitleDelivery
 
+	// h264TargetBitrateKbps and h264TargetResolution are the H.264 encode
+	// target, which PlaybackInfo restores when it falls back from an HEVC
+	// encode no executor can run. They are only read while PlaybackInfo
+	// builds the source, so they are not stored.
+	h264TargetBitrateKbps int
+	h264TargetResolution  string
+
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
 	preservedJSON map[string]json.RawMessage

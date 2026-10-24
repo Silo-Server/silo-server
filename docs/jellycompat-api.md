@@ -216,6 +216,13 @@ left out, including on `/Items?Ids=` without `Fields`. Item detail fills every
 list field. Roku (BrightScript) clients index some of these arrays without
 checking that they exist.
 
+The Resume lists honor `ParentId`: a library limits them to that library, and
+a series or season to its episodes. A series or season is answered from the
+progress of that series' episodes, not from the profile's recent progress, so
+an episode left long ago still resumes. As in Jellyfin, a movie or episode
+`ParentId` lists nothing. Moonfin for Roku resumes a series by asking for one
+resumable item under it.
+
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
 See [dropped-shows.md](architecture/dropped-shows.md). It orders series as
@@ -253,6 +260,8 @@ the primary first, and is empty when the item has no primary backdrop.
 | `GET /Items/{id}/Images/Art` | The clear art; 404 without one. |
 | `GET /Items/{id}/Images/Disc` | The disc art; 404 without one. |
 | `GET /Items/{id}/Images/Backdrop/{index}` | Index 0 (or no index) is the primary backdrop; index `i` is the item's `i`-th backdrop after it, 404 past the last. Other image types ignore the index. |
+| `GET /Items/{id}/Images` | Jellyfin's image list: one entry per type in `ImageTags` and one `Backdrop` entry per backdrop tag, with its `ImageIndex`. `Width` and `Height` are omitted because Silo does not record artwork dimensions. |
+| `HEAD /Items/{id}/Images/{type}[/{index}]` | `200` with no body when the GET would serve the image, without redirecting or proxying it; Roku checks for a logo this way. |
 
 An episode's `ParentThumbImageTag` still names its series' backdrop; the series'
 `Thumb` route serves its landscape thumb when it has one.
@@ -748,3 +757,47 @@ the complete HEVC recipe. Required audio conversion and tone mapping must be
 available on that same executor. Negotiation reads workers' stored capability
 reports; execution checks the selected worker again. Existing HEVC direct-play
 and remux routes are unchanged.
+
+## Encode limits
+
+As in Jellyfin, an H.264 encode targets the smallest `LessThanEqual` limits a
+profile sets on `VideoBitrate`, `Height` and `Width`, in its `Video` codec
+profiles for `h264` (those without a `Container` or `ApplyConditions`) and its
+HLS video transcoding profiles, instead of being refused for exceeding them:
+the video bitrate is capped and the frame is scaled to fit, keeping its aspect
+ratio. A stored device profile keeps `IsRequired: false`; a missing key reads
+back as `true`. A profile that lists transcoding profiles but no
+`DirectPlayProfiles` gets no direct play or direct stream, as in Jellyfin; Roku
+clients send one to ask for a remux after direct play fails.
+
+## Transcode reasons
+
+`TranscodingUrl` carries a `TranscodeReasons` query parameter with Jellyfin's
+reason names. A video copy reports `ContainerNotSupported`, plus
+`AudioChannelsNotSupported` or `AudioCodecNotSupported` when the audio is
+encoded. A video encode reports one video reason: `SubtitleCodecNotSupported`
+for a burn-in, else `VideoBitrateNotSupported`, `VideoResolutionNotSupported`
+or `VideoCodecNotSupported`. Clients read it from the URL: Moonfin for Roku
+shows a text subtitle itself over a copy and asks for a burn-in only over an
+encode. Without the parameter, it took every copy for an encode and restarted
+it with the subtitle burned in. The HLS routes ignore the parameter.
+
+## Roku MPEG-TS copies
+
+Roku players can play the audio of an fMP4 HLS copy silently, as JellyRock
+documents, and Roku clients list their MPEG-TS transcoding profile first. A
+video-copy HLS stream for a client whose user agent starts with `Roku/` and
+whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
+`remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
+keeps fMP4. Other clients are unchanged.
+
+## AAC encodes
+
+Compatibility audio encodes are AAC, which FFmpeg's encoder writes as AAC-LC;
+the negotiated output states that profile, so codec-profile rules on
+`AudioProfile` (Roku requires `!= Main`) evaluate against it. Roku clients
+(jellyfin-roku and Moonfin for Roku) leave AAC out of their video transcoding
+profiles although every Roku decodes stereo AAC (JellyRock fixed the same bug
+by always listing it first), so a transcoding profile without AAC still admits
+the stereo AAC encode when the profile declares AAC decode in a video
+direct-play or `VideoAudio` codec profile.

@@ -37,6 +37,7 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		{http.MethodGet, "/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Users/u1/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Videos/abc/AdditionalParts"},
+		{http.MethodGet, "/items/abc/images"},
 		{http.MethodGet, "/Sessions"},
 		{http.MethodPost, "/ClientLog/Document"},
 		{http.MethodGet, "/System/Configuration/encoding"},

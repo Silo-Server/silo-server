@@ -569,16 +569,24 @@ Each rule is `{field, op, value}`; an operator a field does not list returns `42
 and so does a value of the wrong shape: a span not like `30d` or reaching back before
 PostgreSQL's earliest date (4714 BC), a non-numeric bound,
 a decade that is not a year from 10 on (decade 0 would catch every title with no
-year), a `title` value that is empty or not a string, or a
+year), a `title` or `show_title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
 
 | Operators | Fields | Value |
 | --- | --- | --- |
-| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title`, `show_title` | string, compared ignoring case; `%` and `_` match literally |
 | `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
 | `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
 | `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
+
+In the `episode` scope, `title` compares the episode title and `show_title`
+compares its parent show's title. Other item types match neither positive nor
+negative `show_title` rules. Combine `show_title`, `watched`, and `title` rules
+to select watched episodes of a show while excluding particular episode titles.
+`GET /api/v2/catalog/search/capabilities` advertises `show_title_rules: true`
+when the server accepts the field. Clients should offer it only in episode
+rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
 
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
