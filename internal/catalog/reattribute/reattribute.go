@@ -618,7 +618,7 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 		// The source item keeps its cutoffs for the profiles whose history
 		// stays; a profile whose history moves takes its watched-state cutoff
 		// along, as in mergeHistoryCutoffPairs.
-		if _, err := tx.Exec(ctx, evidenceCTE+`
+		carried, err := tx.Exec(ctx, evidenceCTE+`
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
 			SELECT hhi.user_id, hhi.profile_id, $3, hhi.hidden_before, '-infinity', hhi.updated_at
 			FROM user_history_hidden_items hhi
@@ -629,9 +629,14 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 			SET hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
 			    removed_before = COALESCE(user_history_hidden_items.removed_before, user_history_hidden_items.hidden_before),
 			    updated_at = GREATEST(user_history_hidden_items.updated_at, EXCLUDED.updated_at)
-		`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID); err != nil {
+			WHERE EXCLUDED.hidden_before > user_history_hidden_items.hidden_before
+		`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
+		if err != nil {
 			return fmt.Errorf("reattribute: history cutoff evidence copy: %w", err)
 		}
+		// A carried cutoff changes what the profile has watched even when no
+		// play moves with it.
+		report.IntentMoved += int(carried.RowsAffected())
 		tag, err := tx.Exec(ctx, evidenceCTE+`
 			UPDATE user_watch_history h
 			SET media_item_id = $3

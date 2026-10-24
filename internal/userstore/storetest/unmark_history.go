@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func RunUnmarkKeepsHistory(t *testing.T, newStore func(t *testing.T) userstore.U
 			if err := tc.unmark(ctx, svc); err != nil {
 				t.Fatalf("unmark: %v", err)
 			}
-			assertHistoryCount(t, store, profile, 2, "after unmark")
+			assertHistory(t, store, profile, map[string]int{item: 1, sibling: 1}, "after unmark")
 			assertUnwatched(t, store, profile, item, "after unmark")
 			assertWatched(t, store, profile, sibling, "after unmark")
 
@@ -88,14 +89,14 @@ func RunUnmarkKeepsHistory(t *testing.T, newStore func(t *testing.T) userstore.U
 			if _, err := svc.RecordImportedWatchWithSource(ctx, userID, profile, item, 1200, 0, true, watchedAt, &watchedAt, userstore.WatchHistorySourceTrakt); err != nil {
 				t.Fatalf("import older play: %v", err)
 			}
-			assertHistoryCount(t, store, profile, 2, "after importing the older play")
+			assertHistory(t, store, profile, map[string]int{item: 1, sibling: 1}, "after importing the older play")
 			assertUnwatched(t, store, profile, item, "after importing the older play")
 
 			// Marking watched again records a new play.
 			if err := svc.RecordManualMarkWatched(ctx, userID, profile, []watchstate.LeafWatchTarget{{MediaItemID: item, DurationSeconds: 1200}}, time.Now().UTC()); err != nil {
 				t.Fatalf("mark watched again: %v", err)
 			}
-			assertHistoryCount(t, store, profile, 3, "after marking watched again")
+			assertHistory(t, store, profile, map[string]int{item: 2, sibling: 1}, "after marking watched again")
 			watched, err := userstore.ListProgressWithCompletedHistory(ctx, store, profile, []string{item})
 			if err != nil || !watched[item].Completed {
 				t.Fatalf("after marking watched again: progress %+v, err %v; want completed", watched[item], err)
@@ -105,7 +106,7 @@ func RunUnmarkKeepsHistory(t *testing.T, newStore func(t *testing.T) userstore.U
 			if err := store.RemoveHistoryItems(ctx, profile, []string{item}, time.Now().UTC()); err != nil {
 				t.Fatalf("RemoveHistoryItems: %v", err)
 			}
-			assertHistoryCount(t, store, profile, 1, "after removing from history")
+			assertHistory(t, store, profile, map[string]int{sibling: 1}, "after removing from history")
 			assertUnwatched(t, store, profile, item, "after removing from history")
 			assertWatched(t, store, profile, sibling, "after removing from history")
 		})
@@ -141,18 +142,26 @@ func RunPlayFinishedAfterUnmark(t *testing.T, newStore func(t *testing.T) userst
 	}
 }
 
-func assertHistoryCount(t *testing.T, store userstore.UserStore, profile string, want int, when string) {
+// assertHistory checks the plays each item has listed, through both history
+// listings.
+func assertHistory(t *testing.T, store userstore.UserStore, profile string, want map[string]int, when string) {
 	t.Helper()
 	history, err := store.ListHistory(context.Background(), profile, 50, 0)
 	if err != nil {
 		t.Fatalf("%s: ListHistory: %v", when, err)
 	}
-	if len(history) != want {
-		t.Fatalf("%s: history = %+v, want %d plays", when, history, want)
-	}
 	page, err := store.ListHistoryPage(context.Background(), profile, nil, 50)
-	if err != nil || len(page) != want {
-		t.Fatalf("%s: ListHistoryPage = %+v (%v), want %d plays", when, page, err, want)
+	if err != nil {
+		t.Fatalf("%s: ListHistoryPage: %v", when, err)
+	}
+	for name, rows := range map[string][]userstore.WatchHistoryEntry{"ListHistory": history, "ListHistoryPage": page} {
+		got := map[string]int{}
+		for _, row := range rows {
+			got[row.MediaItemID]++
+		}
+		if !maps.Equal(got, want) {
+			t.Fatalf("%s: %s plays per item = %v, want %v", when, name, got, want)
+		}
 	}
 }
 

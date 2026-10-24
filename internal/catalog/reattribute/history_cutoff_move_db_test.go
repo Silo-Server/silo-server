@@ -88,8 +88,8 @@ func TestMovedHistoryKeepsItsCutoffsDB(t *testing.T) {
 		if err := moveHistorySubset(ctx, tx, opts, &report); err != nil {
 			t.Fatal(err)
 		}
-		if report.HistoryMoved != 1 {
-			t.Fatalf("history moved = %d, want 1", report.HistoryMoved)
+		if report.HistoryMoved != 1 || report.IntentMoved != 1 {
+			t.Fatalf("history moved = %d, cutoffs carried = %d; want 1 and 1", report.HistoryMoved, report.IntentMoved)
 		}
 		if hidden, _ := read(t, to); !hidden.Equal(unmarked) {
 			t.Fatalf("destination watched-state cutoff = %s, want %s", hidden, unmarked)
