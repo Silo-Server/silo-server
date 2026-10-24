@@ -94,7 +94,7 @@ export default function BoxSetPage() {
                     <Play className="size-[18px] fill-current" aria-hidden />
                     {/* A film title can be wider than a phone; the label
                         truncates rather than widen the hero past the screen. */}
-                    <span className="truncate">
+                    <span className="min-w-0 truncate">
                       {started ? `Continue · ${next.title}` : `Play ${next.title}`}
                     </span>
                   </ViewTransitionLink>
