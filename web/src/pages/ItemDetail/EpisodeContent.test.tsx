@@ -412,15 +412,13 @@ describe("EpisodeContent", () => {
       return requests;
     }
 
-    function renderWithTracks() {
+    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
       render(
         <QueryClientProvider
           client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
         >
           <MemoryRouter initialEntries={["/item/episode-1"]}>
-            <EpisodeContent
-              item={makeEpisodeItem({ versions: [makeFileVersion({ audio_tracks: tracks })] })}
-            />
+            <EpisodeContent item={makeEpisodeItem({ versions })} />
           </MemoryRouter>
         </QueryClientProvider>,
       );
@@ -499,6 +497,29 @@ describe("EpisodeContent", () => {
         audioSelectionMode: "explicit",
         explicitAudioTrackIndex: 1,
       });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+
+    it("does not roll a failed pick back to another version's saved track", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const first = makeFileVersion({ file_id: 1, audio_tracks: tracks });
+      const second = makeFileVersion({ file_id: 2, audio_tracks: tracks });
+      renderWithTracks([first, second]);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(actionBar()).toMatchObject({ explicitAudioTrackIndex: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      act(() => actionBar().onSelectVersion(second));
+      act(() => actionBar().onSelectAudioTrack(0));
       await waitFor(() =>
         expect(actionBar()).toMatchObject({
           audioSelectionMode: "auto",

@@ -313,6 +313,7 @@ type PlaybackHandler struct {
 	v3StartEffectsQueue     chan playbackStartSideEffectsV3
 	v3StartEffectsMu        sync.Mutex
 	v3StartEffectsPending   map[string]*playbackStartSideEffectsStateV3
+	v3AudioPreferenceMu     sync.Mutex
 	v3ReplanMu              sync.Mutex
 	v3ReplanLocks           map[string]*v3ReplanLock
 	v3ReplanSlotsOnce       sync.Once
@@ -1514,6 +1515,40 @@ func (h *PlaybackHandler) persistSeriesPlaybackPreference(
 	}
 	if err := store.SetSeriesPlaybackPreference(ctx, pref); err != nil {
 		slog.ErrorContext(ctx, "failed to persist series playback preference", "component", "api", "series_id", key, "profile_id", profileID, "error", err)
+	}
+}
+
+func (h *PlaybackHandler) persistAudioPreference(
+	ctx context.Context,
+	userID int,
+	profileID string,
+	file *models.MediaFile,
+	trackIndex int,
+) {
+	if h.StoreProvider == nil || file == nil || trackIndex < 0 || trackIndex >= len(file.AudioTracks) {
+		return
+	}
+
+	key := h.playbackPreferenceKey(ctx, file)
+	if key == "" {
+		return
+	}
+
+	store, err := h.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to access user store for audio preference", "component", "api", "user_id", userID, "error", err)
+		return
+	}
+
+	track := file.AudioTracks[trackIndex]
+	if err := store.SetAudioPreference(ctx, userstore.AudioPreference{
+		ProfileID:       profileID,
+		SeriesID:        key,
+		AudioTrackIndex: trackIndex,
+		AudioLanguage:   track.Language,
+		TrackSignature:  playback.AudioTrackSignatureFromTrack(track),
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to persist audio preference", "component", "api", "series_id", key, "profile_id", profileID, "error", err)
 	}
 }
 

@@ -192,6 +192,9 @@ type playbackStartSideEffectsV3 struct {
 	userID    int
 	profileID string
 	state     *playbackStartSideEffectsStateV3
+	// legacyAudioTrackIndex is the audio an /api/v1 start played, which the
+	// frozen bridge still saves as the series preference; nil on /api/v2.
+	legacyAudioTrackIndex *int
 }
 
 type playbackStartSideEffectsStateV3 struct {
@@ -2291,7 +2294,14 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
 	h.raceCopySafetyV3(effectiveFile.ID, result.Plan)
-	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID)
+	// The frozen /api/v1 bridge keeps saving the audio a start played; the
+	// native API saves only explicit picks.
+	var legacyAudioTrackIndex *int
+	if !isNativeAPIV2(r.Context()) {
+		index := plannedAudioTrackIndexV3(result, audioIndex)
+		legacyAudioTrackIndex = &index
+	}
+	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, legacyAudioTrackIndex)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
 }
@@ -2324,7 +2334,7 @@ func (h *PlaybackHandler) replayDuplicateStartV3(ctx context.Context, userID int
 	return decisionResponseFromAttemptV3(existing), nil
 }
 
-func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file *models.MediaFile, userID int, profileID string) {
+func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file *models.MediaFile, userID int, profileID string, legacyAudioTrackIndex *int) {
 	if h == nil || session == nil || file == nil {
 		return
 	}
@@ -2352,6 +2362,8 @@ func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context,
 		userID:    userID,
 		profileID: profileID,
 		state:     state,
+
+		legacyAudioTrackIndex: legacyAudioTrackIndex,
 	}
 	h.v3StartEffectsMu.Lock()
 	h.v3StartEffectsPending[session.ID] = state
@@ -2418,6 +2430,9 @@ func (h *PlaybackHandler) runPlaybackStartSideEffectsV3(task playbackStartSideEf
 	if ctx.Err() != nil {
 		return
 	}
+	if task.legacyAudioTrackIndex != nil {
+		h.persistLegacyAudioPreferenceV3(ctx, task.session.ID, task.userID, task.profileID, &task.file, *task.legacyAudioTrackIndex)
+	}
 	h.persistSeriesPlaybackPreference(ctx, task.userID, task.profileID, &task.file)
 	h.syncSessionsNow(ctx, "v3_start")
 }
@@ -2468,6 +2483,20 @@ func (h *PlaybackHandler) cancelPlaybackStartSideEffectsV3(ctx context.Context, 
 	case <-waitCtx.Done():
 		slog.WarnContext(ctx, "timed out canceling playback start side effects", logComponentKey, "api", "session", sessionID)
 	}
+}
+
+// persistLegacyAudioPreferenceV3 is the audio preference write the frozen
+// /api/v1 bridge makes on every start and track change. It serializes start
+// and replan writes and rejects a delayed start value after the live session
+// has already adopted a newer track.
+func (h *PlaybackHandler) persistLegacyAudioPreferenceV3(ctx context.Context, sessionID string, userID int, profileID string, file *models.MediaFile, audioTrackIndex int) {
+	h.v3AudioPreferenceMu.Lock()
+	defer h.v3AudioPreferenceMu.Unlock()
+	current, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil || current.AudioTrackIndex != audioTrackIndex {
+		return
+	}
+	h.persistAudioPreference(ctx, userID, profileID, file, audioTrackIndex)
 }
 
 // prepareTransportV3 resolves the plan into a live local, remote, or identity
@@ -5920,6 +5949,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	transport.afterDurableCommit = func() {
 		cancelReservation()
+		if trackChange && !isNativeAPIV2(r.Context()) {
+			// The frozen /api/v1 bridge still saves a track change's audio.
+			h.persistLegacyAudioPreferenceV3(r.Context(), session.ID, session.UserID, session.ProfileID, effectiveFile, plannedAudioTrackIndexV3(result, session.AudioTrackIndex))
+		}
 		h.syncSessionsNow(r.Context(), "v3_replan")
 		event := playback.RouteEventPlanSelectedV3
 		clientModel := req.ClientPlaybackContext.Device.Model

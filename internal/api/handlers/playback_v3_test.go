@@ -632,7 +632,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 
 	for i := range playbackStartSideEffectsWorkersV3 {
 		sessionID := fmt.Sprintf("running-%d", i)
-		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1")
+		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1", nil)
 	}
 	for range playbackStartSideEffectsWorkersV3 {
 		select {
@@ -643,7 +643,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 	}
 
 	queuedSessionID := "queued-stop"
-	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1")
+	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1", nil)
 	handler.cancelPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
 	close(scrobbler.release)
 	handler.waitForPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
@@ -3742,7 +3742,13 @@ func newVersionChangeFixtureV3(t *testing.T, configure ...func(*versionChangeFix
 	for _, apply := range configure {
 		apply(f)
 	}
-	f.started = startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, f.startRequest))
+	// Current clients play through /api/v2, where starts and replans save no
+	// audio preference; the frozen /api/v1 bridge still does.
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, f.startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &f.started) != nil || f.started.PlaybackPlan == nil {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
 	return f
 }
 
@@ -3761,9 +3767,14 @@ func (f *versionChangeFixtureV3) replan(t *testing.T, previous playback.Decision
 	if operation == playback.ReplanOperationQualityChangeV3 {
 		request.AttemptedPlanKeys = []string{key}
 	}
-	response := postPlaybackReplanV3(t, f.handler, previous.SessionID, request)
-	if response.Terminal != nil || response.PlaybackPlan == nil {
-		t.Fatalf("%s terminal = %#v", id, response.Terminal)
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := servePlaybackReplanNativeV3(f.handler, previous.SessionID, body)
+	var response playback.DecisionResponseV3
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &response) != nil || response.Terminal != nil || response.PlaybackPlan == nil {
+		t.Fatalf("%s status = %d, body = %s", id, rr.Code, rr.Body.String())
 	}
 	return response
 }
@@ -4929,6 +4940,15 @@ func startPlayablePlaybackV3(t *testing.T, handler *PlaybackHandler, body string
 // the authorized test profile and returns the recorded response.
 func servePlaybackReplanV3(handler *PlaybackHandler, sessionID string, body []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+sessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+	req = withPlaybackRouteParam(req, "session_id", sessionID)
+	rr := httptest.NewRecorder()
+	handler.HandleReplanPlaybackV3(rr, req)
+	return rr
+}
+
+// servePlaybackReplanNativeV3 is servePlaybackReplanV3 on /api/v2.
+func servePlaybackReplanNativeV3(handler *PlaybackHandler, sessionID string, body []byte) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/"+sessionID+"/replan", strings.NewReader(string(body))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
 	req = withPlaybackRouteParam(req, "session_id", sessionID)
 	rr := httptest.NewRecorder()
 	handler.HandleReplanPlaybackV3(rr, req)

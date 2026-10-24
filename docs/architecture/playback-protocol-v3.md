@@ -1087,9 +1087,11 @@ differs, and returning to the 2160p version restores a subtitle the 1080p
 version lacked. An attempt whose intent was left behind by a replan that did
 not maintain it (an older server during a rolling deploy) falls back to the
 current plan's selection. None of this writes the viewer's saved audio or
-subtitle preference: starts and replans never save one, and clients save a
-pick with `PUT /api/v2/audio-prefs/{series_id}` and
+subtitle preference: on `/api/v2`, starts and replans never save one, and
+clients save a pick with `PUT /api/v2/audio-prefs/{series_id}` and
 `PUT /api/v2/subtitle-prefs/{series_id}` (`DELETE` returns the series to Auto).
+The frozen `/api/v1` bridge keeps its old behavior and saves the audio each
+start and `track_change` plays.
 
 A fallback to another media version must remap the selected subtitle. It
 prefers a version with an equivalent track; when none has one, playback

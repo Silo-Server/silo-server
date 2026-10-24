@@ -28,11 +28,15 @@ export function usePrePlayAudioSelection(
   // Bumped by every choice and reset, so a failure only rolls back the latest.
   const latestChoiceRef = useRef(0);
   // The selector state the server last kept; a failed write returns here, not
-  // to an earlier choice that may never have been saved either.
+  // to an earlier choice that may never have been saved either. Its index
+  // belongs to one version's file, so another version or title starts over.
   const savedRef = useRef<{ mode: AudioSelectionMode; index: number | null }>({
     mode: "auto",
     index: null,
   });
+  // Bumped with each version or title change, so a write for the previous one
+  // that lands later cannot repopulate savedRef.
+  const fileGenerationRef = useRef(0);
 
   const [prevContentId, setPrevContentId] = useState(contentId);
   if (prevContentId !== contentId) {
@@ -40,10 +44,12 @@ export function usePrePlayAudioSelection(
     setMode("auto");
     setExplicitIndex(null);
   }
-  useEffect(() => {
+  const forgetFile = useCallback(() => {
     latestChoiceRef.current += 1;
+    fileGenerationRef.current += 1;
     savedRef.current = { mode: "auto", index: null };
-  }, [contentId]);
+  }, []);
+  useEffect(forgetFile, [contentId, forgetFile]);
 
   const show = useCallback((nextMode: AudioSelectionMode, nextIndex: number | null) => {
     setMode(nextMode);
@@ -54,9 +60,12 @@ export function usePrePlayAudioSelection(
   // failure shows that again, unless the viewer has chosen since.
   const track = (nextMode: AudioSelectionMode, nextIndex: number | null) => {
     const choice = ++latestChoiceRef.current;
+    const generation = fileGenerationRef.current;
     return {
       onSuccess: () => {
-        savedRef.current = { mode: nextMode, index: nextIndex };
+        if (fileGenerationRef.current === generation) {
+          savedRef.current = { mode: nextMode, index: nextIndex };
+        }
       },
       onError: () => {
         if (latestChoiceRef.current === choice) show(savedRef.current.mode, savedRef.current.index);
@@ -80,9 +89,9 @@ export function usePrePlayAudioSelection(
   };
 
   const clear = useCallback(() => {
-    latestChoiceRef.current += 1;
+    forgetFile();
     show("auto", null);
-  }, [show]);
+  }, [forgetFile, show]);
 
   return { mode, explicitIndex, select, reset, clear };
 }
