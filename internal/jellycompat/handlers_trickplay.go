@@ -22,10 +22,11 @@ type TrickplaySheets interface {
 
 // The Jellyfin trickplay routes. Clients read the Trickplay member of an item
 // for the layout and fetch sheets by position; the playlist form serves
-// players that read HLS image playlists.
+// players that read HLS image playlists. The item parameter is {id}, as on the
+// other media routes, so a PlaySessionId grant can authorize a sheet.
 const (
-	compatTrickplaySheetRoute    = "/Videos/{itemId}/Trickplay/{width}/{index}.jpg"
-	compatTrickplayPlaylistRoute = "/Videos/{itemId}/Trickplay/{width}/tiles.m3u8"
+	compatTrickplaySheetRoute    = "/Videos/{id}/Trickplay/{width}/{index}.jpg"
+	compatTrickplayPlaylistRoute = "/Videos/{id}/Trickplay/{width}/tiles.m3u8"
 	// compatMediaSourceIDQuery names the media source a trickplay request is
 	// for; clients spell it in either case.
 	compatMediaSourceIDQuery = "MediaSourceId"
@@ -79,8 +80,10 @@ func (h *PlaybackHandler) HandleTrickplaySheet(w http.ResponseWriter, r *http.Re
 }
 
 // HandleTrickplayPlaylist serves an HLS image playlist of an item's sheets,
-// in the form Jellyfin writes: one segment per sheet, each tiled
-// EXT-X-TILES, sheet URLs carrying the caller's token.
+// in the form Jellyfin writes: one segment per sheet, each tiled EXT-X-TILES.
+// Jellyfin puts the caller's token on each sheet URL; Silo puts the
+// PlaySessionId of the caller's live play of that source instead, or nothing
+// when there is none, so a logged playlist never carries the login token.
 func (h *PlaybackHandler) HandleTrickplayPlaylist(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
@@ -101,9 +104,11 @@ func (h *PlaybackHandler) HandleTrickplayPlaylist(w http.ResponseWriter, r *http
 		writeError(w, http.StatusNotFound, "NotFound", "Trickplay playlist not found")
 		return
 	}
-	query := url.Values{compatMediaSourceIDQuery: {h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))}}
-	if token, ok := ExtractToken(r); ok {
-		query.Set("ApiKey", token)
+	sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+	query := url.Values{compatMediaSourceIDQuery: {sourceID}}
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
+	if grant := h.trickplayGrant(r.Context(), session, chiURLParam(r, "id"), sourceID, playSessionID); grant != "" {
+		query.Set("PlaySessionId", grant)
 	}
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "private, no-cache")
@@ -133,15 +138,17 @@ func trickplayPlaylist(grid catalog.TrickplayGrid, query string) string {
 // trickplayVersion resolves the file whose previews a request names, among
 // the item's versions this account can see, and answers the request itself
 // when there is none. The file is the mediaSourceId query's, else the route's
-// when it names a media source, else the one this token is playing for the
+// when it names a media source, else the one selected by the play the
+// request's PlaySessionId names, else the one this token is playing for the
 // item (Swiftfin and Findroid send no mediaSourceId), else the item's default
-// version.
+// version. A request a PlaySessionId authorized gets only a version that
+// negotiation offered.
 func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Request, session *Session) (catalog.FileVersion, bool) {
 	if h.content == nil {
 		writeError(w, http.StatusServiceUnavailable, "Unavailable", "Catalog unavailable")
 		return catalog.FileVersion{}, false
 	}
-	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "itemId"))
+	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
 	if err != nil {
 		writeItemIDError(w, r, err)
 		return catalog.FileVersion{}, false
@@ -163,14 +170,16 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
 		return catalog.FileVersion{}, false
 	}
+	grant := playbackGrantFromContext(r.Context())
 	if fileID == 0 {
-		fileID = int64(h.playingFile(r.Context(), session, contentID))
-	}
-	if fileID == 0 {
-		return detail.Versions[0], true
+		if play := h.requestedPlay(r, session, contentID, grant); play != nil {
+			fileID = int64(negotiatedFile(play))
+		} else {
+			fileID = int64(h.playingFile(r.Context(), session, contentID))
+		}
 	}
 	for _, version := range detail.Versions {
-		if int64(version.FileID) == fileID {
+		if (fileID == 0 || int64(version.FileID) == fileID) && (grant == nil || negotiationOffersFile(grant, version.FileID)) {
 			return version, true
 		}
 	}
@@ -178,12 +187,88 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 	return catalog.FileVersion{}, false
 }
 
+// activePlayLister lists a token's live negotiations.
+type activePlayLister interface {
+	ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
+}
+
+// trickplayGrant is the PlaySessionId a sheet URL can carry in place of the
+// caller's token: a live play of the caller that PlaybackSessionAuth accepts
+// for a sheet of routeItemID (the item as the request path names it) and
+// sourceID, preferring the one playSessionID names, else the most recent. It
+// is empty when there is none or the plays could not be read; the sheets then
+// need the caller's own credential.
+func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, routeItemID, sourceID, playSessionID string) string {
+	lister, ok := h.playbackStore.(activePlayLister)
+	if !ok {
+		return ""
+	}
+	plays, err := lister.ListActiveForToken(ctx, session.Token)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat: listing plays for a trickplay playlist failed", "component", "jellycompat", "error", err)
+		return ""
+	}
+	var grant PlaybackSession
+	for _, play := range plays {
+		if !playbackGrantCovers(&play, routeItemID, sourceID) {
+			continue
+		}
+		if play.ID == playSessionID {
+			return play.ID
+		}
+		if grant.ID == "" || play.UpdatedAt.After(grant.UpdatedAt) {
+			grant = play
+		}
+	}
+	return grant.ID
+}
+
+// requestedPlay is the negotiation a trickplay request names: the one whose
+// PlaySessionId authorized it, else this token's live play of contentID that
+// the request's PlaySessionId names, else nil.
+func (h *PlaybackHandler) requestedPlay(r *http.Request, session *Session, contentID string, grant *PlaybackSession) *PlaybackSession {
+	if grant != nil {
+		return grant
+	}
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
+	if playSessionID == "" || h.playbackStore == nil {
+		return nil
+	}
+	play, ok := h.playbackStore.Get(playSessionID)
+	if !ok || play.CompatToken != session.Token || play.ItemID != contentID {
+		return nil
+	}
+	return play
+}
+
+// negotiatedFile is the file a negotiation selected, either during playback or
+// by offering one source, or zero when it offered several and none was chosen.
+func negotiatedFile(play *PlaybackSession) int {
+	if play.UpstreamMediaFileID != 0 {
+		return play.UpstreamMediaFileID
+	}
+	// A source-specific PlaybackInfo response already identifies the file
+	// before the first stream request creates an upstream session.
+	if len(play.MediaSources) == 1 {
+		return play.MediaSources[0].FileID
+	}
+	return 0
+}
+
+// negotiationOffersFile reports whether play offered fileID as a source.
+func negotiationOffersFile(play *PlaybackSession, fileID int) bool {
+	for _, source := range play.MediaSources {
+		if source.FileID == fileID {
+			return true
+		}
+	}
+	return false
+}
+
 // playingFile is the file this token most recently selected for contentID,
 // either during negotiation or playback, or zero when no source is selected.
 func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID string) int {
-	lister, ok := h.playbackStore.(interface {
-		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
-	})
+	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
 		return 0
 	}
@@ -197,12 +282,7 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 		if play.ItemID != contentID || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
 			continue
 		}
-		selected := play.UpstreamMediaFileID
-		// A source-specific PlaybackInfo response already identifies the file
-		// before the first stream request creates an upstream session.
-		if selected == 0 && len(play.MediaSources) == 1 {
-			selected = play.MediaSources[0].FileID
-		}
+		selected := negotiatedFile(&play)
 		// Existing negotiations written before this field was introduced can
 		// still resolve on their owning process.
 		if selected == 0 && play.UpstreamSessionID != "" && h.sessionMgr != nil {
