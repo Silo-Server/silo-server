@@ -470,10 +470,6 @@ function WatchProviderCard({
   const runInfo = connection.connected ? deriveRunInfo(connection, latestRun) : null;
   const settingsPanelId = `watch-provider-${providerKey}-settings`;
   const hasError = Boolean(runInfo?.errorMessage);
-  const favoritesSyncEnabled =
-    connection.import_favorites_enabled || connection.export_favorites_enabled;
-  const watchlistSyncEnabled =
-    connection.import_watchlist_enabled || connection.export_watchlist_enabled;
   const supportsRatings =
     connection.capabilities.import_ratings || connection.capabilities.export_ratings;
 
@@ -775,17 +771,27 @@ function WatchProviderCard({
                     updateConnection.mutate({ export_watched_enabled: checked })
                   }
                 />
-                {connection.capabilities.import_favorites ||
-                connection.capabilities.export_favorites ? (
+                {connection.capabilities.import_favorites ? (
                   <ToggleRow
-                    id={`watch-provider-${providerKey}-favorites`}
-                    label="Sync favorites"
-                    description={`Import ${displayName} movie and show favorites, and send local favorite adds.`}
-                    checked={favoritesSyncEnabled}
+                    id={`watch-provider-${providerKey}-import-favorites`}
+                    label="Import favorites"
+                    description={`Bring ${displayName} movie and show favorites into this profile.`}
+                    checked={connection.import_favorites_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ import_favorites_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.export_favorites ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-export-favorites`}
+                    label="Send favorites"
+                    description="Send local favorite adds to this provider."
+                    checked={connection.export_favorites_enabled}
                     disabled={isBusy}
                     onChange={(checked) =>
                       updateConnection.mutate({
-                        import_favorites_enabled: checked,
                         export_favorites_enabled: checked,
                         sync_favorite_removals_enabled: checked
                           ? connection.sync_favorite_removals_enabled
@@ -800,23 +806,33 @@ function WatchProviderCard({
                     label="Sync favorite removals"
                     description="Remove provider-synced favorites on the other side when they are explicitly unfavorited."
                     checked={connection.sync_favorite_removals_enabled}
-                    disabled={isBusy || !favoritesSyncEnabled}
+                    disabled={isBusy || !connection.export_favorites_enabled}
                     onChange={(checked) =>
                       updateConnection.mutate({ sync_favorite_removals_enabled: checked })
                     }
                   />
                 ) : null}
-                {connection.capabilities.import_watchlist ||
-                connection.capabilities.export_watchlist ? (
+                {connection.capabilities.import_watchlist ? (
                   <ToggleRow
-                    id={`watch-provider-${providerKey}-watchlist`}
-                    label="Sync watchlist"
-                    description={`Import your ${displayName} watchlist, and send local watchlist adds.`}
-                    checked={watchlistSyncEnabled}
+                    id={`watch-provider-${providerKey}-import-watchlist`}
+                    label="Import watchlist"
+                    description={`Bring your ${displayName} watchlist into this profile.`}
+                    checked={connection.import_watchlist_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ import_watchlist_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.export_watchlist ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-export-watchlist`}
+                    label="Send watchlist"
+                    description="Send local watchlist adds to this provider."
+                    checked={connection.export_watchlist_enabled}
                     disabled={isBusy}
                     onChange={(checked) =>
                       updateConnection.mutate({
-                        import_watchlist_enabled: checked,
                         export_watchlist_enabled: checked,
                         sync_watchlist_removals_enabled: checked
                           ? connection.sync_watchlist_removals_enabled
@@ -831,7 +847,7 @@ function WatchProviderCard({
                     label="Sync watchlist removals"
                     description="Remove provider-synced watchlist items on the other side when they are removed locally."
                     checked={connection.sync_watchlist_removals_enabled}
-                    disabled={isBusy || !watchlistSyncEnabled}
+                    disabled={isBusy || !connection.export_watchlist_enabled}
                     onChange={(checked) =>
                       updateConnection.mutate({ sync_watchlist_removals_enabled: checked })
                     }

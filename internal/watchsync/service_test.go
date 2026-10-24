@@ -1491,9 +1491,9 @@ func TestServiceStartsAndPollsDeviceAuth(t *testing.T) {
 	if conn.ProviderUsername != "alex" || conn.AccessToken != testAccessToken {
 		t.Fatalf("connection = %+v", conn)
 	}
-	if !conn.ImportWatchedEnabled || !conn.ImportProgressEnabled ||
-		!conn.ExportWatchedEnabled || !conn.ScrobbleEnabled {
-		t.Fatalf("default toggles were not enabled: %+v", conn)
+	if conn.ImportWatchedEnabled || conn.ImportProgressEnabled ||
+		!conn.ExportWatchedEnabled || !conn.ScrobbleEnabled || conn.ImportFavoritesEnabled {
+		t.Fatalf("default toggles = %+v, want imports off and exports on", conn)
 	}
 	storedSession := repo.sessions[session.ID]
 	if storedSession.CompletedAt == nil {
