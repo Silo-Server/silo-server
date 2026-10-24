@@ -418,48 +418,55 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 		t.Fatal("an unchanged marker is still a candidate after both providers took it")
 	}
 
-	stale := *file
-	file.IntroMarkersAlgorithm = strPtr("chapter:silence:v2")
-	fixture.exec(t, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, file.ID, *file.IntroMarkersAlgorithm)
-	if !candidate(amend.id) || candidate(once.id) {
-		t.Fatal("after a new detection version, want a candidate for the amend provider only")
+	// resent applies change and checks that the amend provider alone is
+	// offered the file again and receives it, as sent describes, and that the
+	// resent marker is settled.
+	resent := func(what string, change func(), sent func(SubmissionRequest) bool) {
+		t.Helper()
+		change()
+		if !candidate(amend.id) || candidate(once.id) {
+			t.Fatalf("after %s, want a candidate for the amend provider only", what)
+		}
+		n := len(amend.submitted)
+		contribute()
+		if len(amend.submitted) != n+1 || !sent(amend.submitted[n]) || len(once.submitted) != 1 {
+			t.Fatalf("submissions after %s: amend %d, once %d; want %d with the change sent, and 1", what, len(amend.submitted), len(once.submitted), n+1)
+		}
+		if candidate(amend.id) {
+			t.Fatalf("after %s, the resent marker is still a candidate", what)
+		}
 	}
-	// A payload with the same times but a version the file no longer holds,
-	// as from a run that read the file earlier, must not take the target.
-	stale.IntroMarkersAlgorithm = strPtr("chapter:silence:v0")
-	outcomes, err := svc.ContributeFile(ctx, &stale, ContributeOptions{Auto: true, Provider: amend.id})
-	if err != nil || len(outcomes) != 1 || outcomes[0].Reason != contributionSupersededReason || len(amend.submitted) != 1 {
-		t.Fatalf("stale detection version: outcomes %+v, err %v; want a superseded skip", outcomes, err)
-	}
-	contribute()
-	if len(amend.submitted) != 2 || len(once.submitted) != 1 {
-		t.Fatalf("submissions after the change: amend %d, once %d; want 2 and 1", len(amend.submitted), len(once.submitted))
-	}
-	if candidate(amend.id) {
-		t.Fatal("the amended marker is still a candidate")
-	}
+	resent("a new detection version", func() {
+		stale := *file
+		file.IntroMarkersAlgorithm = strPtr("chapter:silence:v2")
+		fixture.exec(t, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, file.ID, *file.IntroMarkersAlgorithm)
+		// A payload with the same times but a version the file no longer
+		// holds, as from a run that read the file earlier, must not take the
+		// target.
+		stale.IntroMarkersAlgorithm = strPtr("chapter:silence:v0")
+		outcomes, err := svc.ContributeFile(ctx, &stale, ContributeOptions{Auto: true, Provider: amend.id})
+		if err != nil || len(outcomes) != 1 || outcomes[0].Reason != contributionSupersededReason || len(amend.submitted) != 1 {
+			t.Fatalf("stale detection version: outcomes %+v, err %v; want a superseded skip", outcomes, err)
+		}
+	}, func(req SubmissionRequest) bool { return req.Algorithm == "chapter:silence:v2" })
 	// A corrected episode ID can name another episode at the provider.
-	fixture.exec(t, `UPDATE episodes SET tvdb_id = '349232' WHERE content_id = $1`, file.EpisodeID)
-	if !candidate(amend.id) || candidate(once.id) {
-		t.Fatal("after an episode ID correction, want a candidate for the amend provider only")
-	}
-	contribute()
-	if len(amend.submitted) != 3 || amend.submitted[2].EpisodeExternalIDs[ExternalIDKeyTVDB] != "349232" {
-		t.Fatalf("submissions after the episode ID correction: %d; want the corrected episode sent", len(amend.submitted))
-	}
+	resent("an episode ID correction", func() {
+		fixture.exec(t, `UPDATE episodes SET tvdb_id = '349232' WHERE content_id = $1`, file.EpisodeID)
+	}, func(req SubmissionRequest) bool { return req.EpisodeExternalIDs[ExternalIDKeyTVDB] == "349232" })
 	// A file replaced at the same path keeps its row, and detection can find
 	// the same intro in the new bytes. The provider keys its submissions by
 	// the file hash.
-	file.FileHash, file.FileSize = "8e245d9679d31e12", 734003200
-	fixture.exec(t, `UPDATE media_files SET file_hash = $2, file_size = $3 WHERE id = $1`, file.ID, file.FileHash, file.FileSize)
-	detectIntro()
-	if !candidate(amend.id) || candidate(once.id) {
-		t.Fatal("after a new file hash, want a candidate for the amend provider only")
-	}
-	contribute()
-	if len(amend.submitted) != 4 || amend.submitted[3].FileHash != file.FileHash {
-		t.Fatalf("submissions after the file hash change: %d; want the new file hash sent", len(amend.submitted))
-	}
+	resent("a new file hash", func() {
+		file.FileHash, file.FileSize = "8e245d9679d31e12", 734003200
+		fixture.exec(t, `UPDATE media_files SET file_hash = $2, file_size = $3 WHERE id = $1`, file.ID, file.FileHash, file.FileSize)
+		detectIntro()
+	}, func(req SubmissionRequest) bool { return req.FileHash == file.FileHash })
+	// A rescore of the same bounds changes what the provider weighs the
+	// marker by.
+	resent("a rescore", func() {
+		file.IntroMarkersConfidence = floatPtr(0.92)
+		fixture.exec(t, `UPDATE media_files SET intro_markers_confidence = $2 WHERE id = $1`, file.ID, *file.IntroMarkersConfidence)
+	}, func(req SubmissionRequest) bool { return req.Confidence == 0.92 })
 	wantOneActiveClaim(t, fixture, amend.id, amendTargetKey(file.ID))
 }
 

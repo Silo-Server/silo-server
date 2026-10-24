@@ -422,9 +422,10 @@ earlier submission instead. For it, the target key is `file:<media_file_id>`,
 so each file is its own target. The key names no external ID, so a submission
 still in flight when the item's IDs change holds the target, and the next one
 waits for it. The content hash also covers the episode's own IDs, the
-numbering it follows, the file's hash and size, and the marker's source and
-algorithm, so a corrected episode ID, a file replaced at the same path, or a
-new detection version is a change. A claim whose
+numbering it follows, the file's hash and size, and the marker's source,
+algorithm, and confidence in whole thousandths, so a corrected episode ID, a
+file replaced at the same path, a new detection version, or a rescore is a
+change. A claim whose
 content hash differs from the new one is taken over once it is settled, even
 as a `conflict`. Before taking over a target, `Claim` checks under its lock
 that the payload's content hash is still the one the file's current state

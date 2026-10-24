@@ -89,9 +89,24 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
+// confidenceHashPart is a marker's confidence as an amend hash carries it, in
+// whole thousandths, missing as 0 the way the request sends it.
+// currentAmendHashSQL writes the same. A value outside 0 to 1, NaN included,
+// hashes as "x", which keeps it out of the SQL integer cast.
+func confidenceHashPart(confidence *float64) string {
+	c := 0.0
+	if confidence != nil {
+		c = *confidence
+	}
+	if !(c >= 0 && c <= 1) {
+		return "x"
+	}
+	return strconv.FormatInt(int64(c*1000), 10)
+}
+
 // currentAmendHashSQL is the content hash newContributionRow gives an amend
 // provider's row for the segment seg (kind, start_s, end_s, source,
-// algorithm) of media file mf, from the database's current state: the
+// algorithm, confidence) of media file mf, from the database's current state: the
 // marker, the file's duration, hash and size, and the IDs and numbering
 // DBExternalIDResolver reads for the file. It is NULL when the resolver would
 // find no item. Claim and both daily candidate queries use it, so they cannot
@@ -117,7 +132,9 @@ var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	         WHERE NULLIF(BTRIM(mf.episode_id), '') IS NULL
 	           AND mi.content_id = NULLIF(BTRIM(mf.content_id), '') AND mi.type = 'movie'))
 	    || '|' || COALESCE(mf.file_hash, '') || '|' || COALESCE(mf.file_size, 0)
-	    || '|' || seg.source || '|' || COALESCE(seg.algorithm, ''),
+	    || '|' || seg.source || '|' || COALESCE(seg.algorithm, '')
+	    || '|' || CASE WHEN COALESCE(seg.confidence, 0) BETWEEN 0 AND 1
+	                   THEN trunc(COALESCE(seg.confidence, 0) * 1000)::bigint::text ELSE 'x' END,
 	    'UTF8')), 'hex'), 32)`
 
 // errContributionInFlight is Claim's answer when row.Amend is set and another
@@ -180,11 +197,11 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 			    SELECT 1
 			    FROM media_files mf
 			    CROSS JOIN LATERAL (VALUES
-			        ('intro', mf.intro_start, mf.intro_end, mf.intro_markers_source, mf.intro_markers_algorithm),
-			        ('credits', mf.credits_start, mf.credits_end, mf.credits_markers_source, mf.credits_markers_algorithm),
-			        ('recap', mf.recap_start, mf.recap_end, mf.recap_markers_source, mf.recap_markers_algorithm),
-			        ('preview', mf.preview_start, mf.preview_end, mf.preview_markers_source, mf.preview_markers_algorithm)
-			    ) AS seg(kind, start_s, end_s, source, algorithm)
+			        ('intro', mf.intro_start, mf.intro_end, mf.intro_markers_source, mf.intro_markers_algorithm, mf.intro_markers_confidence),
+			        ('credits', mf.credits_start, mf.credits_end, mf.credits_markers_source, mf.credits_markers_algorithm, mf.credits_markers_confidence),
+			        ('recap', mf.recap_start, mf.recap_end, mf.recap_markers_source, mf.recap_markers_algorithm, mf.recap_markers_confidence),
+			        ('preview', mf.preview_start, mf.preview_end, mf.preview_markers_source, mf.preview_markers_algorithm, mf.preview_markers_confidence)
+			    ) AS seg(kind, start_s, end_s, source, algorithm, confidence)
 			    WHERE mf.id = $1 AND seg.kind = $2
 			      AND `+currentAmendHashSQL+` = $3
 			)`, row.MediaFileID, row.SegmentKind, row.ContentHash).Scan(&current); err != nil {
@@ -483,11 +500,11 @@ func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, prov
 		  AND EXISTS (
 		      SELECT 1
 		      FROM (VALUES
-		          ('intro', mf.intro_markers_source, mf.intro_markers_algorithm, mf.intro_start, mf.intro_end),
-		          ('credits', mf.credits_markers_source, mf.credits_markers_algorithm, mf.credits_start, mf.credits_end),
-		          ('recap', mf.recap_markers_source, mf.recap_markers_algorithm, mf.recap_start, mf.recap_end),
-		          ('preview', mf.preview_markers_source, mf.preview_markers_algorithm, mf.preview_start, mf.preview_end)
-		      ) AS seg(kind, source, algorithm, start_s, end_s)
+		          ('intro', mf.intro_markers_source, mf.intro_markers_algorithm, mf.intro_start, mf.intro_end, mf.intro_markers_confidence),
+		          ('credits', mf.credits_markers_source, mf.credits_markers_algorithm, mf.credits_start, mf.credits_end, mf.credits_markers_confidence),
+		          ('recap', mf.recap_markers_source, mf.recap_markers_algorithm, mf.recap_start, mf.recap_end, mf.recap_markers_confidence),
+		          ('preview', mf.preview_markers_source, mf.preview_markers_algorithm, mf.preview_start, mf.preview_end, mf.preview_markers_confidence)
+		      ) AS seg(kind, source, algorithm, start_s, end_s, confidence)
 		      CROSS JOIN unnest($1::text[]) AS p(provider)
 		      WHERE seg.source = $4 AND seg.algorithm = $5
 		        AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
