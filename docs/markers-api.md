@@ -49,7 +49,8 @@ When several providers return a marker of the same kind, Silo uses the
 provider whose best marker of that kind has the highest confidence, then the
 lower `fetch_priority`, then the higher submission count, then the provider ID,
 and keeps every range that provider returned for the kind. A marker without a
-confidence counts as 0, so it loses to any rated marker. Selection runs over cached answers, so a
+confidence, or with a non-finite one or one outside 0 to 1, counts as 0, so it
+loses to any rated marker. Selection runs over cached answers, so a
 priority change applies without fetching again.
 
 Each provider has a minimum confidence for lookups, `fetch_min_confidence` on
