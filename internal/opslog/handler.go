@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -191,7 +192,10 @@ func attrValue(v slog.Value) any {
 // helper transport errors pass through elsewhere, so signed stream URLs and
 // query-string tokens are not written to the database. Secret key=value pairs
 // left in plain text, such as a plugin's gRPC status description, are masked
-// with logredact.RedactSecretAssignments. A typed-nil pointer
+// with logredact.RedactSecretAssignments. A URL quoted in the text rather
+// than carried as a *url.Error (a presigned S3 URL in an SDK error, say) loses
+// its query, fragment and userinfo, and logredact.SanitizeText masks userinfo
+// in other schemes' URLs. A typed-nil pointer
 // that satisfies error is recorded as a placeholder instead of calling Error
 // on a nil receiver, and a panicking Error method is contained.
 func errorText(err error) (text string) {
@@ -203,7 +207,9 @@ func errorText(err error) (text string) {
 			text = fmt.Sprintf("<%T: Error panicked>", err)
 		}
 	}()
-	return logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error())
+	msg := logredact.SanitizeURLError(err).Error()
+	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+	return logredact.SanitizeText(logredact.RedactSecretAssignments(msg))
 }
 
 // snapshot encodes a value the caller still owns, such as a map, slice or
@@ -218,6 +224,11 @@ func snapshot(v any) any {
 	}
 	return json.RawMessage(raw)
 }
+
+// urlInText matches an http(s) URL token inside free text. It takes the
+// whole non-space run, so trailing punctuation lands in the query or path
+// that SanitizeURL then trims, and anything unparseable fails closed.
+var urlInText = regexp.MustCompile(`(?i)https?://\S+`)
 
 func inferComponent(message string) string {
 	if prefix, _, ok := strings.Cut(message, ":"); ok {
