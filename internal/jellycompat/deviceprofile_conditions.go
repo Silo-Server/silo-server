@@ -99,10 +99,6 @@ func (p DeviceProfile) codecProfileCompatibility(version catalog.FileVersion, au
 	)
 }
 
-func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVersion, audioStreamIndex *int) codecProfileCompatibility {
-	return p.hlsRemuxCodecProfileCompatibilityIn(version, audioStreamIndex, compatContainerMP4)
-}
-
 // hlsRemuxCodecProfileCompatibilityIn evaluates codec profiles for a video
 // copy into container. Only fMP4 writes a sample entry Silo chooses, so the
 // promised VideoCodecTag is set for mp4 alone.

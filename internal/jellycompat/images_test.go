@@ -444,13 +444,17 @@ func TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession(t *testing.T) {
 	assertImageRedirect(t, rec, upstreamURL)
 
 	// Roku probes artwork with HEAD and shows it only on a 200. Following a
-	// redirect would send the HEAD to a URL presigned for GET.
-	req = httptest.NewRequest(http.MethodHead, "/Items/"+routeID+"/Images/Primary", nil)
-	req = withImageRouteParams(req, routeID, "Primary")
-	rec = httptest.NewRecorder()
-	h.HandleItemImage(rec, req)
-	if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || rec.Body.Len() != 0 {
-		t.Fatalf("HEAD = %d, Location %q, %d body bytes; want 200 with no redirect or body", rec.Code, rec.Header().Get("Location"), rec.Body.Len())
+	// redirect would send the HEAD to a URL presigned for GET. Locally served
+	// artwork resolves to Silo's own signed artwork route.
+	for _, imageURL := range []string{upstreamURL, "/api/v2/artwork/poster-token"} {
+		h.images.RememberSized(routeID, "Primary", imageURL, compatCardImageSize)
+		req = httptest.NewRequest(http.MethodHead, "/Items/"+routeID+"/Images/Primary", nil)
+		req = withImageRouteParams(req, routeID, "Primary")
+		rec = httptest.NewRecorder()
+		h.HandleItemImage(rec, req)
+		if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || rec.Body.Len() != 0 {
+			t.Fatalf("HEAD %s = %d, Location %q, %d body bytes; want 200 with no redirect or body", imageURL, rec.Code, rec.Header().Get("Location"), rec.Body.Len())
+		}
 	}
 }
 

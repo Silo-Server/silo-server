@@ -3359,39 +3359,24 @@ func (q itemsQuery) scopesProgressToParent() bool {
 }
 
 // loadParentResume serves Resume for a series or season ParentId from the
-// progress of that series' episodes, so the lookup is bounded by the
+// progress of that parent's episodes, so the lookup is bounded by the
 // series' size rather than by how much else the profile has watched. Other
 // item ids, such as a movie, have no episodes and list nothing, as in
-// Jellyfin. Continue Watching's hiding rules still apply.
+// Jellyfin. Moonfin for Roku resumes a series by asking for one resumable item
+// under it. Continue Watching's hiding rules still apply.
 func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, query itemsQuery, typeSet map[string]bool) ([]baseItemDTO, int, error) {
 	if (len(typeSet) > 0 && !typeSet["episode"]) || h.episodeRepo == nil {
 		return []baseItemDTO{}, 0, nil
 	}
-	seriesID := query.parentItemID
+	listIDs, parentID := h.episodeRepo.ListIDsBySeriesIDs, query.parentItemID
 	if query.parentSeasonID != "" {
-		if h.seasonRepo == nil {
-			return []baseItemDTO{}, 0, nil
-		}
-		season, err := h.seasonRepo.GetByID(ctx, query.parentSeasonID)
-		if errors.Is(err, catalog.ErrSeasonNotFound) || (err == nil && season == nil) {
-			return []baseItemDTO{}, 0, nil
-		}
-		if err != nil {
-			return nil, 0, err
-		}
-		seriesID = season.SeriesID
+		listIDs, parentID = h.episodeRepo.ListIDsBySeasonIDs, query.parentSeasonID
 	}
-	episodes, err := h.episodeRepo.ListBySeries(ctx, seriesID)
+	episodeIDs, err := listIDs(ctx, []string{parentID})
 	if err != nil {
 		return nil, 0, err
 	}
-	episodeIDs := make([]string, 0, len(episodes))
-	for _, episode := range episodes {
-		if episode != nil {
-			episodeIDs = append(episodeIDs, episode.ContentID)
-		}
-	}
-	entries, err := h.userData.ListResumableProgress(ctx, session, episodeIDs)
+	entries, err := h.userData.ListResumableProgress(ctx, session, episodeIDs[parentID])
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3402,34 +3387,12 @@ func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, q
 	if err != nil {
 		return nil, 0, err
 	}
-	matched := hydrated[:0]
-	for _, item := range hydrated {
-		if item.inParent(query) {
-			matched = append(matched, item)
-		}
-	}
-	total := len(matched)
-	page := matched[min(query.startIndex, total):]
+	total := len(hydrated)
+	page := hydrated[min(query.startIndex, total):]
 	if query.limit > 0 && len(page) > query.limit {
 		page = page[:query.limit]
 	}
 	return h.finishProgressPage(ctx, session, page, query, nil), total, nil
-}
-
-// inParent reports whether the progress item is an episode of the ParentId
-// series or season. As in Jellyfin, ParentId names the items under it, so a
-// movie or episode ParentId matches nothing. Moonfin for Roku resumes a series
-// by asking for one resumable item under it, so ignoring ParentId resumed
-// whatever the profile had played last.
-func (item progressHydratedItem) inParent(q itemsQuery) bool {
-	switch {
-	case q.parentSeasonID != "":
-		return item.target != nil && item.target.SeasonID == q.parentSeasonID
-	case q.parentItemID != "":
-		return item.target != nil && item.target.Item.SeriesID == q.parentItemID
-	default:
-		return true
-	}
 }
 
 // sortedTypeSet returns the (already lowercased) keys of a type set in a stable

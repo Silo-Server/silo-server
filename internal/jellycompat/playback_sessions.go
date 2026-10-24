@@ -127,7 +127,13 @@ type PlaybackMediaSource struct {
 	// encodeAudioCodec is the full encode's audio codec, which a subtitle
 	// burn-in switches an audio-encoding remux to. It is only read while
 	// PlaybackInfo builds the source, so it is not stored.
-	encodeAudioCodec     string
+	encodeAudioCodec string
+	// h264TargetBitrateKbps and h264TargetResolution are the H.264 encode
+	// target, which PlaybackInfo restores when it falls back from an HEVC
+	// encode no executor can run. Like encodeAudioCodec, they are not stored.
+	h264TargetBitrateKbps int
+	h264TargetResolution  string
+
 	ID                   string
 	FileID               int
 	Version              catalog.FileVersion

@@ -2377,13 +2377,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		// executor retry must preserve the negotiated stream format.
 		if source.SupportsTranscoding && compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC &&
 			!h.compatHEVCExecutable(r.Context(), source) {
+			// The HEVC target followed HEVC's limits; H.264 has its own.
 			source.TargetVideoCodec = compatTargetVideoCodec
+			source.TargetBitrateKbps, source.TargetResolution = source.h264TargetBitrateKbps, source.h264TargetResolution
 			audioCodec := profile.transcodingOutputAudioCodec(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
 			source.SupportsTranscoding = audioCodec != ""
-			source.TargetAudioCodec = ""
-			if audioCodec != compatTargetAudioCodec {
-				source.TargetAudioCodec = audioCodec
-			}
+			source.TargetAudioCodec = compatStoredAudioCodec(audioCodec)
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
@@ -2557,7 +2556,10 @@ func (h *PlaybackHandler) parsePlaybackRequest(r *http.Request, compatToken stri
 		if err := json.Unmarshal(req.DeviceProfile, &profile); err != nil {
 			return req, DeviceProfile{}, err
 		}
-		if profile.HasData() {
+		// A profile that refuses direct play is a one-off retry (Roku clients
+		// send one after direct play fails). It answers this request only, so
+		// a later request without a profile keeps the device's full one.
+		if profile.HasData() && !profile.refusesDirectPlay() {
 			if err := h.deviceProfiles.PutForDevice(r.Context(), compatToken, compatRequestDeviceID(r), profile); err != nil {
 				return req, profile, err
 			}
@@ -2672,6 +2674,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	_, aacBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
 	targetVideoCodec := compatTargetVideoCodec
 	targetBitrateKbps, targetResolution := compatEncodeTarget(profile, targetVideoCodec, maxBitrate, aacBitrateKbps, sourceVideo)
+	h264BitrateKbps, h264Resolution := targetBitrateKbps, targetResolution
 	encodeAudioCodec := profile.transcodingOutputAudioCodec(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
 	// HEVC needs server opt-in and an explicit compatible HLS fMP4 profile.
 	if len(allowHEVCEncoding) > 0 && allowHEVCEncoding[0] {
@@ -2722,6 +2725,8 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		TargetVideoCodec:           targetVideoCodec,
 		TargetAudioCodec:           compatStoredAudioCodec(targetAudioCodec),
 		encodeAudioCodec:           compatStoredAudioCodec(encodeAudioCodec),
+		h264TargetBitrateKbps:      max(h264BitrateKbps, 0),
+		h264TargetResolution:       h264Resolution,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,

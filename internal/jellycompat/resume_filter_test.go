@@ -323,8 +323,14 @@ type resumeSeriesEpisodeRepo struct {
 	bySeries map[string][]*models.Episode
 }
 
-func (r *resumeSeriesEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {
-	return r.bySeries[seriesID], nil
+func (r *resumeSeriesEpisodeRepo) ListIDsBySeriesIDs(_ context.Context, seriesIDs []string) (map[string][]string, error) {
+	ids := map[string][]string{}
+	for _, seriesID := range seriesIDs {
+		for _, episode := range r.bySeries[seriesID] {
+			ids[seriesID] = append(ids[seriesID], episode.ContentID)
+		}
+	}
+	return ids, nil
 }
 
 // resumableUserData answers ListResumableProgress from a fixed set of
@@ -385,29 +391,5 @@ func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
 	}
 	if got := dtoNames(dtos); len(got) != 0 {
 		t.Fatalf("resume under movie-1 = %v, want none", got)
-	}
-}
-
-func TestProgressItemInParent(t *testing.T) {
-	episode := progressHydratedItem{contentID: "ep-1", target: &compatEpisodeTarget{Item: upstreamListItem{SeriesID: "series-1"}, SeasonID: "season-1"}}
-	movie := progressHydratedItem{contentID: "movie-1"}
-	for _, tc := range []struct {
-		name  string
-		item  progressHydratedItem
-		query itemsQuery
-		want  bool
-	}{
-		{"no parent", movie, itemsQuery{}, true},
-		{"a movie under itself", movie, itemsQuery{parentItemID: "movie-1"}, false},
-		{"an episode under itself", episode, itemsQuery{parentItemID: "ep-1"}, false},
-		{"episode of the series", episode, itemsQuery{parentItemID: "series-1"}, true},
-		{"episode of another series", episode, itemsQuery{parentItemID: "series-2"}, false},
-		{"episode of the season", episode, itemsQuery{parentSeasonID: "season-1"}, true},
-		{"episode of another season", episode, itemsQuery{parentSeasonID: "season-2"}, false},
-		{"movie under a season", movie, itemsQuery{parentSeasonID: "season-1"}, false},
-	} {
-		if got := tc.item.inParent(tc.query); got != tc.want {
-			t.Errorf("%s: inParent = %v, want %v", tc.name, got, tc.want)
-		}
 	}
 }

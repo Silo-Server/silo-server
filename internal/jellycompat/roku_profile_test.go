@@ -413,6 +413,26 @@ func TestRokuRetryWithoutDirectPlayProfilesGetsAnEncode(t *testing.T) {
 	}
 }
 
+// The retry profile answers its own request only. Stored, it would refuse
+// direct play to every later PlaybackInfo the device sends without a profile.
+func TestRokuRetryProfileIsNotStored(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	full := roku1080pProfile(t)
+	retry := full
+	retry.DirectPlayProfiles = nil
+	for _, profile := range []DeviceProfile{full, retry} {
+		body, err := json.Marshal(map[string]any{"DeviceProfile": profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		postPlaybackInfoForDeviceBody(t, handler, routeID, "roku-1", string(body))
+	}
+	stored, ok, err := handler.deviceProfiles.GetForDevice(context.Background(), "token-1", "roku-1")
+	if err != nil || !ok || len(stored.DirectPlayProfiles) == 0 {
+		t.Fatalf("stored profile ok=%v err=%v direct-play profiles=%d, want the full profile kept", ok, err, len(stored.DirectPlayProfiles))
+	}
+}
+
 // Roku clients list AC-3 first for transcoding on every Roku. A device that
 // cannot decode it fails the stream with "unsupported audio format", so when
 // AAC is out, the alternate encode the device declares it decodes comes first.
