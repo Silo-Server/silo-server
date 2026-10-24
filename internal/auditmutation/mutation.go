@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
@@ -199,7 +200,9 @@ func LockActors(ctx context.Context, tx pgx.Tx) error {
 // reaches any log sink. Public endpoints that authenticate through a secret
 // path segment name it with a chi route parameter "token" or "secret"
 // (password reset links, autoscan webhook intake, webhook-sync); logging the
-// raw path would persist the credential.
+// raw path would persist the credential. Chi routes on URL.RawPath when a
+// client percent-encodes the segment, so a parameter can hold the escaped
+// spelling while path is the decoded URL.Path; both spellings are redacted.
 func RedactSecretPath(route *chi.Context, path string) string {
 	if route == nil {
 		return path
@@ -214,6 +217,9 @@ func RedactSecretPath(route *chi.Context, path string) string {
 		value := route.URLParams.Values[i]
 		if value == "" {
 			continue
+		}
+		if decoded, err := url.PathUnescape(value); err == nil && decoded != value {
+			path = strings.Replace(path, "/"+decoded, "/[redacted]", 1)
 		}
 		path = strings.Replace(path, "/"+value, "/[redacted]", 1)
 	}
