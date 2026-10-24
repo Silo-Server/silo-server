@@ -352,20 +352,28 @@ func (u *resumableUserData) ListResumableProgress(_ context.Context, _ *Session,
 	return result, nil
 }
 
-// Resume under a series reads that series' episodes, however much else the
-// profile has watched since, and a movie ParentId lists nothing.
+// Resume under a series reads that series' episodes the viewer can see,
+// however much else the profile has watched since, and a movie ParentId lists
+// nothing.
 func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
 	episodes := []*models.Episode{
 		{ContentID: "ep-1", SeriesID: "series-1", Title: "Episode One", SeasonNumber: 1, EpisodeNumber: 1},
 		{ContentID: "ep-2", SeriesID: "series-1", Title: "Episode Two", SeasonNumber: 1, EpisodeNumber: 2},
+		// Without a pool, visibleEpisodeIDs falls back to live files, so an
+		// episode with none stands in for one the viewer may not see.
+		{ContentID: "ep-hidden", SeriesID: "series-1", Title: "Hidden Episode", SeasonNumber: 1, EpisodeNumber: 3},
 	}
 	episodeRepo := &resumeSeriesEpisodeRepo{
-		countingEpisodeRepo: countingEpisodeRepo{episodesByID: map[string]*models.Episode{"ep-1": episodes[0], "ep-2": episodes[1]}},
-		bySeries:            map[string][]*models.Episode{"series-1": episodes},
+		countingEpisodeRepo: countingEpisodeRepo{
+			episodesByID: map[string]*models.Episode{"ep-1": episodes[0], "ep-2": episodes[1], "ep-hidden": episodes[2]},
+			hasFilesByID: map[string]bool{"ep-1": true, "ep-2": true},
+		},
+		bySeries: map[string][]*models.Episode{"series-1": episodes},
 	}
 	userData := &resumableUserData{inProgress: map[string]upstreamProgress{
-		"ep-2":    {MediaItemID: "ep-2", PositionSeconds: 20, DurationSeconds: 100},
-		"movie-1": {MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
+		"ep-hidden": {MediaItemID: "ep-hidden", PositionSeconds: 30, DurationSeconds: 100},
+		"ep-2":      {MediaItemID: "ep-2", PositionSeconds: 20, DurationSeconds: 100},
+		"movie-1":   {MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
 	}}
 	h := resumeTestHandler(userData, map[string]*models.MediaItem{
 		"series-1": {ContentID: "series-1", Type: "series", Title: "Series One"},
@@ -382,7 +390,7 @@ func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
 		t.Fatalf("resume under series-1 = %v (total %d), want [Episode Two]", got, total)
 	}
 	if fmt.Sprint(userData.asked) != "[ep-1 ep-2]" {
-		t.Fatalf("progress read for %v, want only the series' episodes", userData.asked)
+		t.Fatalf("progress read for %v, want only the series' visible episodes", userData.asked)
 	}
 
 	dtos, _, err = h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "movie-1"}, nil)

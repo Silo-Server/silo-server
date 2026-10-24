@@ -3376,7 +3376,14 @@ func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, q
 	if err != nil {
 		return nil, 0, err
 	}
-	entries, err := h.userData.ListResumableProgress(ctx, session, episodeIDs[parentID])
+	// Hydration checks access on the series only, and a series can span
+	// libraries the viewer may and may not see.
+	visible, err := h.visibleEpisodeIDs(ctx, session, episodeIDs[parentID])
+	if err != nil {
+		return nil, 0, err
+	}
+	visibleIDs := slices.DeleteFunc(episodeIDs[parentID], func(id string) bool { return !visible[id] })
+	entries, err := h.userData.ListResumableProgress(ctx, session, visibleIDs)
 	if err != nil {
 		return nil, 0, err
 	}
