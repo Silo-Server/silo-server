@@ -537,6 +537,10 @@ func dropBlankBody(r *http.Request, limit int64) (bool, error) {
 		r.Header.Del("Content-Type")
 		return true, nil
 	}
+	if r.ContentLength > limit {
+		// Too large to be blank: leave it to the size check unread.
+		return false, nil
+	}
 	head, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return false, err

@@ -44,9 +44,10 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 	if p.playedSince != nil {
 		played, sorted, err = p.client.FetchPlayedSince(ctx, p.auth, *p.playedSince)
 		if err == nil && !sorted {
-			// The server ignored the newest-first sort, so the early stop
-			// could miss recent plays. Read the whole played history instead.
-			slog.WarnContext(ctx, "jellyfin history import: played items not sorted by play date; reading the full played history", "component", "historyimport")
+			// The server ignored the newest-first sort, or the list kept
+			// moving during the read, so the early stop could miss recent
+			// plays. Read the whole played history instead.
+			slog.WarnContext(ctx, "jellyfin history import: played items not newest first or kept moving; reading the full played history", "component", "historyimport")
 			warnings = append(warnings, warnJellyfinLookbackUnsorted)
 		}
 	}

@@ -211,6 +211,49 @@ func TestJellyfinFetchPlayedSince_EarlierDisorderBlocksEarlyStop(t *testing.T) {
 	}
 }
 
+// A play during the read moves an unread item to the top of the list, so the
+// next page repeats the last item read and never returns the moved one. The
+// read starts over and imports it.
+func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
+	t.Parallel()
+
+	since := time.Date(2026, 10, 14, 4, 0, 0, 0, time.UTC)
+	// 300 plays in the window, newest first, then 50 older ones.
+	list := make([]jellyfinItem, 350)
+	for i := range list {
+		list[i] = jellyfinItem{ID: "item-" + strconv.Itoa(i), Type: "Movie", UserData: playedAt(since.Add(time.Duration(300-i)*time.Minute - time.Second))}
+	}
+	firstPages := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
+		end := min(start+jellyfinPageSize, len(list))
+		writeJellyfinItems(t, w, len(list), list[start:end])
+		if start == 0 {
+			firstPages++
+			if firstPages == 1 {
+				// item-250, not read yet, is watched again.
+				moved := list[250]
+				moved.UserData = playedAt(since.Add(time.Hour + time.Minute))
+				list = append([]jellyfinItem{moved}, append(list[:250:250], list[251:]...)...)
+			}
+		}
+	}))
+	defer server.Close()
+
+	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}
+	items, sorted, err := newUnthrottledJellyfinClient().FetchPlayedSince(trustLoopback(context.Background()), auth, since)
+	if err != nil || !sorted {
+		t.Fatalf("FetchPlayedSince: sorted=%v err=%v", sorted, err)
+	}
+	ids := map[string]int{}
+	for _, item := range items {
+		ids[item.ID]++
+	}
+	if len(items) != 300 || len(ids) != 300 || ids["item-250"] != 1 || firstPages != 2 {
+		t.Fatalf("items = %d (%d distinct), item-250 = %d, first-page reads = %d; want all 300 plays once after one restart", len(items), len(ids), ids["item-250"], firstPages)
+	}
+}
+
 // When the server ignores the sort, the lookback run reads the full played
 // history and says so in a run warning, so nothing recent is silently missed.
 // Here the first page holds only older plays, out of order, which would
@@ -219,6 +262,10 @@ func TestJellyfinProviderFetch_UnsortedLookbackFallsBackToFullRead(t *testing.T)
 	t.Parallel()
 
 	since := time.Date(2026, 10, 14, 4, 0, 0, 0, time.UTC)
+	full := []jellyfinItem{
+		{ID: "old", Type: "Movie", ProviderIDs: map[string]string{"Tmdb": "1"}, UserData: playedAt(since.Add(-48 * time.Hour))},
+		{ID: "recent", Type: "Movie", ProviderIDs: map[string]string{"Tmdb": "4"}, UserData: playedAt(since.Add(time.Hour))},
+	}
 	fullReads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -233,10 +280,7 @@ func TestJellyfinProviderFetch_UnsortedLookbackFallsBackToFullRead(t *testing.T)
 			})
 		case r.URL.Path == "/Items" && q.Get("Filters") == "IsPlayed":
 			fullReads++
-			writeJellyfinItems(t, w, 2, []jellyfinItem{
-				{ID: "old", Type: "Movie", ProviderIDs: map[string]string{"Tmdb": "1"}, UserData: playedAt(since.Add(-48 * time.Hour))},
-				{ID: "recent", Type: "Movie", ProviderIDs: map[string]string{"Tmdb": "4"}, UserData: playedAt(since.Add(time.Hour))},
-			})
+			writeJellyfinItems(t, w, 2, full)
 		default:
 			t.Errorf("unexpected request %s?%s", r.URL.Path, r.URL.RawQuery)
 			http.Error(w, "unexpected", http.StatusInternalServerError)
@@ -245,12 +289,22 @@ func TestJellyfinProviderFetch_UnsortedLookbackFallsBackToFullRead(t *testing.T)
 	defer server.Close()
 
 	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}
-	records, warnings, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), auth).WithPlayedSince(&since).Fetch(trustLoopback(context.Background()))
+	ctx := withRunBudget(trustLoopback(context.Background()))
+	records, warnings, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), auth).WithPlayedSince(&since).Fetch(ctx)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if fullReads != 1 || len(records) != 2 {
 		t.Fatalf("full reads = %d, records = %d, want the full played history once", fullReads, len(records))
+	}
+	// The discarded lookback pages must not stay charged on top of the full
+	// read, or a history that fits a full import fails the fallback.
+	var want int64
+	for _, item := range full {
+		want += item.retainedSize()
+	}
+	if got := runBudgetFrom(ctx).retained; got != want {
+		t.Fatalf("retained = %d bytes, want %d for the full read alone", got, want)
 	}
 	if len(warnings) != 1 || PublicWarning(warnings[0]) != jellyfinLookbackUnsortedSummary {
 		t.Fatalf("warnings = %v, want the unsorted-lookback warning", warnings)

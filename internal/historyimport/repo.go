@@ -1196,7 +1196,6 @@ func scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	return finalizeRunScan(&run, warningsJSON, unmatchedJSON)
 }
 
-// scanRunWithMappingID scans a run row that includes the mapping_id column.
 // scanRunWithMappingID reads the shared run columns, then any extra columns a
 // query selects after them into extra.
 func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }, extra ...any) (*Run, error) {

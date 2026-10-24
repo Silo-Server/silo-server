@@ -1562,7 +1562,9 @@ favorites are read in full, an item un-favorited in Silo but still a favorite in
 Jellyfin is favorited again by every run, as a full import already does;
 scheduled lookback runs make that more noticeable. If Jellyfin does not return
 plays newest first, the run reads the full played history instead and records a
-warning saying so. Only Jellyfin sources support it; an Emby or Plex source
+warning saying so. A play during the read can move an unread item ahead of the
+pages already read; the run detects that, reads the window again once, and falls
+back to the full played history if the list moves again. Only Jellyfin sources support it; an Emby or Plex source
 answers 422 `validation_failed`, and a bulk start on one queues nothing. A
 completed lookback run does not update the mapping's `last_imported_at`, which
 records the last completed full import. Run responses carry the cutoff as
