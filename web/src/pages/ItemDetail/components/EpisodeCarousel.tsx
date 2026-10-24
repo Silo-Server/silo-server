@@ -61,7 +61,7 @@ export default function EpisodeCarousel({
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport overflow-hidden py-4 pl-4">
+        <div ref={emblaRef} data-nav-group className="embla__viewport overflow-hidden py-4 pl-4">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {episodes.map((ep) => (
               <EpisodeCarouselCard

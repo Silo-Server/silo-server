@@ -982,7 +982,8 @@ export default function ActionBar({
   return (
     <div className="detail-action-bar space-y-2.5" data-compact-mobile={compactMobile || undefined}>
       {/* ── Primary actions ──────────────────────────────────── */}
-      <div className="detail-primary-actions flex flex-wrap items-center gap-3">
+      {/* A remote arriving on the page starts on Play, not on Back. */}
+      <div data-nav-default className="detail-primary-actions flex flex-wrap items-center gap-3">
         {/* ── Play button ────────────────────────────────────── */}
         {primaryAction ? (
           <PrimaryActionButton action={primaryAction} />
@@ -1153,14 +1154,7 @@ export default function ActionBar({
                   {onRatingChange && (
                     <div className="px-2 py-2" role="group" aria-label="Your rating">
                       <span className="mb-2 block text-sm">Your rating</span>
-                      {/* ArrowUp/ArrowDown keep moving through the menu; only
-                              ArrowLeft/ArrowRight change the rating here. */}
-                      <StarRating
-                        value={rating ?? null}
-                        onChange={onRatingChange}
-                        size={18}
-                        verticalArrows={false}
-                      />
+                      <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
                     </div>
                   )}
                   {hasMainMenuItems && <DetailOverflowSeparator />}

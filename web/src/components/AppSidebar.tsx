@@ -479,6 +479,8 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
     // moving overflow frame that narrows it to the 64px rail. The right border lives on a
     // border box, so the border rides along and lands exactly on the rail edge.
     <aside
+      // Arrowing into the sidebar lands on the current page's entry.
+      data-nav-group
       data-collapsed={railCollapsed ? "true" : undefined}
       className="border-sidebar-border/70 sidebar-surface fixed top-0 bottom-0 left-0 z-40 w-[260px] overflow-hidden border-r"
       onMouseEnter={handleMouseEnter}

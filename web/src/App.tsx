@@ -42,6 +42,7 @@ import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
+import { useRemoteBackKey } from "@/hooks/useRemoteBackKey";
 import Home from "@/pages/Home";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
@@ -214,6 +215,13 @@ function RouteAnnouncer() {
 
 function ScrollRestorationManager() {
   useScrollRestoration();
+  return null;
+}
+
+/** A remote's Back key steps back a page; see `useRemoteBackKey`. */
+function RemoteBackKeyManager() {
+  const { pathname } = useLocation();
+  useRemoteBackKey(!/^\/admin(\/|$)/.test(pathname));
   return null;
 }
 
@@ -865,6 +873,7 @@ function AppShell() {
                       <BandwidthProbePrewarmer />
                       <RealtimeEventChannels />
                       <ScrollRestorationManager />
+                      <RemoteBackKeyManager />
                       <NavigationDirectionManager />
                       <RouteAnnouncer />
                       <QueryCacheManager />
