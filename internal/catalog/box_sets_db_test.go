@@ -197,6 +197,20 @@ func TestBoxSetGroupedBrowseDB(t *testing.T) {
 			t.Fatalf("prefix %q: rows = %v (total %d), want %v", prefix, got, page.Total, want)
 		}
 	}
+	// A query limit with a prefix keeps the first titles of that letter, not
+	// the first titles of the library narrowed to the letter afterwards: the
+	// library's first title is "Alpha Kappa Two", which is not an S.
+	viewer := f.viewer
+	viewer.NamePrefix = "s"
+	limited := f.def(QuerySort{Field: "title", Order: "asc"})
+	limited.Limit = new(1)
+	page, err := grouped.PreviewCursorPage(t.Context(), limited, viewer, 10, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ContentID != f.id("solo") || page.Total != 1 {
+		t.Fatalf("limit 1 under S: rows = %v (total %d), want only %s", page.Items, page.Total, f.id("solo"))
+	}
 }
 
 func TestBoxSetSearchAndSyncDB(t *testing.T) {
