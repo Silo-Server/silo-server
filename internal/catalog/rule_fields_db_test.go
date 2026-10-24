@@ -142,7 +142,7 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 
 	t.Run("show title combines with watched and episode-title exclusions", func(t *testing.T) {
 		batchEquivExec(t, pool, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'other')`, profile+"-other", userID)
-		for i, title := range []string{"Finale", "Return"} {
+		for i, title := range []string{"Finale", "Return", "Unseen", "In progress"} {
 			episodeID := id(fmt.Sprintf("fresh-e%d", i+2))
 			batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1, $2, $2 || '-s1', 1, $3, $4)`, episodeID, id("fresh"), i+2, title)
 			batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1, $2)`, episodeID, shows)
@@ -150,22 +150,37 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			if i == 1 {
 				watcher += "-other"
 			}
-			batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW(), TRUE)`, episodeID+"-history", userID, watcher, episodeID)
+			if i != 2 { // Unseen has no watch history for any profile.
+				batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW(), $5)`, episodeID+"-history", userID, watcher, episodeID, i != 3)
+			}
 		}
-		items, total, err := executor.Preview(ctx, QueryDefinition{
-			MediaScope: "episode",
-			LibraryIDs: []int{shows},
-			Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{
-				{Field: "show_title", Op: "contains", Value: "fresh"},
-				{Field: "watched", Op: "is", Value: true},
-				{Field: "title", Op: "is_not", Value: "Finale"},
-			}}},
-		}.Normalize(), viewer, 50)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := contentIDs(items); !slices.Equal(got, []string{id("fresh-e1")}) || total != 1 {
-			t.Fatalf("watched episodes excluding Finale = %v (total %d)", got, total)
+		for _, tc := range []struct {
+			name    string
+			watched bool
+			want    []string
+		}{
+			{"watched", true, []string{id("fresh-e1")}},
+			{"unwatched", false, []string{id("fresh-e3"), id("fresh-e4"), id("fresh-e5")}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				items, total, err := executor.Preview(ctx, QueryDefinition{
+					MediaScope: "episode",
+					LibraryIDs: []int{shows},
+					Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{
+						{Field: "show_title", Op: "contains", Value: "fresh"},
+						{Field: "watched", Op: "is", Value: tc.watched},
+						{Field: "title", Op: "is_not", Value: "Finale"},
+					}}},
+				}.Normalize(), viewer, 50)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := contentIDs(items)
+				slices.Sort(got)
+				if !slices.Equal(got, tc.want) || total != len(tc.want) {
+					t.Fatalf("episodes excluding Finale = %v (total %d), want %v", got, total, tc.want)
+				}
+			})
 		}
 	})
 
