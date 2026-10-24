@@ -13,6 +13,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useCloseAdminNavTopicsOnExit } from "@/hooks/useAdminNavTopics";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
@@ -30,6 +31,7 @@ export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const location = useLocation();
+  useCloseAdminNavTopicsOnExit();
   const { data: adminInstallations } = useAdminPluginInstallations();
   const policyCapability = usePolicyCapability();
   // The one restart prompt for the admin area. Read here, not in a page: a
