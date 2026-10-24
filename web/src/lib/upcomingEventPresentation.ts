@@ -17,7 +17,8 @@ export function upcomingBadgeLabel(badge: string): string {
     case "series_premiere":
       return "Series Premiere";
     case "season_premiere":
-      return "Season Premiere";
+      // Matches the native apps, which show this badge as NEW SEASON.
+      return "New Season";
     case "finale":
       return "Finale";
     default:
