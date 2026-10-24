@@ -28,6 +28,7 @@ const row: components["schemas"]["AdminSection"] = {
   title: "Saved",
   enabled: false,
   featured: false,
+  web_only: false,
   item_limit: 20,
   config: {
     library_ids: [7],

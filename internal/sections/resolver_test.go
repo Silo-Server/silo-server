@@ -253,3 +253,47 @@ func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
 		}
 	}
 }
+
+// A web-only hero row reaches the web app alone. It goes to every client
+// again while it is not this profile's hero banner: once the profile turns
+// the banner off, or another featured row comes first and takes the banner.
+// A row a profile built itself is never web-only.
+func TestForClientKeepsWebOnlyHeroesOffTheApps(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "hero", Position: 0, SectionType: SectionTrendingDiscover, Title: "Discover", Featured: true, WebOnly: true, ItemLimit: 10, Config: json.RawMessage(`{}`)},
+		{ID: "recent", Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+	}
+	featured, plain := true, false
+	own := ProfileSectionOverride{ID: "own", SectionType: SectionFavorites, Title: "Mine", Featured: &featured, Position: new(2)}
+	ownFirst := own
+	ownFirst.Position = new(-1)
+	ids := func(resolved []ResolvedSection) []string {
+		var out []string
+		for _, s := range resolved {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		overrides []ProfileSectionOverride
+		web, app  []string
+	}{
+		{"admin hero", nil, []string{"hero", "recent"}, []string{"recent"}},
+		{"profile turned the hero off", []ProfileSectionOverride{{SectionID: "hero", Featured: &plain}}, []string{"hero", "recent"}, []string{"hero", "recent"}},
+		{"profile's own hero after it", []ProfileSectionOverride{own}, []string{"hero", "recent", "own"}, []string{"recent", "own"}},
+		{"profile's own hero takes the banner", []ProfileSectionOverride{ownFirst}, []string{"own", "hero", "recent"}, []string{"own", "hero", "recent"}},
+	} {
+		resolved := Resolve(admin, tc.overrides)
+		before := ids(resolved)
+		if got := ids(ForClient(resolved, true)); !slices.Equal(got, tc.web) {
+			t.Errorf("%s: web gets %v, want %v", tc.name, got, tc.web)
+		}
+		if got := ids(ForClient(resolved, false)); !slices.Equal(got, tc.app) {
+			t.Errorf("%s: apps get %v, want %v", tc.name, got, tc.app)
+		}
+		if !slices.Equal(ids(resolved), before) {
+			t.Errorf("%s: ForClient changed its input", tc.name)
+		}
+	}
+}

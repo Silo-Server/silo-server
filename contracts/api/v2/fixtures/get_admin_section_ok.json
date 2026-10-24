@@ -9,6 +9,7 @@
   "item_limit": 20,
   "config": {},
   "enabled": false,
+  "web_only": false,
   "created_at": "2026-01-02T03:04:05.000Z",
   "updated_at": "2026-01-02T03:04:05.000Z"
 }

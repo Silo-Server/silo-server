@@ -31,6 +31,7 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	resolved = sections.ForClient(resolved, viewer.Web)
 	resolvedAt := time.Now()
 	userID := apimw.GetUserID(ctx)
 	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
@@ -82,6 +83,8 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	// A row the viewer's client does not receive is not found.
+	resolved = sections.ForClient(resolved, viewer.Web)
 	userID := apimw.GetUserID(ctx)
 	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
 	hideWatched := h.homeHidesWatchedItems(ctx)
@@ -176,6 +179,7 @@ func (h *SectionHandler) homeLayoutWithItems(ctx context.Context, viewer Section
 	if err != nil {
 		return HomeLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	resolved = sections.ForClient(resolved, viewer.Web)
 	userID := apimw.GetUserID(ctx)
 	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
 	view := HomeLayoutView{Layout: sectionLayoutOf(resolved), IncludedSections: []SectionView{}}

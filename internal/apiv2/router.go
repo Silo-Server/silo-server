@@ -972,7 +972,7 @@ type LibraryAdminService interface {
 // LibrarySectionService is the slice of *handlers.SectionHandler the
 // viewer-facing library section reads use.
 type LibrarySectionService interface {
-	LibraryLayout(ctx context.Context, libraryID int) (handlers.SectionLayoutView, error)
+	LibraryLayout(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionLayoutView, error)
 	LibrarySections(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionsView, error)
 	LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
 }
