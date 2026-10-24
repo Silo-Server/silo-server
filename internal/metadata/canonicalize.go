@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
@@ -163,6 +164,12 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 		}
 		sources = append(sources, childSources...)
 		targets = append(targets, childTargets...)
+	}
+	// The rename drops a source cutoff row that collides with a leftover one
+	// on the new id, and the source's history moves either way, so merge the
+	// cutoffs first or an unmarked play would count as watched again.
+	if _, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, sources, targets); err != nil {
+		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
 	}
 	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, targets); err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)

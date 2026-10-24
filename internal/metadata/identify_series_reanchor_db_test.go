@@ -384,3 +384,69 @@ func TestRenameContentIDsMergesLeftoverAvailability(t *testing.T) {
 		t.Errorf("movie availability = %d rows at %v, want 1 at %v", movies, movieAt, early)
 	}
 }
+
+// A rename onto an id that still holds an older history cutoff keeps the
+// source's later unmark. The rename drops the colliding source cutoff row
+// while the kept play moves, so without the merge the play would count as
+// watched again.
+func TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	items := catalog.NewItemRepository(pool)
+	service := NewMetadataService(nil, nil, nil, items, catalog.NewProviderIDRepository(pool),
+		catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
+		catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
+		nil, nil, nil, nil, nil)
+
+	nonce := time.Now().UnixNano() % 100_000_000
+	from, to := fmt.Sprintf("local-%028d", nonce), fmt.Sprintf("movie-tmdb-%d", 720_000_000+nonce)
+	const profileID = "00000000-0000-4000-8000-000000000001"
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("rename-cutoff-%d", nonce)).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM user_watch_history WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM user_history_hidden_items WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	if err := items.Upsert(ctx, &models.MediaItem{
+		ContentID: from, Type: "movie", Title: "Film", Status: "matched", DefaultMetadataLanguage: "en",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	leftover := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	played := leftover.Add(24 * time.Hour)
+	unmarked := played.Add(time.Hour)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source)
+		VALUES ($1, $2, $3, $4, $5, 0, TRUE, 'manual')`,
+		fmt.Sprintf("rename-cutoff-play-%d", nonce), userID, profileID, from, played); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
+		VALUES ($1, $2, $3, $5, '-infinity', $5), ($1, $2, $4, $6, NULL, $6)`,
+		userID, profileID, from, to, unmarked, leftover); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.renameContentID(ctx, from, to, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var counted int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM user_watch_history h
+		WHERE h.user_id = $1 AND h.media_item_id = $2 AND `+catalog.HistoryCountsAsWatchedSQL("h"),
+		userID, to).Scan(&counted); err != nil {
+		t.Fatal(err)
+	}
+	if counted != 0 {
+		t.Fatalf("%d plays on %s count as watched after the rename, want 0: the unmark was lost", counted, to)
+	}
+}

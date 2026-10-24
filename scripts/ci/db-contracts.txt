@@ -238,6 +238,7 @@
 ./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
 ./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
+./internal/metadata TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase

@@ -410,7 +410,7 @@ func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, key
 	merged := 0
 	if table == historyCutoffTable {
 		var err error
-		if merged, err = mergeHistoryCutoffPairs(ctx, tx, fromIDs, toIDs); err != nil {
+		if merged, err = MergeHistoryCutoffPairs(ctx, tx, fromIDs, toIDs); err != nil {
 			return 0, err
 		}
 	}
@@ -438,14 +438,14 @@ func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, key
 
 const historyCutoffTable = "user_history_hidden_items"
 
-// mergeHistoryCutoffPairs raises a destination's watched-state cutoff to its
+// MergeHistoryCutoffPairs raises a destination's watched-state cutoff to its
 // source's before the source row is dropped. History moves with its item, and
 // a mark unwatched keeps plays in history, so a destination that kept only its
 // own older cutoff would count the source's unmarked plays as watched. The
 // listing cutoff stays the destination's: a history removal already deleted
 // the source's plays behind it. It reports how many destination rows it
 // raised, since a raised cutoff changes what the profile has watched.
-func mergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) (int, error) {
+func MergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) (int, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE user_history_hidden_items dest
 		SET hidden_before = GREATEST(dest.hidden_before, src.hidden_before),
@@ -617,7 +617,7 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 	if opts.Mode == HistoryModeEvidence {
 		// The source item keeps its cutoffs for the profiles whose history
 		// stays; a profile whose history moves takes its watched-state cutoff
-		// along, as in mergeHistoryCutoffPairs.
+		// along, as in MergeHistoryCutoffPairs.
 		carried, err := tx.Exec(ctx, evidenceCTE+`
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
 			SELECT hhi.user_id, hhi.profile_id, $3, hhi.hidden_before, '-infinity', hhi.updated_at
