@@ -410,7 +410,8 @@ describe("CandidateStage", () => {
     const { onDismiss } = renderCandidate({
       card: { content_id: "arrival", type: "movie", title: "Arrival" },
     });
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Claimed, so the app's Back key does not also leave the room.
+    expect(fireEvent.keyDown(document.body, { key: "Escape" })).toBe(false);
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

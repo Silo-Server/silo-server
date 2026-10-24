@@ -39,7 +39,7 @@ export default function TrailersSection({ videos }: TrailersSectionProps) {
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport -mt-1 overflow-hidden pt-1">
+        <div ref={emblaRef} data-nav-group className="embla__viewport -mt-1 overflow-hidden pt-1">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {playable.map((video) => (
               <li key={`${video.site}-${video.site_key}`} className="embla__slide shrink-0">
