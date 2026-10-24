@@ -72,7 +72,12 @@ func TestEpisodeCatalogCountsMatchCursorPagesPostgres(t *testing.T) {
 			if tc.access != nil {
 				access = tc.access(access)
 			}
-			for _, sort := range []QuerySort{{}, {Field: "added_at", Order: "desc"}} {
+			for _, sort := range []QuerySort{
+				{Field: "added_at", Order: "desc"},
+				{Field: "title", Order: "asc"},
+				{Field: "release_date", Order: "desc"},
+				{Field: "last_air_date", Order: "asc"},
+			} {
 				def.Sort = sort
 				checkEpisodeCountPaths(t, &QueryExecutor{Pool: pool, Scope: "episode"}, def, access, tc.want)
 			}
@@ -141,19 +146,22 @@ func seedEpisodeCountLibrary(t *testing.T, pool *pgxpool.Pool) episodeCountLibra
 	for i, episode := range []struct {
 		series, title string
 		alsoDisabled  bool
+		// Air dates tie within and across series, and some are missing, so
+		// the air-date sorts reach their tie-breakers and NULL ordering.
+		airDate *string
 	}{
-		{alpha, "apple", false},
-		{alpha, "banana", false},
-		{alpha, "cherry", false},
-		{alpha, "date", false},
-		{alpha, "eggplant", false},
-		{bravo, "fig", false},
-		{bravo, "grape", false},
-		{bravo, "apricot", true},
-		{charlie, "kiwi", false},
-		{podcast, "avocado", false},
+		{alpha, "apple", false, new("2026-01-01")},
+		{alpha, "banana", false, new("2026-01-01")},
+		{alpha, "cherry", false, new("2026-02-01")},
+		{alpha, "date", false, nil},
+		{alpha, "eggplant", false, new("2026-02-01")},
+		{bravo, "fig", false, new("2026-01-01")},
+		{bravo, "grape", false, nil},
+		{bravo, "apricot", true, new("2026-03-01")},
+		{charlie, "kiwi", false, new("2026-01-01")},
+		{podcast, "avocado", false, nil},
 	} {
-		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,$3,$4)`, id(episode.title), episode.series, i+1, episode.title); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,air_date) VALUES($1,$2,1,$3,$4,$5::date)`, id(episode.title), episode.series, i+1, episode.title, episode.airDate); err != nil {
 			t.Fatal(err)
 		}
 		libraries := []int{library}
