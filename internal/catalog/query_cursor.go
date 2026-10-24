@@ -173,10 +173,11 @@ func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (stri
 	return seek, args, nil
 }
 
-// PreviewCursorPage uses a SQL keyset, including the identity tie breaker. It
-// intentionally uses the general episode relation until optimized projections
-// expose exactly the same typed tuple. Page rows and optional count share one
-// database snapshot; later pages observe live updates, not a retained snapshot.
+// PreviewCursorPage uses a SQL keyset, including the identity tie breaker. Its
+// rows intentionally use the general episode relation until optimized
+// projections expose exactly the same typed tuple; its total is Count's. Page
+// rows and optional count share one database snapshot; later pages observe
+// live updates, not a retained snapshot.
 func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefinition, access AccessFilter, limit int, after *QueryCursor, includeTotal bool) (QueryCursorPage, error) {
 	if e == nil || e.Pool == nil {
 		return QueryCursorPage{}, fmt.Errorf("query executor requires a database pool")
@@ -240,10 +241,10 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 		}
 	}
 	if includeTotal {
-		if def.Limit != nil && !e.GroupByWork {
-			plan.maxResults = *def.Limit
+		countSQL, countArgs, err := e.buildCountQuery(def, access)
+		if err != nil {
+			return QueryCursorPage{}, err
 		}
-		countSQL, countArgs := plan.countSQL()
 		if err := tx.QueryRow(ctx, countSQL, countArgs...).Scan(&result.Total); err != nil {
 			return QueryCursorPage{}, fmt.Errorf("counting cursor page: %w", err)
 		}
