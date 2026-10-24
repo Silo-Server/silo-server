@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
@@ -191,5 +192,6 @@ func BuildAutoscanService(
 		autoscan.NewArrRootFolderClient(nil),
 		autoscan.NewCatalogFolderLister(folderRepo),
 	)
+	svc.SetRemovalConfirmer(scanner.NewFileRepository(folderRepo.Pool()))
 	return svc
 }

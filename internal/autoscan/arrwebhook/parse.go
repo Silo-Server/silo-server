@@ -70,6 +70,10 @@ type payload struct {
 	// upgrade" notification is not enabled in arr.
 	DeletedFiles    []fileRef       `json:"-"`
 	DeletedFilesRaw json.RawMessage `json:"deletedFiles"`
+
+	// DeleteReason says why a file-delete event's file was removed. Raw so an
+	// unexpected non-string value only loses the reason, not the delivery.
+	DeleteReason json.RawMessage `json:"deleteReason"`
 }
 
 // folderDeleteEventTypes send deletedFiles as a bool (whether arr deleted the
@@ -114,6 +118,25 @@ var deleteEventTypes = map[string]bool{
 	"MovieFileDelete":   true,
 }
 
+// arrDeleteReasons are the file-delete reasons where arr removed the file
+// itself. MissingFromDisk only reports a file arr found already gone, which
+// is exactly what a lost mount looks like, so it keeps the removal grace.
+var arrDeleteReasons = map[string]bool{
+	"upgrade":        true,
+	"manual":         true,
+	"manualoverride": true,
+}
+
+// arrDeletedFile reports whether a file-delete reason says arr removed the
+// file itself.
+func arrDeletedFile(raw json.RawMessage) bool {
+	var reason string
+	if err := json.Unmarshal(raw, &reason); err != nil {
+		return false
+	}
+	return arrDeleteReasons[strings.ToLower(strings.TrimSpace(reason))]
+}
+
 // Parse classifies a webhook body. provider is "sonarr", "radarr", or "auto"
 // (empty means auto); in auto mode the provider is inferred from the payload's
 // series/movie shape. Inference failure is an error only for non-test events
@@ -141,14 +164,14 @@ func Parse(provider string, body []byte) (ParsedWebhook, error) {
 
 	switch {
 	case importEventTypes[eventType]:
-		out.Changes = filePaths(p, false)
+		out.Changes = filePaths(p, false, false)
 		if len(out.Changes) == 0 {
 			out.Changes = subtreeFallback(p)
 		}
 	case eventType == "Rename":
-		out.Changes = filePaths(p, true)
+		out.Changes = filePaths(p, true, false)
 	case deleteEventTypes[eventType]:
-		out.Changes = filePaths(p, false)
+		out.Changes = filePaths(p, false, arrDeletedFile(p.DeleteReason))
 	default:
 		// Unsupported event type: valid delivery, nothing to do.
 		return out, nil
@@ -181,8 +204,11 @@ func resolveProvider(provider string, p payload) string {
 // filePaths collects every file path in the payload as file-scope changes,
 // deduped in order. includePrevious additionally collects previousPath values
 // (rename events): the previous path may no longer exist, which the host's
-// resolve pipeline already handles via its vanished-path fallback.
-func filePaths(p payload, includePrevious bool) []autoscan.Change {
+// resolve pipeline already handles via its vanished-path fallback. removed
+// marks the event's own files as deleted by arr (file-delete events). Files
+// an import replaced (deletedFiles) are always marked removed, unless the
+// import reused the same path, which then holds the new file.
+func filePaths(p payload, includePrevious, removed bool) []autoscan.Change {
 	var refs []fileRef
 	if p.EpisodeFile != nil {
 		refs = append(refs, *p.EpisodeFile)
@@ -194,11 +220,10 @@ func filePaths(p payload, includePrevious bool) []autoscan.Change {
 	}
 	refs = append(refs, p.MovieFiles...)
 	refs = append(refs, p.RenamedMovieFiles...)
-	refs = append(refs, p.DeletedFiles...)
 
 	seen := make(map[string]struct{})
 	var changes []autoscan.Change
-	add := func(path string) {
+	add := func(path string, removed bool) {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			return
@@ -207,13 +232,16 @@ func filePaths(p payload, includePrevious bool) []autoscan.Change {
 			return
 		}
 		seen[path] = struct{}{}
-		changes = append(changes, autoscan.Change{SourcePath: path, Scope: autoscan.ChangeScopeFile})
+		changes = append(changes, autoscan.Change{SourcePath: path, Scope: autoscan.ChangeScopeFile, Removed: removed})
 	}
 	for _, ref := range refs {
-		add(ref.Path)
+		add(ref.Path, removed)
 		if includePrevious {
-			add(ref.PreviousPath)
+			add(ref.PreviousPath, false)
 		}
+	}
+	for _, ref := range p.DeletedFiles {
+		add(ref.Path, true)
 	}
 	return changes
 }
