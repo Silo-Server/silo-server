@@ -33,6 +33,9 @@ vi.mock("@/hooks/queries/catalog", () => ({
 vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
+vi.mock("@/hooks/queries/boxSets", () => ({
+  useBoxSetSearch: () => ({ data: [] }),
+}));
 vi.mock("@/hooks/useCanRequest", () => ({
   useCanRequest: () => ({ discoveryEnabled: false, isResolving: false }),
 }));
