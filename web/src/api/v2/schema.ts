@@ -21931,7 +21931,10 @@ export interface components {
     };
     CatalogBoxSet: {
       backdrop_thumbhash?: string;
-      /** @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none */
+      /**
+       * Format: uri-reference
+       * @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
       backdrop_url?: string;
       /**
        * Format: int64
@@ -21969,14 +21972,20 @@ export interface components {
        */
       played_count: number;
       poster_thumbhash?: string;
-      /** @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none */
+      /**
+       * Format: uri-reference
+       * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
       poster_url?: string;
       /** @example Harry Potter Collection */
       title: string;
     };
     CatalogBoxSetDetail: {
       backdrop_thumbhash?: string;
-      /** @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none */
+      /**
+       * Format: uri-reference
+       * @description The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
       backdrop_url?: string;
       /**
        * Format: int64
@@ -22016,7 +22025,10 @@ export interface components {
        */
       played_count: number;
       poster_thumbhash?: string;
-      /** @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none */
+      /**
+       * Format: uri-reference
+       * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
+       */
       poster_url?: string;
       /** @example Harry Potter Collection */
       title: string;

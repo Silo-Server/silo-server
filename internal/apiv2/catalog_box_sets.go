@@ -36,9 +36,9 @@ type CatalogBoxSet struct {
 	LibraryID         ID     `json:"library_id" doc:"The library whose movies make up the box set; pass it to getCatalogBoxSet" example:"1"`
 	Title             string `json:"title" example:"Harry Potter Collection"`
 	Overview          string `json:"overview,omitempty"`
-	PosterURL         string `json:"poster_url,omitempty" doc:"The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none"`
+	PosterURL         string `json:"poster_url,omitempty" format:"uri-reference" doc:"The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none"`
 	PosterThumbhash   string `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string `json:"backdrop_url,omitempty" doc:"The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none"`
+	BackdropURL       string `json:"backdrop_url,omitempty" format:"uri-reference" doc:"The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none"`
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	MovieCount        int    `json:"movie_count" doc:"The collection's movies in the library that the viewer can see" example:"8"`
 	PlayedCount       int    `json:"played_count" doc:"How many of those movies the profile has played" example:"5"`
