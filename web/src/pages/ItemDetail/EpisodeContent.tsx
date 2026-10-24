@@ -4,6 +4,7 @@ import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
+import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useAuth } from "@/hooks/useAuth";
@@ -133,8 +134,8 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     },
     [selectedVersion?.file_id],
   );
-  const [audioSelectionMode, setAudioSelectionMode] = useState<"auto" | "explicit">("auto");
-  const [explicitAudioTrackIndex, setExplicitAudioTrackIndex] = useState<number | null>(null);
+  const audioSelection = usePrePlayAudioSelection(item.content_id, item.series_id, selectedVersion);
+  const clearAudioSelection = audioSelection.clear;
   const [subtitleSelectionMode, setSubtitleSelectionMode] = useState<"auto" | "off" | "explicit">(
     "auto",
   );
@@ -146,29 +147,20 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
 
-  const handleSelectVersion = useCallback((version: FileVersion) => {
-    setManualSelectedFileId(version.file_id);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
-  }, []);
-
-  const handleSelectAudioTrack = useCallback((trackIndex: number) => {
-    setAudioSelectionMode("explicit");
-    setExplicitAudioTrackIndex(trackIndex);
-  }, []);
-
-  const handleResetAudioSelection = useCallback(() => {
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-  }, []);
+  const handleSelectVersion = useCallback(
+    (version: FileVersion) => {
+      setManualSelectedFileId(version.file_id);
+      // Track indexes belong to a file, so another version starts from Auto.
+      clearAudioSelection();
+      setSubtitleSelectionMode("auto");
+      setExplicitSubtitleSelection(null);
+    },
+    [clearAudioSelection],
+  );
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
@@ -409,10 +401,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                 (item.versions?.length ?? 0) > 0 ? () => setSubtitleSearchOpen(true) : undefined
               }
               qualityPreference={qualityPreference}
-              audioSelectionMode={audioSelectionMode}
-              explicitAudioTrackIndex={explicitAudioTrackIndex}
-              onSelectAudioTrack={handleSelectAudioTrack}
-              onResetAudioSelection={handleResetAudioSelection}
+              audioSelectionMode={audioSelection.mode}
+              explicitAudioTrackIndex={audioSelection.explicitIndex}
+              onSelectAudioTrack={audioSelection.select}
+              onResetAudioSelection={audioSelection.reset}
               prePlaySubtitleMode={subtitleSelectionMode}
               explicitSubtitleSelection={explicitSubtitleSelection}
               onSelectSubtitle={handleSelectSubtitle}

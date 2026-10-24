@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
+import { settleTrackPreferenceWrites } from "../utils/trackPreferenceWrites";
 import { playbackStartEnded } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import {
@@ -590,6 +591,8 @@ export function usePlaybackSession(
     retireSessionOnRefusal: boolean;
     resolve: (adopted: boolean) => void;
     planId: string;
+    /** The file the queued request's track ordinals index into. */
+    mediaFileId: number;
     onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
@@ -882,6 +885,9 @@ export function usePlaybackSession(
         clientPlaybackContext,
       });
 
+      // The server resolves this start's tracks from the saved series
+      // choices, so a pick or an Auto made just before Play has to land first.
+      await settleTrackPreferenceWrites();
       return await startPlaybackV2(config, body);
     },
     [
@@ -1341,6 +1347,7 @@ export function usePlaybackSession(
               retireSessionOnRefusal,
               resolve,
               planId: plan.plan_id,
+              mediaFileId: plan.effective_media_file_id,
               onAdopt,
             };
           });
@@ -1522,7 +1529,15 @@ export function usePlaybackSession(
             pendingReplan.options.operation !== "seek_failure_recovery"
               ? true
               : pendingReplan.planId === planRef.current?.plan_id;
-          if (recoveryAppliesToCurrentPlan) {
+          // An audio pick names its track by its index in the file it was
+          // made on. Once a replan has moved to another file (a quality change
+          // to another version), that index means some other track there, so
+          // the pick is dropped rather than replayed; the saved series choice
+          // still applies from the next start.
+          const audioPickAppliesToCurrentFile =
+            pendingReplan.options.audio === undefined ||
+            pendingReplan.mediaFileId === planRef.current?.effective_media_file_id;
+          if (recoveryAppliesToCurrentPlan && audioPickAppliesToCurrentFile) {
             // A capability change can queue behind a replan created by an older
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.

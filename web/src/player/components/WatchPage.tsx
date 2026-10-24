@@ -14,10 +14,13 @@ import {
   buildSubtitleChoiceRequests,
   sendSubtitleChoiceRequest,
 } from "../utils/subtitleChoicePersistence";
+import { buildAudioPreferenceBody, sendAudioChoiceRequest } from "../utils/audioChoicePersistence";
+import { runTrackPreferenceWrite } from "../utils/trackPreferenceWrites";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
+import { invalidateItemDetails } from "@/hooks/queries/trackPreferences";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
 import { toast } from "sonner";
@@ -372,11 +375,29 @@ function WatchPagePlayer({
     });
   }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
 
+  /**
+   * A viewer's audio pick from the player menu: switch tracks now, and save the
+   * pick for the whole series as the item page does. The track saved is the
+   * one in the file playing, since indexes belong to a file. Nothing else
+   * calls this, so restores, reconnects, and server replans never save one.
+   */
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {
       session.switchAudioTrack(index, currentPosition);
+      const track = audioTracks[index];
+      if (!track) return;
+      sendAudioChoiceRequest(
+        config,
+        seriesContext?.seriesId ?? contentId,
+        buildAudioPreferenceBody(index, track),
+      ).then(
+        () => invalidateItemDetails(queryClient),
+        (err: unknown) => {
+          toast.error(err instanceof Error ? err.message : "Failed to save audio preference");
+        },
+      );
     },
-    [session],
+    [audioTracks, config, contentId, queryClient, seriesContext, session],
   );
 
   const updatePlaybackState = session.updatePlaybackState;
@@ -399,17 +420,20 @@ function WatchPagePlayer({
    */
   const handleSubtitleChanged = useCallback(
     (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
+      const seriesId = seriesContext?.seriesId ?? contentId;
       const requests = buildSubtitleChoiceRequests({
-        seriesId: seriesContext?.seriesId ?? contentId,
+        seriesId,
         index,
         tracks: playableSubtitles,
         inventoryTrack,
       });
-      for (const request of requests) {
-        void sendSubtitleChoiceRequest(config, request).catch(() => {
-          // Best effort.
-        });
-      }
+      if (requests.length === 0) return;
+      // Best effort, but after any earlier pick for the series has landed.
+      void runTrackPreferenceWrite(
+        { profileId: config.getProfileId() ?? "", dimension: "subtitle", targetId: seriesId },
+        () =>
+          Promise.allSettled(requests.map((request) => sendSubtitleChoiceRequest(config, request))),
+      );
     },
     [config, seriesContext, contentId, playableSubtitles],
   );

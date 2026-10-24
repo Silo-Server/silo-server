@@ -7,6 +7,7 @@ import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
+import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -134,8 +135,12 @@ export default function MovieContent({
     },
     [selectedVersion?.file_id],
   );
-  const [audioSelectionMode, setAudioSelectionMode] = useState<"auto" | "explicit">("auto");
-  const [explicitAudioTrackIndex, setExplicitAudioTrackIndex] = useState<number | null>(null);
+  const audioSelection = usePrePlayAudioSelection(
+    item.content_id,
+    item.content_id,
+    selectedVersion,
+  );
+  const clearAudioSelection = audioSelection.clear;
   const [subtitleSelectionMode, setSubtitleSelectionMode] = useState<"auto" | "off" | "explicit">(
     "auto",
   );
@@ -147,28 +152,19 @@ export default function MovieContent({
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
-  const handleSelectVersion = useCallback((version: FileVersion) => {
-    setManualSelectedFileId(version.file_id);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
-  }, []);
-
-  const handleSelectAudioTrack = useCallback((trackIndex: number) => {
-    setAudioSelectionMode("explicit");
-    setExplicitAudioTrackIndex(trackIndex);
-  }, []);
-
-  const handleResetAudioSelection = useCallback(() => {
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-  }, []);
+  const handleSelectVersion = useCallback(
+    (version: FileVersion) => {
+      setManualSelectedFileId(version.file_id);
+      // Track indexes belong to a file, so another version starts from Auto.
+      clearAudioSelection();
+      setSubtitleSelectionMode("auto");
+      setExplicitSubtitleSelection(null);
+    },
+    [clearAudioSelection],
+  );
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
@@ -348,10 +344,10 @@ export default function MovieContent({
                 item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
               }
               qualityPreference={qualityPreference}
-              audioSelectionMode={audioSelectionMode}
-              explicitAudioTrackIndex={explicitAudioTrackIndex}
-              onSelectAudioTrack={handleSelectAudioTrack}
-              onResetAudioSelection={handleResetAudioSelection}
+              audioSelectionMode={audioSelection.mode}
+              explicitAudioTrackIndex={audioSelection.explicitIndex}
+              onSelectAudioTrack={audioSelection.select}
+              onResetAudioSelection={audioSelection.reset}
               prePlaySubtitleMode={subtitleSelectionMode}
               explicitSubtitleSelection={explicitSubtitleSelection}
               onSelectSubtitle={handleSelectSubtitle}
