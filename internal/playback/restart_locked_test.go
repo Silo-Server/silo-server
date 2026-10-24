@@ -202,6 +202,26 @@ func TestRestartSessionLocked_ConcurrentRestartsSerialize(t *testing.T) {
 	}
 }
 
+// A segment request can wait on the lifecycle lock behind another restart and
+// be abandoned there when the player seeks again. Once it gets the lock it must
+// not restart FFmpeg for a position nobody is waiting on.
+func TestRestartSegmentLocked_SkipsRequestThatEnded(t *testing.T) {
+	m := NewTranscodeManager()
+	s := newFakeFFmpegSession(t)
+	const sid = "sess-x"
+	m.RegisterTranscodeSession(sid, s)
+	t.Cleanup(func() { _ = s.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := m.RestartSegmentLocked(ctx, sid, s, 40); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RestartSegmentLocked error = %v, want context.Canceled", err)
+	}
+	if s.IsRunning() {
+		t.Fatal("restarted FFmpeg for a request that had ended")
+	}
+}
+
 // A restart whose session was torn down (or replaced by a reconstruct winner)
 // while it waited must not re-spawn ffmpeg for the stale handle.
 func TestRestartSessionLocked_SupersededWhenUnregistered(t *testing.T) {
