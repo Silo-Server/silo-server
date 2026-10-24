@@ -98,7 +98,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "en",
       subtitleMode: "always",
       showForcedSubtitles: true,
-      profileLanguage: "en",
     });
   });
 
@@ -128,7 +127,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "fr",
       subtitleMode: "off",
       showForcedSubtitles: false,
-      profileLanguage: "en",
       introSkipMode: "ask",
     });
     expect(props.versions[0]?.effective_audio_language).toBe("ja");
@@ -158,7 +156,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "",
       subtitleMode: "auto",
       showForcedSubtitles: false,
-      profileLanguage: "en",
     });
   });
 

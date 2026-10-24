@@ -295,7 +295,6 @@ interface VideoPlayerProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
   /**
    * null means the connected server's answer is not in yet, which is not the
@@ -515,7 +514,6 @@ export function VideoPlayer({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
   intro,
   introSkipMode = "ask",
   bufferingMode = "always",
@@ -3822,7 +3820,6 @@ export function VideoPlayer({
       preferredLanguage: preferredSubtitleLanguage ?? null,
       preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
       audioLanguage: audioLang,
-      profileLanguage: profileLanguage ?? null,
       showForcedSubtitles: showForcedSubtitles ?? true,
     });
 
@@ -3840,7 +3837,6 @@ export function VideoPlayer({
     effectiveSubtitleTracks,
     subtitleMode,
     showForcedSubtitles,
-    profileLanguage,
     audioTracks,
     activeAudioIndex,
     selectedVersion,

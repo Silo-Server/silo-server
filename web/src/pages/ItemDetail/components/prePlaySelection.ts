@@ -247,7 +247,6 @@ export function resolveAutoSubtitleSelection(options: {
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
   audioLanguage?: string | null;
-  profileLanguage?: string | null;
 }): PrePlaySubtitleCandidate | null {
   const {
     candidates,
@@ -256,7 +255,6 @@ export function resolveAutoSubtitleSelection(options: {
     subtitleMode,
     showForcedSubtitles = true,
     audioLanguage,
-    profileLanguage,
   } = options;
 
   if (candidates.length === 0) {
@@ -280,7 +278,6 @@ export function resolveAutoSubtitleSelection(options: {
     preferredLanguage: preferredSubtitleLanguage ?? null,
     preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
     audioLanguage: audioLanguage ?? null,
-    profileLanguage: profileLanguage ?? null,
     showForcedSubtitles,
   });
 

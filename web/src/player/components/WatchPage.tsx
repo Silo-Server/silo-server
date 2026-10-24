@@ -166,7 +166,6 @@ function WatchPagePlayer({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
   introSkipMode,
   bufferingMode = "always",
   autoSkipRecap,
@@ -712,7 +711,6 @@ function WatchPagePlayer({
       preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
       subtitleMode={session.initialSubtitleError ? "off" : subtitleMode}
       showForcedSubtitles={session.initialSubtitleError ? false : showForcedSubtitles}
-      profileLanguage={profileLanguage}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
       bufferingMode={bufferingMode}
