@@ -142,8 +142,9 @@ func sameSourceSubtitleIndexV3(want playback.DesiredSubtitleTrackV3, target *mod
 		}
 	case playback.SubtitleSourceDownloadedV3:
 		for i, track := range downloaded {
-			if strings.EqualFold(track.Language, want.Language) && strings.EqualFold(string(track.Format), want.Format) &&
-				(want.ReleaseName == "" || strings.EqualFold(track.ReleaseName, want.ReleaseName)) {
+			// The release names the cut a downloaded subtitle was timed for;
+			// another release in the same language may play out of sync.
+			if strings.EqualFold(track.Language, want.Language) && strings.EqualFold(string(track.Format), want.Format) && strings.EqualFold(track.ReleaseName, want.ReleaseName) {
 				return externals + embedded + i, true
 			}
 		}
@@ -164,6 +165,11 @@ func (h *PlaybackHandler) applyDesiredTracksV3(ctx context.Context, desired *pla
 		index := desired.Audio.ResolveOn(target)
 		request.AudioTrackIndex = &index
 		request.AudioTrackID = playback.TrackIDV3(target.ID, "audio", index)
+	} else {
+		// An identity from another file would be refused on target; with
+		// nothing to resolve, target plays its default track.
+		request.AudioTrackIndex = nil
+		request.AudioTrackID = ""
 	}
 	request.SubtitleTrackIndex = nil
 	request.SubtitleTrackID = ""
@@ -180,6 +186,15 @@ func (h *PlaybackHandler) applyDesiredTracksV3(ctx context.Context, desired *pla
 	request.SubtitleTrackIndex = &index
 	request.SubtitleTrackID = playback.TrackIDV3(target.ID, "subtitle", index)
 	return false, nil
+}
+
+// requestAudioIndexV3 is the audio ordinal request selects on file, after
+// applyDesiredTracksV3 pointed it there: its index, or file's default track.
+func requestAudioIndexV3(file *models.MediaFile, request playback.StartRequestV3) int {
+	if request.AudioTrackIndex == nil {
+		return normalizeAudioTrackIndex(file, -1)
+	}
+	return normalizeAudioTrackIndex(file, *request.AudioTrackIndex)
 }
 
 // trackIdentityIndexV3 is the ordinal identity names on file, or -1 when it
@@ -228,6 +243,18 @@ func (h *PlaybackHandler) startDesiredTracksV3(ctx context.Context, requestedFil
 		return desired
 	}
 	subtitle, err := h.desiredSubtitleFromFileV3(ctx, subtitleFile, subtitleIndex)
+	if err != nil && subtitleFile != effectiveFile {
+		// The requested file's downloaded subtitles are unreadable; keep the
+		// subtitle the plan selected on the effective file instead.
+		slog.WarnContext(ctx, "protocol v3 start: requested subtitle snapshot unavailable", logComponentKey, playbackLogValueV3, "error", err)
+		subtitleIndex = trackIdentityIndexV3(plan.SelectedTracks.Subtitle, effectiveFile, "subtitle")
+		subtitle = plannedDownloadedSubtitleV3(effectiveFile, subtitleIndex, effectiveFile, plan, recipe)
+		if subtitle == nil {
+			subtitle, err = h.desiredSubtitleFromFileV3(ctx, effectiveFile, subtitleIndex)
+		} else {
+			err = nil
+		}
+	}
 	if err != nil {
 		// Without a snapshot replans fall back to the plan's own selection.
 		slog.WarnContext(ctx, "protocol v3 start: desired subtitle unavailable", logComponentKey, playbackLogValueV3, "error", err)
@@ -277,20 +304,22 @@ func (h *PlaybackHandler) replanDesiredTracksV3(ctx context.Context, record *pla
 	return desired
 }
 
-// updateDesiredTracksV3 folds a replan request's track choices into desired.
-// Clients resend the tracks they are playing with every replan, so only a
-// track that differs from the current plan's is a new choice; an echo keeps
-// the desired track even when the current plan could not deliver it. A
-// track_change that omits the subtitle turns subtitles off only when the
-// current plan was showing one; other operations omit unchanged tracks.
-func (h *PlaybackHandler) updateDesiredTracksV3(ctx context.Context, desired *playback.DesiredTracksV3, current, requested playback.SelectedTracksV3, trackChange bool, file *models.MediaFile) *playback.DesiredTracksV3 {
+// updateDesiredTracksV3 folds a track change's choices into desired. Clients
+// resend the tracks they are playing with every replan, so only a track that
+// differs from the current plan's is a new choice; an echo keeps the desired
+// track even when the current plan could not deliver it. A track_change that
+// omits the subtitle turns subtitles off only when the current plan was
+// showing one. It errors when the chosen subtitle cannot be snapshotted
+// because downloaded subtitles are unreadable; desired is then unchanged.
+func (h *PlaybackHandler) updateDesiredTracksV3(ctx context.Context, desired *playback.DesiredTracksV3, current, requested playback.SelectedTracksV3, trackChange bool, file *models.MediaFile) (*playback.DesiredTracksV3, error) {
 	if desired == nil {
-		return nil
+		return nil, nil
 	}
+	next := *desired
 	if requested.Audio != nil {
 		if index := trackIdentityIndexV3(requested.Audio, file, "audio"); index >= 0 && index != trackIdentityIndexV3(current.Audio, file, "audio") {
 			if audio := playback.DesiredAudioFromFile(file, index); audio != nil {
-				desired.Audio = audio
+				next.Audio = audio
 			}
 		}
 	}
@@ -302,14 +331,15 @@ func (h *PlaybackHandler) updateDesiredTracksV3(ctx context.Context, desired *pl
 			break
 		}
 		subtitle, err := h.desiredSubtitleFromFileV3(ctx, file, index)
-		if err != nil || subtitle == nil {
-			// The replan resolves the request itself; only the intent
-			// snapshot is lost, and with it the record of the old choice.
-			return nil
+		if err != nil {
+			return desired, err
 		}
-		desired.Subtitle = subtitle
+		if subtitle != nil {
+			// An index naming no track is the replan's to reject.
+			next.Subtitle = subtitle
+		}
 	case trackChange && currentSubtitle >= 0:
-		desired.Subtitle = nil
+		next.Subtitle = nil
 	}
-	return desired
+	return &next, nil
 }

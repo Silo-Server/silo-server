@@ -232,8 +232,9 @@ func MatchAudioTrack(tracks []models.AudioTrack, wanted models.AudioTrack, ordin
 	if len(tracks) == 0 {
 		return 0
 	}
+	anyDecodable := AnyAudioTrackDecodable(tracks, "")
 	decodable := func(i int) bool {
-		return AudioTrackDecodable(tracks, i, "") || !AnyAudioTrackDecodable(tracks, "")
+		return !anyDecodable || AudioTrackDecodable(tracks, i, "")
 	}
 	if idx := findExactAudioTrack(tracks, AudioTrackSignatureFromTrack(wanted)); idx >= 0 && decodable(idx) {
 		return idx
@@ -286,7 +287,7 @@ func (s audioMatchScore) better(other audioMatchScore) bool {
 	if s.langRank != other.langRank {
 		return s.langRank < other.langRank
 	}
-	for _, pair := range [][2]bool{
+	traits := [...][2]bool{
 		{s.sameRole, other.sameRole},
 		{s.sameTitle, other.sameTitle},
 		{s.sameChannels, other.sameChannels},
@@ -294,7 +295,8 @@ func (s audioMatchScore) better(other audioMatchScore) bool {
 		{s.sameLayout, other.sameLayout},
 		{s.sameOrdinal, other.sameOrdinal},
 		{s.isDefault, other.isDefault},
-	} {
+	}
+	for _, pair := range traits {
 		if pair[0] != pair[1] {
 			return pair[0]
 		}

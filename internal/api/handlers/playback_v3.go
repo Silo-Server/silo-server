@@ -5243,17 +5243,16 @@ func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlannin
 			continue
 		}
 		candidateStart := baseStart
-		candidateAudioIndex := remapAudioIndexV3(baseEffectiveFile, candidateFile, baseAudioIndex)
+		var candidateAudioIndex int
 		var candidateResult playback.PlannerResultV3
 		var candidateToneMapErr error
 		var subtitleDropped bool
 		var err error
 		if p.desired != nil {
 			subtitleDropped, err = h.applyDesiredTracksV3(r.Context(), p.desired, candidateFile, &candidateStart)
-			if candidateStart.AudioTrackIndex != nil {
-				candidateAudioIndex = normalizeAudioTrackIndex(candidateFile, *candidateStart.AudioTrackIndex)
-			}
+			candidateAudioIndex = requestAudioIndexV3(candidateFile, candidateStart)
 		} else {
+			candidateAudioIndex = remapAudioIndexV3(baseEffectiveFile, candidateFile, baseAudioIndex)
 			subtitleDropped, err = h.remapSubtitleSelectionV3(r.Context(), baseEffectiveFile, candidateFile, &candidateStart)
 		}
 		if err != nil {
@@ -5518,8 +5517,18 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// move to another file resolves it afresh rather than remapping whatever
 	// the current plan could deliver.
 	desired := h.replanDesiredTracksV3(r.Context(), record, currentEffectiveFile)
-	if !seekScopedRecovery {
-		desired = h.updateDesiredTracksV3(r.Context(), desired, record.CurrentPlan.SelectedTracks, req.SelectedTracks, trackChange, currentEffectiveFile)
+	// Only a track change records a new choice. Other replans echo the tracks
+	// playing, which after a fallback may not be the ones the viewer chose.
+	choosesTracks := trackChange || req.Failure.Classification == "audio_track_changed" || req.Failure.Classification == "subtitle_track_changed"
+	if choosesTracks && !seekScopedRecovery {
+		var intentErr error
+		desired, intentErr = h.updateDesiredTracksV3(r.Context(), desired, record.CurrentPlan.SelectedTracks, req.SelectedTracks, trackChange, currentEffectiveFile)
+		if intentErr != nil {
+			// The pick cannot be recorded while downloaded subtitles are
+			// unreadable; the playing plan keeps its tracks and the change
+			// can be repeated.
+			return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", intentErr)
+		}
 	}
 	if intentChange && !trackChange {
 		// Prefer returning to the requested edition, but a quality/output/track
@@ -5551,10 +5560,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			// changes must not drop the viewer's subtitle to get back there either.
 			// Staying keeps the selection, so a fallback can still prefer a
 			// version that has it.
-			keepActiveEdition := (outputChange && remapErr != nil) || subtitleDropped
+			// Staying only helps when the version playing shows the subtitle;
+			// when it already lost it, leaving costs nothing.
+			keepForSubtitle := subtitleDropped && record.CurrentPlan.SelectedTracks.Subtitle != nil
+			keepActiveEdition := (outputChange && remapErr != nil) || keepForSubtitle
 			if keepActiveEdition {
 				effectiveFile = currentEffectiveFile
-				keptActiveEditionForSubtitle = subtitleDropped
+				keptActiveEditionForSubtitle = keepForSubtitle
 			} else if errors.Is(remapErr, errSubtitleStoreUnavailableV3) {
 				// The playing plan keeps its subtitle; the change can be
 				// repeated once the downloaded subtitles can be read.
@@ -5659,7 +5671,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		if choosesVersion {
-			effectiveFile, start, audioIndex = h.lowerBufferedVersion(r, start, effectiveFile, audioIndex, plannerSettings)
+			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, audioIndex, plannerSettings, desired)
 		}
 		if requestedEditionResolved {
 			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
@@ -5729,7 +5741,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			readingErr = h.applyConnectionReading(r, &unlimitedStart)
 		}
 		if choosesVersion {
-			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersion(r, unlimitedStart, unlimitedFile, unlimitedAudioIndex, plannerSettings)
+			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, unlimitedAudioIndex, plannerSettings, desired)
 		}
 		unlimited, unlimitedErr := h.planReplanV3(r, planning, unlimitedStart, unlimitedFile, unlimitedAudioIndex, false)
 		if readingErr != nil || unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
