@@ -1157,6 +1157,7 @@ type watchedExporterStub struct {
 	exported     *[]LocalPlay
 	remote       []RemotePlay
 	precision    time.Duration
+	onExport     func()
 	historyStubBase
 }
 
@@ -1175,6 +1176,9 @@ func (p watchedExporterStub) HistoryTimePrecision() time.Duration {
 func (p watchedExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
 	if p.exported != nil {
 		*p.exported = append(*p.exported, plays...)
+	}
+	if p.onExport != nil {
+		p.onExport()
 	}
 	return p.exportResult, p.exportErr
 }
@@ -3202,6 +3206,50 @@ func TestServiceLocalWatchEventSkipsPlaysUnmarkedSinceQueued(t *testing.T) {
 	}
 	if len(exported) != 0 {
 		t.Fatalf("exported %+v, want nothing for a play unmarked since the event was queued", exported)
+	}
+}
+
+// A mark unwatched that lands while one provider exports must stop the play
+// going to the next provider too.
+func TestServiceLocalWatchEventRechecksPlaysPerConnection(t *testing.T) {
+	db := openUserDB(t)
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-1", Name: "Viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	watchedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID, WatchedAt: watchedAt.Format(time.RFC3339), Completed: true, Source: userstore.WatchHistorySourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	unmark := func() {
+		if err := watchstate.NewService(staticStoreProvider{store: store}).RecordManualMarkUnwatched(ctx, 7, "profile-1", []string{testMovieMediaID}); err != nil {
+			t.Error(err)
+		}
+	}
+
+	repo := newServiceFakeRepo()
+	var exported []LocalPlay
+	registry := NewRegistry()
+	for _, key := range []string{"trakt", "simkl"} {
+		if err := registry.Register(watchedExporterStub{exported: &exported, onExport: unmark, historyStubBase: historyStubBase{key: key}}); err != nil {
+			t.Fatal(err)
+		}
+		conn := Connection{ID: "conn-" + key, Provider: key, UserID: 7, ProfileID: "profile-1", ProviderAccountID: testProviderAccountID, ExportWatchedEnabled: true}
+		repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	}
+	service := NewService(repo, registry).WithUserStoreProvider(staticStoreProvider{store: store})
+
+	if err := service.processLocalWatchEvent(ctx, LocalWatchEvent{
+		Kind:      LocalWatchEventMarkedWatched,
+		UserID:    7,
+		ProfileID: "profile-1",
+		Plays:     []LocalPlay{{HistoryID: "history-1", MediaItemID: testMovieMediaID, ProviderItemKey: testMovieProviderItemKey, WatchedAt: watchedAt}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("exported %d plays, want 1: the provider after the unmark must get nothing", len(exported))
 	}
 }
 

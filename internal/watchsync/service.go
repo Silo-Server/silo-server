@@ -414,14 +414,6 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 	if len(conns) == 0 {
 		return nil
 	}
-	// A mark unwatched that landed after the event was queued keeps the play
-	// in history but stops it counting as watched, and no removal follows it
-	// to the provider. Send only plays that still count; the next scheduled
-	// export finds nothing to send for the rest.
-	event.Plays, err = s.playsStillWatched(ctx, event.UserID, event.ProfileID, event.Plays)
-	if err != nil {
-		return err
-	}
 	event.Plays = s.withPlayTitles(ctx, event.Plays)
 	for _, conn := range conns {
 		provider, ok := s.registry.Get(conn.Provider)
@@ -442,7 +434,17 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 			if !ok {
 				continue
 			}
-			if err := s.exportLocalPlays(ctx, conn, cfg, exporter, event.Plays); err != nil {
+			// A mark unwatched that landed after the event was queued, or
+			// while an earlier connection exported, keeps the play in history
+			// but stops it counting as watched, and no removal follows it to
+			// the provider. Send only plays that still count; the next
+			// scheduled export finds nothing to send for the rest.
+			plays, err := s.playsStillWatched(ctx, event.UserID, event.ProfileID, event.Plays)
+			if err != nil {
+				s.recordLocalWatchEventError(ctx, conn, err)
+				continue
+			}
+			if err := s.exportLocalPlays(ctx, conn, cfg, exporter, plays); err != nil {
 				if limited, ok := AsRateLimited(err); ok {
 					if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
 						s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
