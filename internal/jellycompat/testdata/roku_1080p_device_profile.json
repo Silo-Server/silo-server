@@ -1,0 +1,460 @@
+{
+ "Name": "Official Roku Client",
+ "CodecProfiles": [
+  {
+   "Type": "VideoAudio",
+   "Codec": "aac",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    },
+    {
+     "Value": "Main",
+     "Property": "AudioProfile",
+     "Condition": "NotEquals",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "aac",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    },
+    {
+     "Value": "Main",
+     "Property": "AudioProfile",
+     "Condition": "NotEquals",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "mp3",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "mp3",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "mp2",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "mp2",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "opus",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "pcm",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "pcm",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "lpcm",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "lpcm",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "flac",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "flac",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "alac",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "alac",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "wmapro",
+   "Conditions": [
+    {
+     "Value": "8",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "wmapro",
+   "Conditions": [
+    {
+     "Value": "8",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "vorbis",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "vorbis",
+   "Conditions": [
+    {
+     "Value": "6",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "VideoAudio",
+   "Codec": "mpg123",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Audio",
+   "Codec": "mpg123",
+   "Conditions": [
+    {
+     "Value": "2",
+     "Property": "AudioChannels",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  },
+  {
+   "Type": "Video",
+   "Codec": "h264",
+   "Conditions": [
+    {
+     "Value": "true",
+     "Property": "IsAnamorphic",
+     "Condition": "NotEquals",
+     "IsRequired": false
+    },
+    {
+     "Value": "8",
+     "Property": "VideoBitDepth",
+     "Condition": "LessThanEqual",
+     "IsRequired": false
+    },
+    {
+     "Value": "high|main",
+     "Property": "VideoProfile",
+     "Condition": "EqualsAny",
+     "IsRequired": false
+    },
+    {
+     "Value": "SDR|DOVIWithSDR",
+     "Property": "VideoRangeType",
+     "Condition": "EqualsAny",
+     "IsRequired": false
+    },
+    {
+     "Value": "41",
+     "Property": "VideoLevel",
+     "Condition": "LessThanEqual",
+     "IsRequired": false
+    },
+    {
+     "Value": "10000000",
+     "Property": "VideoBitrate",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ]
+  }
+ ],
+ "SubtitleProfiles": [
+  {
+   "Format": "vtt",
+   "Method": "External"
+  },
+  {
+   "Format": "srt",
+   "Method": "External"
+  },
+  {
+   "Format": "ttml",
+   "Method": "External"
+  },
+  {
+   "Format": "sub",
+   "Method": "External"
+  },
+  {
+   "Format": "srt",
+   "Method": "Embed"
+  },
+  {
+   "Format": "subrip",
+   "Method": "Embed"
+  }
+ ],
+ "DirectPlayProfiles": [
+  {
+   "Type": "Video",
+   "Container": "ts",
+   "AudioCodec": "mp3,mp2,pcm,lpcm,flac,aac,mpg123",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Video",
+   "Container": "mkv,webm",
+   "AudioCodec": "mp3,mp2,pcm,lpcm,wma,flac,alac,aac,opus,wmapro,vorbis,mpg123",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Video",
+   "Container": "ism",
+   "AudioCodec": "wma,aac,wmapro",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Video",
+   "Container": "mp4,mov,m4v",
+   "AudioCodec": "mp3,mp2,alac,aac,mpg123",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Video",
+   "Container": "hls",
+   "AudioCodec": "mp3,mp2,aac,mpg123",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Video",
+   "Container": "dash",
+   "AudioCodec": "mp3,mp2,alac,aac,mpg123",
+   "VideoCodec": "h264,mpeg4 avc,mpeg4"
+  },
+  {
+   "Type": "Audio",
+   "Container": "mp3,mp2,pcm,lpcm,wma,flac,alac,aac,wmapro,vorbis,mpg123"
+  }
+ ],
+ "MaxStreamingBitrate": 120000000,
+ "TranscodingProfiles": [
+  {
+   "Type": "Audio",
+   "Context": "Streaming",
+   "Protocol": "http",
+   "Container": "aac",
+   "AudioCodec": "aac",
+   "MaxAudioChannels": "2"
+  },
+  {
+   "Type": "Audio",
+   "Context": "Static",
+   "Protocol": "http",
+   "Container": "aac",
+   "AudioCodec": "aac",
+   "MaxAudioChannels": "2"
+  },
+  {
+   "Type": "Audio",
+   "Context": "Streaming",
+   "Protocol": "http",
+   "Container": "mp3",
+   "AudioCodec": "mp3",
+   "MaxAudioChannels": "2"
+  },
+  {
+   "Type": "Audio",
+   "Context": "Static",
+   "Protocol": "http",
+   "Container": "mp3",
+   "AudioCodec": "mp3",
+   "MaxAudioChannels": "2"
+  },
+  {
+   "Type": "Video",
+   "Context": "Streaming",
+   "Protocol": "hls",
+   "Container": "ts",
+   "AudioCodec": "AC3,mp3,flac,pcm",
+   "Conditions": [
+    {
+     "Value": "1080",
+     "Property": "Height",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    },
+    {
+     "Value": "1920",
+     "Property": "Width",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ],
+   "VideoCodec": "h264,h264,mpeg4 avc",
+   "MaxAudioChannels": "2"
+  },
+  {
+   "Type": "Video",
+   "Context": "Streaming",
+   "Protocol": "hls",
+   "Container": "mp4",
+   "AudioCodec": "AC3,mp3,alac",
+   "Conditions": [
+    {
+     "Value": "1080",
+     "Property": "Height",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    },
+    {
+     "Value": "1920",
+     "Property": "Width",
+     "Condition": "LessThanEqual",
+     "IsRequired": true
+    }
+   ],
+   "VideoCodec": "h264,h264,mpeg4 avc",
+   "MaxAudioChannels": "2"
+  }
+ ]
+}

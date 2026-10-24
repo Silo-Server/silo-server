@@ -3175,6 +3175,24 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	// narrower requests are still honored. Requests scoped only to types the
 	// watching scope cannot serve (e.g. Series/Season-only) fall through to
 	// loadProgressPage below.
+	// A series or season ParentId reads that series' episodes, not the
+	// profile's recent progress, so an episode watched long ago still resumes.
+	if query.scopesProgressToParent() {
+		items, total, err := h.loadParentResume(r.Context(), session, query, typeSet)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		h.applyListFileFields(r.Context(), session, items, query)
+		applyItemsResponseOptions(items, query)
+		writeJSON(w, http.StatusOK, queryResultDTO{
+			Items:            items,
+			TotalRecordCount: total,
+			StartIndex:       query.startIndex,
+		})
+		return
+	}
+
 	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
@@ -3190,7 +3208,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		slog.WarnContext(r.Context(), "jellycompat: resume via sections failed, falling back to progress scan", "component", "jellycompat", "error", err)
 	}
 
-	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, nil)
+	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, libraryIDPtr(query.parentLibraryID))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -3266,7 +3284,8 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		SuppressNextUp: true,
 	}
 
-	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, nil, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
+	libraryID := libraryIDPtr(query.parentLibraryID)
+	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, libraryID, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3315,11 +3334,11 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		entries = entries[:pageSize]
 	}
 
-	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, libraryID)
 	if err != nil {
 		return nil, 0, err
 	}
-	dtos := h.finishProgressPage(ctx, session, hydrated, query, nil)
+	dtos := h.finishProgressPage(ctx, session, hydrated, query, libraryID)
 	return dtos, len(dtos), nil
 }
 
@@ -3330,6 +3349,57 @@ type progressHydratedItem struct {
 	entry      upstreamProgress
 	target     *compatEpisodeTarget
 	dto        baseItemDTO
+}
+
+// scopesProgressToParent reports whether ParentId names a series, season or
+// item, which Resume serves from that parent's episodes. A library ParentId
+// is applied through the libraryID argument instead.
+func (q itemsQuery) scopesProgressToParent() bool {
+	return q.parentItemID != "" || q.parentSeasonID != ""
+}
+
+// loadParentResume serves Resume for a series or season ParentId from the
+// progress of that parent's episodes, so the lookup is bounded by the
+// series' size rather than by how much else the profile has watched. Other
+// item ids, such as a movie, have no episodes and list nothing, as in
+// Jellyfin. Moonfin for Roku resumes a series by asking for one resumable item
+// under it. Continue Watching's hiding rules still apply.
+func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, query itemsQuery, typeSet map[string]bool) ([]baseItemDTO, int, error) {
+	if (len(typeSet) > 0 && !typeSet["episode"]) || h.episodeRepo == nil {
+		return []baseItemDTO{}, 0, nil
+	}
+	listIDs, parentID := h.episodeRepo.ListIDsBySeriesIDs, query.parentItemID
+	if query.parentSeasonID != "" {
+		listIDs, parentID = h.episodeRepo.ListIDsBySeasonIDs, query.parentSeasonID
+	}
+	episodeIDs, err := listIDs(ctx, []string{parentID})
+	if err != nil {
+		return nil, 0, err
+	}
+	// Hydration checks access on the series only, and a series can span
+	// libraries the viewer may and may not see.
+	visible, err := h.visibleEpisodeIDs(ctx, session, episodeIDs[parentID])
+	if err != nil {
+		return nil, 0, err
+	}
+	visibleIDs := slices.DeleteFunc(episodeIDs[parentID], func(id string) bool { return !visible[id] })
+	entries, err := h.userData.ListResumableProgress(ctx, session, visibleIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	if entries, err = h.userData.FilterResumeProgress(ctx, session, entries); err != nil {
+		return nil, 0, err
+	}
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	total := len(hydrated)
+	page := hydrated[min(query.startIndex, total):]
+	if query.limit > 0 && len(page) > query.limit {
+		page = page[:query.limit]
+	}
+	return h.finishProgressPage(ctx, session, page, query, nil), total, nil
 }
 
 // sortedTypeSet returns the (already lowercased) keys of a type set in a stable

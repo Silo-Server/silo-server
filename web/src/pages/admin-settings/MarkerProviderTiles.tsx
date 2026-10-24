@@ -357,7 +357,7 @@ function MarkerProviderTile({
         <SettingFieldRow
           label="Provider priority"
           htmlFor={priorityID}
-          description="If providers return markers for the same section, prefer the provider with the lower number."
+          description="Silo uses the marker with the highest confidence. When two providers are equally confident, it prefers the lower number."
         >
           <Input
             id={priorityID}

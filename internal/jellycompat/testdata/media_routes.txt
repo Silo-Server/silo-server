@@ -28,8 +28,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media
@@ -194,8 +197,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media

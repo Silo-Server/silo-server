@@ -72,7 +72,8 @@ var queryFieldDefs = map[string]queryFieldDef{
 		validOps:   map[string]bool{"is": true, "is_not": true},
 	},
 
-	querySortTitle: {columnSQL: querySortTitle, executable: true, validOps: textRuleOps},
+	ruleFieldShowTitle: {executable: true, validOps: textRuleOps},
+	querySortTitle:     {columnSQL: querySortTitle, executable: true, validOps: textRuleOps},
 	// decade takes the decade's first year (1990 matches 1990 to 1999).
 	ruleFieldDecade: {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
 	// runtime holds minutes; 0 means unknown and matches no bound.
@@ -95,6 +96,7 @@ const (
 	ruleOpBeginsWith             = "begins_with"
 	ruleOpEndsWith               = "ends_with"
 	ruleFieldDecade              = "decade"
+	ruleFieldShowTitle           = "show_title"
 	latestEpisodeAddedColumn     = "latest_episode_added_at"
 	latestAvailableAirDateColumn = "latest_available_episode_air_date_at"
 )
@@ -120,6 +122,7 @@ func (d queryFieldDef) allows(op string) bool {
 // keeps the frozen vocabulary: these fields and not_in_last are refused there,
 // with the messages v1 gave them before they existed.
 var v2RuleFields = map[string]bool{
+	ruleFieldShowTitle:          true,
 	querySortTitle:              true,
 	ruleFieldDecade:             true,
 	querySortRuntime:            true,
@@ -160,11 +163,11 @@ func validateRuleValue(rule QueryRule) error {
 		return err
 	}
 	switch rule.Field {
-	case querySortTitle:
+	case querySortTitle, ruleFieldShowTitle:
 		// An empty value would make contains, begins_with and ends_with match
 		// every title.
 		if text, ok := rule.Value.(string); !ok || strings.TrimSpace(text) == "" {
-			return fmt.Errorf("title requires a non-empty string")
+			return fmt.Errorf("%s requires a non-empty string", rule.Field)
 		}
 	case ruleFieldDecade:
 		if _, ok := decadeStart(rule.Value); !ok {

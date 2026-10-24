@@ -1497,7 +1497,10 @@ read the live log. Account and file identifiers are strings, instants are RFC 33
 `duration_seconds` is null when the media duration was never recorded. A deleted account
 lists with an empty `username`; an item no longer in the catalog lists with an empty
 `media_title` and `media_type`. The stored client address is not part of this projection,
-matching v1. A missing database returns 503; storage errors are masked as 500.
+matching v1. It is the viewer's last address on the playback session. Rows written by
+earlier server versions hold the address of the request that ended the attempt instead:
+the administrator's when an administrator stopped or terminated it, and none when it
+expired. A missing database returns 503; storage errors are masked as 500.
 
 Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
 attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
