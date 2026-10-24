@@ -1245,11 +1245,6 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
-	if lowerVersionTakesTranscodeV3(input, source, quality) {
-		// The handler's alternate-version fallback transcodes the lower
-		// version instead, and replans this source without it if that fails.
-		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
-	}
 	if hlsRegistry == nil {
 		hlsRegistry = input.hlsVideoRegistry()
 	}
@@ -1328,6 +1323,13 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {
 			targetVideoCodec, quality = transcodeCodecHEVC, hevcQuality
 		}
+	}
+	// Decided on the encode the device takes, which an H.264 decoder can hold
+	// below the quality asked for. The handler's alternate-version fallback
+	// transcodes the lower version instead, and replans this source without
+	// it if that fails.
+	if lowerVersionTakesTranscodeV3(input, source, quality) {
+		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesV3(input, source)

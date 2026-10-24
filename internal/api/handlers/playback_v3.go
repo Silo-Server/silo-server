@@ -5209,6 +5209,11 @@ func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlannin
 		alternateErr = nil
 	}
 	if alternateErr != nil {
+		if result.Terminal != nil {
+			if fallback := h.planWithoutLowerVersionV3(r.Context(), h.replanInputV3(r, p, start, effectiveFile, audioIndex)); fallback != nil {
+				return *fallback, false, false
+			}
+		}
 		return planned, false, false
 	}
 	baseStart := start
@@ -5301,19 +5306,23 @@ func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlannin
 		toneMapCapabilityErr = firstFailureToneMapErr
 	}
 	if result.Terminal != nil {
-		baseInput := playback.PlannerInputV3{
-			Request: baseStart, RequestedFile: p.plannerRequestedFile, EffectiveFile: baseEffectiveFile,
-			LowerVersion:         lowerVersionForFileV3(p.lowerVersion, baseEffectiveFile),
-			ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
-			AudioTrackIndex:      baseAudioIndex, Settings: p.settings,
-			Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(),
-			AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile),
-		}
-		if fallback := h.planWithoutLowerVersionV3(r.Context(), baseInput); fallback != nil {
+		if fallback := h.planWithoutLowerVersionV3(r.Context(), h.replanInputV3(r, p, baseStart, baseEffectiveFile, baseAudioIndex)); fallback != nil {
 			return *fallback, false, false
 		}
 	}
 	return alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, subtitleDegraded, subtitleNotShown
+}
+
+// replanInputV3 is the planner input of a replan of file.
+func (h *PlaybackHandler) replanInputV3(r *http.Request, p replanPlanningV3, start playback.StartRequestV3, file *models.MediaFile, audioIndex int) playback.PlannerInputV3 {
+	return playback.PlannerInputV3{
+		Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: file,
+		LowerVersion:         lowerVersionForFileV3(p.lowerVersion, file),
+		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
+		AudioTrackIndex:      audioIndex, Settings: p.settings,
+		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), file), Now: time.Now(),
+		AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), file),
+	}
 }
 
 // executeReplanV3 prepares an atomic replacement for a failed playback route.

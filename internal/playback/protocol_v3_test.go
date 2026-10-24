@@ -2896,6 +2896,55 @@ func TestPlanPlaybackV3LowerVersionTakesTranscodeByResolutionClass(t *testing.T)
 	}
 }
 
+// A fixed 4K rung stays on the 4K source even when its cropped frame is no
+// taller than the lower version: a 3840x1080 film's 2160p Medium rung keeps
+// its 1080 lines.
+func TestPlanPlaybackV3LowerVersionLeaves4KRungOnCroppedSource(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "hevc", Width: 3840, Height: 1080, BitrateKbps: 40_000, FrameRate: 24}
+	lower := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}
+	input := PlannerInputV3{
+		Request:      validStartRequestV3(),
+		Settings:     PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		LowerVersion: &LowerVersionV3{Requested: source, Lower: lower},
+	}
+	input.Request.QualityPreference = QualityRung2160pMediumV3
+	if quality := ResolveQualityPolicyV3(input.Request, source); lowerVersionTakesTranscodeV3(input, source, quality) {
+		t.Fatalf("2160p Medium (%dx%d) went to the 1080p version", quality.Width, quality.Height)
+	}
+}
+
+// An encode an H.264 decoder holds to 1080p goes to a 1080p lower version
+// even when the quality asked for more: Auto on a 4K HEVC source for a device
+// that decodes only 1080p H.264.
+func TestPlanPlaybackV3LowerVersionTakesH264BoundedEncode(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.Resolution = "2160p"
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "Main", 8
+	file.VideoTracks[0].VideoRange, file.VideoTracks[0].VideoRangeType = "SDR", "SDR"
+	request := validStartRequestV3()
+	request.QualityPreference = QualityAutoV3
+	request.Capabilities.CodecsVideo = []string{"h264"}
+	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000, Hardware: true}}
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		Registry: testTransformationRegistryV3(),
+	}
+
+	alone := PlanPlaybackV3(input)
+	if alone.Plan == nil || alone.Plan.Delivery != DeliveryTranscodeHLSV3 || optionalValueV3(alone.Plan.EffectiveRecipe.Height) != 1080 {
+		t.Fatalf("without a lower version = %s, want a 1080p transcode of the 4K source", ExplainPlannerResultV3(alone))
+	}
+
+	input.LowerVersion = &LowerVersionV3{
+		Requested: SourceDescriptorFromFileV3(file, 0),
+		Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, DynamicRange: DynamicRangeSDRV3},
+	}
+	if refused := PlanPlaybackV3(input); refused.Terminal == nil || refused.Terminal.Reason != "no_alternate_version" {
+		t.Fatalf("with a lower version = %s, want the encode refused for the lower version", ExplainPlannerResultV3(refused))
+	}
+}
+
 // A 4K version that may not be transcoded offers the qualities its
 // lower-resolution version serves: that version as it is, then the rungs a
 // transcode of it can reach. Original stays the 4K version.
