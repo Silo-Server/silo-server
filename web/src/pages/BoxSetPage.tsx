@@ -82,7 +82,7 @@ export default function BoxSetPage() {
               <div className="detail-primary-actions flex flex-wrap items-center gap-3">
                 <Button
                   asChild
-                  className="relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md"
+                  className="relative h-11 max-w-full cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md"
                 >
                   <ViewTransitionLink
                     to={buildMediaPlayHref({
@@ -92,7 +92,11 @@ export default function BoxSetPage() {
                     })}
                   >
                     <Play className="size-[18px] fill-current" aria-hidden />
-                    {started ? `Continue · ${next.title}` : `Play ${next.title}`}
+                    {/* A film title can be wider than a phone; the label
+                        truncates rather than widen the hero past the screen. */}
+                    <span className="truncate">
+                      {started ? `Continue · ${next.title}` : `Play ${next.title}`}
+                    </span>
                   </ViewTransitionLink>
                 </Button>
               </div>
