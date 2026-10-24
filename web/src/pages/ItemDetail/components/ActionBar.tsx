@@ -35,7 +35,7 @@ import {
   RotateCcw,
   Shuffle,
   Tags,
-  EyeOff,
+  Eye,
   ThumbsDown,
   UsersRound,
   Hand,
@@ -216,7 +216,6 @@ export interface ActionBarProps {
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
-  /** Clears the resume position without marking the item watched. */
   /** Mark Unwatched for a partly watched item: clears its resume position and keeps history. */
   onClearResumePosition?: () => void;
   resumePositionSeconds?: number;
@@ -726,7 +725,7 @@ export default function ActionBar({
         closeMenu={closeOverflowMenu}
         onAction={onClearResumePosition}
       >
-        <EyeOff className="size-4" />
+        <Eye className="size-4" />
         Mark Unwatched
       </DetailOverflowMenuItem>
     ),

@@ -426,9 +426,10 @@ func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.Us
 		t.Fatalf("history after retry: %+v %v", history, err)
 	}
 
-	// A rewatch in progress (completed, with a resume position) is not yet
-	// watched again: the mark records another play and clears the position,
-	// and a repeat with no new position in between records nothing.
+	// A rewatch in progress (completed, with a resume position) is left alone
+	// unless the target asks to record it: then the mark records another play
+	// and clears the position, and a repeat with no new position in between
+	// records nothing.
 	if err := store.SetProgress(ctx, "p1", "ep-1", 300, 1200, userstore.ProgressThresholds{}); err != nil {
 		t.Fatalf("SetProgress(ep-1 rewatch): %v", err)
 	}
@@ -438,10 +439,15 @@ func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.Us
 	rewatchEntry := entries[0]
 	rewatchEntry.ID = ""
 	rewatchEntry.WatchedAt = watchedAt.Add(2 * time.Hour).Format(time.RFC3339)
-	for attempt, want := range []int{1, 0} {
-		rewatched, err := userstore.MarkWatchedBatch(ctx, store, "p1", targets[:1], []userstore.WatchHistoryEntry{rewatchEntry})
-		if err != nil || len(rewatched) != want {
-			t.Fatalf("rewatch mark %d: %+v %v; want %d entries", attempt, rewatched, err, want)
+	rewatchTarget := targets[0]
+	for attempt, want := range []struct {
+		recordRewatch bool
+		entries       int
+	}{{false, 0}, {true, 1}, {true, 0}} {
+		rewatchTarget.RecordRewatch = want.recordRewatch
+		rewatched, err := userstore.MarkWatchedBatch(ctx, store, "p1", []userstore.MarkWatchedTarget{rewatchTarget}, []userstore.WatchHistoryEntry{rewatchEntry})
+		if err != nil || len(rewatched) != want.entries {
+			t.Fatalf("rewatch mark %d (record %v): %+v %v; want %d entries", attempt, want.recordRewatch, rewatched, err, want.entries)
 		}
 	}
 	if progress, err := store.GetProgress(ctx, "p1", "ep-1"); err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {

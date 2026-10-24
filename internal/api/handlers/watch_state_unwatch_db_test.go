@@ -89,7 +89,7 @@ func TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 
 			// The two episodes were watched while their files existed; the
 			// scanner then dropped their library membership.
-			if err := handler.markLeafTargetsWatched(ctx, userID, profileID, []watchedLeafTarget{{ContentID: deleted1}, {ContentID: deleted2}}); err != nil {
+			if err := handler.markLeafTargetsWatched(ctx, userID, profileID, []watchedLeafTarget{{ContentID: deleted1}, {ContentID: deleted2}}, false); err != nil {
 				t.Fatal(err)
 			}
 			if got := listNextUp(); len(got) != 1 || got[0].ContentID != onDisk {
@@ -100,7 +100,7 @@ func TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 			if parent == watchstate.ParentSeason {
 				target = season
 			}
-			view, err := handler.SetWatchedState(ctx, userID, profileID, target, false, catalog.AccessFilter{})
+			view, err := handler.SetWatchedState(ctx, userID, profileID, target, false, false, catalog.AccessFilter{})
 			if err != nil {
 				t.Fatalf("SetWatchedState: %v", err)
 			}

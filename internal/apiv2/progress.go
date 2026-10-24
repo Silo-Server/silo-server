@@ -115,9 +115,7 @@ type ResumePositionInput struct {
 // ProgressCapabilities is the getProgressCapabilities body.
 type ProgressCapabilities struct {
 	Capability
-	ClearResumePosition bool `json:"clear_resume_position" doc:"Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history" example:"true"`
-	// Older servers answer markWatched on a rewatch in progress with a 204 that
-	// records nothing, so a client checks this before offering Mark Watched there.
+	ClearResumePosition       bool `json:"clear_resume_position" doc:"Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history" example:"true"`
 	MarkWatchedRecordsRewatch bool `json:"mark_watched_records_rewatch" doc:"Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op" example:"true"`
 }
 

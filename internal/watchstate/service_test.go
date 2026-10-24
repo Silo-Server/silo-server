@@ -741,9 +741,10 @@ func TestManualMarkWatchedSkipsAlreadyCompletedTargets(t *testing.T) {
 	}
 }
 
-// A completed item with a resume position is a rewatch in progress. Marking it
-// watched records another play and clears the position; a repeat, with no new
-// position in between, records nothing.
+// A completed item with a resume position is a rewatch in progress. A mark
+// that records rewatches records another play and clears the position; a
+// repeat, with no new position in between, records nothing. Any other mark
+// leaves it alone.
 func TestManualMarkWatchedRecordsRewatchInProgress(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestUserStore(t)
@@ -751,6 +752,7 @@ func TestManualMarkWatchedRecordsRewatchInProgress(t *testing.T) {
 	createWatchstateProfile(t, store)
 	service := NewService(testStoreProvider{store: store})
 	target := []LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}}
+	rewatch := []LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200, RecordRewatch: true}}
 
 	if err := service.RecordManualMarkWatched(ctx, 1, "profile-1", target, time.Now().UTC().Add(-48*time.Hour)); err != nil {
 		t.Fatalf("first mark: %v", err)
@@ -762,19 +764,23 @@ func TestManualMarkWatchedRecordsRewatchInProgress(t *testing.T) {
 		t.Fatalf("progress before = %+v, %v; want a watched item with a resume position", progress, err)
 	}
 
-	rewatch, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", target, time.Now().UTC())
+	plain, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", target, time.Now().UTC())
+	if err != nil || len(plain.Entries) != 0 {
+		t.Fatalf("plain mark entries = %+v, %v; want none", plain.Entries, err)
+	}
+	recorded, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", rewatch, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("rewatch mark: %v", err)
 	}
-	if len(rewatch.Entries) != 1 || !rewatch.Entries[0].Completed {
-		t.Fatalf("rewatch mark entries = %+v, want one completed play", rewatch.Entries)
+	if len(recorded.Entries) != 1 || !recorded.Entries[0].Completed {
+		t.Fatalf("rewatch mark entries = %+v, want one completed play", recorded.Entries)
 	}
 	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
 	if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
 		t.Fatalf("progress after = %+v, %v; want watched with no resume position", progress, err)
 	}
 
-	repeat, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", target, time.Now().UTC())
+	repeat, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", rewatch, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("repeat mark: %v", err)
 	}
