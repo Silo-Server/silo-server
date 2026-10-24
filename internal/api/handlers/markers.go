@@ -111,6 +111,17 @@ type segmentMarker struct {
 	DetectedAt *time.Time `json:"detected_at"`
 }
 
+// MarshalJSON writes the frozen /api/v1 shape, which reports a withheld manual
+// marker (markers.ManualWithheldAlgorithm) as "manual:v1". /api/v2 copies the
+// fields into its own types and reports the stored algorithm.
+func (m segmentMarker) MarshalJSON() ([]byte, error) {
+	type v1SegmentMarker segmentMarker
+	if m.Algorithm != nil && *m.Algorithm == markers.ManualWithheldAlgorithm {
+		m.Algorithm = new(markers.ManualAlgorithm)
+	}
+	return json.Marshal(v1SegmentMarker(m))
+}
+
 type fileMarkersResponse struct {
 	FileID         int                            `json:"file_id"`
 	Intro          segmentMarker                  `json:"intro"`

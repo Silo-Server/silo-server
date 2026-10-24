@@ -474,8 +474,13 @@ replaces one, so the stored row is what the player showed. Provenance is
 written with the marker in one statement, so it survives restarts, races
 between saves, and changes to the item's metadata. Everywhere else,
 including write priority, local detection, the API, and jellycompat,
-`manual:withheld:v1` is a manual marker like `manual:v1`; the API reports the
-stored algorithm.
+`manual:withheld:v1` is a manual marker like `manual:v1`. `/api/v2` reports
+the stored algorithm; the frozen `/api/v1` reports `manual:v1` for both.
+
+The rule exists because TheIntroDB's terms forbid using its data to seed other
+databases, so Silo must not pass a provider's marker on as if a person had
+found it. It applies to every provider, the one the marker came from
+included, so it stays one simple rule.
 
 ## Measuring accuracy
 
