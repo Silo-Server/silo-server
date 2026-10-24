@@ -47,7 +47,8 @@ const (
 type ContributeOptions struct {
 	// Provider restricts the run to a single provider id ("" = all enabled).
 	Provider string
-	// Segments restricts the run to specific kinds (nil = every present segment).
+	// Segments restricts the run to specific kinds (nil = every present
+	// segment and manual clear).
 	Segments []MarkerKind
 	// Auto marks a background run: a segment is only contributed when the
 	// provider has contribute_auto_local enabled and the segment is a local
@@ -180,6 +181,26 @@ func HoldsSharedManualMarker(file *models.MediaFile, kind MarkerKind) bool {
 	return false
 }
 
+// KeepsProviderAbsence reports whether a manual clear of kind repeats a
+// provider's answer that the file has none of it: shown, the file as the user
+// saw it before the clear, held an online or plugin tombstone of kind, or a
+// manual clear an earlier save withheld. A manual save stores
+// ManualWithheldAlgorithm on such a clear, as on a marker KeepsProviderMarker
+// matches.
+func KeepsProviderAbsence(shown *models.MediaFile, kind MarkerKind) bool {
+	if shown == nil {
+		return false
+	}
+	for _, seg := range fileSegments(shown) {
+		if seg.kind != kind || seg.start != nil || seg.end != nil || seg.source == nil {
+			continue
+		}
+		return *seg.source == models.MarkerSourceOnline || *seg.source == models.MarkerSourcePlugin ||
+			(seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm)
+	}
+	return false
+}
+
 // AutoContributedKinds lists the local segment kinds automatic contribution
 // shares, in the order a run shares them. The scanner detects intros and
 // credits; intros go first so a backlog of credits never holds back a new
@@ -237,7 +258,7 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 // that support amend. The daily task resends manual corrections to them
 // whether or not they share local markers automatically. It reads the stored
 // provider config; a failed read lists none.
-func (s *ContributionService) AmendContributors(ctx context.Context) ([]string, error) {
+func (s *ContributionService) AmendContributors(ctx context.Context) ([]AmendContributor, error) {
 	if s == nil || s.config == nil {
 		return nil, nil
 	}
@@ -245,10 +266,14 @@ func (s *ContributionService) AmendContributors(ctx context.Context) ([]string, 
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []AmendContributor
 	for _, sub := range s.submitters() {
-		if cfg, ok := configs[sub.ID()]; ok && cfg.ContributeEnabled && submissionRequirements(sub).SupportsAmend {
-			out = append(out, sub.ID())
+		cfg, ok := configs[sub.ID()]
+		if !ok || !cfg.ContributeEnabled {
+			continue
+		}
+		if reqs := submissionRequirements(sub); reqs.SupportsAmend {
+			out = append(out, AmendContributor{Provider: sub.ID(), SupportsAbsent: reqs.SupportsAbsent})
 		}
 	}
 	return out, nil
@@ -322,12 +347,20 @@ func (s *ContributionService) contributeSegment(
 	seg segmentData,
 	opts ContributeOptions,
 ) (ContributionOutcome, bool) {
-	if seg.start == nil || seg.end == nil {
-		return ContributionOutcome{}, false
-	}
 	source := ""
 	if seg.source != nil {
 		source = *seg.source
+	}
+	// A manual clear says the item has no segment of the kind, and goes to
+	// providers that accept that. A detector that found nothing is no
+	// evidence of absence, and stores no clear.
+	absent := seg.start == nil && seg.end == nil && source == models.MarkerSourceManual
+	reqs := submissionRequirements(sub)
+	if absent && !reqs.SupportsAbsent {
+		return ContributionOutcome{}, false
+	}
+	if !absent && (seg.start == nil || seg.end == nil) {
+		return ContributionOutcome{}, false
 	}
 	// Only ever contribute our own data; never round-trip online markers.
 	if source != models.MarkerSourceScanner && source != models.MarkerSourceManual {
@@ -337,7 +370,7 @@ func (s *ContributionService) contributeSegment(
 	if seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm {
 		return ContributionOutcome{}, false
 	}
-	if opts.Corrections && (source != models.MarkerSourceManual || !submissionRequirements(sub).SupportsAmend) {
+	if opts.Corrections && (source != models.MarkerSourceManual || !reqs.SupportsAmend) {
 		return ContributionOutcome{}, false
 	}
 	if opts.Auto {
@@ -392,8 +425,14 @@ func (s *ContributionService) contributeSegment(
 	row.ID = claim.ID
 	row.ClaimToken = claim.Token
 
-	startDur := time.Duration(*seg.start * float64(time.Second))
-	endDur := time.Duration(*seg.end * float64(time.Second))
+	algorithm, confidence := row.Algorithm, 0.0
+	if seg.confidence != nil {
+		confidence = *seg.confidence
+	}
+	if absent {
+		// A clear saved before clears carried provenance has none.
+		algorithm, confidence = ManualAlgorithm, 1
+	}
 	req := SubmissionRequest{
 		Kind:               ids.Kind,
 		ExternalIDs:        ids.AsRequestMap(),
@@ -403,16 +442,17 @@ func (s *ContributionService) contributeSegment(
 		EpisodeNumbering:   ids.EpisodeNumbering,
 		EpisodeTitle:       ids.EpisodeTitle,
 		Segment:            seg.kind,
-		Start:              &startDur,
-		End:                &endDur,
 		Duration:           time.Duration(file.Duration) * time.Second,
 		FileHash:           file.FileHash,
 		FileSize:           file.FileSize,
 		Source:             source,
-		Algorithm:          row.Algorithm,
+		Algorithm:          algorithm,
+		Confidence:         confidence,
+		Absent:             absent,
 	}
-	if seg.confidence != nil {
-		req.Confidence = *seg.confidence
+	if !absent {
+		req.Start = new(time.Duration(*seg.start * float64(time.Second)))
+		req.End = new(time.Duration(*seg.end * float64(time.Second)))
 	}
 
 	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)
@@ -471,8 +511,11 @@ func (s *ContributionService) contributeSegment(
 // keys.
 func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, seg segmentData, source string) ContributionRow {
 	reqs := submissionRequirements(sub)
-	startMs := int64(*seg.start * 1000)
-	endMs := int64(*seg.end * 1000)
+	// A manual clear carries no times.
+	var startMs, endMs *int64
+	if seg.start != nil && seg.end != nil {
+		startMs, endMs = new(int64(*seg.start*1000)), new(int64(*seg.end*1000))
+	}
 	durMs := int64(file.Duration) * 1000
 	algorithm := ""
 	if seg.algorithm != nil {
@@ -492,10 +535,10 @@ func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, 
 		Provider:         sub.ID(),
 		SegmentKind:      seg.name,
 		Source:           source,
-		SubmittedStartMs: &startMs,
-		SubmittedEndMs:   &endMs,
+		SubmittedStartMs: startMs,
+		SubmittedEndMs:   endMs,
 		VideoDurationMs:  &durMs,
-		ContentHash:      ContentHash(seg.name, &startMs, &endMs, &durMs, hashParts...),
+		ContentHash:      ContentHash(seg.name, startMs, endMs, &durMs, hashParts...),
 		TargetKey:        targetKey,
 		Status:           contributionStatusClaim,
 		Amend:            reqs.SupportsAmend,

@@ -35,7 +35,6 @@ type MarkerFileResolver interface {
 // ManualMarkerWriter persists/clears manual markers.
 type ManualMarkerWriter interface {
 	UpsertMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate) (bool, error)
-	ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error)
 	UpsertAndClearMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate, clearSegments []string) (bool, error)
 }
 
@@ -420,7 +419,12 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
-	if _, err := h.Writer.ClearMarkers(h.auditContext(r), file.ID, []string{segment}); err != nil {
+	// The clear goes to providers that accept absent submissions, as one
+	// through applyManualMarkers does, unless it repeats a provider's answer.
+	clears := []string{segment}
+	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: markers.ManualAlgorithm}
+	h.withholdKeptProviderMarkers(r.Context(), file, &update, clears)
+	if _, err := h.Writer.UpsertAndClearMarkers(h.auditContext(r), file.ID, update, clears); err != nil {
 		h.logger.ErrorContext(r.Context(), "markers: clear segment failed", "file_id", file.ID, "segment", segment, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear marker")
 		return
@@ -431,6 +435,7 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal_error", "Marker cleared but failed to reload")
 		return
 	}
+	h.maybeContribute(refreshed, clears)
 	writeJSON(w, http.StatusOK, fileMarkers(refreshed))
 }
 
@@ -590,11 +595,12 @@ func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*mode
 }
 
 // maybeContribute fires a best-effort, detached contribution run for the
-// segments just set by a manual save. ContributeFile self-gates on each
-// provider's contribute_enabled flag, only submits scanner/manual-sourced
-// segments, never one the save withheld, and is idempotent — so this is a
-// no-op when contribution is off or the marker was already submitted. It runs
-// in the background so the save responds immediately and is never blocked by
+// segments just set or cleared by a manual save. ContributeFile self-gates on
+// each provider's contribute_enabled flag, only submits scanner/manual-sourced
+// segments, never one the save withheld, sends a clear only to providers that
+// accept absent submissions, and is idempotent — so this is a no-op when
+// contribution is off or the marker was already submitted. It runs in the
+// background so the save responds immediately and is never blocked by
 // provider rate limits. It tries each provider once; at a provider that
 // supports amend, the daily task sends a correction this run did not.
 func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string) {

@@ -504,7 +504,7 @@ func withoutMisplacedCredits(file *models.MediaFile, found []Marker) []Marker {
 		duration = float64(file.Duration)
 	}
 	return slices.DeleteFunc(slices.Clone(found), func(m Marker) bool {
-		return m.Kind == MarkerKindCredits && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
+		return m.Kind == MarkerKindCredits && !m.Absent && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
 	})
 }
 

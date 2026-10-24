@@ -22,6 +22,7 @@ type fakeSubmitter struct {
 	err       error
 	required  []string
 	amend     bool
+	absent    bool
 	onSubmit  func()
 	deadline  chan time.Time
 }
@@ -53,7 +54,7 @@ func (f *fakeSubmitter) SubmitMarker(ctx context.Context, req SubmissionRequest)
 }
 func (f *fakeSubmitter) FetchUserStats(context.Context) (UserStats, error) { return UserStats{}, nil }
 func (f *fakeSubmitter) SubmissionRequirements() SubmissionRequirements {
-	return SubmissionRequirements{RequiredExternalIDs: f.required, SupportsAmend: f.amend}
+	return SubmissionRequirements{RequiredExternalIDs: f.required, SupportsAmend: f.amend, SupportsAbsent: f.absent}
 }
 
 type fakeResolver struct{ ids ExternalIDs }
@@ -171,6 +172,38 @@ func TestContributeSubmitsManualOnDemand(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending {
 		t.Errorf("outcomes = %+v", outcomes)
+	}
+}
+
+// A manual clear says the item has no segment of the kind. It goes only to a
+// provider that accepts absent submissions, and a provider's own absent answer
+// is never passed on.
+func TestContributeSendsManualClearsAsAbsentOnlyWhereAccepted(t *testing.T) {
+	reg := NewRegistry(nil)
+	accepts, declines := &fakeSubmitter{id: "accepts", absent: true}, &fakeSubmitter{id: "declines"}
+	_ = reg.Register(accepts)
+	_ = reg.Register(declines)
+	cfg := fakeConfig{"accepts": {Provider: "accepts", ContributeEnabled: true}, "declines": {Provider: "declines", ContributeEnabled: true}}
+	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
+	rec := &fakeRecorder{}
+	svc := NewContributionService(reg, resolver, cfg, rec, nil)
+
+	file := newContribFile()
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	file.CreditsMarkersSource, file.CreditsMarkersProvider = strPtr(models.MarkerSourcePlugin), strPtr("accepts")
+	if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(declines.submitted) != 0 || len(accepts.submitted) != 1 {
+		t.Fatalf("submissions: accepts %+v, declines %+v; want one clear to accepts", accepts.submitted, declines.submitted)
+	}
+	got := accepts.submitted[0]
+	if got.Segment != MarkerKindIntro || !got.Absent || got.Start != nil || got.End != nil ||
+		got.Source != models.MarkerSourceManual || got.Algorithm != "manual:v1" || got.Confidence != 1 {
+		t.Fatalf("submission = %+v, want an absent manual intro", got)
+	}
+	if len(rec.recorded) != 1 || rec.recorded[0].SubmittedStartMs != nil || rec.recorded[0].SubmittedEndMs != nil {
+		t.Fatalf("recorded = %+v, want one row without times", rec.recorded)
 	}
 }
 
@@ -483,13 +516,14 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 
 // AutoContributors lists only registered submitters with automatic sharing on,
 // carrying each one's own minimum and required IDs. AmendContributors lists
-// every enabled one that supports amend, automatic sharing on or off. Both
-// list none when the stored config cannot be read.
+// every enabled one that supports amend, automatic sharing on or off, with
+// whether it takes manual clears. Both list none when the stored config cannot
+// be read.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
 		{id: "keyed", required: []string{ExternalIDKeyTVDB}, amend: true},
-		{id: "manual-only", amend: true},
+		{id: "manual-only", amend: true, absent: true},
 		{id: "disabled", amend: true},
 	} {
 		_ = reg.Register(sub)
@@ -505,14 +539,14 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 		name      string
 		config    providerConfigReader
 		want      []AutoContributor
-		wantAmend []string
+		wantAmend []AmendContributor
 		wantErr   bool
 	}{
 		{
 			name:      "stored config",
 			config:    stored,
 			want:      []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
-			wantAmend: []string{"keyed", "manual-only"},
+			wantAmend: []AmendContributor{{Provider: "keyed"}, {Provider: "manual-only", SupportsAbsent: true}},
 		},
 		{
 			name:    "config unreadable",

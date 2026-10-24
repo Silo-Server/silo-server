@@ -107,14 +107,15 @@ func confidenceHashPart(confidence *float64) string {
 // currentAmendHashSQL is the content hash newContributionRow gives an amend
 // provider's row for the segment seg (kind, start_s, end_s, source,
 // algorithm, confidence) of media file mf, from the database's current state: the
-// marker, the file's duration, hash and size, and the IDs and numbering
+// marker (a manual clear's missing times hash as ContentHash writes them), the
+// file's duration, hash and size, and the IDs and numbering
 // DBExternalIDResolver reads for the file. It is NULL when the resolver would
 // find no item. Claim and both daily candidate queries use it, so they cannot
 // disagree.
 var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	    seg.kind
-	    || '|' || trunc(seg.start_s * 1000)::bigint
-	    || '|' || trunc(seg.end_s * 1000)::bigint
+	    || '|' || COALESCE(trunc(seg.start_s * 1000)::bigint::text, 'null')
+	    || '|' || COALESCE(trunc(seg.end_s * 1000)::bigint::text, 'null')
 	    || '|' || COALESCE(mf.duration, 0) * 1000
 	    || '|' || COALESCE(
 	        (SELECT 'episode|' || COALESCE(si.tmdb_id, '') || '|' || COALESCE(si.imdb_id, '') || '|' || COALESCE(si.tvdb_id, '')
@@ -474,19 +475,33 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 	return out, rows.Err()
 }
 
+// AmendContributor is a provider that supports amend, as the daily task's
+// manual corrections pass sees it.
+type AmendContributor struct {
+	Provider string
+	// SupportsAbsent means the provider also takes a manual clear.
+	SupportsAbsent bool
+}
+
 // CandidateManualCorrections returns files, by ascending id, carrying a manual
 // marker (ManualAlgorithm, any kind, movie or episode) that one of providers,
 // all supporting amend, may take as a correction (ContributionRow.Correction)
-// and does not hold yet: the provider has a row for the file's segment, none
-// of its active claims there has the content hash the file's current state
+// and does not hold yet. A manual clear counts only for a provider that
+// supports absent submissions. The provider has a row for the file's segment,
+// none of its active claims there has the content hash the file's current state
 // gives (currentAmendHashSQL), and none is a fresh in-flight claim, which
 // Claim would refuse. The hash covers the item's IDs, so a claim taken under
 // IDs the item no longer has never matches. A stale in-flight claim and an
 // invalid refusal due for its recheck do not count. Paging is by keyset: pass
 // the last candidate returned (nil for the first page).
-func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
+func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, providers []AmendContributor, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
 	if s == nil || s.pool == nil || len(providers) == 0 || limit <= 0 {
 		return nil, nil
+	}
+	ids := make([]string, len(providers))
+	absent := make([]bool, len(providers))
+	for i, p := range providers {
+		ids[i], absent[i] = p.Provider, p.SupportsAbsent
 	}
 	afterID := 0
 	if after != nil {
@@ -505,9 +520,10 @@ func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, prov
 		          ('recap', mf.recap_markers_source, mf.recap_markers_algorithm, mf.recap_start, mf.recap_end, mf.recap_markers_confidence),
 		          ('preview', mf.preview_markers_source, mf.preview_markers_algorithm, mf.preview_start, mf.preview_end, mf.preview_markers_confidence)
 		      ) AS seg(kind, source, algorithm, start_s, end_s, confidence)
-		      CROSS JOIN unnest($1::text[]) AS p(provider)
+		      CROSS JOIN unnest($1::text[], $10::boolean[]) AS p(provider, absent)
 		      WHERE seg.source = $4 AND seg.algorithm = $5
-		        AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
+		        AND ((seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL)
+		             OR (p.absent AND seg.start_s IS NULL AND seg.end_s IS NULL))
 		        AND EXISTS (
 		            SELECT 1 FROM marker_contributions mc
 		            WHERE mc.media_file_id = mf.id AND mc.provider = p.provider AND mc.segment_kind = seg.kind
@@ -523,10 +539,11 @@ func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, prov
 		  )
 		ORDER BY mf.id
 		LIMIT $3`,
-		providers, afterID, limit,
+		ids, afterID, limit,
 		models.MarkerSourceManual, ManualAlgorithm,
 		contributionStatusClaim, int64(contributionClaimLease/time.Second),
 		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
+		absent,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query manual correction candidates: %w", err)

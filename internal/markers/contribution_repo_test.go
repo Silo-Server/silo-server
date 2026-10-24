@@ -486,6 +486,84 @@ func wantOneActiveClaim(t *testing.T, fixture contributionStoreFixture, provider
 	}
 }
 
+// A manual clear goes to an amend provider that accepts absent submissions:
+// its missing times hash the same in SQL as in Go, so the clear matches the
+// file's stored tombstone under the claim lock. When the save's own run is
+// lost, the daily task sends the clear to a provider holding an earlier
+// range; a provider without absent support is never offered it.
+func TestContributionStoreAmendSendsManualClears(t *testing.T) {
+	fixture := newContributionStoreFixture(t)
+	ctx := context.Background()
+	file := fixture.seedEpisodeFile(t, "clear", 2, 4)
+	absent := &fakeSubmitter{id: fixture.provider, amend: true, absent: true}
+	plain := &fakeSubmitter{id: fixture.provider + "-plain", amend: true}
+	t.Cleanup(func() {
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM marker_contributions WHERE provider = $1`, plain.id)
+	})
+	reg := NewRegistry(nil)
+	cfg := fakeConfig{}
+	for _, sub := range []*fakeSubmitter{absent, plain} {
+		_ = reg.Register(sub)
+		cfg[sub.id] = ProviderConfig{Provider: sub.id, ContributeEnabled: true}
+	}
+	svc := NewContributionService(reg, NewDBExternalIDResolver(fixture.pool), cfg, fixture.store, nil)
+	save := func(start, end *float64) *models.MediaFile {
+		t.Helper()
+		if _, err := fixture.pool.Exec(ctx, `
+			UPDATE media_files SET intro_start = $2, intro_end = $3, intro_markers_source = 'manual',
+			       intro_markers_confidence = 1, intro_markers_algorithm = $4
+			WHERE id = $1`, file.ID, start, end, ManualAlgorithm); err != nil {
+			t.Fatalf("save intro: %v", err)
+		}
+		saved := *file
+		saved.IntroStart, saved.IntroEnd = start, end
+		saved.IntroMarkersSource, saved.IntroMarkersAlgorithm, saved.IntroMarkersConfidence = strPtr(models.MarkerSourceManual), strPtr(ManualAlgorithm), floatPtr(1)
+		return &saved
+	}
+	candidate := func(providers []AmendContributor) bool {
+		t.Helper()
+		page, err := fixture.store.CandidateManualCorrections(ctx, providers, nil, 10_000)
+		if err != nil {
+			t.Fatalf("CandidateManualCorrections: %v", err)
+		}
+		return slices.ContainsFunc(page, func(c ContributionCandidate) bool { return c.FileID == file.ID })
+	}
+	amenders := func() []AmendContributor {
+		t.Helper()
+		providers, err := svc.AmendContributors(ctx)
+		if err != nil {
+			t.Fatalf("AmendContributors: %v", err)
+		}
+		return providers
+	}
+
+	if _, err := svc.ContributeFile(ctx, save(floatPtr(10), floatPtr(60)), ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(absent.submitted) != 1 || len(plain.submitted) != 1 {
+		t.Fatalf("submissions: absent %d, plain %d; want the range sent to both", len(absent.submitted), len(plain.submitted))
+	}
+
+	// The clear's own run is lost, as when its server stops.
+	cleared := save(nil, nil)
+	if candidate([]AmendContributor{{Provider: plain.id}}) {
+		t.Fatal("a provider without absent support is offered the clear")
+	}
+	if !candidate(amenders()) {
+		t.Fatal("the unsent clear is not a correction candidate")
+	}
+	outcomes, err := svc.ContributeFile(ctx, cleared, ContributeOptions{Corrections: true})
+	if err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(absent.submitted) != 2 || !absent.submitted[1].Absent || len(plain.submitted) != 1 {
+		t.Fatalf("submissions = %+v, outcomes = %+v; want one absent intro, to the absent provider only", absent.submitted, outcomes)
+	}
+	if candidate(amenders()) {
+		t.Fatal("the sent clear is still a candidate")
+	}
+}
+
 // manualCorrections drives one amend provider, with automatic sharing off,
 // and a seeded episode or movie file whose marker of kind a test saves by
 // hand.

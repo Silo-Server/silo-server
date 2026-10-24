@@ -16,7 +16,7 @@ import (
 // *markers.ContributionService).
 type ContributionRunner interface {
 	AutoContributors(ctx context.Context) ([]markers.AutoContributor, error)
-	AmendContributors(ctx context.Context) ([]string, error)
+	AmendContributors(ctx context.Context) ([]markers.AmendContributor, error)
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
 }
 
@@ -25,7 +25,7 @@ type ContributionRunner interface {
 // *markers.ContributionStore).
 type ContributionCandidateSource interface {
 	CandidateLocalMarkerFiles(ctx context.Context, kind markers.MarkerKind, providers []markers.AutoContributor, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
-	CandidateManualCorrections(ctx context.Context, providers []string, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
+	CandidateManualCorrections(ctx context.Context, providers []markers.AmendContributor, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
 }
 
 // ContributionFileLoader loads files by id (satisfied by *scanner.FileRepository).
