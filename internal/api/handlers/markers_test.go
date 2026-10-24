@@ -56,11 +56,6 @@ func (f *fakeMarkerWriter) UpsertMarkers(ctx context.Context, _ int, u scanner.M
 	f.upserts = append(f.upserts, u)
 	return true, nil
 }
-func (f *fakeMarkerWriter) ClearMarkers(ctx context.Context, _ int, segs []string) (bool, error) {
-	f.captureAudit(ctx)
-	f.clears = append(f.clears, segs)
-	return true, nil
-}
 func (f *fakeMarkerWriter) UpsertAndClearMarkers(ctx context.Context, _ int, u scanner.MarkerUpdate, segs []string) (bool, error) {
 	f.captureAudit(ctx)
 	if u.HasAnySegment() {

@@ -35,7 +35,6 @@ type MarkerFileResolver interface {
 // ManualMarkerWriter persists/clears manual markers.
 type ManualMarkerWriter interface {
 	UpsertMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate) (bool, error)
-	ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error)
 	UpsertAndClearMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate, clearSegments []string) (bool, error)
 }
 

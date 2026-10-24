@@ -1615,13 +1615,6 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	return r.UpsertAndClearMarkers(ctx, fileID, update, nil)
 }
 
-// ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, retaining manual provenance to prevent automatic rediscovery. Returns
-// whether a row was updated.
-func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
-	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
-}
-
 // WithdrawScannerMarker clears a file's intro or credits segment while it
 // still holds the scanner result algorithm wrote, and reports whether it
 // cleared it. Local analysis uses it to take back a result its current rules
