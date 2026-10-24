@@ -19,6 +19,7 @@ import { prefetchCatalog } from "@/pages/catalogRoute";
 import { useSidebarItemNavigation } from "@/components/sidebarItemNavigationContext";
 import {
   createEmptyQueryDefinition,
+  type BoxSetSummary,
   type BrowseItem,
   type Person,
   type RequestMediaResult,
@@ -27,7 +28,6 @@ import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/cata
 import { usePersonSearch } from "@/hooks/queries/personSearch";
 import { useBoxSetSearch } from "@/hooks/queries/boxSets";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
-import type { BoxSetSummary } from "@/api/types";
 import { GlobalSearchBoxSetRow } from "@/components/boxsets/GlobalSearchBoxSetRow";
 import { useSearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRequestSearch } from "@/hooks/queries/useRequests";

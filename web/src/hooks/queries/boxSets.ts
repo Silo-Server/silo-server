@@ -4,6 +4,7 @@ import type { BoxSetSummary } from "@/api/types";
 import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 import { catalogKeys } from "@/hooks/queries/keys";
+import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 
 /** A box set with its movies the viewer can see, in collection order. */
 export interface BoxSetDetail extends BoxSetSummary {
@@ -34,20 +35,28 @@ export async function searchBoxSets(
 
 /**
  * Box sets for search text, from one library when libraryId is set. Box sets
- * only come from libraries with box sets in search, so most servers answer
- * with none. Callers show none while the read fails, and a failed refresh
- * keeps the box sets already shown.
+ * only come from libraries with box sets on, so the read waits until one of
+ * the viewer's libraries has them and is skipped otherwise. Callers show none
+ * while the read fails, and a failed refresh keeps the box sets already
+ * shown. A failure is not retried, so it never holds back "No matches".
  */
 export function useBoxSetSearch(
   q: string,
   options: { enabled?: boolean; libraryId?: string } = {},
 ) {
   const query = q.trim();
+  const libraries = useAvailableUserLibraries();
+  const hasBoxSetLibrary = (libraries.data ?? []).some(
+    (library) =>
+      library.box_sets_enabled === true &&
+      (!options.libraryId || String(library.id) === options.libraryId),
+  );
   return useQuery({
     queryKey: boxSetKeys.search(query, options.libraryId),
     queryFn: ({ signal }) => searchBoxSets(query, options.libraryId, { signal }),
-    enabled: (options.enabled ?? true) && query.length > 0,
+    enabled: (options.enabled ?? true) && hasBoxSetLibrary && query.length > 0,
     staleTime: 60 * 1000,
+    retry: false,
   });
 }
 
