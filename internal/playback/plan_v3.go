@@ -1249,6 +1249,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		hlsRegistry = input.hlsVideoRegistry()
 	}
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
+		// The lower version can still play a quality it serves at its own
+		// size, so a refusal it acts on beats one it does not.
+		if lowerVersionTakesTranscodeV3(input, source, quality) {
+			return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
+		}
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
 	// An automatic encode never spends more than the best menu rung of its

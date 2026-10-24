@@ -2945,6 +2945,30 @@ func TestPlanPlaybackV3LowerVersionTakesH264BoundedEncode(t *testing.T) {
 	}
 }
 
+// Without an encode toolchain, a quality the lower version serves still goes
+// to it, which can play it at its own smaller size, rather than to a refusal
+// the alternate-version fallback does not act on.
+func TestPlanPlaybackV3LowerVersionTakesQualityWithoutToolchain(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "Main", 8
+	file.VideoTracks[0].VideoRange, file.VideoTracks[0].VideoRangeType = "SDR", "SDR"
+	request := validStartRequestV3()
+	request.QualityPreference = QualityAutoV3
+	request.BandwidthEstimateKbps = new(4_000)
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		Registry: NewTransformationRegistryV3(nil),
+		LowerVersion: &LowerVersionV3{
+			Requested: SourceDescriptorFromFileV3(file, 0),
+			Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, DynamicRange: DynamicRangeSDRV3},
+		},
+	}
+	if result := PlanPlaybackV3(input); result.Terminal == nil || result.Terminal.Reason != "no_alternate_version" {
+		t.Fatalf("result = %s, want the quality refused for the lower version", ExplainPlannerResultV3(result))
+	}
+}
+
 // A 4K version that may not be transcoded offers the qualities its
 // lower-resolution version serves: that version as it is, then the rungs a
 // transcode of it can reach. Original stays the 4K version.
