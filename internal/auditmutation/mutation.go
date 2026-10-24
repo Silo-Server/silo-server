@@ -113,7 +113,7 @@ func RecordMutations(ctx context.Context, tx pgx.Tx, action, targetType string, 
 	entry := &Entry{Timestamp: time.Now().UTC(), ClientIP: clientip.FromContext(ctx), UserID: lc.UserID,
 		ImpersonatorUserID: lc.ImpersonatorUserID, SessionID: lc.SessionID, RequestID: middleware.GetReqID(ctx),
 		NodeID: lc.NodeID, Method: r.Method, Path: path, PathPattern: pattern, StatusCode: status,
-		UserAgent: strings.ToValidUTF8(strings.ReplaceAll(r.UserAgent(), "\x00", ""), "�"), DurationMs: int(time.Since(lc.Started).Milliseconds()),
+		UserAgent: BoundUserAgent(r.UserAgent()), DurationMs: int(time.Since(lc.Started).Milliseconds()),
 		Action: action, TargetType: targetType, Changes: changes}
 	raw, err := json.Marshal(changes)
 	if err != nil {
