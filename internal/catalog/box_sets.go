@@ -105,33 +105,6 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 	return out, nil
 }
 
-// CollectionIDsOfContent returns the stored collection of each of the given
-// movies that has one.
-func (r *BoxSetRepository) CollectionIDsOfContent(ctx context.Context, contentIDs []string) (map[string]int64, error) {
-	out := map[string]int64{}
-	if r == nil || r.pool == nil || len(contentIDs) == 0 {
-		return out, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT m.content_id, m.tmdb_collection_id
-		FROM media_item_tmdb_collections m
-		JOIN media_items mi ON mi.content_id = m.content_id AND mi.tmdb_id = m.checked_tmdb_id::text
-		WHERE m.content_id = ANY($1) AND m.tmdb_collection_id IS NOT NULL`, contentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying movie collections: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var contentID string
-		var collectionID int64
-		if err := rows.Scan(&contentID, &collectionID); err != nil {
-			return nil, fmt.Errorf("scanning movie collection: %w", err)
-		}
-		out[contentID] = collectionID
-	}
-	return out, rows.Err()
-}
-
 // MovieCollectionLookup is a movie whose TMDB collection needs looking up.
 type MovieCollectionLookup struct {
 	ContentID string
@@ -189,14 +162,28 @@ func (r *BoxSetRepository) RecordMovieCollection(ctx context.Context, contentID 
 	return nil
 }
 
-// CollectionsNeedingFetch returns up to limit collections some movie belongs
-// to that are not stored yet or were fetched before staleBefore.
+// currentBoxSetMember holds when the collection lookup row m is current (its
+// movie still has the TMDB ID it was looked up under) and its movie is in an
+// enabled library with box sets on. Only such rows keep a collection stored
+// and refreshed: a library that turns box sets off, or a rematched movie,
+// leaves its lookup rows behind.
+const currentBoxSetMember = `EXISTS (
+			SELECT 1 FROM media_items cmi
+			JOIN media_item_libraries cmil ON cmil.content_id = cmi.content_id
+			JOIN media_folders cf ON cf.id = cmil.media_folder_id
+			WHERE cmi.content_id = m.content_id AND cmi.tmdb_id = m.checked_tmdb_id::text
+			  AND cf.box_sets_enabled AND cf.enabled IS NOT FALSE)`
+
+// CollectionsNeedingFetch returns up to limit collections a movie of a box
+// set library belongs to that are not stored yet or were fetched before
+// staleBefore.
 func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT m.tmdb_collection_id, c.fetched_at
 		FROM media_item_tmdb_collections m
 		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = m.tmdb_collection_id
 		WHERE m.tmdb_collection_id IS NOT NULL AND (c.tmdb_collection_id IS NULL OR c.fetched_at < $1)
+		  AND `+currentBoxSetMember+`
 		  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
 		ORDER BY c.fetched_at NULLS FIRST, m.tmdb_collection_id
 		LIMIT $2`, staleBefore, limit, nonNilSlice(skip))
@@ -323,14 +310,17 @@ func (r *BoxSetRepository) TouchCollection(ctx context.Context, id int64) error 
 	return nil
 }
 
-// DeleteUnusedCollections deletes the stored collections no movie belongs
-// to any more, such as one whose last movie left the catalog, so their rows
-// and cached artwork do not outlive them. The delete trigger queues the
-// artwork for collection. A collection a movie joins again is fetched anew.
+// DeleteUnusedCollections deletes the stored collections no movie of a box
+// set library belongs to any more, such as one whose last movie left the
+// catalog or whose library turned box sets off, so their rows and cached
+// artwork do not outlive them. The delete trigger queues the artwork for
+// collection. A collection a movie joins again is fetched anew.
 func (r *BoxSetRepository) DeleteUnusedCollections(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM tmdb_movie_collections c
-		WHERE NOT EXISTS (SELECT 1 FROM media_item_tmdb_collections m WHERE m.tmdb_collection_id = c.tmdb_collection_id)`)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM media_item_tmdb_collections m
+			WHERE m.tmdb_collection_id = c.tmdb_collection_id AND `+currentBoxSetMember+`)`)
 	if err != nil {
 		return 0, fmt.Errorf("deleting unused tmdb collections: %w", err)
 	}

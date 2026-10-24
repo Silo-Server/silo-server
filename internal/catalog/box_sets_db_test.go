@@ -294,6 +294,46 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	}
 }
 
+// TestBoxSetCollectionsOfDisabledLibraryDB checks that a library that turns
+// box sets off leaves its lookup rows behind, but they no longer keep its
+// collections refreshed or stored.
+func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
+	f := seedBoxSets(t)
+	ctx := t.Context()
+	if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() - interval '30 days' WHERE tmdb_collection_id = $1`, f.franchise); err != nil {
+		t.Fatal(err)
+	}
+	refetch := func() bool {
+		t.Helper()
+		ids, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.Contains(ids, f.franchise)
+	}
+	if !refetch() {
+		t.Fatal("a stale collection of a box set library is not due for a fetch")
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE media_folders SET box_sets_enabled = false WHERE id = $1`, f.lib); err != nil {
+		t.Fatal(err)
+	}
+	if refetch() {
+		t.Fatal("a collection of a library with box sets off is still due for a fetch")
+	}
+	if _, err := f.repo.DeleteUnusedCollections(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if kept, err := f.repo.Collections(ctx, []int64{f.franchise}); err != nil || len(kept) != 0 {
+		t.Fatalf("collections after box sets turned off = %v, %v; want none", kept, err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE media_folders SET box_sets_enabled = true WHERE id = $1`, f.lib); err != nil {
+		t.Fatal(err)
+	}
+	if !refetch() {
+		t.Fatal("a collection of a library that turned box sets back on is not fetched anew")
+	}
+}
+
 func TestBoxSetCollectionArtworkDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
