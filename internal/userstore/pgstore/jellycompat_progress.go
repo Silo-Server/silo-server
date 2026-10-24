@@ -55,9 +55,12 @@ func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profil
 		}
 	}
 	if edit.History != nil {
+		// The played mark is idempotent, as on the mark-played path: a leaf
+		// that is already completed gets no new history row.
 		entry := *edit.History
 		entry.ProfileID, entry.MediaItemID = profileID, edit.MediaItemID
-		if _, err := s.addVisibleHistory(ctx, tx, entry); err != nil {
+		target := userstore.MarkWatchedTarget{MediaItemID: edit.MediaItemID, DurationSeconds: edit.DurationSeconds, EventAt: &edit.EventAt}
+		if _, err := s.markWatchedBatchTx(ctx, tx, profileID, []userstore.MarkWatchedTarget{target}, []userstore.WatchHistoryEntry{entry}); err != nil {
 			return err
 		}
 	}

@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// JellycompatProgressEdit is one explicit leaf edit. History is added only for
-// an explicit played mark; ClearWatched implements an explicit unplayed mark,
-// which keeps the item's history listed.
+// JellycompatProgressEdit is one explicit leaf edit. History is the play an
+// explicit played mark records, added only when the leaf is not already
+// completed; ClearWatched implements an explicit unplayed mark, which keeps the
+// item's history listed.
 // Progress, history, and an optional favorite mutation commit or roll back together.
 type JellycompatProgressEdit struct {
 	MediaItemID                      string

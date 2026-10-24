@@ -613,7 +613,9 @@ func formatWatchedAt(watchedAt time.Time) string {
 }
 
 // RecordJellycompatProgress commits the leaf's explicit state and its optional
-// played/unplayed history mutation before notifying watch providers.
+// played/unplayed history mutation before notifying watch providers. Like the
+// mark-played path, a played mark adds history only when the leaf is not
+// already completed.
 func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
 	if edit.EventAt.IsZero() {
 		edit.EventAt = time.Now().UTC()
