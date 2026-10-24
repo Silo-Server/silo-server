@@ -1062,8 +1062,32 @@ every route reaches a terminal instead of cycling forever.
 Failure, seek, and quality replans may omit unchanged track identities. The
 server overlays only identities present in those requests and preserves the
 durable selected subtitle otherwise. Only `operation: "track_change"` gives an
-omitted `selected_tracks.subtitle` the explicit meaning "subtitles off". A
-fallback to another media version must remap the selected subtitle. It
+omitted `selected_tracks.subtitle` the explicit meaning "subtitles off".
+
+The attempt also keeps the audio and subtitle the viewer asked for, apart from
+what the current plan could deliver (`desired_tracks` on the attempt row). A
+start records the audio resolved on the requested file and the subtitle the
+client named there (or, when it named none, the one the plan selected). A
+replan changes that intent only where its `selected_tracks` name a track other
+than the current plan's, so clients that echo the playing tracks with every
+replan do not overwrite it; a `track_change` that omits the subtitle turns
+subtitles off only when the current plan was showing one. Whenever a replan
+moves playback to another file, the server resolves that intent on the new
+file instead of remapping the current plan's selection: on the file a track
+was chosen on it is found by its source identity (sidecar path, embedded
+stream index, or downloaded subtitle id), and elsewhere audio matches by
+signature, then language and variant (exact regional tag, main or commentary,
+title, channels, codec), never by position alone. So a 2160p to 1080p move
+keeps Japanese audio even when the codec, channel count, or track order
+differs, and returning to the 2160p version restores a subtitle the 1080p
+version lacked. An attempt whose intent was left behind by a replan that did
+not maintain it (an older server during a rolling deploy) falls back to the
+current plan's selection. None of this writes the viewer's saved audio or
+subtitle preference: starts and replans never save one, and clients save a
+pick with `PUT /api/v2/audio-prefs/{series_id}` and
+`PUT /api/v2/subtitle-prefs/{series_id}` (`DELETE` returns the series to Auto).
+
+A fallback to another media version must remap the selected subtitle. It
 prefers a version with an equivalent track; when none has one, playback
 continues with subtitles off and the plan carries `subtitle_track_unavailable`
 rather than ending in a terminal. A selection the effective file cannot honor

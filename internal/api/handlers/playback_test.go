@@ -813,11 +813,14 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-// A start remembers the version and audio track it played: under the series
-// for an episode, so the next episode opens on the same traits, and under the
-// movie itself, naming the exact file, so a play too short to leave progress
-// still keeps the viewer's choice.
-func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
+// A start remembers the version it played: under the series for an episode,
+// so the next episode opens on the same traits, and under the movie itself,
+// naming the exact file, so a play too short to leave progress still keeps
+// the viewer's choice. It never saves the audio track: a start cannot tell a
+// pick from Auto, a Next Up carry, or a fallback, and a saved track would
+// outrank the profile's language for the rest of the series. Picks reach the
+// audio preference through PUT /audio-prefs.
+func TestHandleStartPlaybackV3_RemembersVersionButNotAudioTrack(t *testing.T) {
 	tests := []struct {
 		name       string
 		episodeID  string
@@ -867,11 +870,8 @@ func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
 			}
 
 			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
-			if err != nil || audio == nil {
-				t.Fatalf("GetAudioPreference(%q) = %+v, %v", tt.key, audio, err)
-			}
-			if audio.AudioTrackIndex != 1 {
-				t.Fatalf("stored audio track = %d, want 1", audio.AudioTrackIndex)
+			if err != nil || audio != nil {
+				t.Fatalf("GetAudioPreference(%q) = %+v, %v; want no saved audio preference", tt.key, audio, err)
 			}
 		})
 	}

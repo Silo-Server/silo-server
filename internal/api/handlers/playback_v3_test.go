@@ -632,7 +632,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 
 	for i := range playbackStartSideEffectsWorkersV3 {
 		sessionID := fmt.Sprintf("running-%d", i)
-		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1", 0)
+		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1")
 	}
 	for range playbackStartSideEffectsWorkersV3 {
 		select {
@@ -643,7 +643,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 	}
 
 	queuedSessionID := "queued-stop"
-	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1", 0)
+	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1")
 	handler.cancelPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
 	close(scrobbler.release)
 	handler.waitForPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
@@ -3681,6 +3681,112 @@ func TestHandleReplanPlaybackV3PrefersFallbackVersionThatKeepsSubtitle(t *testin
 		if warning.Code == playback.DegradationWarningSubtitleTrackUnavailableV3 {
 			t.Fatalf("kept subtitle reported as dropped: %#v", plan.DegradationWarnings)
 		}
+	}
+}
+
+// A quality change to another version keeps the viewer's audio language and
+// subtitle, matched by language and variant rather than position, and a
+// later return to the original version restores the subtitle the fallback
+// version lacked, along with any audio picked in between. None of this saves
+// an audio preference.
+func TestHandleReplanPlaybackV3VersionChangesKeepAndRestoreChosenTracks(t *testing.T) {
+	source := uhdSourceFileV3(t)
+	source.AudioTracks = []models.AudioTrack{
+		{Language: "en", Codec: "aac", Channels: 6, Layout: "5.1", Default: true},
+		{Language: "ja", Codec: "aac", Channels: 6, Layout: "5.1"},
+	}
+	source.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.eng.ass"), Language: "eng", Format: "ass"}}
+	alternate := lowerAlternateFileV3(source)
+	alternate.AudioTracks = []models.AudioTrack{
+		{Language: "ja", Codec: "aac", Channels: 2, Layout: "stereo"},
+		{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
+	}
+	alternate.ExternalSubtitles = nil
+
+	store := newPlaybackTestStore(t)
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "auto"
+	startRequest.Capabilities.MaxResolution = "2160p"
+	startRequest.Capabilities.VideoDecode[0].Levels = []int{51}
+	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
+	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
+	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	japanese, subtitleIndex := 1, 0
+	startRequest.AudioTrackID = playback.TrackIDV3(source.ID, "audio", japanese)
+	startRequest.AudioTrackIndex = &japanese
+	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", subtitleIndex)
+	startRequest.SubtitleTrackIndex = &subtitleIndex
+	for _, delivery := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassHLSV3} {
+		startRequest.ClientPlaybackContext.Deliveries[delivery] = playback.DeliveryCapabilityV3{
+			Enabled: true, SupportedOnDevice: true,
+			Subtitles:       playback.DeliverySubtitleCapabilitiesV3{SidecarText: true, ASSStyling: true},
+			ValidatedClaims: []string{playback.ClaimClientSelectedAudioTrackV3},
+		}
+	}
+	replan := func(previous playback.DecisionResponseV3, id, quality string) playback.DecisionResponseV3 {
+		t.Helper()
+		key := playback.PlanAttemptKeyV3(*previous.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+		response := postPlaybackReplanV3(t, handler, previous.SessionID, playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationQualityChangeV3,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: id,
+			FailedPlanID: previous.PlaybackPlan.PlanID, PlanAttemptID: id + "-attempt",
+			PlanAttemptKey: key, AttemptedPlanKeys: []string{key}, AttemptCount: 1, QualityPreference: quality,
+			// Clients echo the audio they are playing and omit the subtitle.
+			SelectedTracks:        playback.SelectedTracksV3{Audio: previous.PlaybackPlan.SelectedTracks.Audio},
+			Capabilities:          startRequest.Capabilities,
+			ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		})
+		if response.Terminal != nil || response.PlaybackPlan == nil {
+			t.Fatalf("%s terminal = %#v", id, response.Terminal)
+		}
+		return response
+	}
+	trackID := func(identity *playback.TrackIdentityV3) string {
+		if identity == nil {
+			return ""
+		}
+		return identity.ID
+	}
+
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
+	lower := replan(started, "version-tracks-lower-0001", "1080p")
+	if plan := lower.PlaybackPlan; plan.EffectiveMediaFileID != alternate.ID ||
+		trackID(plan.SelectedTracks.Audio) != playback.TrackIDV3(alternate.ID, "audio", 0) || plan.SelectedTracks.Subtitle != nil {
+		t.Fatalf("1080p version: file=%d audio=%q subtitle=%q, want %d with Japanese audio 0 and no subtitle",
+			plan.EffectiveMediaFileID, trackID(plan.SelectedTracks.Audio), trackID(plan.SelectedTracks.Subtitle), alternate.ID)
+	}
+	// Switching to English on the 1080p version is a new choice; the subtitle
+	// it omits was already off there, so the request does not turn it off.
+	english := 1
+	lowerKey := playback.PlanAttemptKeyV3(*lower.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	switched := postPlaybackReplanV3(t, handler, lower.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "version-tracks-english-0001",
+		FailedPlanID: lower.PlaybackPlan.PlanID, PlanAttemptID: "version-tracks-english-attempt",
+		PlanAttemptKey: lowerKey, AttemptCount: 1, QualityPreference: "1080p",
+		SelectedTracks:        playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(alternate.ID, "audio", english), Index: &english}},
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if switched.PlaybackPlan == nil || trackID(switched.PlaybackPlan.SelectedTracks.Audio) != playback.TrackIDV3(alternate.ID, "audio", english) {
+		t.Fatalf("audio switch on the 1080p version = %#v", switched.Terminal)
+	}
+	original := replan(switched, "version-tracks-original-0001", "original")
+	if plan := original.PlaybackPlan; plan.EffectiveMediaFileID != source.ID ||
+		trackID(plan.SelectedTracks.Audio) != playback.TrackIDV3(source.ID, "audio", 0) ||
+		trackID(plan.SelectedTracks.Subtitle) != playback.TrackIDV3(source.ID, "subtitle", subtitleIndex) {
+		t.Fatalf("back on the 4K version: file=%d audio=%q subtitle=%q, want %d with English audio 0 and subtitle 0",
+			plan.EffectiveMediaFileID, trackID(plan.SelectedTracks.Audio), trackID(plan.SelectedTracks.Subtitle), source.ID)
+	}
+	handler.waitForPlaybackStartSideEffectsV3(context.Background(), started.SessionID)
+	if audio, err := store.GetAudioPreference(context.Background(), "profile-1", source.ContentID); err != nil || audio != nil {
+		t.Fatalf("GetAudioPreference = %+v, %v; version changes must not save an audio preference", audio, err)
 	}
 }
 

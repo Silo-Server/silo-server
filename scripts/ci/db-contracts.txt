@@ -501,6 +501,7 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
