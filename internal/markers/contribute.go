@@ -456,9 +456,10 @@ func (s *ContributionService) contributeSegment(
 // newContributionRow is the claim row for submitting seg's marker, from
 // source, to sub. An amend provider replaces this file's earlier submission,
 // so the file alone is its target (amendTargetKey), and its hash covers
-// everything the request identifies the episode by and a new detection
-// version, each a change worth sending. currentAmendHashSQL derives the same
-// amend hash in SQL, and CandidateLocalMarkerFiles the same keys.
+// everything the request identifies the episode and the file's bytes by, and
+// a new detection version, each a change worth sending. currentAmendHashSQL
+// derives the same amend hash in SQL, and CandidateLocalMarkerFiles the same
+// keys.
 func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, seg segmentData, source string) ContributionRow {
 	reqs := submissionRequirements(sub)
 	startMs := int64(*seg.start * 1000)
@@ -473,6 +474,7 @@ func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, 
 	if reqs.SupportsAmend {
 		hashParts = append(hashParts,
 			ids.Episode.TmdbID, ids.Episode.ImdbID, ids.Episode.TvdbID, ids.EpisodeNumbering,
+			file.FileHash, strconv.FormatInt(file.FileSize, 10),
 			source, algorithm)
 		targetKey = amendTargetKey(file.ID)
 	}

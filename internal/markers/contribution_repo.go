@@ -92,9 +92,10 @@ func ptrIntStr(v *int64) string {
 // currentAmendHashSQL is the content hash newContributionRow gives an amend
 // provider's row for the segment seg (kind, start_s, end_s, source,
 // algorithm) of media file mf, from the database's current state: the
-// marker, the file's duration, and the IDs and numbering DBExternalIDResolver
-// reads for the file. It is NULL when the resolver would find no item. Claim
-// and both daily candidate queries use it, so they cannot disagree.
+// marker, the file's duration, hash and size, and the IDs and numbering
+// DBExternalIDResolver reads for the file. It is NULL when the resolver would
+// find no item. Claim and both daily candidate queries use it, so they cannot
+// disagree.
 var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	    seg.kind
 	    || '|' || trunc(seg.start_s * 1000)::bigint
@@ -115,6 +116,7 @@ var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	         FROM media_items mi
 	         WHERE NULLIF(BTRIM(mf.episode_id), '') IS NULL
 	           AND mi.content_id = NULLIF(BTRIM(mf.content_id), '') AND mi.type = 'movie'))
+	    || '|' || COALESCE(mf.file_hash, '') || '|' || COALESCE(mf.file_size, 0)
 	    || '|' || seg.source || '|' || COALESCE(seg.algorithm, ''),
 	    'UTF8')), 'hex'), 32)`
 

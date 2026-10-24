@@ -132,6 +132,14 @@ func (f contributionStoreFixture) seedEpisodeFile(t *testing.T, name string, sea
 	return file
 }
 
+// exec runs a statement and fails the test if it errors.
+func (f contributionStoreFixture) exec(t *testing.T, query string, args ...any) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), query, args...); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+}
+
 // seedMovieFile seeds a movie with TMDB 1396, IMDb and TVDB IDs and a
 // 30-minute file of it without markers.
 func (f contributionStoreFixture) seedMovieFile(t *testing.T, name string) *models.MediaFile {
@@ -354,12 +362,14 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 	file.IntroStart, file.IntroEnd = floatPtr(1.005), floatPtr(72.5)
 	file.IntroMarkersSource, file.IntroMarkersConfidence = strPtr(models.MarkerSourceScanner), floatPtr(0.95)
 	file.IntroMarkersAlgorithm = strPtr("chapter:silence:v1")
-	if _, err := fixture.pool.Exec(ctx, `
-		UPDATE media_files SET intro_start = 1.005, intro_end = 72.5, intro_markers_source = 'scanner',
-		       intro_markers_confidence = 0.95, intro_markers_algorithm = 'chapter:silence:v1'
-		WHERE id = $1`, file.ID); err != nil {
-		t.Fatalf("seed intro: %v", err)
+	detectIntro := func() {
+		t.Helper()
+		fixture.exec(t, `
+			UPDATE media_files SET intro_start = 1.005, intro_end = 72.5, intro_markers_source = 'scanner',
+			       intro_markers_confidence = 0.95, intro_markers_algorithm = $2
+			WHERE id = $1`, file.ID, *file.IntroMarkersAlgorithm)
 	}
+	detectIntro()
 	amend := &fakeSubmitter{id: fixture.provider, amend: true, err: &SubmissionConflictError{Provider: fixture.provider, HTTPStatus: 409}}
 	once := &fakeSubmitter{id: fixture.provider + "-once"}
 	t.Cleanup(func() {
@@ -410,9 +420,7 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 
 	stale := *file
 	file.IntroMarkersAlgorithm = strPtr("chapter:silence:v2")
-	if _, err := fixture.pool.Exec(ctx, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, file.ID, *file.IntroMarkersAlgorithm); err != nil {
-		t.Fatalf("bump algorithm: %v", err)
-	}
+	fixture.exec(t, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, file.ID, *file.IntroMarkersAlgorithm)
 	if !candidate(amend.id) || candidate(once.id) {
 		t.Fatal("after a new detection version, want a candidate for the amend provider only")
 	}
@@ -431,15 +439,26 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 		t.Fatal("the amended marker is still a candidate")
 	}
 	// A corrected episode ID can name another episode at the provider.
-	if _, err := fixture.pool.Exec(ctx, `UPDATE episodes SET tvdb_id = '349232' WHERE content_id = $1`, file.EpisodeID); err != nil {
-		t.Fatalf("correct the episode's TVDB ID: %v", err)
-	}
+	fixture.exec(t, `UPDATE episodes SET tvdb_id = '349232' WHERE content_id = $1`, file.EpisodeID)
 	if !candidate(amend.id) || candidate(once.id) {
 		t.Fatal("after an episode ID correction, want a candidate for the amend provider only")
 	}
 	contribute()
 	if len(amend.submitted) != 3 || amend.submitted[2].EpisodeExternalIDs[ExternalIDKeyTVDB] != "349232" {
 		t.Fatalf("submissions after the episode ID correction: %d; want the corrected episode sent", len(amend.submitted))
+	}
+	// A file replaced at the same path keeps its row, and detection can find
+	// the same intro in the new bytes. The provider keys its submissions by
+	// the file hash.
+	file.FileHash, file.FileSize = "8e245d9679d31e12", 734003200
+	fixture.exec(t, `UPDATE media_files SET file_hash = $2, file_size = $3 WHERE id = $1`, file.ID, file.FileHash, file.FileSize)
+	detectIntro()
+	if !candidate(amend.id) || candidate(once.id) {
+		t.Fatal("after a new file hash, want a candidate for the amend provider only")
+	}
+	contribute()
+	if len(amend.submitted) != 4 || amend.submitted[3].FileHash != file.FileHash {
+		t.Fatalf("submissions after the file hash change: %d; want the new file hash sent", len(amend.submitted))
 	}
 	wantOneActiveClaim(t, fixture, amend.id, amendTargetKey(file.ID))
 }

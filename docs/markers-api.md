@@ -86,10 +86,10 @@ until one of those inputs changes, for example when the series gains a TMDB ID.
 A provider whose marker capability declares `supports_amend` replaces its
 earlier submission instead. It holds one submission per file, and a file is
 selected again whenever the marker's content hash changes: new bounds, source,
-or detection version, a re-probed duration, or a change to the series or
-episode IDs or the episode numbering. The daily task also resends to such a
-provider a manual correction that the save did not deliver, when the provider
-already holds a submission for that file and kind.
+or detection version, a re-probed duration, a new file hash or size, or a
+change to the series or episode IDs or the episode numbering. The daily task
+also resends to such a provider a manual correction that the save did not
+deliver, when the provider already holds a submission for that file and kind.
 
 Contribution is off for a new provider unless its plugin manifest asks
 otherwise. The capability metadata keys `default_contribute_enabled`,
