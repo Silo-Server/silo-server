@@ -5,27 +5,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PlayerFileVersion, PlayerPlaybackStateChange, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
-import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
-import {
-  buildSubtitleChoiceRequests,
-  sendSubtitleChoiceRequest,
-} from "../utils/subtitleChoicePersistence";
-import { buildAudioPreferenceBody, sendAudioChoiceRequest } from "../utils/audioChoicePersistence";
-import {
-  runPlayerTrackPreferenceWrite,
-  StaleTrackPreferenceWriteError,
-} from "../utils/trackPreferenceWrites";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
-import { invalidateItemDetails } from "@/hooks/queries/trackPreferences";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
+import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
 
 function patchChapterThumbnail(
@@ -378,31 +368,18 @@ function WatchPagePlayer({
     });
   }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
 
-  /**
-   * A viewer's audio pick from the player menu: switch tracks now, and save the
-   * pick for the whole series as the item page does. The track saved is the
-   * one in the file playing, since indexes belong to a file. Nothing else
-   * calls this, so restores, reconnects, and server replans never save one.
-   */
+  const { saveAudioChoice, saveSubtitleChoice } = useTrackChoicePersistence({
+    seriesId: seriesContext?.seriesId ?? contentId,
+    audioTracks,
+    subtitleTracks: playableSubtitles,
+  });
+  // A viewer's audio pick from the player menu: switch now, save for the series.
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {
       session.switchAudioTrack(index, currentPosition);
-      const track = audioTracks[index];
-      if (!track) return;
-      sendAudioChoiceRequest(
-        config,
-        seriesContext?.seriesId ?? contentId,
-        buildAudioPreferenceBody(index, track),
-      ).then(
-        () => invalidateItemDetails(queryClient),
-        (err: unknown) => {
-          // The viewer switched profile before it went out; it isn't theirs.
-          if (err instanceof StaleTrackPreferenceWriteError) return;
-          toast.error(err instanceof Error ? err.message : "Failed to save audio preference");
-        },
-      );
+      saveAudioChoice(index);
     },
-    [audioTracks, config, contentId, queryClient, seriesContext, session],
+    [saveAudioChoice, session],
   );
 
   const updatePlaybackState = session.updatePlaybackState;
@@ -412,37 +389,6 @@ function WatchPagePlayer({
       onPlaybackStateChange?.(state);
     },
     [onPlaybackStateChange, updatePlaybackState],
-  );
-
-  /**
-   * Persists an in-player subtitle choice for the whole series.
-   *
-   * buildSubtitleChoiceRequests decides what a pick is worth storing and
-   * where; this only issues the requests. They are independent on purpose: a
-   * failed settings write must not cost the user the track they picked, and a
-   * failed track write must not cost them the language, so each is best effort
-   * on its own rather than one composite request that half-applies.
-   */
-  const handleSubtitleChanged = useCallback(
-    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
-      const seriesId = seriesContext?.seriesId ?? contentId;
-      const requests = buildSubtitleChoiceRequests({
-        seriesId,
-        index,
-        tracks: playableSubtitles,
-        inventoryTrack,
-      });
-      if (requests.length === 0) return;
-      // Best effort, but after any earlier pick for the series has landed.
-      void runPlayerTrackPreferenceWrite(config, "subtitle", seriesId, (ownerConfig) =>
-        Promise.allSettled(
-          requests.map((request) => sendSubtitleChoiceRequest(ownerConfig, request)),
-        ),
-      ).catch(() => {
-        // Best effort; a write for a profile no longer active is dropped.
-      });
-    },
-    [config, seriesContext, contentId, playableSubtitles],
   );
 
   useEffect(() => {
@@ -799,7 +745,7 @@ function WatchPagePlayer({
       audioTracks={audioTracks}
       activeAudioIndex={session.audioTrackIndex}
       onAudioSelect={handleSwitchAudio}
-      onSubtitleChanged={handleSubtitleChanged}
+      onSubtitleChanged={saveSubtitleChoice}
       onReturnFromPostRoll={onReturnFromPostRoll}
       watchTogetherRoomId={watchTogetherRoomId}
       watchTogetherConnection={watchTogetherConnection}
