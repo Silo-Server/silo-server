@@ -46,6 +46,92 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 	}
 }
 
+// TestLadderBackfillSkipsCandidatesHeldByJobsDB checks which job states keep a
+// ladder candidate out of an EnqueueLadderBackfill batch. A job that will still
+// cache the same source (queued, running, or failed and waiting for a later
+// retry) holds the row. No job, a succeeded job, a failed job whose retry is
+// due, or a job for an older source leaves it to be enqueued.
+func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := t.Context()
+
+	contentID := fmt.Sprintf("zz-ladder-held-%d", time.Now().UnixNano())
+	const source = "https://image.tmdb.org/t/p/original/poster.jpg"
+	cleanup := func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	// No manifest lists the poster's new rung, so the poster is a candidate.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, tmdb_id, poster_source_path, poster_path)
+		VALUES ($1, 'movie', 'Ladder held', '1', $2, $3)
+	`, contentID, source, "tmdb/movies/"+contentID+"/poster/original.r1.webp"); err != nil {
+		t.Fatalf("seed media item: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		status string // empty for no job
+		source string
+		retry  time.Duration // next_attempt_at relative to now
+		held   bool
+	}{
+		{name: "no job"},
+		{name: "queued", status: ImageCacheStatusQueued, source: source, held: true},
+		{name: "queued for a later retry", status: ImageCacheStatusQueued, source: source, retry: time.Hour, held: true},
+		{name: "running", status: ImageCacheStatusRunning, source: source, held: true},
+		{name: "failed with a later retry", status: ImageCacheStatusFailed, source: source, retry: time.Hour, held: true},
+		{name: "failed with its retry due", status: ImageCacheStatusFailed, source: source, retry: -time.Minute},
+		{name: "succeeded", status: ImageCacheStatusSucceeded, source: source},
+		{name: "queued for an older source", status: ImageCacheStatusQueued, source: "https://image.tmdb.org/t/p/original/old.jpg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID); err != nil {
+				t.Fatalf("clear jobs: %v", err)
+			}
+			if tc.status != "" {
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO metadata_image_cache_jobs (
+						target_type, target_content_id, series_id, source_path, provider_id,
+						provider_content_id, content_type, image_type, target_language,
+						status, next_attempt_at, locked_at
+					)
+					VALUES (
+						'item', $1, $1, $2, 'tmdb', '1', 'movie', 'poster', '',
+						$3::text, NOW() + $4::double precision * interval '1 second',
+						CASE WHEN $3::text = 'running' THEN NOW() END
+					)
+				`, contentID, tc.source, tc.status, tc.retry.Seconds()); err != nil {
+					t.Fatalf("seed job: %v", err)
+				}
+			}
+
+			var enqueueable int
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*)
+				FROM (`+ladderCandidateRowsSQL()+`) ac
+				WHERE ac.target_type = 'item'
+				  AND ac.image_type = 'poster'
+				  AND ac.target_content_id = $1
+				  AND NOT `+ladderCandidateHeldSQL, contentID).Scan(&enqueueable); err != nil {
+				t.Fatalf("query enqueueable candidates: %v", err)
+			}
+			want := 1
+			if tc.held {
+				want = 0
+			}
+			if enqueueable != want {
+				t.Fatalf("enqueueable candidates = %d, want %d", enqueueable, want)
+			}
+		})
+	}
+}
+
 // seedLadderBackdrops caches a provider backdrop on the item, its German
 // localization, and one extra backdrop row, returning each surface's original
 // key and the extra backdrop's row ID.
