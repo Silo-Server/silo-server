@@ -2,8 +2,17 @@ package metadata
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 func TestShouldBulkReset(t *testing.T) {
@@ -298,4 +307,87 @@ func TestArtworkReconcileWithoutSaverContinuesAfterUnsafeBatches(t *testing.T) {
 	if stats.Verified != 2 || stats.SweepErrors != 2 {
 		t.Fatalf("stats = %#v, want 2 verified and 2 sweep errors", stats)
 	}
+}
+
+// A collection created from a built-in template can keep its bundled poster
+// path, such as "/images/collection-templates/<id>.jpg". The sweep must leave it
+// alone: it is not a storage key, and blobstore rejecting it used to count as a
+// sweep error on every run.
+func TestArtworkReconcileSkipsBundledPostersDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var folderID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ('movies', 'ARC Folder', true) RETURNING id`,
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	suffix := time.Now().UnixNano()
+	collectionID := fmt.Sprintf("arc-bundled-%d", suffix)
+	bundled := fmt.Sprintf("/images/collection-templates/arc-%d.jpg", suffix)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO library_collections (id, library_id, slug, title, collection_type, poster_url, poster_thumbhash, poster_from_template)
+		VALUES ($1, $2, $1, 'ARC Template Collection', 'manual', $3, 'aGFzaA==', TRUE)
+	`, collectionID, folderID, bundled); err != nil {
+		t.Fatalf("seed collection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, collectionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+
+	checker := &fakeObjectChecker{}
+	stats, err := NewArtworkCacheReconciler(pool, checker).Run(ctx, nil)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if checker.checked[bundled] != 0 {
+		t.Fatal("bundled app-relative posters must not be checked against storage")
+	}
+	if stats.SweepErrors != 0 {
+		t.Fatalf("SweepErrors = %d, want 0", stats.SweepErrors)
+	}
+	var poster, hash string
+	var fromTemplate bool
+	if err := pool.QueryRow(ctx,
+		`SELECT poster_url, poster_thumbhash, poster_from_template FROM library_collections WHERE id = $1`, collectionID,
+	).Scan(&poster, &hash, &fromTemplate); err != nil {
+		t.Fatalf("read collection: %v", err)
+	}
+	if poster != bundled || hash != "aGFzaA==" || !fromTemplate {
+		t.Fatalf("bundled poster changed: url=%q hash=%q from_template=%v", poster, hash, fromTemplate)
+	}
+}
+
+type fakeObjectChecker struct {
+	mu       sync.Mutex
+	missing  map[string]bool
+	erroring map[string]bool
+	errorAll bool
+	checked  map[string]int
+}
+
+func (f *fakeObjectChecker) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.checked == nil {
+		f.checked = map[string]int{}
+	}
+	f.checked[key]++
+	if f.errorAll || f.erroring[key] {
+		return blobstore.ObjectInfo{}, errors.New("simulated storage error")
+	}
+	if f.missing[key] {
+		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
+	}
+	return blobstore.ObjectInfo{Key: key}, nil
 }
