@@ -1528,8 +1528,8 @@ const ladderCandidateHeldSQL = `EXISTS (
 // artwork with no cached destination, this one looks for artwork whose
 // destination exists but predates a rung.
 //
-// The job check below is deduplication only — it keeps a row that already has a
-// queued or running job from being enqueued twice. It is deliberately NOT the
+// The job check below is deduplication only: it keeps a row whose job is queued,
+// running, or waiting to retry from being enqueued twice. It is deliberately NOT the
 // completion signal: a row held by another node's in-flight job is absent here
 // but is not done. HasLadderBackfillRemaining answers that question instead.
 func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
