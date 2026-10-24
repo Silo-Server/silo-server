@@ -291,6 +291,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		TitleIsFallback:      response.GetItem().GetTitleIsFallback(),
 		SortTitle:            response.GetItem().GetSortTitle(),
 		Overview:             response.GetItem().GetOverview(),
+		OverviewLanguage:     response.GetItem().GetOverviewLanguage(),
 		Tagline:              response.GetItem().GetTagline(),
 		Year:                 int(response.GetItem().GetYear()),
 		Runtime:              int(response.GetItem().GetRuntime()),
@@ -491,12 +492,14 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 	for _, season := range response.GetSeasons() {
 		ids := mergePluginProviderIDs(p.capabilityID, season.GetProviderId(), season.GetProviderIds())
 		seasons = append(seasons, SeasonResult{
-			ContentID:    ids[p.capabilityID],
-			SeasonNumber: int(season.GetSeasonNumber()),
-			Title:        season.GetTitle(),
-			Overview:     season.GetOverview(),
-			AirDate:      season.GetAirDate(),
-			PosterPath:   season.GetPosterPath(),
+			ContentID:        ids[p.capabilityID],
+			SeasonNumber:     int(season.GetSeasonNumber()),
+			Title:            season.GetTitle(),
+			TitleLanguage:    season.GetTitleLanguage(),
+			Overview:         season.GetOverview(),
+			OverviewLanguage: season.GetOverviewLanguage(),
+			AirDate:          season.GetAirDate(),
+			PosterPath:       season.GetPosterPath(),
 		})
 	}
 	return seasons, nil
@@ -532,16 +535,18 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 	for _, episode := range response.GetEpisodes() {
 		ids := mergePluginProviderIDs(p.capabilityID, episode.GetProviderId(), episode.GetProviderIds())
 		episodes = append(episodes, EpisodeResult{
-			ContentID:     ids[p.capabilityID],
-			ProviderIDs:   ids,
-			SeasonNumber:  int(episode.GetSeasonNumber()),
-			EpisodeNumber: int(episode.GetEpisodeNumber()),
-			Title:         episode.GetTitle(),
-			Overview:      episode.GetOverview(),
-			AirDate:       episode.GetAirDate(),
-			Runtime:       int(episode.GetRuntime()),
-			Ratings:       ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
-			StillPath:     episode.GetStillPath(),
+			ContentID:        ids[p.capabilityID],
+			ProviderIDs:      ids,
+			SeasonNumber:     int(episode.GetSeasonNumber()),
+			EpisodeNumber:    int(episode.GetEpisodeNumber()),
+			Title:            episode.GetTitle(),
+			TitleLanguage:    episode.GetTitleLanguage(),
+			Overview:         episode.GetOverview(),
+			OverviewLanguage: episode.GetOverviewLanguage(),
+			AirDate:          episode.GetAirDate(),
+			Runtime:          int(episode.GetRuntime()),
+			Ratings:          ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
+			StillPath:        episode.GetStillPath(),
 		})
 	}
 	return episodes, nil
