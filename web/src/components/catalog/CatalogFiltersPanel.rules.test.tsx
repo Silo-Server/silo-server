@@ -22,7 +22,7 @@ vi.mock("@/hooks/queries/ratingsCapability", () => ({
 
 vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: [], isLoading: false }),
-  useExtendedQueryRules: () => true,
+  useQueryRuleCapabilities: () => ({ extendedRules: true, showTitleRules: true }),
 }));
 
 // Rules the Guided view can't show: a negated genre, two actors, and an OR group.

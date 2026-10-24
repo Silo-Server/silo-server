@@ -298,7 +298,7 @@ func TestRegistryPreservesEveryRangeFromWinningProvider(t *testing.T) {
 		{Kind: MarkerKindCredits, Start: 1900 * time.Second, End: 1950 * time.Second},
 		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1850 * time.Second},
 	}}})
-	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second, Confidence: 1}}}})
+	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second}}}})
 	result, ok, err := populateRegistryForTest(t.Context(), registry)
 	if err != nil || !ok || len(result.Markers) != 2 {
 		t.Fatalf("multi-range merge: %+v, %v", result, err)

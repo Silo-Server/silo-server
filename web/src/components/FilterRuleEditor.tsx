@@ -25,11 +25,12 @@ import {
   newFilterRule,
   type CollectionFieldOption,
   type CollectionLanguageSource,
+  type QueryRuleCapabilities,
 } from "@/components/collections/collectionBuilderFields";
 import { FacetValuePicker } from "@/components/ui/facet-value-picker";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
 import { type FacetValueScope, useRuleLanguages } from "@/hooks/queries/facetValues";
-import { useExtendedQueryRules } from "@/hooks/queries/personSearch";
+import { useQueryRuleCapabilities } from "@/hooks/queries/personSearch";
 import { formatLanguage } from "@/lib/languageDisplay";
 import {
   getDefaultQuerySortOrder,
@@ -63,22 +64,26 @@ const SHOW_SCOPES: ReadonlySet<FilterRuleMediaScope> = new Set(["all", "video", 
 
 /**
  * The fields a rule row offers. `shownRatingSources` leaves out ratings an
- * administrator hid; unset offers every rating. `extendedRules` false leaves
- * out what only a server advertising `extended_query_rules` takes.
+ * administrator hid; unset offers every rating. Capabilities leave out rules
+ * the connected server does not support.
  */
 export function getFilterRuleFieldOptions(
   allowPersonalizedFilters = false,
   mediaScope: FilterRuleMediaScope = "all",
   shownRatingSources?: ReadonlySet<string>,
-  extendedRules = true,
+  capabilities: QueryRuleCapabilities = {},
 ) {
-  return availableCollectionFields(allowPersonalizedFilters, shownRatingSources, extendedRules)
+  return availableCollectionFields(allowPersonalizedFilters, shownRatingSources, capabilities)
     .filter(
       (option) =>
         (!option.showsOnly || SHOW_SCOPES.has(mediaScope)) &&
+        (!option.episodesOnly || mediaScope === "episode") &&
         (!option.noEpisodeValue || mediaScope !== "episode"),
     )
     .map((option) => {
+      if (mediaScope === "episode" && option.value === "title") {
+        return { ...option, label: "Episode title" };
+      }
       // Ebook and manga are read rather than watched, so relabel "watched".
       if (mediaScope !== "ebook" && mediaScope !== "manga") {
         return option;
@@ -704,12 +709,12 @@ export default function FilterRuleEditor({
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
   const shownRatingSources = useShownRatingSources();
-  const extendedRules = useExtendedQueryRules();
+  const capabilities = useQueryRuleCapabilities();
   const fieldOptions = getFilterRuleFieldOptions(
     allowPersonalizedFilters,
     mediaScope,
     shownRatingSources,
-    extendedRules,
+    capabilities,
   );
 
   function updateConfig(updates: Partial<FilterConfig>) {

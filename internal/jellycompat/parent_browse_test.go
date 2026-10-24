@@ -80,6 +80,14 @@ func (f *fakeSeasonEpisodeRepo) ListBySeries(_ context.Context, seriesID string)
 // ListAdjacentInSeries returns the target episode plus its immediate
 // previous/next neighbors across the whole series, mirroring the repo's
 // natural (season, episode) ordering.
+func (f *fakeSeasonEpisodeRepo) ListIDsBySeriesIDs(context.Context, []string) (map[string][]string, error) {
+	return nil, nil
+}
+
+func (f *fakeSeasonEpisodeRepo) ListIDsBySeasonIDs(context.Context, []string) (map[string][]string, error) {
+	return nil, nil
+}
+
 func (f *fakeSeasonEpisodeRepo) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
 	all, _ := f.ListBySeries(ctx, seriesID)
 	sort.SliceStable(all, func(i, j int) bool {

@@ -388,12 +388,12 @@ type providerResult struct {
 }
 
 // mergeProviderResults preserves every range from the winning provider for each
-// kind. Priority selects across providers; their quality signals break ties.
-// A marker below its provider's minimum confidence takes no part, so another
-// provider, or local detection, can fill its kind. The provider then counts as
-// refreshed even when its answer came from the cache: that answer is current
-// for the file, so a stored marker of the provider it no longer supports is
-// withdrawn rather than kept.
+// kind. Confidence selects across providers; fetch priority, then submission
+// count, breaks ties. A marker below its provider's minimum confidence takes no
+// part, so another provider, or local detection, can fill its kind. The
+// provider then counts as refreshed even when its answer came from the cache:
+// that answer is current for the file, so a stored marker of the provider it no
+// longer supports is withdrawn rather than kept.
 func mergeProviderResults(results []providerResult) Result {
 	type candidate struct {
 		rank   mergeCandidate
@@ -488,18 +488,19 @@ type mergeCandidate struct {
 	priority int
 }
 
-// better reports whether a should win over b for the same segment kind: more
-// preferred fetch priority, then more submissions, then higher confidence, then
-// deterministic provider id ordering.
+// better reports whether a should win over b for the same segment kind: higher
+// confidence, then more preferred fetch priority, then more submissions, then
+// deterministic provider id ordering. A marker without a confidence (zero)
+// loses to any rated one.
 func (a mergeCandidate) better(b mergeCandidate) bool {
+	if a.marker.Confidence != b.marker.Confidence {
+		return a.marker.Confidence > b.marker.Confidence
+	}
 	if a.priority != b.priority {
 		return a.priority < b.priority
 	}
 	if a.marker.SubmissionCount != b.marker.SubmissionCount {
 		return a.marker.SubmissionCount > b.marker.SubmissionCount
-	}
-	if a.marker.Confidence != b.marker.Confidence {
-		return a.marker.Confidence > b.marker.Confidence
 	}
 	return a.marker.ProviderID < b.marker.ProviderID
 }
