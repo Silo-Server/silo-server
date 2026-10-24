@@ -35,6 +35,18 @@ func TestTopGenreIsReadOncePerTTL(t *testing.T) {
 	}
 }
 
+// The shared read runs on singleflight's goroutine, where a panic would end
+// the process instead of reaching the request's recovery.
+func TestTopGenreSurvivesAReadPanic(t *testing.T) {
+	var cache topGenreCache
+	genre, err := cache.get(t.Context(), func(context.Context) (string, error) {
+		panic("read bug")
+	})
+	if err == nil || genre != "" {
+		t.Fatalf("panicking read returned %q, %v", genre, err)
+	}
+}
+
 // An expired genre is served at once while a background read refreshes it.
 func TestTopGenreServesExpiredGenreWhileRefreshing(t *testing.T) {
 	cache := topGenreCache{genre: "Drama", loaded: true, expires: time.Now().Add(-time.Second)}

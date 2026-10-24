@@ -364,7 +364,9 @@ func splitProgressSnapshots(snapshots []ProgressSnapshot) ([]string, []time.Time
 
 // The snapshots arrive as unnest arrays instead of joins against
 // user_watch_progress because per-user progress may live in a SQLite store
-// rather than this Postgres database.
+// rather than this Postgres database. Specials (season 0) have no airing
+// position, so only a later special supersedes a special, and a special never
+// supersedes a regular episode.
 func buildSupersededEpisodeProgressQuery() string {
 	return `
 		WITH in_progress(content_id, updated_at) AS (
@@ -379,6 +381,7 @@ func buildSupersededEpisodeProgressQuery() string {
 		JOIN episodes done
 		  ON done.series_id = ip.series_id
 		 AND (done.season_number, done.episode_number) > (ip.season_number, ip.episode_number)
+		 AND (done.season_number = 0) = (ip.season_number = 0)
 		JOIN completed done_progress
 		  ON done_progress.content_id = done.content_id
 		WHERE done_progress.updated_at > ip_progress.updated_at`

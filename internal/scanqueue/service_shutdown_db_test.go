@@ -53,14 +53,19 @@ func (f overlapTestFolders) GetByID(context.Context, int) (*models.MediaFolder, 
 }
 
 // shutdownTestIngester blocks every ingest until its context ends, as a long
-// scan does when the process shuts down. With block unset it completes.
+// scan does when the process shuts down. With block unset it returns err, or
+// completes when err is nil.
 type shutdownTestIngester struct {
 	block   bool
 	started chan struct{}
+	err     error
 }
 
 func (i *shutdownTestIngester) ingest(ctx context.Context) (*libraryingest.Result, error) {
 	if !i.block {
+		if i.err != nil {
+			return nil, i.err
+		}
 		return &libraryingest.Result{}, nil
 	}
 	close(i.started)
@@ -143,7 +148,7 @@ func TestShutdownRequeuesRunningScanWithFollowUpDB(t *testing.T) {
 
 	run := startShutdownTestRun(t, ctx, repo, folderID)
 	done := processUntilStarted(t, svc, run, ingester.started)
-	if _, err := repo.UpdateProgress(ctx, run.ID, &evt.ScanRunResult{Message: "Processing files", FilesProcessed: 5, TotalFiles: 10}); err != nil {
+	if _, err := repo.UpdateProgress(ctx, run.ID, run.StartedAt, &evt.ScanRunResult{Message: "Processing files", FilesProcessed: 5, TotalFiles: 10}); err != nil {
 		t.Fatalf("record progress: %v", err)
 	}
 	shutdown()
@@ -269,5 +274,111 @@ func TestRequeueLeavesALaterClaimRunningDB(t *testing.T) {
 	got, changed, err := repo.Requeue(ctx, first.ID, first.StartedAt)
 	if err != nil || changed || got.Status != StatusRunning || !got.StartedAt.Equal(*second.StartedAt) {
 		t.Fatalf("stale requeue = %#v changed=%v err=%v, want the second claim left running", got, changed, err)
+	}
+}
+
+// claimAgain requeues run as the stale-run requeue would and claims it again,
+// as a worker on another replica would, and returns the new claim.
+func claimAgain(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) *models.ScanRun {
+	t.Helper()
+	if _, changed, err := repo.Requeue(ctx, run.ID, run.StartedAt); err != nil || !changed {
+		t.Fatalf("requeue run: changed=%v err=%v", changed, err)
+	}
+	again, err := repo.Start(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("claim run again: %v", err)
+	}
+	if again.StartedAt == nil || again.StartedAt.Equal(*run.StartedAt) {
+		t.Fatalf("second claim started at %v, want a start time other than the first claim's %v", again.StartedAt, run.StartedAt)
+	}
+	return again
+}
+
+// TestRunningScanStopsWhenItsClaimEndsElsewhereDB pins that a worker stops its
+// scan at the next heartbeat once its run is canceled on another replica, or
+// requeued as stale and claimed again, and leaves the run to that cancel or
+// claim. Before, only the replica that took the cancel stopped its own scans,
+// and a worker kept heartbeating a later claim, so the scan ran to the end.
+func TestRunningScanStopsWhenItsClaimEndsElsewhereDB(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// end ends the worker's claim from outside it and returns the status
+		// and claim the run must keep.
+		end func(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) (string, *time.Time)
+	}{
+		{
+			name: "canceled on another replica",
+			end: func(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) (string, *time.Time) {
+				other := NewService(repo, nil, nil, nil, context.Background(), 1, 1)
+				if _, err := other.CancelByLibrary(ctx, run.MediaFolderID); err != nil {
+					t.Fatalf("cancel library scans on another replica: %v", err)
+				}
+				return StatusCancelled, run.StartedAt
+			},
+		},
+		{
+			name: "requeued and claimed again",
+			end: func(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) (string, *time.Time) {
+				return StatusRunning, claimAgain(t, ctx, repo, run).StartedAt
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _, repo, folderID := openDirectRunTestRepository(t)
+			folder := &models.MediaFolder{ID: folderID, Type: "series", Enabled: true}
+			appCtx, stop := context.WithCancel(context.Background())
+			t.Cleanup(stop)
+			ingester := &shutdownTestIngester{block: true, started: make(chan struct{})}
+			svc := NewService(repo, overlapTestFolders{folder: folder}, ingester, nil, appCtx, 1, 1)
+			svc.heartbeatInterval = 20 * time.Millisecond
+
+			run := startShutdownTestRun(t, ctx, repo, folderID)
+			done := processUntilStarted(t, svc, run, ingester.started)
+			wantStatus, wantClaim := tc.end(t, ctx, repo, run)
+			waitProcessed(t, done)
+
+			got, err := repo.GetByID(ctx, run.ID)
+			if err != nil {
+				t.Fatalf("load run: %v", err)
+			}
+			if got.Status != wantStatus || got.StartedAt == nil || !got.StartedAt.Equal(*wantClaim) || got.FollowupTrigger != "autoscan:sonarr" {
+				t.Fatalf("run after the worker stopped = status %s started %v follow-up %q, want %s started %v with its follow-up",
+					got.Status, got.StartedAt, got.FollowupTrigger, wantStatus, wantClaim)
+			}
+		})
+	}
+}
+
+// TestStaleWorkerLeavesALaterClaimRunningDB pins that a worker whose run was
+// requeued as stale and claimed again cannot end the later claim, whichever
+// way its own scan ends, even before its heartbeat notices. Before, the stale
+// worker completed, failed or canceled the run under the later claim.
+func TestStaleWorkerLeavesALaterClaimRunningDB(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "scan completes"},
+		{name: "scan fails", err: errors.New("read library: input/output error")},
+		{name: "scan is canceled", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _, repo, folderID := openDirectRunTestRepository(t)
+			folder := &models.MediaFolder{ID: folderID, Type: "series", Enabled: true}
+			svc := NewService(repo, overlapTestFolders{folder: folder}, &shutdownTestIngester{err: tc.err}, nil, context.Background(), 1, 1)
+
+			stale := startShutdownTestRun(t, ctx, repo, folderID)
+			later := claimAgain(t, ctx, repo, stale)
+			svc.process(stale)
+
+			got, err := repo.GetByID(ctx, stale.ID)
+			if err != nil {
+				t.Fatalf("load run: %v", err)
+			}
+			if got.Status != StatusRunning || got.StartedAt == nil || !got.StartedAt.Equal(*later.StartedAt) || got.FollowupTrigger != "autoscan:sonarr" {
+				t.Fatalf("run after the stale worker finished = status %s started %v follow-up %q, want the later claim (started %v) left running with its follow-up",
+					got.Status, got.StartedAt, got.FollowupTrigger, later.StartedAt)
+			}
+		})
 	}
 }

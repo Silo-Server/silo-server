@@ -1,4 +1,4 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
 
@@ -15,6 +15,11 @@ export function authProviderQueryOptions() {
     staleTime: 1_000,
     retry: false,
   });
+}
+
+/** The server's sign-in providers and whether its sign-in screens offer a password form. */
+export function useAuthProviders() {
+  return useQuery(authProviderQueryOptions());
 }
 
 /** Provider writes must refresh even when discovery was read moments ago. */

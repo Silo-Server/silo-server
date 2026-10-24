@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { resetPlaybackCapabilitiesV2 } from "./start-v2";
 import { replanV2 } from "./lifecycle-v2";
 import { registerSessionMutations, resetSessionMutations } from "./session-mutations";
 import { PlayerFetchError } from "./player-fetch";
@@ -52,6 +53,7 @@ const reply = (body: unknown, status = 200, type = "application/json") =>
   });
 
 beforeEach(() => {
+  resetPlaybackCapabilitiesV2();
   registerSessionMutations(sessionId, installationId);
 });
 afterEach(() => {
@@ -60,10 +62,13 @@ afterEach(() => {
 });
 
 it("replans through v2 with the session's installation", async () => {
-  const fetcher = vi.fn().mockResolvedValue(reply(wireDecision));
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(reply({ features: [], protocol_versions: [3] }))
+    .mockResolvedValueOnce(reply(wireDecision));
   vi.stubGlobal("fetch", fetcher);
   const decision = await replanV2(config, sessionId, replan);
-  const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
+  const [url, init] = fetcher.mock.calls[1] as [string, RequestInit];
   expect(url).toBe(`http://localhost:3000/api/v2/playback/${sessionId}/replan`);
   expect(init.method).toBe("POST");
   const headers = new Headers(init.headers);
@@ -80,18 +85,21 @@ it("replans through v2 with the session's installation", async () => {
 it("surfaces a problem refusal as a player fetch error with its code", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      reply(
-        {
-          type: "https://siloserver.org/docs/api/v2/problems/idempotency_conflict",
-          title: "Idempotency conflict",
-          status: 409,
-          detail: "The replan request ID belongs to a different request",
-        },
-        409,
-        "application/problem+json",
+    vi
+      .fn()
+      .mockResolvedValueOnce(reply({ features: [], protocol_versions: [3] }))
+      .mockResolvedValueOnce(
+        reply(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/idempotency_conflict",
+            title: "Idempotency conflict",
+            status: 409,
+            detail: "The replan request ID belongs to a different request",
+          },
+          409,
+          "application/problem+json",
+        ),
       ),
-    ),
   );
   const failure = await replanV2(config, sessionId, replan).catch((e: unknown) => e);
   expect(failure).toBeInstanceOf(PlayerFetchError);
@@ -105,4 +113,28 @@ it("refuses a session that was not started on v2", async () => {
   vi.stubGlobal("fetch", fetcher);
   await expect(replanV2(config, "other", replan)).rejects.toThrow("not started on API v2");
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("negotiates with the session's server features, without a capabilities request", async () => {
+  const fetcher = vi.fn().mockResolvedValue(reply(wireDecision));
+  vi.stubGlobal("fetch", fetcher);
+  await replanV2(config, sessionId, { ...replan, learned_limit: "clear" }, [
+    "buffering_quality_v1",
+  ]);
+  expect(fetcher).toHaveBeenCalledOnce();
+  const body = JSON.parse(String((fetcher.mock.calls[0] as [string, RequestInit])[1].body));
+  expect(body.learned_limit).toBe("clear");
+  expect(body.client_features).toContain("buffering_quality_v1");
+});
+
+it("replans without the negotiated fields when capabilities cannot be read", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(reply(null, 503))
+    .mockResolvedValueOnce(reply(wireDecision));
+  vi.stubGlobal("fetch", fetcher);
+  await replanV2(config, sessionId, { ...replan, learned_limit: "clear" });
+  const body = JSON.parse(String((fetcher.mock.calls[1] as [string, RequestInit])[1].body));
+  expect(body).not.toHaveProperty("learned_limit");
+  expect(body.client_features).not.toContain("buffering_quality_v1");
 });

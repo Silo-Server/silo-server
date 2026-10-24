@@ -357,7 +357,7 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		if target.Role != models.RoleAdmin || !target.Enabled {
 			// Recovery also signs the account out everywhere, so every
 			// session starts again under its new authority.
-			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
+			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}, nil); err != nil {
 				return nil, 0, fmt.Errorf("promoting account: %w", err)
 			}
 			if err := RevokeSignInsInTransaction(ctx, tx, id); err != nil {

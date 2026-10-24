@@ -143,10 +143,6 @@ type historyPrecisionExporter interface {
 	HistoryTimePrecision() time.Duration
 }
 
-type UnwatchedExporter interface {
-	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
-}
-
 type FavoriteImporter interface {
 	FetchFavorites(ctx context.Context, cfg ServerConfig, conn Connection) ([]RemoteFavorite, error)
 }
@@ -660,8 +656,7 @@ type LocalDroppedEvent struct {
 type LocalWatchEventKind string
 
 const (
-	LocalWatchEventMarkedWatched   LocalWatchEventKind = "marked_watched"
-	LocalWatchEventMarkedUnwatched LocalWatchEventKind = "marked_unwatched"
+	LocalWatchEventMarkedWatched LocalWatchEventKind = "marked_watched"
 )
 
 type LocalWatchEvent struct {

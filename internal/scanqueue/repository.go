@@ -399,15 +399,21 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 	return run, nil
 }
 
-func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
+// TouchHeartbeat keeps the claim that started at startedAt alive. It reports
+// ErrScanRunNotFound once the run is no longer running under that claim: it
+// was canceled, possibly on another replica, or requeued as stale and perhaps
+// claimed again.
+func (r *Repository) TouchHeartbeat(ctx context.Context, id string, startedAt *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE scan_runs
 		SET heartbeat_at = NOW(),
 			updated_at = NOW()
 		WHERE id = $1
-		  AND status = $2`,
+		  AND status = $2
+		  AND started_at IS NOT DISTINCT FROM $3`,
 		id,
 		StatusRunning,
+		startedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("touch scan heartbeat: %w", err)
@@ -418,7 +424,9 @@ func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) UpdateProgress(ctx context.Context, id string, result *evt.ScanRunResult) (*models.ScanRun, error) {
+// UpdateProgress records progress for the claim that started at startedAt, and
+// reports ErrScanRunNotFound once the run is no longer that running claim.
+func (r *Repository) UpdateProgress(ctx context.Context, id string, startedAt *time.Time, result *evt.ScanRunResult) (*models.ScanRun, error) {
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return nil, fmt.Errorf("marshal scan progress: %w", err)
@@ -429,24 +437,28 @@ func (r *Repository) UpdateProgress(ctx context.Context, id string, result *evt.
 			updated_at = NOW()
 		WHERE id = $1
 		  AND status = $3
+		  AND started_at IS NOT DISTINCT FROM $4
 		RETURNING `+scanRunColumns,
 		id,
 		payload,
 		StatusRunning,
+		startedAt,
 	))
 }
 
-// Complete marks a running run completed. When a request for the same scope
-// was coalesced into the run while it was running, the owed follow-up scan is
+// Complete marks a running run completed. startedAt is the claim finishing
+// it: a run that is no longer running under that claim is left alone and
+// reported as ErrScanRunNotFound. When a request for the same scope was
+// coalesced into the run while it was running, the owed follow-up scan is
 // enqueued in the same transaction; see CompleteWithFollowUp to observe it.
-func (r *Repository) Complete(ctx context.Context, id string, result *evt.ScanRunResult) (*models.ScanRun, error) {
-	run, _, err := r.CompleteWithFollowUp(ctx, id, result)
+func (r *Repository) Complete(ctx context.Context, id string, startedAt *time.Time, result *evt.ScanRunResult) (*models.ScanRun, error) {
+	run, _, err := r.CompleteWithFollowUp(ctx, id, startedAt, result)
 	return run, err
 }
 
 // CompleteWithFollowUp is Complete returning the follow-up run it enqueued,
 // or nil when none was owed.
-func (r *Repository) CompleteWithFollowUp(ctx context.Context, id string, result *evt.ScanRunResult) (*models.ScanRun, *models.ScanRun, error) {
+func (r *Repository) CompleteWithFollowUp(ctx context.Context, id string, startedAt *time.Time, result *evt.ScanRunResult) (*models.ScanRun, *models.ScanRun, error) {
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal scan result: %w", err)
@@ -461,21 +473,22 @@ func (r *Repository) CompleteWithFollowUp(ctx context.Context, id string, result
 			updated_at = NOW()
 		WHERE id = $1
 		  AND status = $4
+		  AND started_at IS NOT DISTINCT FROM $5
 		RETURNING `+scanRunColumns,
-		id, StatusCompleted, payload, StatusRunning)
+		id, StatusCompleted, payload, StatusRunning, startedAt)
 }
 
-// Fail marks a running run failed. An owed follow-up is still enqueued: the
-// request that was coalesced into this run has not been served, and a
-// follow-up only exists because a new request arrived, so a persistently
-// failing scope cannot loop on its own.
-func (r *Repository) Fail(ctx context.Context, id string, errorMessage string) (*models.ScanRun, error) {
-	run, _, err := r.FailWithFollowUp(ctx, id, errorMessage)
+// Fail marks a running run failed, under the same claim rule as Complete. An
+// owed follow-up is still enqueued: the request that was coalesced into this
+// run has not been served, and a follow-up only exists because a new request
+// arrived, so a persistently failing scope cannot loop on its own.
+func (r *Repository) Fail(ctx context.Context, id string, startedAt *time.Time, errorMessage string) (*models.ScanRun, error) {
+	run, _, err := r.FailWithFollowUp(ctx, id, startedAt, errorMessage)
 	return run, err
 }
 
 // FailWithFollowUp is Fail returning the follow-up run it enqueued, or nil.
-func (r *Repository) FailWithFollowUp(ctx context.Context, id string, errorMessage string) (*models.ScanRun, *models.ScanRun, error) {
+func (r *Repository) FailWithFollowUp(ctx context.Context, id string, startedAt *time.Time, errorMessage string) (*models.ScanRun, *models.ScanRun, error) {
 	return r.finish(ctx, id, `
 		UPDATE scan_runs
 		SET status = $2,
@@ -485,8 +498,9 @@ func (r *Repository) FailWithFollowUp(ctx context.Context, id string, errorMessa
 			updated_at = NOW()
 		WHERE id = $1
 		  AND status = $4
+		  AND started_at IS NOT DISTINCT FROM $5
 		RETURNING `+scanRunColumns,
-		id, StatusFailed, errorMessage, StatusRunning)
+		id, StatusFailed, errorMessage, StatusRunning, startedAt)
 }
 
 // finish applies a terminal-status update and, when the finished run owes a
@@ -575,6 +589,28 @@ func (r *Repository) MarkCancelled(ctx context.Context, id string) (*models.Scan
 	return run, false, nil
 }
 
+// CancelClaim marks a run canceled for the worker holding the claim that
+// started at startedAt. Unlike MarkCancelled, which an admin cancel applies to
+// any active run, it reports ErrScanRunNotFound, and changes nothing, once the
+// run is no longer running under that claim.
+func (r *Repository) CancelClaim(ctx context.Context, id string, startedAt *time.Time) (*models.ScanRun, error) {
+	return scanRunRow(r.pool.QueryRow(ctx, `
+		UPDATE scan_runs
+		SET status = $2,
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $3
+		  AND started_at IS NOT DISTINCT FROM $4
+		RETURNING `+scanRunColumns,
+		id,
+		StatusCancelled,
+		StatusRunning,
+		startedAt,
+	))
+}
+
 // Requeue returns a running run to the queue so a worker claims it again,
 // keeping any owed follow-up and dropping the interrupted attempt's progress.
 // startedAt is the claim being given up: a run that was requeued as stale and
@@ -622,7 +658,9 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*models.ScanRun, e
 	))
 }
 
-func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) (int, error) {
+// RequeueStaleRunning returns to the queue every worker run whose heartbeat is
+// older than staleAfter, measured on the database clock that stamped it.
+func (r *Repository) RequeueStaleRunning(ctx context.Context, staleAfter time.Duration) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE scan_runs
 		SET status = $2,
@@ -632,11 +670,11 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 			error_message = '',
 			updated_at = NOW()
 		WHERE status = $1
-		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3
+		  AND COALESCE(heartbeat_at, started_at, requested_at) < NOW() - make_interval(secs => $3)
 		  AND trigger <> ALL($4)`,
 		StatusRunning,
 		StatusAccepted,
-		before,
+		staleAfter.Seconds(),
 		directScanTriggers,
 	)
 	if err != nil {
@@ -645,7 +683,9 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 	return int(tag.RowsAffected()), nil
 }
 
-func (r *Repository) FailStaleDirect(ctx context.Context, before time.Time) (int, error) {
+// FailStaleDirect fails every direct run whose heartbeat is older than
+// staleAfter, measured on the database clock that stamped it.
+func (r *Repository) FailStaleDirect(ctx context.Context, staleAfter time.Duration) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE scan_runs
 		SET status = $2,
@@ -654,12 +694,12 @@ func (r *Repository) FailStaleDirect(ctx context.Context, before time.Time) (int
 			heartbeat_at = NOW(),
 			updated_at = NOW()
 		WHERE status = ANY($1)
-		  AND COALESCE(heartbeat_at, started_at, requested_at) < $4
+		  AND COALESCE(heartbeat_at, started_at, requested_at) < NOW() - make_interval(secs => $4)
 		  AND trigger = ANY($5)`,
 		[]string{StatusAccepted, StatusRunning},
 		StatusFailed,
 		"abandoned direct scan run",
-		before,
+		staleAfter.Seconds(),
 		directScanTriggers,
 	)
 	if err != nil {

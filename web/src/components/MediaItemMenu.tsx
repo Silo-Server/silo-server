@@ -23,7 +23,6 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
-  TimerReset,
   ThumbsDown,
   X,
 } from "lucide-react";
@@ -39,7 +38,6 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { useClearResumePosition } from "@/hooks/queries/progress";
 import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
@@ -124,7 +122,8 @@ type MediaItemMenuEntry =
       key:
         | "playFromBeginning"
         | "toggleWatched"
-        | "resetProgress"
+        | "markWatched"
+        | "markUnwatched"
         | "toggleFavorite"
         | "toggleWatchlist"
         | "toggleNotInterested"
@@ -145,8 +144,9 @@ interface BuildMediaItemMenuModelOptions {
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
   /**
-   * Whether the item has a resume position to clear, rewatches included.
-   * Defaults to hasPartialProgress.
+   * Whether the item has a resume position, rewatches included. A movie or
+   * episode with one offers both Mark Watched and Mark Unwatched. Defaults to
+   * hasPartialProgress.
    */
   hasResumePosition?: boolean;
   isAdmin: boolean;
@@ -171,8 +171,8 @@ interface MediaItemMenuProps {
   dismissAction?: DismissHomeItemVariables;
   hasPartialProgress?: boolean;
   /**
-   * Whether the item has a resume position to clear, rewatches included, for
-   * lists that hide a watched item's progress. Defaults to hasPartialProgress.
+   * Whether the item has a resume position, rewatches included, for lists that
+   * hide a watched item's progress. Defaults to hasPartialProgress.
    */
   hasResumePosition?: boolean;
   /** Enables the watched shortcut on wide cards such as Continue Watching. */
@@ -185,6 +185,10 @@ interface MediaItemMenuProps {
   longPressRef?: RefObject<HTMLElement | null>;
   /** Heading for the touch action sheet. */
   itemTitle?: string;
+}
+
+function isInProgressVideo(mediaType: MediaItemType, hasResumePosition: boolean) {
+  return (mediaType === "movie" || mediaType === "episode") && hasResumePosition;
 }
 
 export function buildMediaItemMenuModel({
@@ -209,17 +213,20 @@ export function buildMediaItemMenuModel({
     });
   }
 
-  if (userState) {
+  // A partly watched movie or episode, a rewatch included, offers both: Mark
+  // Watched records a play, and Mark Unwatched clears the watched state and
+  // the resume position. Neither removes anything from watch history.
+  if (isInProgressVideo(mediaType, hasResumePosition)) {
+    if (userState) {
+      entries.push({ kind: "action", key: "markWatched", label: "Mark Watched" });
+    }
+    entries.push({ kind: "action", key: "markUnwatched", label: "Mark Unwatched" });
+  } else if (userState) {
     entries.push({
       kind: "action",
       key: "toggleWatched",
       label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
-  }
-
-  // Clears the resume point without passing through watched (issue #2134).
-  if ((mediaType === "movie" || mediaType === "episode") && hasResumePosition) {
-    entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
   }
 
   if (userState && showCollectionActions) {
@@ -329,8 +336,10 @@ function MediaItemMenuActionIcon({
       ) : (
         <EyeOff aria-hidden="true" className="size-4" />
       );
-    case "resetProgress":
-      return <TimerReset aria-hidden="true" className="size-4" />;
+    case "markWatched":
+      return <EyeOff aria-hidden="true" className="size-4" />;
+    case "markUnwatched":
+      return <Eye aria-hidden="true" className="size-4" />;
     case "toggleFavorite":
       return (
         <Heart
@@ -1000,7 +1009,6 @@ function MediaItemMenuEngine({
   const notInterestedMutation = useToggleNotInterested(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
-  const clearResumePositionMutation = useClearResumePosition();
   const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
@@ -1009,8 +1017,7 @@ function MediaItemMenuEngine({
     watchlistMutation.isPending ||
     notInterestedMutation.isPending ||
     refreshMetadataMutation.isPending ||
-    dismissHomeItemMutation.isPending ||
-    clearResumePositionMutation.isPending;
+    dismissHomeItemMutation.isPending;
   const watchedPending = watchedMutation.isPending;
   const favoritePending = favoriteMutation.isPending;
   const refreshPending = refreshMetadataMutation.isPending;
@@ -1055,6 +1062,25 @@ function MediaItemMenuEngine({
     );
   }
 
+  // A partly watched item's Mark Watched and Mark Unwatched set the state
+  // instead of toggling it. Mark Watched marks even an item that is already
+  // watched: on a rewatch the server records another play and clears the
+  // resume position.
+  async function handleSetWatched(played: boolean) {
+    if (watchedMutation.isPending) return;
+    const previousPlayed = currentUserState?.played;
+    setCurrentUserState((previous) => (previous ? { ...previous, played } : previous));
+    try {
+      await watchedMutation.mutateAsync(played);
+    } catch {
+      setCurrentUserState((previous) =>
+        previous && previousPlayed !== undefined
+          ? { ...previous, played: previousPlayed }
+          : previous,
+      );
+    }
+  }
+
   async function handleFavoriteToggle() {
     await runOptimisticToggle("is_favorite", favoriteMutation.isPending, (_, previousValue) =>
       favoriteMutation.mutateAsync(previousValue),
@@ -1082,8 +1108,12 @@ function MediaItemMenuEngine({
         await handleWatchedToggle();
         return;
       }
-      case "resetProgress": {
-        clearResumePositionMutation.mutate({ contentId });
+      case "markWatched": {
+        await handleSetWatched(true);
+        return;
+      }
+      case "markUnwatched": {
+        await handleSetWatched(false);
         return;
       }
       case "toggleFavorite": {
@@ -1371,9 +1401,14 @@ export default function MediaItemMenu({
     showFavoriteShortcut &&
     showsFavoriteQuickAction(quickActionMode) &&
     model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
-  const hasWatchedAction = model.some(
-    (entry) => entry.kind === "action" && entry.key === "toggleWatched",
+  // An in-progress item's shortcut marks it watched, as its menu does, rather
+  // than toggling a rewatch to unwatched.
+  const watchedShortcutMarks = model.some(
+    (entry) => entry.kind === "action" && entry.key === "markWatched",
   );
+  const hasWatchedAction =
+    watchedShortcutMarks ||
+    model.some((entry) => entry.kind === "action" && entry.key === "toggleWatched");
   const rootPosterSupportsWatchedShortcut =
     variant === "poster" && (mediaType === "movie" || mediaType === "series");
   const showWatchedQuickAction =
@@ -1420,11 +1455,17 @@ export default function MediaItemMenu({
           {showWatchedQuickAction && (
             <WatchedQuickActionButton
               mediaType={mediaType}
-              isWatched={currentUserState.played}
+              isWatched={watchedShortcutMarks ? false : currentUserState.played}
               isPending={pending.watched}
               variant={variant}
               density={posterActionDensity}
-              onToggle={() => requestEngine({ kind: "toggleWatched" })}
+              onToggle={() =>
+                requestEngine(
+                  watchedShortcutMarks
+                    ? { kind: "action", key: "markWatched" }
+                    : { kind: "toggleWatched" },
+                )
+              }
             />
           )}
           {showPosterFavorite && (

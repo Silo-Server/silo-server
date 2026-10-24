@@ -228,6 +228,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	registerQuickConnectRoutes(r, deps, authHandler)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
+	// Roku clients probe for artwork with HEAD before showing it.
+	r.Head(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Head(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
@@ -259,6 +262,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			if !autoscanVirtualFoldersRegistered {
 				r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
 			}
+			r.Get(compatMediaFoldersPath, itemsHandler.HandleMediaFolders)
 			r.Get("/Users/{userId}/Views", itemsHandler.HandleViews)
 			r.Get("/Items", itemsHandler.HandleItems)
 			r.Get("/Users/{id}/Items", itemsHandler.HandleItems)
@@ -286,6 +290,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
+			r.Get("/Items/{id}/Images", itemsHandler.HandleItemImageInfos)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Studios", itemsHandler.HandleStudios)
@@ -466,6 +471,9 @@ func withDefaults(deps Dependencies) Dependencies {
 	// access filter so all consumers (content service, items/images handlers,
 	// recommendations) inherit them without per-call-site guards.
 	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
+	// The playback bitrate cap reads the same scope as the access filter, so
+	// one request resolves it once for both (see NewScopeAccessFilter).
+	deps.PlaybackScopeResolver = rememberRequestScope(deps.PlaybackScopeResolver)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}

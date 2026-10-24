@@ -12,6 +12,7 @@ import {
   matchRecommendationProviderPreset,
   type RecommendationProviderPreset,
 } from "@/lib/recommendation-provider-presets";
+import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
@@ -20,7 +21,14 @@ import { useStepSubmit, useStepSummary } from "../useStep";
 const APPLE_PUSH_KEY = "notifications.apple_push_delivery_enabled";
 const ANDROID_PUSH_KEY = "notifications.android_push_delivery_enabled";
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
+const SHARE_MARKERS_KEY = "markers.share_by_default";
+
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  SHARE_MARKERS_KEY,
+];
 
 const DOWNLOAD_KEYS = [
   "download.enabled",
@@ -56,6 +64,8 @@ export function FeaturesStep() {
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const localMarkersEnabled = markerMode === "local" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  // Only an explicit false turns sharing off, as on the server.
+  const shareMarkers = form.getValue(SHARE_MARKERS_KEY) !== "false";
 
   const baseUrl = form.getValue("recommendations.embedding_base_url");
   const model = form.getValue("recommendations.embedding_model");
@@ -134,9 +144,9 @@ export function FeaturesStep() {
     >
       <StepSection>
         <SettingField
-          label="Skip markers from TheIntroDB"
+          label="Skip markers from TheIntroDB and Silo"
           type="toggle"
-          description="TheIntroDB is installed by default to find intros, credits, recaps, and other segments you can skip. Online markers are preferred over local detection."
+          description="TheIntroDB and Silo's marker service find intros, credits, recaps, and other segments you can skip. TheIntroDB is installed by default. Online markers are preferred over local detection."
           value={onlineMarkersEnabled ? "true" : "false"}
           onChange={(value) => setOnlineMarkers(value === "true")}
         />
@@ -166,6 +176,13 @@ export function FeaturesStep() {
           description="Detect missing intros and credits using this server's CPU. Saved online markers take priority. Applies to libraries with marker detection enabled."
           value={localMarkersEnabled ? "true" : "false"}
           onChange={(value) => setLocalMarkers(value === "true")}
+        />
+        <SettingField
+          label="Share markers with Silo"
+          type="toggle"
+          description={MARKER_SHARING_DISCLOSURE}
+          value={shareMarkers ? "true" : "false"}
+          onChange={(value) => form.setValue(SHARE_MARKERS_KEY, value)}
         />
         <SettingField
           label="Mobile push notifications"

@@ -3,12 +3,15 @@ package jellycompat
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 type compatTestUserStoreProvider struct {
@@ -43,6 +46,43 @@ func TestDirectUserDataServiceProgressUsesCompletedHistory(t *testing.T) {
 	}
 	if progressMap["movie-history-only"] == nil || !progressMap["movie-history-only"].Completed {
 		t.Fatalf("ListProgressByMediaItems = %+v, want completed history overlay", progressMap)
+	}
+}
+
+// Filters=IsPlayed lists read completed progress pages; each row must carry
+// the stored play date, not the time the row was last written (#2885).
+func TestDirectUserDataServiceCompletedListsReportPlayDate(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	provider := compatTestUserStoreProvider{store: store}
+	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	played := time.Date(2019, 3, 14, 20, 15, 0, 0, time.UTC)
+	if err := service.MarkPlayedBatchAt(t.Context(), session, []string{"movie-1"}, played); err != nil {
+		t.Fatal(err)
+	}
+
+	lists := map[string]func() ([]upstreamProgress, error){
+		"ListProgress": func() ([]upstreamProgress, error) {
+			return service.ListProgress(t.Context(), session, "completed", 10, 0)
+		},
+		"ListProgressFiltered": func() ([]upstreamProgress, error) {
+			return service.ListProgressFiltered(t.Context(), session, "completed", []string{"movie"}, nil, 10, 0)
+		},
+	}
+	for name, list := range lists {
+		t.Run(name, func(t *testing.T) {
+			entries, err := list()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("entries = %+v, want one", entries)
+			}
+			got, err := time.Parse(time.RFC3339Nano, entries[0].UpdatedAt)
+			if err != nil || !got.Equal(played) {
+				t.Fatalf("UpdatedAt = %q, want play date %s", entries[0].UpdatedAt, played.Format(time.RFC3339))
+			}
+		})
 	}
 }
 
@@ -110,5 +150,40 @@ func addCompletedHistoryForJellycompatTest(t *testing.T, store userstore.UserSto
 		Source:          userstore.WatchHistorySourceTrakt,
 	}); err != nil {
 		t.Fatalf("AddHistory: %v", err)
+	}
+}
+
+// ListResumableProgress keeps the ids with a resume point, newest first, as
+// ListProgress("in_progress") orders them.
+func TestDirectUserDataServiceListResumableProgress(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, row := range []struct {
+		id        string
+		position  float64
+		completed bool
+		at        time.Time
+	}{
+		{"ep-old", 10, false, now.Add(-2 * time.Hour)},
+		{"ep-new", 20, false, now.Add(-time.Hour)},
+		{"ep-done", 0, true, now},
+		{"other", 30, false, now},
+	} {
+		if err := store.SetProgressAt(t.Context(), "profile-1", row.id, row.position, 100, row.completed, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &directUserDataService{storeProvider: compatTestUserStoreProvider{store: store}}
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	entries, err := service.ListResumableProgress(t.Context(), session, []string{"ep-old", "ep-new", "ep-done", "ep-none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.MediaItemID)
+	}
+	if fmt.Sprint(got) != "[ep-new ep-old]" {
+		t.Fatalf("resumable = %v, want [ep-new ep-old]", got)
 	}
 }

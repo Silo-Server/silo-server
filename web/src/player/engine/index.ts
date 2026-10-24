@@ -23,8 +23,10 @@ export function attachBrowserEngine(options: {
   surface: HTMLElement;
   source: EngineSourceSpec;
   onFailure: (failure: FailureV3) => void;
+  /** Data a read from the file received; see EnginePlayerOptions. */
+  onMediaData?: (request: number, bytes: number, first: number, last: number) => void;
 }): BrowserEngineSession {
-  const { video, surface, source, onFailure } = options;
+  const { video, surface, source, onFailure, onMediaData } = options;
   const player = new EnginePlayer({
     source,
     surface,
@@ -33,6 +35,7 @@ export function attachBrowserEngine(options: {
     muted: video.muted,
     playbackRate: video.defaultPlaybackRate,
     onFailure,
+    onMediaData,
   });
   const detach = attachEngineToElement(video, player);
   try {

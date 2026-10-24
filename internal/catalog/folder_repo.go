@@ -762,7 +762,20 @@ func (r *FolderRepository) DeleteWithStats(
 		if e := moveCollectionsOffFolder(ctx, tx, id); e != nil {
 			return e
 		}
+		// The folder's episode memberships cascade with it; series that
+		// survive in other libraries recompute the denorms read from them.
+		var seriesIDs []string
+		if e := tx.QueryRow(ctx, `
+			SELECT COALESCE(array_agg(DISTINCT e.series_id), ARRAY[]::text[])
+			FROM episode_libraries el
+			JOIN episodes e ON e.content_id = el.episode_id
+			WHERE el.media_folder_id = $1`, id).Scan(&seriesIDs); e != nil {
+			return e
+		}
 		if _, e := tx.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id); e != nil {
+			return e
+		}
+		if e := RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, seriesIDs); e != nil {
 			return e
 		}
 		return tx.Commit(ctx)

@@ -35,15 +35,29 @@
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
-# Series air-date sort keys advance when a known episode airs.
+# A finished regular episode does not push a half-watched special off Continue Watching.
+./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
+
+# Series air-date sort keys advance when a known episode airs. The latest
+# available episode air date counts only episodes with a file in a library:
+# files the bulk episode link attaches count, also when an air-date correction
+# holds the series row meanwhile, and deleting a library drops its episodes.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
+./internal/scanner TestBulkLinkEpisodesAdvancesSeriesAvailableAirDateDB
 
 # Same-day episodes sorted by air date keep series title and season/episode order on every query path.
 ./internal/catalog TestQueryEpisodeAirDateTiesPostgres
 
+# Episode collection counts name exactly the episodes their cursor pages list, under every rule and access limit.
+./internal/catalog TestEpisodeCatalogCountsMatchCursorPagesPostgres
+
 # PostgreSQL search keeps typo matches that contain every query word and ranks
-# titles starting with the query first, on the cursor and offset paths.
+# titles starting with the query first, on the cursor and offset paths. Search
+# folds diacritics alike in Go and SQL, and the folding migration refreshes
+# stored search fields and collapses colliding aliases.
 ./internal/catalog TestSearchRelevancePostgres
+./internal/catalog TestSearchTextFoldMatchesGoPostgres
+./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
@@ -51,6 +65,10 @@
 
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
+
+# Stale membership removal locks the series before it deletes, in the order
+# curated rebind and split take them.
+./internal/catalog TestStaleMembershipRemovalLocksSeriesFirstDB
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
@@ -191,6 +209,12 @@
 ./internal/markers TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
 ./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
+./internal/markers TestProviderConfigDefaultSharingDB
+./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
+./cmd/silo TestStopDefaultMarkerSharingInTxDB
+./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
+./internal/markers TestContributionStoreAmendSendsAnUnsentManualCorrection
+./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
@@ -219,6 +243,8 @@
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
 ./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
 ./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
+./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
+./internal/metadata TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
@@ -254,6 +280,8 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
+./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
+./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 
@@ -270,6 +298,10 @@
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
+
+# A resumed play's measured watch time survives repeated finalizations and is
+# what admin watch totals count.
+./internal/api/handlers TestAdminPlaybackWatchTimeDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
@@ -376,7 +408,7 @@
 ./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
 ./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
 ./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
-./internal/recommendations TestWatchedItemIDSetAcrossPagesPostgres
+./internal/recommendations TestWatchedItemIDSetQueryMatchesStoreWalkPostgres
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
@@ -464,6 +496,29 @@
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
 
+# Buffering quality: a learned limit expires after seven days, a reset keeps the
+# probe and plan summary, rows go with the device's last registration (in either
+# user store, also when two deletions race) and after 30 days without an
+# update, a seek replay never records a limit, a later replan plans under the
+# stored limit, a start or replan reports the limit only when it lowered the
+# plan, the connection budget honours the administrator cap, a plan summary
+# keeps the delivery of the plan it reports after a replan replaced it, and a
+# slow delivery lookup does not cost the summary its write.
+./internal/playback/connectionstore TestStoreLifecycle
+./internal/playback/connectionstore TestReadingsDB
+./internal/catalog TestSourceBitratePercentileDB
+./internal/api/handlers TestSeekReplayKeepsLearnedLimitDB
+./internal/api/handlers TestConnectionBudgetAppliesAdminCapDB
+./internal/api/handlers TestLearnedLimitCarriesThroughReplansDB
+./internal/api/handlers TestLearnedLimitMarksOnlyAStartItLoweredDB
+./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
+./internal/api/handlers TestConnectionReadingsDB
+./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
+./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
+./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
+./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
+./internal/api/handlers TestSQLiteRegistrationRemovalDropsConnectionsDB
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
@@ -484,6 +539,18 @@
 ./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
 ./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
 
+# A worker stops its scan once its run is cancelled on any replica or claimed
+# again, and a stale worker never heartbeats or ends another worker's claim.
+./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
+./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
+
+# Password sign-in spends one attempt budget per name on every surface.
+./internal/auth TestSignInNameBudgetDB
+
 # The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
 # keeps a value an administrator chose.
 ./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
+
+# A stored collection's Jellyfin BoxSet page skips members the viewer can't see
+# without shortening the page or shifting later pages.
+./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB

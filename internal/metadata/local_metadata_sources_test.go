@@ -63,7 +63,7 @@ func TestLocalMetadataURLSourceRouting(t *testing.T) {
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tmdb", URL: "https://image.tmdb.org/rated.jpg", Type: ImagePoster, Language: "en", Rating: 9},
 		{ProviderID: "nfo", URL: nfoPosterSource, Type: ImagePoster},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if item.PosterPath != nfoPosterSource {
 		t.Errorf("PosterPath = %q, want the NFO poster over a rated remote one", item.PosterPath)
 	}

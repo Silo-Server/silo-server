@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS hidden_history_items (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
     hidden_before TEXT NOT NULL,
+    removed_before TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, media_item_id)
 );
@@ -193,6 +194,8 @@ CREATE TABLE IF NOT EXISTS series_playback_preferences (
     hdr BOOLEAN NOT NULL DEFAULT false,
     codec_video TEXT,
     updated_at TEXT NOT NULL,
+    file_id INTEGER,
+    edition_key TEXT,
     PRIMARY KEY (profile_id, series_id)
 );
 

@@ -94,6 +94,10 @@ func (h *DeviceHandler) RemoveDeviceSettings(ctx context.Context, actor DeviceSe
 	if err != nil {
 		return err
 	}
+	if forget {
+		registry, _ := store.(userstore.DeviceRegistry)
+		forgetPlaybackConnections(ctx, h.Connections, registry, actor.UserID, []string{deviceID})
+	}
 	for _, key := range keys {
 		publishUserSettingsEvent(ctx, h.EventsHub, actor.UserID, profileID, key, string(settingscontract.ScopeProfileDevice))
 	}

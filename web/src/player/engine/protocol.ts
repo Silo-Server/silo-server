@@ -7,6 +7,9 @@ import type { EngineSourceSpec } from "./source";
  */
 export const ENGINE_READ_FAILED = "browser_engine_read_failed";
 
+/** The engine's start deadline passed before the position became playable. */
+export const ENGINE_STARTUP_TIMEOUT = "browser_engine_startup_timeout";
+
 /**
  * The video decoder reported an error. A hardware decoder also fails this way
  * when the GPU process restarts under it, so the page retries a new decode run
@@ -81,6 +84,15 @@ export type WorkerToPageMessage =
    * while the AudioContext is suspended for lack of a user gesture.
    */
   | { type: "audio-buffered"; generation: number }
+  /** A read from the source failed and will be retried, or has given up. */
+  | { type: "read-failed" }
+  /**
+   * A read from the source received data: request `request` has `bytes` in
+   * all, its first at `first` and its latest at `last`, as
+   * `performance.timeOrigin + performance.now()` so the page can place them
+   * on its own clock. Sent while data arrives, a few times a second.
+   */
+  | { type: "media-data"; request: number; bytes: number; first: number; last: number }
   | {
       type: "error";
       generation: number | null;

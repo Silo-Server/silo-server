@@ -359,6 +359,21 @@ func cleanUpReplacedCollectionImage(
 	}
 }
 
+// removeDeletedCollectionArtwork deletes a deleted collection's whole artwork
+// directory: every image revision and collage. The row delete has committed,
+// so the cleanup outlives a canceled request, bounded by
+// collectionImageCleanupTimeout, and a failure only logs.
+func removeDeletedCollectionArtwork(ctx context.Context, store blobstore.Store, prefix, collectionID string) {
+	if store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectionImageCleanupTimeout)
+	defer cancel()
+	if _, err := store.DeletePrefix(ctx, fmt.Sprintf("%s/%s/", prefix, collectionID)); err != nil {
+		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "prefix", prefix, "error", err)
+	}
+}
+
 // isCollectionImageKeyIn reports whether key is an object directly inside dir
 // (which carries a trailing slash).
 func isCollectionImageKeyIn(dir, key string) bool {

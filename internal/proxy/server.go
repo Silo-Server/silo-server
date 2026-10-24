@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
@@ -45,8 +46,9 @@ const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	watcher *nodeconfig.Watcher
-	tracker *nodesessions.Tracker
+	probeLimiter *bandwidthprobe.Limiter
+	watcher      *nodeconfig.Watcher
+	tracker      *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
 	nodeRowID            func() (int, bool)
@@ -142,6 +144,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
+		probeLimiter: bandwidthprobe.NewLimiter(),
 	}
 	if watcher != nil {
 		server.nodeRowID = watcher.NodeRowID
@@ -250,6 +253,8 @@ func (s *Server) router() chi.Router {
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Accept", "Authorization", "Content-Type", proxyRangeHeader,
+			"X-Silo-Device-Name", "X-Silo-Device-Platform", "X-Silo-Client-Family", "X-Profile-Token",
+			"X-Silo-Device-Id", "X-Silo-Client", "X-Silo-Client-Version", "X-Profile-Id", "X-Silo-Client-Build", "X-Silo-Client-Channel",
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
 		// direct_stream_resume_v1 has the client re-request a byte range with
@@ -261,7 +266,7 @@ func (s *Server) router() chi.Router {
 		// different origin than the web app, which is the normal deployment.
 		ExposedHeaders: []string{
 			"Accept-Ranges", "Content-Encoding", "Content-Length", "Content-Range",
-			"ETag", "Last-Modified",
+			"ETag", "Last-Modified", "Retry-After",
 		},
 		MaxAge: 86400,
 	}))
@@ -273,6 +278,7 @@ func (s *Server) router() chi.Router {
 	r.Group(func(r chi.Router) {
 		// Streaming and download bytes count toward the node's measured egress.
 		r.Use(s.meterEgress)
+		r.Get("/stream/bandwidth-probe/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/bandwidth-probe/{token}", s.handleBandwidthProbe))
 		r.Head("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Get("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Head("/stream/remux/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/remux/{token}", s.handleRemux))
@@ -408,7 +414,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.

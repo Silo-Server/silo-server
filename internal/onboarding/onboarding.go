@@ -81,7 +81,7 @@ type Step struct {
 // StepLink is one outbound link on a step.
 type StepLink struct {
 	Label string `json:"label"`
-	URL   string `json:"url"`
+	URL   string `json:"url" format:"uri"`
 }
 
 // SettingSpec describes the control a setting_choice renders and where the

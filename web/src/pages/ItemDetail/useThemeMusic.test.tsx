@@ -83,6 +83,8 @@ beforeEach(() => {
           element.src = "";
         }),
         load: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       };
       elements.push(element as unknown as HTMLAudioElement);
       return element;

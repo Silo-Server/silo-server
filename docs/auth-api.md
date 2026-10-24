@@ -356,10 +356,15 @@ stays signed in and retries.
 Operations that name a rate-limit budget (`login`, `setup`, `signup`, `invitation`,
 `password_reset`, the `device_*` budgets and the others above) spend one counter per
 budget wherever they run: v1 and v2, and for `login` and the device budgets the
-Jellyfin-compatible listener too. A budget counts per client IP. That is the address taken
-from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
+Jellyfin-compatible listener too. A budget counts per client address. That is the address
+taken from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
 (`clientip.trusted_proxies`, every private range and loopback by default), otherwise the
-connection's own address.
+connection's own address. A public IPv6 address counts by its /64, because one home line or
+server usually holds a whole /64; this applies to every per-address budget, including the
+per-address request budget of authenticated routes. Every other address counts on its own:
+IPv4, unique local and link-local IPv6 (which only come from the local network, like
+private IPv4 addresses), and the NAT64 addresses (`64:ff9b::/96` and the local-use `64:ff9b:1::/48`) that stand
+for IPv4 clients.
 
 When the client IP came from those headers, the request also spends a budget keyed on the
 connection's own address: ten times the per-client one, shared by every client behind that
@@ -367,6 +372,82 @@ proxy. Naming a new client in the headers on each request therefore stops at tha
 Direct connections and requests through a network access provider, whose plugin writes the
 header itself, spend only the per-client budget. An exhausted budget answers 429 with
 `Retry-After`.
+
+### When the server is too busy to check a password
+
+Every bcrypt hash and comparison, for account passwords and profile PINs alike, runs
+under one limit per server process (`internal/auth/passwordhash`). At most half the
+process's processors hash at once (`GOMAXPROCS`, which follows a container CPU limit;
+at least one), and up to four requests per slot wait for a turn, for at most two
+seconds. A request beyond that is refused before its password or PIN is checked, so on
+a server with more than one processor a burst of sign-ins cannot take every core from
+playback and the rest of the API.
+
+The refusal is `503` with `Retry-After: 1`: v2 `dependency_unavailable`, v1 error code
+`service_unavailable`, Jellyfin `ServiceUnavailable`, and a plain `503` on the
+Audiobookshelf listener. It never answers as a wrong password, and every sign-in name
+gets the same answer whether or not it has an account. Password sign-in, password
+changes and resets, setup, signup, invitation acceptance, account creation and edits by
+an administrator, credential linking, and setting a profile PIN all answer this way;
+clients retry after the delay. A signup or invitation acceptance whose account was
+already created when its sign-in was refused answers as before (`500`, or
+`sign_in_required` from v2 invitation acceptance), since repeating it cannot succeed. A
+first OAuth sign-in that has to create the account fails with `login_failed`, and the
+person starts it again.
+
+A refused sign-in still spends an attempt of the name's budget, like any other failed
+one ([Sign-in attempts per name](#sign-in-attempts-per-name)).
+
+Profile PIN checks wait in a queue of their own that takes every other turn, so a burst
+of sign-ins does not keep a signed-in household from switching profiles; see
+[Profile PINs](#profile-pins). A Jellyfin or Audiobookshelf sign-in with `password#PIN`
+still checks the password first and can be refused with it.
+
+## Sign-in attempts per name
+
+Every password sign-in also spends a budget kept for the name it signs in with, however
+many addresses the attempts come from: v1 and v2 `login`, Jellyfin
+`POST /Users/AuthenticateByName`, Audiobookshelf `/login` (beta), and
+`linkAccountIdentityWithCredentials`, which spends the budget of the directory username
+it checks. Names are trimmed and compared without regard to case, as sign-in looks up
+accounts, so ` Alice` and `alice` share one budget; a username and the same account's
+email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
+budget of the part before the `#`, even when it signs in to an account whose own name
+contains the `#`, so the budget does not depend on which accounts exist. Such an account's
+native sign-ins spend the budget of its whole name, so it has two budgets. A name with no account has a budget like any other and is refused the same way, so
+the budget does not reveal which names exist.
+
+The limit is `ratelimit.SignInNamePolicy`: ten attempts per name. The first attempt
+starts a 15-minute window, and the tenth locks the name for 15 minutes from that attempt.
+While a name is locked every attempt is refused before any password is checked, the
+right password included. A successful sign-in while the name is not locked clears the
+count, and so does the right temporary password on a Jellyfin or Audiobookshelf sign-in,
+which is refused only because those apps cannot change it. Every other failure counts,
+including one caused by an unavailable directory or database, or by a server too busy to
+check the password ([`503`](#when-the-server-is-too-busy-to-check-a-password)). A count that never reaches
+ten expires 15 minutes after its first attempt. A Jellyfin or Audiobookshelf sign-in whose
+password ends in a `#PIN` part counts twice, whether or not the name has a local account,
+because it may check the password both with and without that part.
+Attempts are counted before the password is checked, so concurrent guesses cannot overrun
+the limit.
+
+A locked name answers 429 with `Retry-After` giving the seconds left:
+
+- v2: `rate_limited` problem, on `login` and `linkAccountIdentityWithCredentials`.
+- v1: `{"error":"rate_limited","message":"Too many failed sign-ins for this name. Try again later."}`.
+  This is a v1 change made during the bridge window as a critical security fix.
+- Jellyfin: `{"Error":"TooManyRequests",...}`, as for its other 429s.
+- Audiobookshelf: a plain-text 429.
+
+The count lives in Redis whenever the server has Redis configured, so every node and
+every listener share it, independent of `ratelimit.backend` and of whether request rate
+limiting is enabled. Only a server without Redis keeps it in process memory. A Redis
+error fails open and is logged; a request whose own context was canceled is refused.
+
+The lock is temporary, but anyone who knows a name can keep it locked by spending the
+budget every 15 minutes. While that lasts, the account's existing sessions keep working
+and refreshing, completing a password reset or an invitation signs in without spending
+the budget, and a signed-in device can approve a new one through device sign-in.
 
 ## Authenticated account allowance
 
@@ -392,8 +473,17 @@ budget using the existing 429 response and `Retry-After`.
 Requests without an authenticated account do not spend an account allowance.
 Pre-authentication display-token lookup and public sign-in/device operations retain
 their source and global checks. With the memory backend, counters are per process;
-Redis shares them across instances, with the existing fail-open behavior when Redis
-is unavailable. Disabling rate limiting disables the account allowance too.
+Redis shares them across instances. When Redis is unavailable each process counts
+its checks in its own memory, in the same second and minute windows Redis uses, so
+the limits keep holding per process instead of switching off. A check that fails, or
+gets no answer within a second, is counted locally, and that process then stops
+waiting on Redis: its checks count locally at once, and every five seconds one
+request is also counted in Redis in the background to find out whether Redis answers
+again. The failure that stops the waiting and each failed background count are
+logged. Checks that start before the first failure is noticed, up to a second after
+Redis stops answering, each wait up to a second. A check that fails only because its
+own request ended early does not count as Redis failing. Disabling rate limiting
+disables the account allowance too.
 
 ## Profile PINs
 
@@ -421,7 +511,10 @@ right PIN included, so the lockout cannot be bypassed by guessing on. A correct 
 while not locked clears the count, and so does setting or removing the profile's PIN.
 A count that never reaches five expires five minutes after its first attempt.
 Attempts are counted before the PIN is compared, so concurrent guesses cannot overrun
-the limit.
+the limit. The check then waits for a hashing turn in its own queue, ahead of
+sign-ins ([when the server is too busy](#when-the-server-is-too-busy-to-check-a-password)).
+When that queue is full or no turn comes within two seconds it answers that `503`, and
+the attempt counts like any other; clients still must not replay a check automatically.
 
 A locked check answers 429 with `Retry-After` giving the seconds left:
 
@@ -450,7 +543,7 @@ authenticates.
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting
 is enabled. Only a server without Redis keeps it in process memory, which is correct
-for a single node. Like the request limiter, a Redis error fails open and is logged;
+for a single node. A Redis error fails open and is logged;
 a request whose own context was canceled is refused instead, so dropping the
 connection does not buy an uncounted guess. Clients show the lockout from
 `Retry-After`, for example "Too many incorrect PINs. Try again in 5 minutes.",
@@ -468,7 +561,7 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `POST /auth/device/poll` (`pollDeviceLogin`) | device code | `opened: true` once an approver has looked a pending request up. A pending answer carries the current `expires_at`, which lookups can move later; the device moves its local deadline there. `approved` carries the token pair exactly once. |
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. |
 | `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name` and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
-| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
+| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409, and so is approving a request another account (for `approve-handoff`, another profile) already approved, or denying one another account approved (v2 `conflict`, v1 `approval_conflict`). An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
 | `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval. |
 
 `status` gains `canceled` on lookup and poll. Start, poll and cancel spend the
@@ -527,7 +620,7 @@ linking rule whether or not `network_sign_in` is served.
 | --- | --- | --- |
 | `GET /auth/providers` (`listAuthProviders`) | none | Leaves `local` out while `auth.local_password_login` is off. `password_login` says whether any listed provider takes a password; apps and TVs hide the password form when it is false. An `oauth` provider carries `native_start_path`, the native start's path below the server base, while OAuth sign-in is served (a public URL is configured). Apps append `native_start_path` to their own saved server base URL and never open another origin; an `oauth` provider without it offers no native sign-in. A `network` provider is listed only to a request that came through its own overlay from a device it vouches for, with `network_sign_in_path` and `network_identity` (`display_name`, `username`: who owns the device, for a "Continue as" label); it is never `default`. Clients ignore modes they do not know. |
 | `POST /auth/network/{id}/sign-in` (`signInWithNetworkIdentity`) | none; the request must come through the network provider's own overlay listener | Signs in the owner of the requesting device through network provider installation `{id}` (`mode: network`, such as the Tailscale plugin). Body: `{}` with `Content-Type: application/json`. Answers the same token pair as `login`. Refusals: 403 `network_identity_required` (the request did not come through that provider's overlay), 403 `not_permitted` (the provider refuses the device: unknown, tagged, or left out by its policy; or the account's OIDC or LDAP provider refuses the account), 403 `account_required`, 403 `permission_denied` (the account is disabled), 409 `email_in_use` or `identity_linked_elsewhere`, 404 `not_found` (not an enabled network provider), 503 `provider_unavailable`, 415 without a JSON body, 429. Spends the `login` rate-limit budget. |
-| `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. |
+| `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. A name that has used its attempt budget, or a client over the `login` rate-limit budget, is 429 `rate_limited` ([Sign-in attempts per name](#sign-in-attempts-per-name)). |
 | `GET /account/identities` (`listAccountIdentities`) | signed-in account | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). |
 | `POST /account/identities/link-credentials` (`linkAccountIdentityWithCredentials`) | the account's own login session | Links the directory (LDAP) identity. Body, all required and non-null: `installation_id` (the credentials provider from `listAuthProviders`), `password` (the account's local password, 1 to 1024 characters), `username` (directory username, 1 to 256) and `directory_password` (1 to 1024). Answers 201, `Location: /api/v2/account/identities`, and the linked identity as `listAccountIdentities` shows it. Refusals: 422 `validation_failed` at `body.password` (wrong local password) or `body.directory_password` (the directory refused the credentials); 409 `local_password_required`; 403 `not_permitted`, `account_disabled` (the directory account is disabled, locked or expired) or `password_expired`; 403 `permission_denied` (the Silo account is disabled, or an API key or impersonation session); 409 `identity_linked_elsewhere` or `already_linked`; 404 `not_found` (not an enabled credentials provider); 503 `provider_unavailable`; 429. Spends the `login` rate-limit budget. Linking turns local password sign-in off unless the account is break-glass. |
 | `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. Unlike other linking, the account keeps its local password sign-in, which answers 403 `not_permitted` while the provider refuses the person (break-glass accounts excepted). |

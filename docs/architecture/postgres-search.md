@@ -38,6 +38,14 @@ query reads. A pre-upgrade binary that still issues expression queries gets the
 same results without them, only slower. A normalization change must update every
 stored representation.
 
+`public.normalize_search_text` folds diacritics before it splits words, so
+"shogun" and "Shōgun" share their tokens: `public.fold_search_diacritics`
+decomposes text, drops combining marks U+0300-U+036F, recomposes, maps the few
+letters without a decomposition (ø, đ, ł, ...) and spells out ß, æ and œ. Query
+tokens built in Go pass through `foldSearchDiacritics`, which must fold exactly
+like the SQL function; `TestSearchTextFoldMatchesGoPostgres` checks that they
+agree.
+
 ## Ranking, counts, and continuation
 
 The relevance order is exact title, title position, year hint, phrase rank,

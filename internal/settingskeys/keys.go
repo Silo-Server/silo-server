@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 22
+const Revision = 23
 
 // Setting keys, one constant per definition.
 const (
@@ -49,6 +49,8 @@ const (
 	PlaybackAutoSkipIntro = "playback.auto_skip_intro"
 	// Auto-skip recaps
 	PlaybackAutoSkipRecap = "playback.auto_skip_recap"
+	// Lower quality when buffering
+	PlaybackBufferingQualityMode = "playback.buffering_quality_mode"
 	// Cellular maximum bitrate
 	PlaybackCellularMaxBitrateKbps = "playback.cellular_max_bitrate_kbps"
 	// Cellular quality
@@ -175,6 +177,7 @@ var Remote = []string{
 	PlaybackAutoSkipCredits,
 	PlaybackAutoSkipIntro,
 	PlaybackAutoSkipRecap,
+	PlaybackBufferingQualityMode,
 	PlaybackCellularMaxBitrateKbps,
 	PlaybackCellularPreferredQuality,
 	PlaybackIntroSkipMode,

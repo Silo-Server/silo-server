@@ -22,8 +22,9 @@ import type {
   SubtitleUploadRequest,
 } from "@/api/types";
 
-import { itemKeys, settingsKeys, subtitleKeys } from "./keys";
+import { settingsKeys, subtitleKeys } from "./keys";
 import { isSettingValueMissing } from "./settingValues";
+import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
 interface DownloadSubtitleResponse {
@@ -167,15 +168,6 @@ export function useSubtitleProviderStatus() {
   });
 }
 
-// Subtitle preferences feed the effective defaults on item details; a
-// series-keyed preference feeds every episode's detail, so invalidate broadly.
-function invalidateItemDetails(queryClient: ReturnType<typeof useQueryClient>): Promise<unknown> {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: itemKeys.details() }),
-    queryClient.invalidateQueries({ queryKey: ["catalog", "items"] }),
-  ]);
-}
-
 /**
  * Clears the persisted subtitle override (saved when a track is manually
  * selected during playback) so profile-level auto selection applies again.
@@ -192,21 +184,26 @@ export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (prefId: string) => {
-      await v2("DELETE /api/v2/subtitle-prefs/{series_id}", { path: { series_id: prefId } });
-      await Promise.all(
-        SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
-          v2("DELETE /api/v2/settings/values/{key}", {
-            path: { key },
-            query: seriesSubtitleSettingIdentity(prefId),
-          }).catch((error: unknown) => {
-            // Nothing stored at this scope is the state a reset asks for.
-            if (isSettingValueMissing(error)) return;
-            throw error;
-          }),
-        ),
-      );
-    },
+    mutationFn: (prefId: string) =>
+      runOrderedPreferenceWrite("subtitle", prefId, async (profileContext) => {
+        await v2("DELETE /api/v2/subtitle-prefs/{series_id}", {
+          path: { series_id: prefId },
+          profileContext,
+        });
+        await Promise.all(
+          SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
+            v2("DELETE /api/v2/settings/values/{key}", {
+              path: { key },
+              query: seriesSubtitleSettingIdentity(prefId),
+              profileContext,
+            }).catch((error: unknown) => {
+              // Nothing stored at this scope is the state a reset asks for.
+              if (isSettingValueMissing(error)) return;
+              throw error;
+            }),
+          ),
+        );
+      }),
     onSuccess: () =>
       Promise.all([
         invalidateItemDetails(queryClient),
@@ -237,30 +234,33 @@ export function useSetSubtitlePreference() {
 
   return useMutation({
     mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
-      v2("PUT /api/v2/subtitle-prefs/{series_id}", {
-        path: { series_id: prefId },
-        body: {
-          subtitle_language: selection?.language ?? "",
-          // -1 is the "no track" sentinel the contract admits for "off".
-          subtitle_track_index: selection?.track_index ?? -1,
-          subtitle_mode: derivePersistedSubtitleMode(
-            selection ? (selection.track_index ?? -1) : null,
-          ),
-          // The contract spells "no signature" as an absent member, not null.
-          track_signature: selection
-            ? {
-                source: selection.source,
-                language: selection.language,
-                codec: selection.codec,
-                label: selection.label,
-                forced: selection.forced,
-                hearing_impaired: selection.hearing_impaired,
-              }
-            : undefined,
-          // show_forced_subtitles is left out so the series keeps following
-          // the profile's "Show forced subtitles" toggle.
-        },
-      }),
+      runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
+        v2("PUT /api/v2/subtitle-prefs/{series_id}", {
+          path: { series_id: prefId },
+          profileContext,
+          body: {
+            subtitle_language: selection?.language ?? "",
+            // -1 is the "no track" sentinel the contract admits for "off".
+            subtitle_track_index: selection?.track_index ?? -1,
+            subtitle_mode: derivePersistedSubtitleMode(
+              selection ? (selection.track_index ?? -1) : null,
+            ),
+            // The contract spells "no signature" as an absent member, not null.
+            track_signature: selection
+              ? {
+                  source: selection.source,
+                  language: selection.language,
+                  codec: selection.codec,
+                  label: selection.label,
+                  forced: selection.forced,
+                  hearing_impaired: selection.hearing_impaired,
+                }
+              : undefined,
+            // show_forced_subtitles is left out so the series keeps following
+            // the profile's "Show forced subtitles" toggle.
+          },
+        }),
+      ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save subtitle preference");

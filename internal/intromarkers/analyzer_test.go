@@ -364,6 +364,37 @@ func TestAnalyzeEpisodeWritesChapterMarker(t *testing.T) {
 	}
 }
 
+// A file's own intro chapter replaces an online intro rated below it. Other
+// higher-priority intros stay, and a file without an intro chapter is not
+// handed on to other kinds of local analysis.
+func TestChapterIntrosReplaceOnlyLessConfidentOnlineIntros(t *testing.T) {
+	chapters := []models.MediaChapter{
+		{Index: 0, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
+		{Index: 1, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
+	}
+	stored := func(fileID int, source string, confidence float64, chapters []models.MediaChapter) Candidate {
+		return Candidate{
+			FileID: fileID, EpisodeID: fmt.Sprintf("ep%d", fileID), Chapters: chapters,
+			IntroStart: floatPtr(55), IntroEnd: floatPtr(125), IntroMarkersSource: strPtr(source), IntroMarkersConfidence: floatPtr(confidence),
+		}
+	}
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
+
+	remaining, summary := analyzer.processChapterCandidates(context.Background(), []Candidate{
+		stored(10, models.MarkerSourcePlugin, 0.3, chapters),
+		stored(20, models.MarkerSourceOnline, 0.99, chapters),
+		stored(30, models.MarkerSourceManual, 1, chapters),
+		stored(40, models.MarkerSourcePlugin, 0.3, nil),
+	}, chapterProcessingOptions{allowEpisodeCopy: true})
+	if len(repo.patches) != 1 || repo.patches[0].FileID != 10 || repo.patches[0].Algorithm != ChapterAlgorithm || summary.ChapterMarkersWritten != 1 {
+		t.Fatalf("patches %+v, want only the less confident online intro replaced by the chapter", repo.patches)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("remaining %+v, want no file handed on", remaining)
+	}
+}
+
 func TestAnalyzeEpisodeWritesSilenceRefinedChapterMarker(t *testing.T) {
 	candidate := Candidate{
 		FileID:          10,

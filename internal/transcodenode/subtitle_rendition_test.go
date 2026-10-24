@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,9 @@ func TestNodeServesSubtitleRenditionThroughManifestAndSegmentRoutes(t *testing.T
 	server.handleManifest(manifestRR, manifestReq)
 	if manifestRR.Code != http.StatusOK || !strings.Contains(manifestRR.Body.String(), "#EXT-X-MEDIA:TYPE=SUBTITLES") {
 		t.Fatalf("manifest = %d %q", manifestRR.Code, manifestRR.Body.String())
+	}
+	if got, want := manifestRR.Header().Get("Content-Length"), strconv.Itoa(manifestRR.Body.Len()); got != want {
+		t.Fatalf("manifest Content-Length = %q, want %q", got, want)
 	}
 
 	segmentReq := withNodeRouteParams(httptest.NewRequest(http.MethodGet, "/transcode/"+sessionID+"/segment/sub_00001.vtt", nil),

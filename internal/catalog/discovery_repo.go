@@ -199,7 +199,8 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 			WHERE uwh.user_id = $%d
 			  AND uwh.profile_id = $%d
 			  AND uwh.media_item_id = mi.content_id
-		) <= $%d`, argIdx, argIdx+1, argIdx+2))
+			  AND %s
+		) <= $%d`, argIdx, argIdx+1, HistoryCountsAsWatchedSQL("uwh"), argIdx+2))
 		args = append(args, f.UserID, f.ProfileID, f.MaxPlays)
 		argIdx += 3
 	} else {
@@ -209,7 +210,8 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 			WHERE uwh.user_id = $%d
 			  AND uwh.profile_id = $%d
 			  AND uwh.media_item_id = mi.content_id
-		)`, argIdx, argIdx+1))
+			  AND %s
+		)`, argIdx, argIdx+1, HistoryCountsAsWatchedSQL("uwh")))
 		args = append(args, f.UserID, f.ProfileID)
 		argIdx += 2
 	}
@@ -238,9 +240,10 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 }
 
 // ListUnplayedHighRated returns high-rated items that the given user/profile has
-// never started watching.  "Never started" means no row exists in
-// user_watch_history for (user_id, profile_id, media_item_id), regardless of
-// completion status.  Items without a known TMDB vote count are excluded.
+// never started watching.  "Never started" means no row in
+// user_watch_history for (user_id, profile_id, media_item_id) counts as a
+// watch, regardless of completion status: plays a mark unwatched kept in
+// history do not.  Items without a known TMDB vote count are excluded.
 //
 // Results are ordered by vote-weighted TMDB rating.
 func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f UnplayedFilter) ([]*models.MediaItem, error) {
@@ -308,7 +311,8 @@ func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 		  AND uwh.profile_id = $%d
 		  AND uwh.media_item_id = mi.content_id
 		  AND uwh.watched_at >= NOW() - make_interval(days => $%d)
-	)`, argIdx, argIdx+1, argIdx+2))
+		  AND %s
+	)`, argIdx, argIdx+1, argIdx+2, HistoryCountsAsWatchedSQL("uwh")))
 	args = append(args, f.UserID, f.ProfileID, f.LookbackDays)
 	argIdx += 3
 

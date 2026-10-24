@@ -691,6 +691,17 @@ Instants are RFC 3339 UTC strings with `Z` and millisecond precision. Date-only 
 milliseconds for client timing and seconds for coarse expiry—unless an existing normative
 protocol such as playback v3 specifies otherwise. User time zones are separate IANA identifiers.
 
+The schema declares these shapes so generated clients can type them, and the spec lint in
+`internal/contractspec` enforces them by member name. A date member declares `format: date`; a
+request member where `""` clears declares a `YYYY-MM-DD` pattern that also admits `""`, and a
+stored date that is not a calendar date is left out of a response rather than sent as text. A
+URL member declares `format: uri` when its value is always absolute and `uri-reference`
+otherwise; a URL-named member whose value the server stores or relays without parsing it as a
+URL carries no format and says "not validated as a URI" in its description. A language or
+country member names its standard (ISO 639, ISO 3166, BCP 47) and carries a `pattern` where every
+value it admits or emits has one shape; members that also accept language names, or emit stored
+values older than canonicalization, carry none.
+
 Enums are lowercase strings, never numbers. Request enums are closed and reject unknown values
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
 values are never renamed or repurposed. Polymorphic objects use a required string discriminator
@@ -1423,6 +1434,20 @@ no device id because the v2 listener reads no device header. `listWatchlist`,
 outside the library that have since arrived onto this list; see
 [Watchlist titles](#watchlist-titles).
 
+A `404` for an ordinary "not on the list" answer is indistinguishable from probing to reverse-proxy
+security monitoring: a detail screen that checks an item and its episodes produces a burst of
+distinct 404 paths, and CrowdSec's `http-probing` scenario bans the client's address (issue #952).
+`getFavoriteMembership` (`GET /api/v2/favorites/{item_id}/membership`) and
+`getWatchlistMembership` (`GET /api/v2/watchlist/{item_id}/membership`) therefore answer the same
+check as `200` `PersonalListMembership` `{item_id, is_member, added_at?}` for every item the viewer
+may see; `added_at` is present only for a member. They keep `404` for an item that is missing or
+that the viewer may not see, run through the same `GetFavorite`/`GetWatchlistEntry` seams (so the
+watchlist read still promotes arrived titles), and are the reads clients should use.
+`getFavorite` and `getWatchlistEntry` keep their entry-or-`404` contract for already shipped
+clients, as do the v1 `204`/`404` checks. Clients detect the membership reads through
+`getPersonalListCapability` (`GET /api/v2/capabilities/personal-lists`), whose
+`membership_supported` is true when they answer.
+
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
 `verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
@@ -1615,7 +1640,8 @@ played}` echo. All four mutations declare `non_retryable` and are not `If-Match`
 Atomic marking suppresses concurrent duplicate history and provider events, but a delayed
 retry after an intervening unmark can create another watch; a durable client watch identity
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
-hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
+hide an intervening watch (unmark keeps the watch in history but stops it counting as
+watched). Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
@@ -1624,7 +1650,11 @@ nothing to clear), `422` at `path.media_item_id` for a season, series or ebook a
 kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
-`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
+`clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
+v2 `markWatched` on a watched movie or episode with a resume position records another play and
+clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
+no-op. Semantics are in
+[the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,

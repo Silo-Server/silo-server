@@ -33,7 +33,7 @@ func TestApplyBestImagesLocalCandidateAlwaysApplies(t *testing.T) {
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "nfo", URL: "file:///media/movies/Film/poster.jpg", Type: ImagePoster, Rating: 0},
 		{ProviderID: "tmdb", URL: "https://image.tmdb.org/text.jpg", Type: ImagePoster, Language: "en", Rating: 10},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if item.PosterPath != "file:///media/movies/Film/poster.jpg" {
 		t.Fatalf("PosterPath = %q, want local candidate to apply over existing art", item.PosterPath)
 	}
@@ -45,14 +45,14 @@ func TestApplyBestImagesRemoteSelectionUnchanged(t *testing.T) {
 	item := &models.MediaItem{PosterPath: "tmdb/movies/550/poster/original.webp"}
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tmdb", URL: "https://image.tmdb.org/zero.jpg", Type: ImagePoster, Rating: 0},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if item.PosterPath != "tmdb/movies/550/poster/original.webp" {
 		t.Fatalf("PosterPath = %q, rating-0 remote must not displace existing art", item.PosterPath)
 	}
 
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tmdb", URL: "https://image.tmdb.org/rated.jpg", Type: ImagePoster, Rating: 7.5},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if item.PosterPath != "https://image.tmdb.org/rated.jpg" {
 		t.Fatalf("PosterPath = %q, rated remote candidate must still apply", item.PosterPath)
 	}
@@ -60,7 +60,7 @@ func TestApplyBestImagesRemoteSelectionUnchanged(t *testing.T) {
 	empty := &models.MediaItem{}
 	applyBestImages(empty, []RemoteImage{
 		{ProviderID: "tmdb", URL: "https://image.tmdb.org/zero.jpg", Type: ImagePoster, Rating: 0},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if empty.PosterPath != "https://image.tmdb.org/zero.jpg" {
 		t.Fatalf("PosterPath = %q, rating-0 remote must still fill empty art", empty.PosterPath)
 	}
@@ -72,9 +72,40 @@ func TestApplyBestImagesPrefersTextPostersByLanguage(t *testing.T) {
 	tests := []struct {
 		name          string
 		preferredLang string
+		fallbackLang  string
 		images        []RemoteImage
 		wantPoster    string
 	}{
+		{
+			name:          "with a fallback language, textless beats a poster in another language",
+			preferredLang: "sv",
+			fallbackLang:  "en",
+			images: []RemoteImage{
+				{ProviderID: "tmdb", URL: "japanese", Type: ImagePoster, Rating: 10, IncludesText: &includesText},
+				{ProviderID: "tmdb", URL: "textless", Type: ImagePoster, Rating: 5},
+			},
+			wantPoster: "textless",
+		},
+		{
+			name:          "the fallback language beats English",
+			preferredLang: "sv",
+			fallbackLang:  "fr",
+			images: []RemoteImage{
+				{ProviderID: "tmdb", URL: "english", Type: ImagePoster, Language: "en", Rating: 9},
+				{ProviderID: "tmdb", URL: "french", Type: ImagePoster, Language: "fr", Rating: 6},
+			},
+			wantPoster: "french",
+		},
+		{
+			name:          "English still beats textless with another fallback language",
+			preferredLang: "sv",
+			fallbackLang:  "fr",
+			images: []RemoteImage{
+				{ProviderID: "tmdb", URL: "textless", Type: ImagePoster, Rating: 10},
+				{ProviderID: "tmdb", URL: "english", Type: ImagePoster, Language: "en", Rating: 6},
+			},
+			wantPoster: "english",
+		},
 		{
 			name:          "explicit text flag beats a higher rated English-tagged textless poster",
 			preferredLang: "en",
@@ -143,7 +174,7 @@ func TestApplyBestImagesPrefersTextPostersByLanguage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item := &models.MediaItem{}
-			applyBestImages(item, tt.images, MergeFillEmpty, tt.preferredLang)
+			applyBestImages(item, tt.images, MergeFillEmpty, tt.preferredLang, tt.fallbackLang)
 			if item.PosterPath != tt.wantPoster {
 				t.Fatalf("PosterPath = %q, want %q", item.PosterPath, tt.wantPoster)
 			}
@@ -160,7 +191,7 @@ func TestApplyBestImagesUsesLibraryLanguageForArtwork(t *testing.T) {
 		{ProviderID: "tmdb", URL: "backdrop-english", Type: ImageBackdrop, Language: "en", Rating: 7},
 		{ProviderID: "tmdb", URL: "logo-textless", Type: ImageLogo, Rating: 10},
 		{ProviderID: "tmdb", URL: "logo-english", Type: ImageLogo, Language: "en", Rating: 7},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 
 	if item.PosterPath != "poster-english" {
 		t.Fatalf("PosterPath = %q, want text poster", item.PosterPath)
@@ -262,7 +293,7 @@ func TestApplyBestImagesLogoCandidates(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item := &models.MediaItem{}
-			applyBestImages(item, tt.images, MergeFillEmpty, tt.preferredLang)
+			applyBestImages(item, tt.images, MergeFillEmpty, tt.preferredLang, "")
 			if item.LogoPath != tt.wantLogo {
 				t.Fatalf("LogoPath = %q, want %q", item.LogoPath, tt.wantLogo)
 			}
@@ -284,7 +315,7 @@ func TestApplyBestImagesFallsBackToLanguageTaggedBackgrounds(t *testing.T) {
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tmdb", URL: "english", Type: ImageBackdrop, Language: "en", Rating: 10},
 		{ProviderID: "tmdb", URL: "german", Type: ImageBackdrop, Language: "de", Rating: 9},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 	if item.BackdropPath != "english" {
 		t.Fatalf("BackdropPath = %q, want a language-tagged fallback background", item.BackdropPath)
 	}
@@ -303,7 +334,7 @@ func TestBuildItemLocalizationRecordSkipsLocalCandidates(t *testing.T) {
 			{ProviderID: "nfo", URL: "file:///media/movies/Film/poster.jpg", Type: ImagePoster},
 		},
 		MergeFillEmpty,
-		"de",
+		"de", "",
 		false, true)
 
 	if loc.PosterPath != "" || loc.PosterSourcePath != "" {
@@ -493,7 +524,7 @@ func TestApplyBestImagesStoredClearArtLogo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			existing := tc.existing
 			item := existing
-			applyBestImages(&item, tc.images, tc.mode, "en")
+			applyBestImages(&item, tc.images, tc.mode, "en", "")
 			prepareItemImagesForQueue(&item, &existing, true)
 			if item.LogoPath != tc.wantPath || item.LogoSourcePath != tc.wantSource {
 				t.Fatalf("logo = path %q source %q, want path %q source %q", item.LogoPath, item.LogoSourcePath, tc.wantPath, tc.wantSource)

@@ -217,8 +217,8 @@ type CatalogFilters struct {
 	Genres            []string                 `json:"genres" doc:"Empty, never null"`
 	Studios           []string                 `json:"studios"`
 	Networks          []string                 `json:"networks"`
-	Countries         []string                 `json:"countries"`
-	OriginalLanguages []string                 `json:"original_languages"`
+	Countries         []string                 `json:"countries" doc:"Distinct countries in scope, normally ISO 3166-1 alpha-2 codes; NFO files and manual edits can store country names"`
+	OriginalLanguages []string                 `json:"original_languages" doc:"Distinct original languages in scope, normally ISO 639-1 codes (ISO 639-3 when none exists); provider codes such as TMDB's xx pass through"`
 	ContentRatings    []string                 `json:"content_ratings"`
 	Authors           []string                 `json:"authors" doc:"First 1000 alphabetically; searchCatalogFacet pages the rest"`
 	Narrators         []string                 `json:"narrators"`
@@ -229,8 +229,8 @@ type CatalogFilters struct {
 // CatalogTechnicalFilters are the facets derived from the files themselves.
 type CatalogTechnicalFilters struct {
 	Resolutions       []string `json:"resolutions" doc:"Empty, never null"`
-	AudioLanguages    []string `json:"audio_languages"`
-	SubtitleLanguages []string `json:"subtitle_languages"`
+	AudioLanguages    []string `json:"audio_languages" doc:"Distinct audio track languages in scope as lowercase BCP 47 tags (en, pt-br); older scans may carry an ISO 639-2 code or the raw tag"`
+	SubtitleLanguages []string `json:"subtitle_languages" doc:"Distinct subtitle languages in scope as BCP 47 tags; a stored value that is not a recognizable language passes through"`
 }
 
 // CatalogFiltersOutput is the getCatalogFilters response.
@@ -266,7 +266,7 @@ type AudiobookGroup struct {
 	TotalDurationSeconds int64    `json:"total_duration_seconds" example:"302400"`
 	InProgressCount      int      `json:"in_progress_count" doc:"The viewer's books in progress"`
 	FinishedCount        int      `json:"finished_count"`
-	PosterURLs           []string `json:"poster_urls" doc:"Up to four presigned covers for a stack; empty, never null"`
+	PosterURLs           []string `json:"poster_urls" format:"uri-reference" doc:"Up to four presigned covers for a stack; empty, never null"`
 }
 
 // AudiobookGroupCollection is one page of groups.
@@ -305,7 +305,7 @@ type ItemExtraInfo struct {
 	Title           string `json:"title,omitempty"`
 	DurationSeconds int    `json:"duration_seconds,omitempty"`
 	FileID          int    `json:"file_id,omitempty"`
-	StillURL        string `json:"still_url,omitempty" doc:"Presigned, short-lived. 16:9 image of the extra; absent when it has none"`
+	StillURL        string `json:"still_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. 16:9 image of the extra; absent when it has none"`
 	StillThumbhash  string `json:"still_thumbhash,omitempty"`
 }
 
@@ -346,7 +346,7 @@ type FileVersion struct {
 	MultiEpisodeStart        int                               `json:"multi_episode_start,omitempty"`
 	MultiEpisodeEnd          int                               `json:"multi_episode_end,omitempty"`
 	EffectiveAudioTrackIndex *int                              `json:"effective_audio_track_index,omitempty"`
-	EffectiveAudioLanguage   string                            `json:"effective_audio_language,omitempty"`
+	EffectiveAudioLanguage   string                            `json:"effective_audio_language,omitempty" doc:"Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown"`
 	VideoTracks              []models.VideoTrack               `json:"video_tracks,omitempty"`
 	AudioTracks              []models.AudioTrack               `json:"audio_tracks,omitempty"`
 	SubtitleTracks           []catalogpkg.VersionSubtitleTrack `json:"subtitle_tracks,omitempty"`
@@ -400,23 +400,23 @@ type CatalogItemDetail struct {
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
 	TvdbID                          string                               `json:"tvdb_id,omitempty"`
-	BannerURL                       string                               `json:"banner_url,omitempty" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
+	BannerURL                       string                               `json:"banner_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
 	BannerThumbhash                 string                               `json:"banner_thumbhash,omitempty"`
-	ThumbURL                        string                               `json:"thumb_url,omitempty" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
+	ThumbURL                        string                               `json:"thumb_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
 	ThumbThumbhash                  string                               `json:"thumb_thumbhash,omitempty"`
-	ClearArtURL                     string                               `json:"clearart_url,omitempty" doc:"Presigned, short-lived. Transparent cut-out art. Movies and series only"`
-	DiscURL                         string                               `json:"disc_url,omitempty" doc:"Presigned, short-lived. Transparent disc art. Movies only"`
-	BackdropURLs                    []string                             `json:"backdrop_urls,omitempty" doc:"Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none"`
+	ClearArtURL                     string                               `json:"clearart_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. Transparent cut-out art. Movies and series only"`
+	DiscURL                         string                               `json:"disc_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. Transparent disc art. Movies only"`
+	BackdropURLs                    []string                             `json:"backdrop_urls,omitempty" format:"uri-reference" doc:"Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none"`
 	Cast                            []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
 	Crew                            []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
-	Countries                       []string                             `json:"countries,omitempty"`
+	Countries                       []string                             `json:"countries,omitempty" doc:"Production countries, normally ISO 3166-1 alpha-2 codes (US); NFO files and manual edits can store country names"`
 	LockedFields                    []int                                `json:"locked_fields,omitempty" doc:"Metadata fields an editor pinned"`
-	FirstAirDate                    *string                              `json:"first_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	FirstAirDate                    *string                              `json:"first_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	AirTime                         *string                              `json:"air_time,omitempty"`
 	AirTimezone                     *string                              `json:"air_timezone,omitempty"`
 	SeasonCount                     *int                                 `json:"season_count,omitempty"`
 	EpisodeCount                    *int                                 `json:"episode_count,omitempty"`
-	AirDate                         *string                              `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	AirDate                         *string                              `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	IsSpecials                      bool                                 `json:"is_specials,omitempty"`
 	UserData                        *WatchRollup                         `json:"user_data,omitempty"`
 	UserRating                      *int                                 `json:"user_rating,omitempty"`
@@ -432,7 +432,7 @@ type CatalogItemDetail struct {
 	Credits                         *catalogpkg.Marker                   `json:"credits,omitempty"`
 	Recap                           *catalogpkg.Marker                   `json:"recap,omitempty"`
 	Preview                         *catalogpkg.Marker                   `json:"preview,omitempty"`
-	EffectiveSubtitleLanguage       *string                              `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the viewer's preferences resolve to for this item"`
+	EffectiveSubtitleLanguage       *string                              `json:"effective_subtitle_language,omitempty" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"The subtitle language the viewer's preferences resolve to for this item: BCP 47 tag; empty when the preference is None"`
 	EffectiveSubtitleMode           *string                              `json:"effective_subtitle_mode,omitempty" doc:"The subtitle mode the viewer's preferences resolve to for this item"`
 	EffectiveShowForcedSubtitles    *bool                                `json:"effective_show_forced_subtitles,omitempty" doc:"Whether forced subtitles show for this item under the viewer's preferences"`
 	EffectiveSubtitleTrackSignature *WatchSubtitleSignature              `json:"effective_subtitle_track_signature,omitempty"`
@@ -558,20 +558,20 @@ type Episode struct {
 	EpisodeNumber              int                 `json:"episode_number"`
 	Title                      string              `json:"title"`
 	Overview                   string              `json:"overview,omitempty"`
-	AirDate                    *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	AirDate                    *string             `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Runtime                    int                 `json:"runtime" doc:"Minutes"`
 	ImdbID                     string              `json:"imdb_id,omitempty"`
 	TmdbID                     string              `json:"tmdb_id,omitempty"`
 	TvdbID                     string              `json:"tvdb_id,omitempty"`
 	Ratings                    []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
 	StillIsEpisodeStill        *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
-	StillURL                   string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
+	StillURL                   string              `json:"still_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	StillThumbhash             string              `json:"still_thumbhash,omitempty"`
 	UserData                   *WatchRollup        `json:"user_data,omitempty"`
 	Files                      []EpisodeFile       `json:"files,omitempty"`
 	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
 	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
-	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language (BCP 47 tag, such as en or pt-BR) this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -592,9 +592,9 @@ type Season struct {
 	IsSpecials              bool         `json:"is_specials,omitempty"`
 	Title                   string       `json:"title" example:"Season 1"`
 	Overview                string       `json:"overview,omitempty"`
-	AirDate                 *string      `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	AirDate                 *string      `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	EpisodeCount            int          `json:"episode_count"`
-	PosterURL               string       `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterURL               string       `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	PosterThumbhash         string       `json:"poster_thumbhash,omitempty"`
 	UserData                *WatchRollup `json:"user_data,omitempty"`
 	MachineTranslatedFields []string     `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
@@ -1406,7 +1406,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		ContentRating: d.ContentRating, AdvisoryAge: d.AdvisoryAge, AdvisorySource: d.AdvisorySource,
 		ShowStatus: d.ShowStatus,
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
-		Overview: d.Overview, ReleaseDate: d.ReleaseDate, LastAirDate: d.LastAirDate,
+		Overview: d.Overview, ReleaseDate: calendarDatePtr(d.ReleaseDate), LastAirDate: calendarDatePtr(d.LastAirDate),
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
@@ -1444,7 +1444,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
 		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
-		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
+		FirstAirDate: calendarDatePtr(d.FirstAirDate), AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
 		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: itemExtrasOf(d.Extras),
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,

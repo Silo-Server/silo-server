@@ -353,13 +353,20 @@ func hasAnyMarker(file *models.MediaFile) bool {
 // missingLocalMarkers returns the marker kinds local analysis could still
 // fill for the file. Local analysis finds intros and credits in episodes and
 // only credits in movies, so an episode with an intro from any source still
-// needs it for credits, and only for credits.
+// needs it for credits, and only for credits. A provider's answer that the
+// file has none of a kind counts as an online marker of it.
 func missingLocalMarkers(file *models.MediaFile, isEpisode bool) intromarkers.EpisodeMarkerKinds {
 	if file == nil {
 		return intromarkers.EpisodeMarkerKinds{Intro: isEpisode, Credits: true}
 	}
+	missing := func(start, end *float64, source *string) bool {
+		if start != nil && end != nil {
+			return false
+		}
+		return source == nil || (*source != models.MarkerSourcePlugin && *source != models.MarkerSourceOnline)
+	}
 	return intromarkers.EpisodeMarkerKinds{
-		Intro:   isEpisode && (file.IntroStart == nil || file.IntroEnd == nil),
-		Credits: file.CreditsStart == nil || file.CreditsEnd == nil,
+		Intro:   isEpisode && missing(file.IntroStart, file.IntroEnd, file.IntroMarkersSource),
+		Credits: missing(file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource),
 	}
 }

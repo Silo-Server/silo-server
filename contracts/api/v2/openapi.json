@@ -311,7 +311,7 @@
         "additionalProperties": false,
         "properties": {
           "authorize_url": {
-            "description": "Provider sign-in URL; navigate the same browser there",
+            "description": "Provider sign-in URL as the sign-in plugin returned it; navigate the same browser there; not validated as a URI",
             "examples": [
               "https://id.example.test/authorize?client_id=silo\u0026state=..."
             ],
@@ -1799,6 +1799,7 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "description": "Base URL as entered; not validated as a URI",
             "type": "string"
           },
           "has_api_key": {
@@ -1834,6 +1835,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -1866,6 +1868,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -2608,6 +2611,7 @@
             "type": "string"
           },
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -2861,6 +2865,7 @@
           },
           "url": {
             "description": "Stable public asset path with the ref as cache-buster",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -2974,6 +2979,7 @@
             "type": "array"
           },
           "remote_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3002,6 +3008,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3250,6 +3257,7 @@
         "additionalProperties": false,
         "properties": {
           "href": {
+            "format": "uri-reference",
             "type": "string"
           },
           "key": {
@@ -3471,6 +3479,7 @@
             "type": "string"
           },
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -3578,6 +3587,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -3597,6 +3607,7 @@
           },
           "source_config": {},
           "source_url": {
+            "description": "Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI",
             "type": "string"
           },
           "sync_schedule": {
@@ -3656,6 +3667,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3671,6 +3683,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3773,6 +3786,7 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -3825,6 +3839,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -3838,6 +3853,7 @@
           },
           "source_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -4113,6 +4129,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -4299,6 +4316,7 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -4343,6 +4361,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -4356,6 +4375,7 @@
           },
           "source_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -5007,9 +5027,154 @@
         ],
         "type": "object"
       },
+      "AdminDeviceConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "learned_limit": {
+            "additionalProperties": false,
+            "properties": {
+              "expires_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              },
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "observed_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "observed_at",
+              "expires_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "plan_summary": {
+            "additionalProperties": false,
+            "properties": {
+              "diagnostics": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "plan_id": {
+                "type": "string"
+              },
+              "reported_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              }
+            },
+            "required": [
+              "plan_id",
+              "reported_at",
+              "diagnostics"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "playback_sample": {
+            "additionalProperties": false,
+            "properties": {
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "measured_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "measured_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "probe": {
+            "additionalProperties": false,
+            "properties": {
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "lower_bound": {
+                "description": "The test proved only that the link carries at least kbps.",
+                "type": "boolean"
+              },
+              "measured_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "lower_bound",
+              "measured_at",
+              "transport"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "connection",
+          "probe",
+          "playback_sample",
+          "learned_limit",
+          "plan_summary"
+        ],
+        "type": "object"
+      },
       "AdminDeviceDetail": {
         "additionalProperties": false,
         "properties": {
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDeviceConnection"
+            },
+            "type": "array"
+          },
           "device_id": {
             "type": "string"
           },
@@ -5979,6 +6144,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           }
         },
@@ -7339,6 +7505,7 @@
             "type": "boolean"
           },
           "node_url": {
+            "description": "Configured address of the node that answered, with credentials removed, or [invalid URL] when it does not parse; not validated as a URI",
             "type": "string"
           },
           "nodes": {
@@ -7515,6 +7682,15 @@
             "format": "int64",
             "type": "integer"
           },
+          "max_lookback_hours": {
+            "description": "Largest accepted lookback_hours.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "played_lookback": {
+            "description": "Run and bulk-run accept lookback_hours for Jellyfin sources.",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -7535,6 +7711,8 @@
           "guarded_configuration",
           "durable_runs",
           "max_bulk_mappings",
+          "played_lookback",
+          "max_lookback_hours",
           "revision",
           "state",
           "allowed"
@@ -7770,6 +7948,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "played_since": {
+            "description": "The lookback cutoff: the run imports only items last played at or after it. Absent for a full import.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
           "profile_id": {
             "description": "The profile the history is written to",
             "examples": [
@@ -7877,10 +8062,30 @@
         ],
         "type": "object"
       },
+      "AdminHistoryImportRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "lookback_hours": {
+            "description": "Import only items last played within this many hours before the run is queued. Resume positions and favorites are still read in full. Jellyfin sources only. Write it as a plain JSON integer; 72.0 and 1e2 are refused. Omit it or send null for a full import.",
+            "examples": [
+              72
+            ],
+            "format": "int64",
+            "maximum": 8760,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "AdminHistoryImportSource": {
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "enabled": {
@@ -7940,6 +8145,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           },
@@ -7983,6 +8189,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           },
@@ -8065,6 +8272,7 @@
             "type": "string"
           },
           "image_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "revision": {
@@ -8088,6 +8296,7 @@
         "additionalProperties": false,
         "properties": {
           "original_url": {
+            "description": "An original_url from this item's image list, sent back unchanged; not validated as a URI",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -8652,6 +8861,7 @@
             ]
           },
           "countries": {
+            "description": "Country codes, ISO 3166-1 alpha-2 by convention (US); stored as sent; null clears",
             "items": {
               "type": "string"
             },
@@ -8787,6 +8997,12 @@
             ]
           },
           "status": {
+            "description": "Match status; null leaves it unchanged",
+            "enum": [
+              "pending",
+              "matched",
+              "unmatched"
+            ],
             "type": [
               "string",
               "null"
@@ -8861,6 +9077,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "server_name": {
@@ -8948,6 +9165,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "description": "Public URL Jellyfin clients are told to use, as configured; not validated as a URI",
             "type": "string"
           },
           "restart_required": {
@@ -8957,6 +9175,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri",
             "type": "string"
           },
           "tag": {
@@ -9003,6 +9222,7 @@
         "properties": {
           "source_url": {
             "description": "Official jellyfin-web source; empty uses the stored source URL",
+            "format": "uri-reference",
             "maxLength": 2048,
             "type": "string"
           },
@@ -9491,6 +9711,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {},
@@ -9506,6 +9727,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -9849,11 +10071,22 @@
             "minimum": 0,
             "type": "number"
           },
+          "default_contribute_enabled": {
+            "description": "The provider's plugin manifest turns sharing on when the provider is first configured, unless the markers.share_by_default server setting is false. Turning that setting off also turns sharing off for these providers.",
+            "type": "boolean"
+          },
           "display_name": {
             "type": "string"
           },
           "fetch_enabled": {
             "type": "boolean"
+          },
+          "fetch_min_confidence": {
+            "description": "Markers the provider rates below this confidence are left out of lookups, so another provider or local detection can fill their kind. 0 keeps every marker.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
           },
           "fetch_priority": {
             "format": "int64",
@@ -9885,9 +10118,11 @@
           "is_submitter",
           "fetch_enabled",
           "fetch_priority",
+          "fetch_min_confidence",
           "contribute_enabled",
           "contribute_auto_local",
-          "contribute_min_confidence"
+          "contribute_min_confidence",
+          "default_contribute_enabled"
         ],
         "type": "object"
       },
@@ -9918,6 +10153,15 @@
           "fetch_enabled": {
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "fetch_min_confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
               "null"
             ]
           },
@@ -10291,6 +10535,7 @@
             "type": "array"
           },
           "public_url": {
+            "description": "Client-facing node address as configured; not validated as a URI",
             "type": "string"
           },
           "type": {
@@ -10301,6 +10546,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Node address as configured; not validated as a URI",
             "type": "string"
           }
         },
@@ -10388,6 +10634,7 @@
             "type": "string"
           },
           "public_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -10399,6 +10646,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -10634,6 +10882,7 @@
             "type": "string"
           },
           "node_url": {
+            "description": "Address the node reported for itself; not validated as a URI",
             "type": "string"
           },
           "profile_id": {
@@ -10778,6 +11027,7 @@
             "type": "string"
           },
           "public_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": [
               "string",
@@ -10785,6 +11035,7 @@
             ]
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -10991,6 +11242,7 @@
             "examples": [
               "https://silo.example.test/reset-password/3f2b47eb7b36dd2d"
             ],
+            "format": "uri",
             "type": "string"
           }
         },
@@ -11031,7 +11283,8 @@
             ]
           },
           "birth_date": {
-            "description": "YYYY-MM-DD; empty clears; null or omission preserves.",
+            "description": "Calendar date, YYYY-MM-DD; empty clears; null or omission preserves.",
+            "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
             "type": [
               "string",
               "null"
@@ -11044,7 +11297,8 @@
             ]
           },
           "death_date": {
-            "description": "YYYY-MM-DD; empty clears; null or omission preserves.",
+            "description": "Calendar date, YYYY-MM-DD; empty clears; null or omission preserves.",
+            "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
             "type": [
               "string",
               "null"
@@ -11282,6 +11536,14 @@
           "play_method": {
             "type": "string"
           },
+          "played_seconds": {
+            "description": "Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "profile_id": {
             "type": "string"
           },
@@ -11325,6 +11587,7 @@
             "type": "string"
           },
           "watched_seconds": {
+            "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
             "format": "double",
             "type": "number"
           }
@@ -11345,6 +11608,7 @@
           "watched_seconds",
           "duration_seconds",
           "completed",
+          "played_seconds",
           "series_title",
           "season_number",
           "episode_number"
@@ -11543,6 +11807,7 @@
             "type": "number"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -11624,6 +11889,7 @@
             "type": "string"
           },
           "source_audio_language": {
+            "description": "Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown",
             "type": "string"
           },
           "source_audio_layout": {
@@ -12055,6 +12321,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "capability_id": {
@@ -12082,6 +12349,7 @@
             "examples": [
               "https://silo.example.test/login"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "updated_at": {
@@ -12165,6 +12433,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "config_schema": {
@@ -12192,6 +12461,7 @@
             "examples": [
               "https://silo.example.test/login"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "request_router": {
@@ -12235,6 +12505,7 @@
         "additionalProperties": false,
         "properties": {
           "archive_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "assets": {
@@ -12267,6 +12538,7 @@
             "$ref": "#/components/schemas/AdminPluginPresentation"
           },
           "repo_url": {
+            "description": "Source repository the catalog lists for the plugin; not validated as a URI",
             "type": "string"
           },
           "repository_id": {
@@ -12768,6 +13040,7 @@
             "$ref": "#/components/schemas/AdminPluginPresentation"
           },
           "repo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "repository_id": {
@@ -12815,6 +13088,7 @@
             "type": "string"
           },
           "updates_paused": {
+            "description": "True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again.",
             "type": "boolean"
           },
           "user_config_schema": {
@@ -12874,6 +13148,7 @@
         "additionalProperties": false,
         "properties": {
           "changelog_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "description_markdown": {
@@ -12883,6 +13158,7 @@
             "type": "string"
           },
           "homepage_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "license_spdx": {
@@ -12892,18 +13168,21 @@
             "type": "string"
           },
           "publisher_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "setup_markdown": {
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "summary": {
             "type": "string"
           },
           "support_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -12962,6 +13241,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Repository index URL as entered; not validated as a URI",
             "type": "string"
           }
         },
@@ -12989,6 +13269,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -13011,6 +13292,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           }
@@ -14557,6 +14839,7 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "description": "Service base URL as stored; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -14650,6 +14933,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "description": "Service base URL; a host[:port] without a scheme gets http://; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -14766,6 +15050,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "description": "Service base URL; a host[:port] without a scheme gets http://, and empty clears it; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -14943,20 +15228,22 @@
             "type": "array"
           },
           "exclude_origin_countries": {
-            "description": "Match titles from none of these ISO 3166-1 countries",
+            "description": "Match titles from none of these upper-case ISO 3166-1 alpha-2 countries",
             "items": {
+              "pattern": "^[A-Z]{2}$",
               "type": "string"
             },
             "type": "array"
           },
           "exclude_original_languages": {
-            "description": "Match titles whose original language is none of these ISO 639-1 codes",
+            "description": "Match titles whose original language is none of these TMDB codes (lowercase ISO 639-1; TMDB also uses cn and xx)",
             "examples": [
               [
                 "en"
               ]
             ],
             "items": {
+              "pattern": "^[a-z]{2,3}$",
               "type": "string"
             },
             "type": "array"
@@ -15001,25 +15288,27 @@
             "type": "array"
           },
           "origin_countries": {
-            "description": "ISO 3166-1 country codes",
+            "description": "Upper-case ISO 3166-1 alpha-2 country codes (TMDB origin_country)",
             "examples": [
               [
                 "JP"
               ]
             ],
             "items": {
+              "pattern": "^[A-Z]{2}$",
               "type": "string"
             },
             "type": "array"
           },
           "original_languages": {
-            "description": "ISO 639-1 codes of the original language",
+            "description": "TMDB original-language codes: lowercase ISO 639-1 (TMDB also uses cn and xx)",
             "examples": [
               [
                 "ja"
               ]
             ],
             "items": {
+              "pattern": "^[a-z]{2,3}$",
               "type": "string"
             },
             "type": "array"
@@ -15109,12 +15398,14 @@
             "type": "array"
           },
           "origin_countries": {
+            "description": "The title's TMDB origin countries, ISO 3166-1 alpha-2",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "original_language": {
+            "description": "The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx)",
             "type": "string"
           },
           "year": {
@@ -15769,6 +16060,7 @@
             "type": "boolean"
           },
           "icon_url": {
+            "description": "Icon as the scan source plugin reported it; not validated as a URI",
             "type": "string"
           },
           "summary": {
@@ -17153,6 +17445,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "media_content_id": {
@@ -17274,6 +17568,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "media_file_id": {
@@ -17315,8 +17611,10 @@
             "type": "boolean"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code, any case; stored in canonical form",
             "maxLength": 128,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "release_name": {
@@ -17603,6 +17901,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "preset": {
@@ -17673,6 +17972,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {},
@@ -17692,6 +17992,7 @@
             "examples": [
               "https://www.themoviedb.org/list/310-my-movie-list"
             ],
+            "format": "uri-reference",
             "minLength": 1,
             "type": "string"
           }
@@ -17999,6 +18300,7 @@
             "type": "string"
           },
           "download_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "failure": {
@@ -18053,6 +18355,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "refresh_result": {
@@ -19002,12 +19305,13 @@
         "additionalProperties": false,
         "properties": {
           "target_language": {
-            "description": "BCP 47 tag of the language to fill in",
+            "description": "BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form",
             "examples": [
               "de"
             ],
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -19031,8 +19335,10 @@
             ]
           },
           "target_language": {
+            "description": "BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form",
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -20112,7 +20418,7 @@
             "type": "string"
           },
           "issuer": {
-            "description": "Who asserted the subject, as the provider last said; may be empty",
+            "description": "Who asserted the subject, as the provider last said; may be empty; not validated as a URI",
             "examples": [
               "https://id.example.test"
             ],
@@ -20789,10 +21095,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Preferred audio language; empty means no language preference",
+            "description": "Preferred audio language for the series: BCP 47 tag (en, pt-BR) or x-silo-original; empty means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "audio_track_index": {
@@ -20847,10 +21154,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Preferred audio language; empty or omitted means no language preference",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; empty or omitted means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "audio_track_index": {
@@ -20897,6 +21205,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           },
           "layout": {
@@ -20950,9 +21259,9 @@
             "type": "string"
           },
           "language": {
-            "description": "Track language (ISO 639)",
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -21045,6 +21354,7 @@
           "poster_urls": {
             "description": "Up to four presigned covers for a stack; empty, never null",
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "type": "array"
@@ -21142,6 +21452,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -21179,6 +21490,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "series_index": {
@@ -21225,6 +21537,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "ok": {
@@ -21307,6 +21620,7 @@
             "examples": [
               "https://plugins.example.test/icon.svg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "id": {
@@ -21495,15 +21809,18 @@
             "type": "string"
           },
           "favicon_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "login_bg_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "login_subtitle": {
             "type": "string"
           },
           "mark_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "server_name": {
@@ -21513,6 +21830,7 @@
             "type": "boolean"
           },
           "wordmark_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -21622,6 +21940,7 @@
             "examples": [
               "2026-01-10"
             ],
+            "format": "date",
             "type": "string"
           },
           "items": {
@@ -21653,6 +21972,7 @@
             "examples": [
               "2026-01-09"
             ],
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -21697,6 +22017,7 @@
             "examples": [
               "2026-01-10"
             ],
+            "format": "date",
             "type": "string"
           },
           "poster_thumbhash": {
@@ -21706,6 +22027,7 @@
             "examples": [
               "https://s3.example.test/poster.jpg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "season_number": {
@@ -21821,6 +22143,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -21986,6 +22309,7 @@
             "type": "array"
           },
           "countries": {
+            "description": "Distinct countries in scope, normally ISO 3166-1 alpha-2 codes; NFO files and manual edits can store country names",
             "items": {
               "type": "string"
             },
@@ -22011,6 +22335,7 @@
             "type": "array"
           },
           "original_languages": {
+            "description": "Distinct original languages in scope, normally ISO 639-1 codes (ISO 639-3 when none exists); provider codes such as TMDB's xx pass through",
             "items": {
               "type": "string"
             },
@@ -22100,6 +22425,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -22150,10 +22476,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -22182,6 +22510,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -22195,7 +22524,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22216,6 +22545,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -22248,6 +22578,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -22393,6 +22724,7 @@
           },
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -22413,11 +22745,13 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "backdrop_urls": {
             "description": "Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none",
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "type": "array"
@@ -22434,6 +22768,7 @@
           },
           "banner_url": {
             "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
+            "format": "uri-reference",
             "type": "string"
           },
           "cast": {
@@ -22445,6 +22780,7 @@
           },
           "clearart_url": {
             "description": "Presigned, short-lived. Transparent cut-out art. Movies and series only",
+            "format": "uri-reference",
             "type": "string"
           },
           "content_id": {
@@ -22461,6 +22797,7 @@
             "type": "string"
           },
           "countries": {
+            "description": "Production countries, normally ISO 3166-1 alpha-2 codes (US); NFO files and manual edits can store country names",
             "items": {
               "type": "string"
             },
@@ -22478,6 +22815,7 @@
           },
           "disc_url": {
             "description": "Presigned, short-lived. Transparent disc art. Movies only",
+            "format": "uri-reference",
             "type": "string"
           },
           "duration_seconds": {
@@ -22492,7 +22830,8 @@
             "type": "boolean"
           },
           "effective_subtitle_language": {
-            "description": "The subtitle language the viewer's preferences resolve to for this item",
+            "description": "The subtitle language the viewer's preferences resolve to for this item: BCP 47 tag; empty when the preference is None",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "effective_subtitle_mode": {
@@ -22530,6 +22869,7 @@
           },
           "first_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "folder_paths": {
@@ -22568,6 +22908,7 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "locked_fields": {
@@ -22580,6 +22921,7 @@
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -22611,6 +22953,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -22627,7 +22970,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22659,6 +23002,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "preview": {
@@ -22711,6 +23055,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -22778,6 +23123,7 @@
           },
           "thumb_url": {
             "description": "Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -22952,6 +23298,7 @@
           },
           "release_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "resolution": {
@@ -22979,6 +23326,7 @@
             "examples": [
               "2026-01-09"
             ],
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -23482,6 +23830,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "show_title_rules": {
+            "description": "Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -23557,6 +23909,7 @@
         "additionalProperties": false,
         "properties": {
           "audio_languages": {
+            "description": "Distinct audio track languages in scope as lowercase BCP 47 tags (en, pt-br); older scans may carry an ISO 639-2 code or the raw tag",
             "items": {
               "type": "string"
             },
@@ -23570,6 +23923,7 @@
             "type": "array"
           },
           "subtitle_languages": {
+            "description": "Distinct subtitle languages in scope as BCP 47 tags; a stored value that is not a recognizable language passes through",
             "items": {
               "type": "string"
             },
@@ -23698,6 +24052,7 @@
         "additionalProperties": false,
         "properties": {
           "callback_url": {
+            "format": "uri",
             "maxLength": 32768,
             "minLength": 1,
             "type": "string"
@@ -23727,9 +24082,11 @@
             "type": "string"
           },
           "authorization_url": {
+            "format": "uri",
             "type": "string"
           },
           "callback_uri": {
+            "format": "uri",
             "type": "string"
           },
           "expires_at": {
@@ -26014,6 +26371,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "description": "Public URL Jellyfin clients are told to use, as configured; not validated as a URI",
             "type": "string"
           },
           "server_name": {
@@ -26115,6 +26473,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -26141,6 +26500,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -26253,6 +26613,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {
@@ -26278,7 +26639,7 @@
             "description": "Import source configuration; null when not imported"
           },
           "source_url": {
-            "description": "Where an imported collection came from; empty otherwise",
+            "description": "Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI",
             "type": "string"
           },
           "sync_schedule": {
@@ -26341,12 +26702,15 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           },
           "logo_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           },
           "poster_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           }
         },
@@ -27275,10 +27639,12 @@
           },
           "proxy_url": {
             "description": "The same link for /api/v2/direct-download-proxy; use it only when the download capability reports proxy_delivery.",
+            "format": "uri-reference",
             "type": "string"
           },
           "url": {
             "description": "Server-relative GET/HEAD URL for /api/v2/direct-download that carries the link token as dl. Treat it as a secret until it expires.",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -27328,6 +27694,7 @@
             "type": "string"
           },
           "logo_url": {
+            "format": "uri",
             "type": [
               "string",
               "null"
@@ -27395,6 +27762,7 @@
             "type": "string"
           },
           "logo_url": {
+            "format": "uri",
             "type": [
               "string",
               "null"
@@ -28290,7 +28658,7 @@
             "type": "string"
           },
           "updated_at": {
-            "description": "Time of the local status event; retain on retry. Future times are rejected.",
+            "description": "Time of the local status event; retain on retry. Times more than two minutes ahead of the server clock are rejected.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -29562,6 +29930,7 @@
         "properties": {
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "content_id": {
@@ -29600,7 +29969,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it",
             "type": "string"
           },
           "ratings": {
@@ -29628,6 +29997,7 @@
           },
           "still_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -30225,6 +30595,7 @@
             "type": "string"
           },
           "effective_audio_language": {
+            "description": "Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown",
             "type": "string"
           },
           "effective_audio_track_index": {
@@ -30475,6 +30846,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -30525,10 +30897,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -30557,6 +30931,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -30570,7 +30945,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -30591,6 +30966,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -30623,6 +30999,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -31008,6 +31385,7 @@
             "examples": [
               "https://jellyfin.example.test"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "jellyfin_password": {
@@ -31028,6 +31406,7 @@
           },
           "plex_base_url": {
             "description": "Plex: a server address when the client holds its own token",
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_base_urls": {
@@ -31038,6 +31417,7 @@
               ]
             ],
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "maxItems": 31,
@@ -31106,6 +31486,7 @@
             "examples": [
               "https://emby.example.test"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "created_at": {
@@ -31748,6 +32129,7 @@
         "properties": {
           "claim_url": {
             "description": "One-time disclosure; never retained for replay. Contains the bearer claim token.",
+            "format": "uri",
             "type": "string"
           },
           "delivery_status": {
@@ -31840,6 +32222,7 @@
           },
           "still_url": {
             "description": "Presigned, short-lived. 16:9 image of the extra; absent when it has none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -31860,9 +32243,11 @@
             "type": "integer"
           },
           "language": {
+            "description": "Language of text in the image as the provider reports it, usually ISO 639-1 (TMDB uses xx for none); empty when textless or unknown",
             "type": "string"
           },
           "original_url": {
+            "description": "The provider's image URL, or file:// and the unescaped path of a local image; not validated as a URI. Send it unchanged to apply the image",
             "type": "string"
           },
           "provider_id": {
@@ -31876,6 +32261,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Preview of the image: a fetchable URL, a data: URI, or the provider's value as given; not validated as a URI",
             "type": "string"
           },
           "width": {
@@ -31905,6 +32291,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language of the video as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "name": {
@@ -32042,10 +32429,11 @@
             "type": "string"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code metadata is fetched in",
+            "description": "Lowercase ISO 639-1 code metadata is fetched in; empty when an update cleared it, and fetches then use en",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -32068,6 +32456,7 @@
           },
           "poster_url": {
             "description": "Presigned poster URL; absent when the library has no poster",
+            "format": "uri-reference",
             "type": "string"
           },
           "realtime_monitoring": {
@@ -32272,6 +32661,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -32419,10 +32809,11 @@
             "type": "boolean"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code; default en",
+            "description": "Lowercase ISO 639-1 code from the supported list; empty or omitted means en",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -32662,10 +33053,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (BCP 47 language tag); empty means none",
+            "description": "Audio language override: BCP 47 tag (en, pt-BR) or x-silo-original; empty means none",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "library_id": {
@@ -32691,10 +33083,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Subtitle language override (BCP 47 language tag); empty means none",
+            "description": "Subtitle language override: BCP 47 tag (en, pt-BR); empty means none",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -32746,10 +33139,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (BCP 47 language tag); null or empty clears it",
+            "description": "Audio language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; null or empty clears it",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -32766,10 +33160,11 @@
             ]
           },
           "subtitle_language": {
-            "description": "Subtitle language override (BCP 47 language tag); null or empty clears it",
+            "description": "Subtitle language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; null or empty clears it",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -33212,10 +33607,11 @@
             "type": "boolean"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code; a change queues a quick metadata refresh",
+            "description": "Lowercase ISO 639-1 code from the supported list; a change queues a quick metadata refresh",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -33295,6 +33691,7 @@
             "$ref": "#/components/schemas/LiteraryWorkMetadata"
           },
           "primary_cover_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "work_id": {
@@ -33424,6 +33821,7 @@
           },
           "published_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "publisher": {
@@ -33816,6 +34214,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {
@@ -33841,6 +34240,7 @@
             "examples": [
               "https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"
             ],
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -33906,6 +34306,7 @@
             "examples": [
               "https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "user_id": {
@@ -33969,6 +34370,7 @@
         "additionalProperties": false,
         "properties": {
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -33988,6 +34390,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "progress": {
@@ -34142,6 +34545,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -34319,6 +34723,7 @@
             "type": "string"
           },
           "image_url": {
+            "description": "Image for the candidate as the metadata plugin returned it; not validated as a URI",
             "type": "string"
           },
           "match_reasons": {
@@ -34359,6 +34764,7 @@
             "type": "boolean"
           },
           "title_language": {
+            "description": "Language of the title as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "year": {
@@ -35021,6 +35427,8 @@
             "type": "string"
           },
           "source_language": {
+            "description": "Language of the base metadata (ISO 639-1); empty until the job reads it",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "status": {
@@ -35032,6 +35440,8 @@
             "type": "string"
           },
           "target_language": {
+            "description": "BCP 47 tag of the language being filled in",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "updated_at": {
@@ -35324,7 +35734,7 @@
             "type": "array"
           },
           "auth_url": {
-            "description": "Interactive enrollment URL, only while awaiting_authorization; admin-only, never logged",
+            "description": "Interactive enrollment URL as the network access plugin reported it, only while awaiting_authorization; admin-only, never logged; not validated as a URI",
             "type": "string"
           },
           "error": {
@@ -35434,6 +35844,7 @@
             "type": "string"
           },
           "node_url": {
+            "description": "Configured node address with credentials removed, or [invalid URL] when it does not parse; not validated as a URI",
             "type": "string"
           },
           "render_device_details": {
@@ -35952,6 +36363,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -36139,6 +36551,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -36167,6 +36580,7 @@
         "additionalProperties": false,
         "properties": {
           "relay_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -36206,6 +36620,7 @@
             "type": "string"
           },
           "relay_url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -36489,6 +36904,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -36533,6 +36949,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -36593,6 +37010,7 @@
             "type": "string"
           },
           "endpoint": {
+            "format": "uri",
             "maxLength": 2048,
             "minLength": 1,
             "type": "string",
@@ -36625,6 +37043,7 @@
             "type": "boolean"
           },
           "endpoint": {
+            "format": "uri-reference",
             "type": "string"
           },
           "id": {
@@ -36670,6 +37089,7 @@
         "additionalProperties": false,
         "properties": {
           "endpoint": {
+            "format": "uri",
             "maxLength": 2048,
             "minLength": 1,
             "type": "string",
@@ -36735,6 +37155,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -36893,6 +37314,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -37018,6 +37440,7 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           },
           "layout": {
@@ -37122,6 +37545,7 @@
             "type": "boolean"
           },
           "fetch_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "file_size": {
@@ -37138,6 +37562,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "revision": {
@@ -37653,6 +38078,7 @@
             "examples": [
               "1940-04-25"
             ],
+            "format": "date",
             "type": "string"
           },
           "birthplace": {
@@ -37660,6 +38086,7 @@
           },
           "death_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "homepage": {
@@ -37687,6 +38114,7 @@
           },
           "photo_url": {
             "description": "Presigned photo URL; absent when the person has no photo",
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -37997,6 +38425,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -38025,7 +38454,7 @@
             "description": "Import source document; absent for a manual or smart collection"
           },
           "source_url": {
-            "description": "Where an imported collection is synced from; empty otherwise",
+            "description": "Where an imported collection is synced from; empty otherwise; not validated as a URI",
             "examples": [
               ""
             ],
@@ -38183,6 +38612,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {
@@ -38271,6 +38701,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -38307,6 +38738,7 @@
           },
           "poster_url": {
             "description": "Card-size poster URL; omitted when the item has none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -38394,11 +38826,13 @@
             "type": "string"
           },
           "poster_source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
           "sort_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -38415,6 +38849,72 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "PersonalListCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "membership_supported": {
+            "description": "Whether getFavoriteMembership and getWatchlistMembership answer 200 with is_member for every item the viewer may see",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "membership_supported",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "PersonalListMembership": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "description": "When the item joined the list; absent when it is not on it",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "is_member": {
+            "description": "Whether the item is on the list",
+            "type": "boolean"
+          },
+          "item_id": {
+            "description": "The catalog item",
+            "examples": [
+              "movie:heat-1995"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "is_member"
+        ],
         "type": "object"
       },
       "PlaybackAccepted": {
@@ -38439,12 +38939,55 @@
         ],
         "type": "object"
       },
+      "PlaybackBandwidthLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "source",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "PlaybackCapabilities": {
         "additionalProperties": false,
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
+          },
+          "bandwidth_probe_automatic": {
+            "description": "With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works.",
+            "type": "boolean"
+          },
+          "bandwidth_probe_max_age_seconds": {
+            "description": "With connection_speed_v1: how long a speed reading stays current.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "bandwidth_probe_target_kbps": {
+            "description": "With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "bandwidth_probe_url": {
+            "format": "uri",
+            "type": "string"
           },
           "deliveries": {
             "items": {
@@ -38495,6 +39038,63 @@
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "PlaybackConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_budget_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "connection": {
+            "type": "string"
+          },
+          "learned_limit": {
+            "additionalProperties": false,
+            "description": "The learned limit on this connection; null when there is none.",
+            "properties": {
+              "expires_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              },
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "observed_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "observed_at",
+              "expires_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "playback_sample": {
+            "$ref": "#/components/schemas/PlaybackSample",
+            "description": "The best recent playback throughput on this connection, a lower bound on its speed. A Test speed result clears it."
+          },
+          "probe": {
+            "$ref": "#/components/schemas/PlaybackProbe"
+          }
+        },
+        "required": [
+          "connection",
+          "learned_limit"
         ],
         "type": "object"
       },
@@ -38602,6 +39202,7 @@
             "type": "array"
           },
           "session_id": {
+            "description": "Present only when outcome is playable. A terminal decision (adaptation_unavailable), from start or replan, carries none; read outcome before comparing sessions.",
             "type": "string"
           },
           "terminal": {
@@ -38612,6 +39213,35 @@
           "protocol_version",
           "server_features",
           "outcome"
+        ],
+        "type": "object"
+      },
+      "PlaybackLearnedLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "observed_at",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -38665,6 +39295,9 @@
               "$ref": "#/components/schemas/AvailableQualityV3"
             },
             "type": "array"
+          },
+          "bandwidth_limit": {
+            "$ref": "#/components/schemas/PlaybackBandwidthLimit"
           },
           "claims": {
             "$ref": "#/components/schemas/ValidationClaimsV3"
@@ -38771,6 +39404,111 @@
         ],
         "type": "object"
       },
+      "PlaybackPlanSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "reported_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id",
+          "reported_at",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
+      "PlaybackProbe": {
+        "additionalProperties": false,
+        "properties": {
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lower_bound": {
+            "description": "The test proved only that the link carries at least kbps.",
+            "type": "boolean"
+          },
+          "measured_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "lower_bound",
+          "measured_at",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "PlaybackProbeResultsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "maximum": 1000000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "maximum": 60000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "kbps": {
+            "description": "The bounds of bandwidth_estimate_kbps, so a kept reading is one a start can send.",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "lower_bound": {
+            "description": "The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound.",
+            "type": "boolean"
+          },
+          "manual": {
+            "description": "The viewer started this test with Test speed; never set for the automatic test. A manual result clears the connection's playback sample, so the reading becomes this result, and one above the device's learned limit on this connection also clears the limit, as a reset does.",
+            "type": "boolean"
+          },
+          "transport": {
+            "enum": [
+              "wifi",
+              "ethernet",
+              "cellular",
+              "other"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "bytes",
+          "duration_ms",
+          "transport"
+        ],
+        "type": "object"
+      },
       "PlaybackProgressBody": {
         "additionalProperties": false,
         "properties": {
@@ -38829,6 +39567,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "bandwidth_estimate_source": {
+            "enum": [
+              "probe",
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          },
           "client_capabilities": {
             "$ref": "#/components/schemas/ClientCodecCapabilitiesV3"
           },
@@ -38857,6 +39602,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "learned_limit": {
+            "enum": [
+              "ignore",
+              "clear"
+            ],
+            "type": "string"
+          },
           "local_mutations": {
             "items": {
               "type": "string"
@@ -38868,6 +39620,13 @@
             "deprecated": true,
             "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
+          },
+          "observed_throughput_kbps": {
+            "description": "What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 100,
+            "type": "integer"
           },
           "operation": {
             "enum": [
@@ -38965,7 +39724,8 @@
               "runtime_correction_succeeded",
               "runtime_correction_failed",
               "seek_reanchor_requested",
-              "seek_reanchored"
+              "seek_reanchored",
+              "plan_summary"
             ],
             "type": "string"
           },
@@ -39058,6 +39818,27 @@
         "required": [
           "event_id",
           "outcome"
+        ],
+        "type": "object"
+      },
+      "PlaybackSample": {
+        "additionalProperties": false,
+        "properties": {
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "measured_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "measured_at"
         ],
         "type": "object"
       },
@@ -39251,6 +40032,7 @@
             "examples": [
               "https://media.example/poster.jpg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -39394,9 +40176,9 @@
             "type": "string"
           },
           "source_audio_language": {
-            "description": "Empty when unknown",
+            "description": "Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -39769,6 +40551,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "bandwidth_estimate_source": {
+            "enum": [
+              "probe",
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          },
           "client_capabilities": {
             "$ref": "#/components/schemas/ClientCodecCapabilitiesV3"
           },
@@ -39797,10 +40586,24 @@
             "minLength": 1,
             "type": "string"
           },
+          "learned_limit": {
+            "enum": [
+              "ignore",
+              "clear"
+            ],
+            "type": "string"
+          },
           "metered": {
             "deprecated": true,
             "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
+          },
+          "observed_throughput_kbps": {
+            "description": "What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 100,
+            "type": "integer"
           },
           "playback_attempt_id": {
             "type": "string"
@@ -40005,6 +40808,7 @@
             "examples": [
               "https://app.plex.tv/auth#?code=ABCD"
             ],
+            "format": "uri",
             "type": "string"
           },
           "expires_at": {
@@ -40778,6 +41582,7 @@
             "examples": [
               "/avatars/presets/fox.png"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "created_at": {
@@ -40818,10 +41623,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1); empty inherits",
+            "description": "Preferred audio language: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR), or x-silo-original for each item's original language; empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "library_restrictions_enabled": {
@@ -40864,10 +41670,11 @@
             "type": "string"
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1); empty inherits the library's",
+            "description": "Metadata language: BCP 47 tag (en, pt-BR), or x-silo-original for each item's original language; empty inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "quality_preference": {
@@ -40891,10 +41698,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1); empty inherits",
+            "description": "Preferred subtitle language: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -41063,10 +41871,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1)",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "library_restrictions_enabled": {
@@ -41122,10 +41931,11 @@
             "type": "string"
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1)",
+            "description": "Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "quality_preference": {
@@ -41151,10 +41961,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1)",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; omitted or empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -41380,10 +42191,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1); null inherits",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41454,10 +42266,11 @@
             ]
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1); null inherits the library's",
+            "description": "Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41485,10 +42298,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1); null inherits",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; null inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41627,6 +42441,13 @@
             ],
             "type": "boolean"
           },
+          "mark_watched_records_rewatch": {
+            "description": "Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -41644,6 +42465,7 @@
         },
         "required": [
           "clear_resume_position",
+          "mark_watched_records_rewatch",
           "revision",
           "state",
           "allowed"
@@ -42156,6 +42978,7 @@
             "examples": [
               "https://id.example.test/logout?id_token_hint=eyJhbGciOi..."
             ],
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -42888,6 +43711,7 @@
           },
           "first_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "genres": {
@@ -42915,6 +43739,7 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "library_content_id": {
@@ -42969,6 +43794,7 @@
           },
           "release_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -43145,6 +43971,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -43194,6 +44021,7 @@
             "examples": [
               "2025-01-17"
             ],
+            "format": "date",
             "type": "string"
           },
           "availability": {
@@ -43556,6 +44384,7 @@
         "additionalProperties": false,
         "properties": {
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -43728,6 +44557,7 @@
         "properties": {
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "content_id": {
@@ -43765,6 +44595,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "season_number": {
@@ -43913,6 +44744,7 @@
             "examples": [
               "https://mdblist.com/lists/purple_smurf/halloween-family2"
             ],
+            "format": "uri",
             "type": "string"
           },
           "name": {
@@ -44719,6 +45551,7 @@
           },
           "url": {
             "description": "scheme://host[:port] clients reach the API at over the overlay; present only while connected",
+            "format": "uri",
             "type": "string"
           }
         },
@@ -44742,6 +45575,7 @@
           },
           "url": {
             "description": "scheme://host[:port] clients reach the API at",
+            "format": "uri",
             "type": "string"
           }
         },
@@ -44782,6 +45616,7 @@
             "examples": [
               "http://192.168.1.20:8080"
             ],
+            "format": "uri",
             "type": "string"
           }
         },
@@ -45818,6 +46653,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -45852,6 +46688,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty when the stored value is not a recognizable language",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "media_file_id": {
@@ -45918,6 +46756,7 @@
             "type": "string"
           },
           "header_refresh_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "headers": {
@@ -45933,6 +46772,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -45973,6 +46813,7 @@
             "type": "integer"
           },
           "source_language": {
+            "description": "BCP 47 tag of the source language; empty or unrecognized means detect",
             "maxLength": 64,
             "type": "string"
           },
@@ -45982,7 +46823,9 @@
             "type": "number"
           },
           "target_language": {
+            "description": "BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe",
             "maxLength": 64,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -46073,12 +46916,15 @@
             "type": "integer"
           },
           "source_language": {
+            "description": "BCP 47 tag of the source language; empty when not given",
             "type": "string"
           },
           "status": {
             "type": "string"
           },
           "target_language": {
+            "description": "BCP 47 tag to produce; empty for transcribe jobs",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "updated_at": {
@@ -46201,6 +47047,7 @@
             "type": "number"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -46276,6 +47123,7 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code, used as a hint; omitted means detect",
             "maxLength": 64,
             "type": "string"
           }
@@ -46289,6 +47137,8 @@
         "additionalProperties": false,
         "properties": {
           "language": {
+            "description": "BCP 47 tag detected from the file name, embedded metadata, or speech",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "source": {
@@ -46314,8 +47164,10 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Language of the chosen result exactly as searchSubtitles returned it (BCP 47)",
             "maxLength": 64,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "media_file_id": {
@@ -46384,6 +47236,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "source": {
@@ -46418,6 +47271,7 @@
             "type": "string"
           },
           "font_bundle_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "forced": {
@@ -46430,6 +47284,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "source": {
@@ -46442,6 +47297,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -46490,10 +47346,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language; empty means no language preference",
+            "description": "Preferred subtitle language for the series: BCP 47 tag (en, pt-BR); empty means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -46554,10 +47411,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language; empty or omitted means no language preference",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; empty or omitted means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -46650,6 +47508,7 @@
         "additionalProperties": false,
         "properties": {
           "languages": {
+            "description": "BCP 47 tags or ISO 639 codes, any case; recognized English language names are also accepted",
             "items": {
               "type": "string"
             },
@@ -46693,6 +47552,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "provider": {
@@ -47000,6 +47861,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language tag (BCP 47 for current data); may be empty or a legacy value",
             "type": "string"
           },
           "media_file_id": {
@@ -47157,9 +48019,9 @@
             "type": "string"
           },
           "language": {
-            "description": "Track language (ISO 639)",
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -47186,6 +48048,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code; omitted means detect",
             "maxLength": 64,
             "type": "string"
           },
@@ -47335,6 +48198,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "preset": {
@@ -47406,6 +48270,7 @@
             "type": "string"
           },
           "original_language": {
+            "description": "TMDB original-language code (ISO 639-1)",
             "type": "string"
           },
           "release_date_gte": {
@@ -47504,6 +48369,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {
@@ -47529,6 +48395,7 @@
             "examples": [
               "https://www.themoviedb.org/list/310-my-movie-list"
             ],
+            "format": "uri-reference",
             "minLength": 1,
             "type": "string"
           }
@@ -47543,6 +48410,7 @@
         "additionalProperties": false,
         "properties": {
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -47719,6 +48587,7 @@
           },
           "url": {
             "description": "Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -47892,6 +48761,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language of the alias as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "provider": {
@@ -48077,6 +48947,7 @@
             ],
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -48253,6 +49124,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "updated_at": {
@@ -48313,6 +49185,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_order": {
@@ -48414,6 +49287,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -48458,6 +49332,7 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name",
             "type": "string"
           },
           "resolution": {
@@ -48695,8 +49570,9 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -48742,6 +49618,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -48765,6 +49642,7 @@
           },
           "backdrop_url": {
             "description": "The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size",
+            "format": "uri-reference",
             "type": "string"
           },
           "content_id": {
@@ -48780,7 +49658,8 @@
             "type": "boolean"
           },
           "effective_subtitle_language": {
-            "description": "The subtitle language the profile's preferences resolve to",
+            "description": "The subtitle language the profile's preferences resolve to: BCP 47 tag; empty when the preference is None",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "effective_subtitle_mode": {
@@ -48825,6 +49704,7 @@
           },
           "poster_url": {
             "description": "The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls",
+            "format": "uri-reference",
             "type": "string"
           },
           "preview": {
@@ -48957,6 +49837,7 @@
             "type": "string"
           },
           "effective_audio_language": {
+            "description": "Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown",
             "type": "string"
           },
           "effective_audio_track_index": {
@@ -49200,6 +50081,7 @@
             "type": "boolean"
           },
           "export_unwatched": {
+            "description": "Always false: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched": {
@@ -49290,6 +50172,7 @@
             "type": "boolean"
           },
           "export_unwatched_enabled": {
+            "description": "Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched_enabled": {
@@ -49466,6 +50349,7 @@
             "type": "string"
           },
           "verification_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -49508,6 +50392,7 @@
             "type": "boolean"
           },
           "export_unwatched_enabled": {
+            "description": "Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched_enabled": {
@@ -49861,8 +50746,9 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -49901,6 +50787,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "type": "string"
           },
           "source": {
@@ -49942,8 +50829,9 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -50692,6 +51580,7 @@
             "type": "string"
           },
           "poster_url": {
+            "description": "Poster the suggesting member's client sent; not validated as a URI",
             "type": "string"
           },
           "room_id": {
@@ -50769,6 +51658,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -50887,6 +51777,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -50944,10 +51835,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -50976,6 +51869,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -50989,7 +51883,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -51010,6 +51904,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -51042,6 +51937,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -51207,6 +52103,7 @@
           },
           "photo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -51253,6 +52150,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -51303,10 +52201,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -51335,6 +52235,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -51348,7 +52249,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -51369,6 +52270,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -51401,6 +52303,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -51609,6 +52512,7 @@
           },
           "url": {
             "description": "A JPEG image; the URL carries its own authorization",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -51883,6 +52787,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -52104,6 +53009,7 @@
           },
           "webhook_url": {
             "description": "Relative URL of the external webhook receiver; resolve against the server origin.",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -52149,6 +53055,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -52192,6 +53099,7 @@
             "$ref": "#/components/schemas/WebhookConnection"
           },
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -52728,7 +53636,7 @@
     },
     "/api/v2/account/identities/link-credentials": {
       "post": {
-        "description": "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.",
+        "description": "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 429 rate_limited with Retry-After (the directory username has used its sign-in attempt budget); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.",
         "operationId": "linkAccountIdentityWithCredentials",
         "requestBody": {
           "content": {
@@ -70219,6 +71127,176 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit": {
+      "delete": {
+        "operationId": "resetAdminDeviceLearnedLimit",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear a device connection's learned limit, preserving measurements.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/diagnostics/reports": {
       "get": {
         "operationId": "listAdminDiagnosticReports",
@@ -76678,6 +77756,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent, empty, or whitespace-only runs a full import, whatever the Content-Type; any other body must be application/json."
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -76755,6 +77843,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {
@@ -77622,6 +78740,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent, empty, or whitespace-only runs a full import, whatever the Content-Type; any other body must be application/json."
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -77682,6 +78810,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {
@@ -118433,10 +119591,12 @@
             }
           },
           {
+            "description": "BCP 47 tag or ISO 639 code; legacy spellings of the same language also match",
             "explode": false,
             "in": "query",
             "name": "language",
             "schema": {
+              "description": "BCP 47 tag or ISO 639 code; legacy spellings of the same language also match",
               "maxLength": 128,
               "type": "string"
             }
@@ -130424,6 +131584,16 @@
             },
             "description": "Unprocessable Entity"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -134353,6 +135523,207 @@
           "auth"
         ],
         "x-silo-class": "public",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/capabilities/personal-lists": {
+      "get": {
+        "operationId": "getPersonalListCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalListCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover the favorites and watchlist membership reads.",
+        "tags": [
+          "favorites"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
@@ -160457,6 +161828,163 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/favorites/{item_id}/membership": {
+      "get": {
+        "operationId": "getFavoriteMembership",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalListMembership"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer whether the item is one of the acting profile's favorites as is_member, 200 either way; 404 only when the viewer may not see the item.",
+        "tags": [
+          "favorites"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/history": {
       "get": {
         "operationId": "listHistory",
@@ -181081,9 +182609,17 @@
             "schema": {
               "default": 1000000,
               "format": "int64",
-              "maximum": 100000000,
+              "maximum": 1000000000,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Use the client media egress route.",
+            "in": "query",
+            "name": "media_path",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -181109,6 +182645,16 @@
                 "schema": {
                   "format": "int64",
                   "type": "integer"
+                }
+              }
+            }
+          },
+          "307": {
+            "description": "Selected media proxy; follow the short-lived probe URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -181179,13 +182725,198 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After.",
+        "summary": "Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After.",
         "tags": [
           "playback"
         ],
         "x-silo-class": "authenticated",
         "x-silo-raw-protocol": "bandwidth-probe",
         "x-silo-raw-reason": "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."
+      }
+    },
+    "/api/v2/playback/bandwidth-probe/results": {
+      "post": {
+        "operationId": "reportPlaybackBandwidthProbe",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackProbeResultsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Store the calling device's latest measured connection speed.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/playback/capabilities": {
@@ -181389,6 +183120,311 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/playback/connection": {
+      "get": {
+        "operationId": "getPlaybackConnection",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackConnection"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read or reset the calling device's learned connection limit.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/playback/connection/learned-limit": {
+      "delete": {
+        "operationId": "resetPlaybackLearnedLimit",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read or reset the calling device's learned connection limit.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/playback/route-events": {
       "post": {
         "operationId": "reportPlaybackRouteEvent",
@@ -181412,6 +183448,18 @@
             "schema": {
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
               ],
               "type": "string"
             }
@@ -182258,6 +184306,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -182366,18 +184426,6 @@
               "description": "Opaque distribution channel paired with X-Silo-Client",
               "examples": [
                 "release"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
-            "in": "header",
-            "name": "X-Silo-Device-Id",
-            "schema": {
-              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
-              "examples": [
-                "iphone-1"
               ],
               "type": "string"
             }
@@ -183171,6 +185219,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -183492,6 +185552,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -183808,6 +185880,18 @@
             "schema": {
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
               ],
               "type": "string"
             }
@@ -215093,7 +217177,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.",
+        "summary": "Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched.",
         "tags": [
           "watch"
         ],
@@ -215242,7 +217326,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.",
+        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie or episode with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.",
         "tags": [
           "watch"
         ],
@@ -216523,6 +218607,163 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/watchlist/{item_id}/membership": {
+      "get": {
+        "operationId": "getWatchlistMembership",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalListMembership"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer whether the item is on the acting profile's watchlist as is_member, 200 either way; 404 only when the viewer may not see the item.",
+        "tags": [
+          "watchlist"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -222240,6 +224481,67 @@
           },
           "503": {
             "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": true,
+            "schema": {
+              "maximum": 1000000000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "Requires an expiring token with bandwidth-probe purpose and an account. Returns random, uncompressed bytes with Cache-Control: no-store. Playback tokens are refused. Limits concurrent probes and bytes per account; rate limits return Retry-After.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/stream/bandwidth-probe/{token}",
+        "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+        "auth_class": "public",
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Probe bytes"
+          },
+          "400": {
+            "description": "Invalid size"
+          },
+          "401": {
+            "description": "Invalid or expired token"
+          },
+          "403": {
+            "description": "Wrong token purpose or account"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

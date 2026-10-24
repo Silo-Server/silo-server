@@ -106,7 +106,6 @@ function initFormState(item: ItemDetail) {
     air_time: item.air_time ?? "",
     air_timezone: item.air_timezone ?? "",
     air_date: item.air_date ?? "",
-    status: item.status ?? "",
     rating_imdb: item.rating_imdb,
     rating_tmdb: item.rating_tmdb,
     rating_rt_critic: item.rating_rt_critic,
@@ -209,7 +208,6 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     if (form.air_timezone !== originalForm.air_timezone)
       data.air_timezone = form.air_timezone || null;
     if (form.air_date !== originalForm.air_date) data.air_date = form.air_date || null;
-    if (form.status !== originalForm.status) data.status = form.status;
     if (form.rating_imdb !== originalForm.rating_imdb) data.rating_imdb = form.rating_imdb;
     if (form.rating_tmdb !== originalForm.rating_tmdb) data.rating_tmdb = form.rating_tmdb;
     if (form.rating_rt_critic !== originalForm.rating_rt_critic)
@@ -384,19 +382,6 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                           value={form.runtime || ""}
                           onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
                         />
-                      </FieldRow>
-                    )}
-
-                    {item.type === "series" && (
-                      <FieldRow label="Status">
-                        <select
-                          value={form.status}
-                          onChange={(e) => setField("status", e.target.value)}
-                          className="border-border bg-background text-foreground focus:border-ring focus:ring-ring/50 h-9 w-full rounded-md px-3 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
-                        >
-                          <option value="Continuing">Continuing</option>
-                          <option value="Ended">Ended</option>
-                        </select>
                       </FieldRow>
                     )}
 

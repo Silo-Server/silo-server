@@ -143,6 +143,9 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 	case errors.Is(err, auth.ErrPasswordLoginDisabled):
 		return apiError(http.StatusConflict, "password_login_disabled", "This account does not use local password sign-in")
 	}
+	if apiErr := busyError(err); apiErr != nil {
+		return apiErr
+	}
 	return apiError(http.StatusInternalServerError, "internal_error", "Failed to change password")
 }
 

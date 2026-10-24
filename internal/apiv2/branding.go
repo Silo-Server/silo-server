@@ -21,10 +21,10 @@ type BrandingConfiguration struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
 	AccentColor      string `json:"accent_color,omitempty"`
-	WordmarkURL      string `json:"wordmark_url,omitempty"`
-	MarkURL          string `json:"mark_url,omitempty"`
-	FaviconURL       string `json:"favicon_url,omitempty"`
-	LoginBgURL       string `json:"login_bg_url,omitempty"`
+	WordmarkURL      string `json:"wordmark_url,omitempty" format:"uri-reference"`
+	MarkURL          string `json:"mark_url,omitempty" format:"uri-reference"`
+	FaviconURL       string `json:"favicon_url,omitempty" format:"uri-reference"`
+	LoginBgURL       string `json:"login_bg_url,omitempty" format:"uri-reference"`
 	StorageAvailable bool   `json:"storage_available"`
 }
 type BrandingOutput struct{ Body BrandingConfiguration }

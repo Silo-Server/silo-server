@@ -56,7 +56,7 @@ func RunProfilePINRevision(t *testing.T, newStore func(*testing.T) userstore.Use
 
 	check("created")
 
-	update("parent", userstore.UpdateProfileInput{PIN: str("1234")})
+	update("parent", userstore.UpdateProfileInput{PINHash: str("hash-of-1234")})
 	want["parent"] = 1
 	check("parent sets its PIN")
 
@@ -74,7 +74,7 @@ func RunProfilePINRevision(t *testing.T, newStore func(*testing.T) userstore.Use
 	})
 	check("parent edits the kid's limits")
 
-	update("kid", userstore.UpdateProfileInput{PIN: str("9999")})
+	update("kid", userstore.UpdateProfileInput{PINHash: str("hash-of-9999")})
 	want["kid"] = 1
 	check("kid's PIN set")
 
@@ -87,15 +87,15 @@ func RunProfilePINRevision(t *testing.T, newStore func(*testing.T) userstore.Use
 	})
 	check("parent edits its own non-PIN fields")
 
-	update("parent", userstore.UpdateProfileInput{PIN: str("4321")})
+	update("parent", userstore.UpdateProfileInput{PINHash: str("hash-of-4321")})
 	want["parent"] = 2
 	check("parent changes its PIN")
 
-	update("parent", userstore.UpdateProfileInput{PIN: str("")})
+	update("parent", userstore.UpdateProfileInput{PINHash: str("")})
 	want["parent"] = 3
 	check("parent clears its PIN")
 
 	// pin_hash does not change, so no token can be stale.
-	update("parent", userstore.UpdateProfileInput{PIN: str("")})
+	update("parent", userstore.UpdateProfileInput{PINHash: str("")})
 	check("parent clears its already empty PIN")
 }

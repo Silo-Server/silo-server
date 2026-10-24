@@ -521,9 +521,12 @@ event:
 ```
 
 Capture `updated_at` when local state changes, and retain both the timestamp and the
-revision when retrying. `status` is `downloading` or `completed`; future timestamps
-are rejected. The response is `200` with the current `DownloadEntry`, whose optional
-`status_event_at` names the latest accepted event for the current revision.
+revision when retrying. `status` is `downloading` or `completed`. The server keeps
+`updated_at` as reported when it is at most two minutes ahead of its own clock, the
+same skew progress sync allows, so device clock drift does not refuse a report; a
+later timestamp returns `400 malformed_request`. The response is `200` with the
+current `DownloadEntry`, whose optional `status_event_at` names the latest accepted
+event for the current revision.
 
 An older or equal event returns the current entry without changing it. A different
 revision returns `409`: reload the registry and reconcile the new bytes instead of

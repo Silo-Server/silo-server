@@ -11,7 +11,15 @@ import (
 )
 
 const (
+	BandwidthEstimateProbeV3            = "probe"
+	BandwidthEstimateObservedRebufferV3 = "observed_rebuffer"
+	LearnedLimitIgnoreV3                = "ignore"
+	LearnedLimitClearV3                 = "clear"
+
 	ProtocolV3                               = 3
+	FeatureBufferingQualityV1                = "buffering_quality_v1"
+	FeatureConnectionSpeedV1                 = "connection_speed_v1"
+	FeaturePlaybackPlanSummaryV1             = "playback_plan_summary_v1"
 	FeaturePlaybackPlanV3                    = "playback_plan_v3"
 	FeatureServerRemoteStreamBitratePolicyV3 = "server_remote_stream_bitrate_policy_v1"
 	FeatureServerLocalStreamBitratePolicyV3  = "server_local_stream_bitrate_policy_v1"
@@ -132,6 +140,7 @@ const (
 	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
 	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
 	// node that approves theme files as progressive AAC inputs.
+	TransportFeatureBandwidthProbeV1      = "bandwidth_probe_v1"
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
 	// A transcode node that executes the multi-track prepared-download layout
@@ -214,7 +223,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -651,6 +660,9 @@ type StartRequestV3 struct {
 	SubtitleTrackIndex         *int                      `json:"subtitle_track_index,omitempty"`
 	Metered                    bool                      `json:"metered"`
 	BandwidthEstimateKbps      *int                      `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthEstimateSource    string                    `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps     *int                      `json:"observed_throughput_kbps,omitempty"`
+	LearnedLimit               string                    `json:"learned_limit,omitempty"`
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
@@ -721,23 +733,27 @@ type ReplanRequestV3 struct {
 	// LocalMutations reports client-applied local plan mutations (for example
 	// a PCM recovery route) so the server can fold them into the attempt key it
 	// computes for the failed plan. Clients never hash anything themselves.
-	LocalMutations        []string                  `json:"local_mutations,omitempty"`
-	AttemptCount          int                       `json:"attempt_count"`
-	QualityPreference     string                    `json:"quality_preference"`
-	PositionSeconds       float64                   `json:"position_seconds"`
-	Metered               bool                      `json:"metered"`
-	BandwidthEstimateKbps *int                      `json:"bandwidth_estimate_kbps,omitempty"`
-	BandwidthCapKbps      *int                      `json:"bandwidth_cap_kbps,omitempty"`
-	SelectedTracks        SelectedTracksV3          `json:"selected_tracks"`
-	Failure               FailureV3                 `json:"failure,omitzero"`
-	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
-	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
+	LocalMutations          []string                  `json:"local_mutations,omitempty"`
+	AttemptCount            int                       `json:"attempt_count"`
+	QualityPreference       string                    `json:"quality_preference"`
+	PositionSeconds         float64                   `json:"position_seconds"`
+	Metered                 bool                      `json:"metered"`
+	BandwidthEstimateKbps   *int                      `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthEstimateSource string                    `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps  *int                      `json:"observed_throughput_kbps,omitempty"`
+	LearnedLimit            string                    `json:"learned_limit,omitempty"`
+	BandwidthCapKbps        *int                      `json:"bandwidth_cap_kbps,omitempty"`
+	SelectedTracks          SelectedTracksV3          `json:"selected_tracks"`
+	Failure                 FailureV3                 `json:"failure,omitzero"`
+	Capabilities            ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext   ClientPlaybackContextV3   `json:"client_playback_context"`
 }
 
 const (
 	RouteEventPlanSelectedV3               = "plan_selected"
 	RouteEventPlanInvalidatedV3            = "plan_invalidated"
 	RouteEventPlanFailedV3                 = "plan_failed"
+	RouteEventPlanSummaryV3                = "plan_summary"
 	RouteEventFirstFrameV3                 = "first_frame"
 	RouteEventTerminalV3                   = "terminal"
 	RouteEventStoppedV3                    = "stopped"
@@ -749,6 +765,7 @@ const (
 )
 
 var routeEventNamesV3 = []string{
+	RouteEventPlanSummaryV3,
 	RouteEventPlanSelectedV3,
 	RouteEventPlanInvalidatedV3,
 	RouteEventPlanFailedV3,
@@ -801,13 +818,13 @@ type RouteEventV3 struct {
 }
 
 type StreamV3 struct {
-	URL              string              `json:"url"`
+	URL              string              `json:"url" format:"uri-reference"`
 	Protocol         StreamProtocolV3    `json:"protocol"`
 	Container        string              `json:"container,omitempty"`
 	MIMEType         string              `json:"mime_type,omitempty"`
 	Headers          map[string]string   `json:"headers"`
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
-	HeaderRefreshURL string              `json:"header_refresh_url,omitempty"`
+	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
 }
 
 type TimelineV3 struct {
@@ -907,7 +924,7 @@ type ValidationClaimsV3 struct {
 }
 
 type SubtitleArtifactV3 struct {
-	URL                 string  `json:"url"`
+	URL                 string  `json:"url" format:"uri-reference"`
 	MIMEType            string  `json:"mime_type"`
 	Format              string  `json:"format"`
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
@@ -996,6 +1013,8 @@ const (
 	QualityRung720pHighV3    = "720p-high"
 	QualityRung720pMediumV3  = "720p-medium"
 	QualityRung720pLowV3     = "720p-low"
+	QualityRung480pLowV3     = "480p-low"
+	QualityRung360pV3        = "360p"
 )
 
 // AvailableQualityV3 is one server-ladder rung valid for this source and
@@ -1011,9 +1030,16 @@ type AvailableQualityV3 struct {
 	PreservesSource bool   `json:"preserves_source"`
 }
 
+type BandwidthLimitV3 struct {
+	Kbps      int    `json:"kbps"`
+	Source    string `json:"source"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type PlanV3 struct {
-	ProtocolVersion int    `json:"protocol_version"`
-	PlanID          string `json:"plan_id"`
+	BandwidthLimit  *BandwidthLimitV3 `json:"bandwidth_limit,omitempty"`
+	ProtocolVersion int               `json:"protocol_version"`
+	PlanID          string            `json:"plan_id"`
 	// PlanAttemptKey is the server-computed opaque loop-prevention token for
 	// this plan. Clients store the keys of attempted plans and echo them in
 	// attempted_plan_keys on replan; they never compute keys themselves.
@@ -1094,7 +1120,13 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 	if r.ProgressPersistence == ProgressPersistenceClientV3 && r.StartPosition == nil {
 		return nil, errors.New("start_position is required when progress_persistence is client")
 	}
+	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps, r.ObservedThroughputKbps); err != nil {
+		return nil, err
+	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return nil, err
+	}
+	if err := validateOptionalBoundedIntV3(r.ObservedThroughputKbps, 100, 1_000_000, "observed_throughput_kbps"); err != nil {
 		return nil, err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
@@ -1169,7 +1201,13 @@ func (r *ReplanRequestV3) Validate() error {
 			return errors.New("invalid local mutation")
 		}
 	}
+	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps, r.ObservedThroughputKbps); err != nil {
+		return err
+	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return err
+	}
+	if err := validateOptionalBoundedIntV3(r.ObservedThroughputKbps, 100, 1_000_000, "observed_throughput_kbps"); err != nil {
 		return err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
@@ -1558,4 +1596,26 @@ func boundExceedsV3(output, panel int) bool {
 
 func boundExceedsFloatV3(output, panel float64) bool {
 	return panel > 0 && (output == 0 || output > panel)
+}
+
+func validateBufferingQualityV3(features []string, source, limit string, estimate, observed *int) error {
+	if source == "" && limit == "" && observed == nil {
+		return nil
+	}
+	if !HasFeatureV3(features, FeatureBufferingQualityV1) {
+		return errors.New("buffering_quality_v1 is required for buffering quality fields")
+	}
+	if source != "" && source != BandwidthEstimateProbeV3 && source != BandwidthEstimateObservedRebufferV3 {
+		return errors.New("invalid bandwidth_estimate_source")
+	}
+	if source != "" && estimate == nil {
+		return errors.New("bandwidth_estimate_source requires bandwidth_estimate_kbps")
+	}
+	if observed != nil && source != BandwidthEstimateObservedRebufferV3 {
+		return errors.New("observed_throughput_kbps requires bandwidth_estimate_source observed_rebuffer")
+	}
+	if limit != "" && limit != LearnedLimitIgnoreV3 && limit != LearnedLimitClearV3 {
+		return errors.New("invalid learned_limit")
+	}
+	return nil
 }

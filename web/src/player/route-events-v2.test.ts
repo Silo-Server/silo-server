@@ -56,3 +56,14 @@ it("skips a session that was not started on v2", async () => {
   await reportSessionRouteEventV2(config, "other", event);
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it("sends a closing page's event as a keepalive request", async () => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ event_id: "x", outcome: "accepted" }, 202));
+  vi.stubGlobal("fetch", fetcher);
+  await reportSessionRouteEventV2(config, sessionId, event, { keepalive: true });
+  await reportSessionRouteEventV2(config, sessionId, event);
+  const [closing, open] = fetcher.mock.calls.map(([, init]) => init as RequestInit);
+  expect(closing!.keepalive).toBe(true);
+  expect(open!.keepalive).toBeUndefined();
+  expect(open!.signal).toBeDefined();
+});

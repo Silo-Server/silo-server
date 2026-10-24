@@ -2400,13 +2400,13 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
 	`,
 		},
-		{
-			// target_episode selects the episodes in scope; candidate then
-			// re-joins every active file of those episodes so first_seen_at
-			// and the scan-run provenance aggregate over the whole episode,
-			// not just the scanned path.
-			desc: "restoring episode folder memberships",
-			sql: `
+	}
+
+	// target_episode selects the episodes in scope; candidate then re-joins
+	// every active file of those episodes so first_seen_at and the scan-run
+	// provenance aggregate over the whole episode, not just the scanned path.
+	// It returns the parent series of the genuinely new links.
+	restoreEpisodeMembershipsSQL := `
 		WITH target_episode AS (
 			SELECT DISTINCT mf.episode_id, mf.media_folder_id
 			FROM media_files mf
@@ -2439,23 +2439,12 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 			SELECT episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
 			FROM candidate
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
-			RETURNING episode_id, first_seen_at
+			RETURNING episode_id
 		)
-		-- Bump each parent series' latest-episode-added denorm for the
-		-- genuinely new links ("Latest Episodes" sort, issue #202).
-		UPDATE media_items mi
-		SET latest_episode_added_at = GREATEST(mi.latest_episode_added_at, sub.latest_added)
-		FROM (
-			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
-			FROM inserted i
-			JOIN episodes e ON e.content_id = i.episode_id
-			GROUP BY e.series_id
-		) sub
-		WHERE mi.content_id = sub.series_id
-		  AND mi.type = 'series'
-	`,
-		},
-	}
+		SELECT COALESCE(array_agg(DISTINCT e.series_id), ARRAY[]::text[])
+		FROM inserted i
+		JOIN episodes e ON e.content_id = i.episode_id
+	`
 
 	// One transaction: a crash part-way through must not leave a row with some
 	// links cleared and its memberships unrepaired.
@@ -2469,6 +2458,17 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 		if _, err := tx.Exec(ctx, stmt.sql, args...); err != nil {
 			return fmt.Errorf("%s: %w", stmt.desc, err)
 		}
+	}
+	var linkedSeriesIDs []string
+	if err := tx.QueryRow(ctx, restoreEpisodeMembershipsSQL, args...).Scan(&linkedSeriesIDs); err != nil {
+		return fmt.Errorf("restoring episode folder memberships: %w", err)
+	}
+	// New links move the series' membership denorms ("Latest Episodes",
+	// issue #202; "Latest Episode Air Date", issue #2741). Recompute them in
+	// a later statement: one that waited on a concurrent air-date
+	// correction's series lock would still apply the older episode dates.
+	if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, linkedSeriesIDs); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

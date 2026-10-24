@@ -37,6 +37,7 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		{http.MethodGet, "/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Users/u1/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Videos/abc/AdditionalParts"},
+		{http.MethodGet, "/items/abc/images"},
 		{http.MethodGet, "/Sessions"},
 		{http.MethodPost, "/ClientLog/Document"},
 		{http.MethodGet, "/System/Configuration/encoding"},
@@ -91,8 +92,9 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 	if rec := authed(http.MethodGet, "/System/Configuration/livetv"); rec.Code != http.StatusNotFound {
 		t.Errorf("authed GET /System/Configuration/livetv = %d, want 404", rec.Code)
 	}
-	// Moonfin for Roku asks for additional parts in lowercase (#1097).
-	for _, path := range []string{"/Videos/abc/AdditionalParts", "/videos/abc/additionalparts"} {
+	// Moonfin for Roku asks for additional parts in lowercase (#1097), and the
+	// Roku clients send some lowercase paths with a trailing slash (#2988).
+	for _, path := range []string{"/Videos/abc/AdditionalParts", "/videos/abc/additionalparts", "/Videos/abc/AdditionalParts/", "/videos/abc/additionalparts/"} {
 		rec := authed(http.MethodGet, path)
 		if rec.Code != http.StatusOK {
 			t.Errorf("authed GET %s = %d, want 200; body=%s", path, rec.Code, rec.Body.String())

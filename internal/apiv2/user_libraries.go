@@ -22,7 +22,7 @@ type UserLibrary struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	SortOrder int    `json:"sort_order"`
-	PosterURL string `json:"poster_url,omitempty"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
 }
 
 type UserLibraryListOutput struct{ Body Collection[UserLibrary] }

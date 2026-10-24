@@ -311,6 +311,29 @@
             "require_authored_fidelity",
             "allow_simplified_rendering"
           ]
+        },
+        "bandwidth_limit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kbps",
+            "source",
+            "expires_at"
+          ],
+          "properties": {
+            "kbps": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 1000000
+            },
+            "source": {
+              "const": "observed_rebuffer"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
         }
       },
       "additionalProperties": true,

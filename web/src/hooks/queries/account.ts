@@ -9,6 +9,8 @@ import {
 } from "@/api/client";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 
+import { compatKeys } from "./keys";
+
 /** Whether and within which limits the caller may replace the account password. */
 export type AccountPasswordCapability = V2Result<"GET /api/v2/account/password/capability">;
 
@@ -53,9 +55,11 @@ export function useAccountIdentities(enabled = true) {
 
 function invalidateSignInState(queryClient: ReturnType<typeof useQueryClient>) {
   // Linking turns local password sign-in off (except for break-glass
-  // accounts), so the password form's capability changes with it.
+  // accounts), so the password form's capability and Connect Apps'
+  // password_login_available change with it.
   void queryClient.invalidateQueries({ queryKey: accountIdentityKeys.all() });
   void queryClient.invalidateQueries({ queryKey: accountKeys.passwordCapability() });
+  void queryClient.invalidateQueries({ queryKey: compatKeys.all });
 }
 
 function requireIdentityMutationSession(session: SessionIdentitySnapshot) {

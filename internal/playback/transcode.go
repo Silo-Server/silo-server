@@ -312,7 +312,6 @@ func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
 type SegmentProgress struct {
 	ProducedHead    int
-	ProducedCount   int
 	LastProducedAt  time.Time
 	ManifestModTime time.Time
 	// GenerationStartedAt is when the ffmpeg process that currently owns the
@@ -2825,19 +2824,21 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 
-	for _, entry := range timeline.entries {
-		segmentPath := filepath.Join(s.outputDir, segmentFilename(entry.number, opts))
-		info, err := os.Stat(segmentPath)
+	// FFmpeg numbers segments in order, renames each finished segment into
+	// place (-hls_flags temp_file) before rewriting the playlist to list it,
+	// and lists only its own segments because append_list is not set. The last
+	// listed segment still on disk is therefore both the highest and the most
+	// recently written, so the walk stops there instead of statting every
+	// entry of a playlist that can list 50,000 segments.
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		number := timeline.entries[i].number
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(number, opts)))
 		if err != nil || info.Size() <= 0 {
 			continue
 		}
-		progress.ProducedCount++
-		if entry.number > progress.ProducedHead {
-			progress.ProducedHead = entry.number
-		}
-		if info.ModTime().After(progress.LastProducedAt) {
-			progress.LastProducedAt = info.ModTime()
-		}
+		progress.ProducedHead = max(progress.ProducedHead, number)
+		progress.LastProducedAt = info.ModTime()
+		break
 	}
 
 	return progress

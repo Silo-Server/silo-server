@@ -30,6 +30,19 @@ export function formatBitrateKbps(kbps: number): string {
 }
 
 /**
+ * A connection speed, budget or learned limit, as every Silo client shows one
+ * in Settings and the admin device page: rounded down, so a lower bound or a
+ * budget never overstates the link. One decimal below 10 Mbps, whole Mbps from
+ * there, kbps below 1 Mbps, and no digit grouping.
+ */
+export function formatConnectionRateKbps(kbps: number): string {
+  const value = Math.max(0, Math.floor(kbps));
+  if (value < 1000) return `${value} kbps`;
+  if (value < 10_000) return `${(Math.floor(value / 100) / 10).toFixed(1)} Mbps`;
+  return `${Math.floor(value / 1000)} Mbps`;
+}
+
+/**
  * The select entries for a bandwidth cap: an unset entry, the ladder bounded
  * by the definition's own range, and — when the stored value came from
  * somewhere else (an API call, another client) — that value itself, so it

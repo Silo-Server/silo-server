@@ -1,11 +1,15 @@
 package jellycompat
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestSlicePageIDs locks slicePageIDs to sliceBaseItems' exact bounds
 // semantics — the two slice the same page in parallel in
 // writeNextUpResponse, and any divergence would attach detail upgrades to
-// the wrong DTOs.
+// the wrong DTOs. Both share slicePage, so this also covers it, including a
+// client Limit large enough to overflow start+limit.
 func TestSlicePageIDs(t *testing.T) {
 	ids := []string{"a", "b", "c", "d"}
 	cases := []struct {
@@ -20,6 +24,7 @@ func TestSlicePageIDs(t *testing.T) {
 		{"start past end is empty", 9, 2, []string{}},
 		{"zero limit returns rest", 1, 0, []string{"b", "c", "d"}},
 		{"negative start clamps to zero", -3, 2, []string{"a", "b"}},
+		{"max limit from second item", 1, math.MaxInt, []string{"b", "c", "d"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,5 +52,22 @@ func TestSlicePageIDs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPageFetchLimitSaturates pins that the rows read from offset 0 to serve a
+// page saturate instead of wrapping negative. The wrapped Next Up fetch made
+// ListNextUp fall back to its 20-row default.
+func TestPageFetchLimitSaturates(t *testing.T) {
+	cases := []struct {
+		startIndex, limit, want int
+	}{
+		{10, 24, 34},
+		{1, math.MaxInt, math.MaxInt},
+	}
+	for _, tc := range cases {
+		if got := pageFetchLimit(tc.startIndex, tc.limit); got != tc.want {
+			t.Errorf("pageFetchLimit(%d, %d) = %d, want %d", tc.startIndex, tc.limit, got, tc.want)
+		}
 	}
 }

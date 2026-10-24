@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 783
+    "entries": 789
   },
   "entries": [
     {
@@ -311,6 +311,48 @@
       "listener": "root",
       "namespace": "legacy_unversioned",
       "method": "PUT",
+      "path": "/",
+      "registration_index": 0,
+      "handler": "server.FrontendHandler()",
+      "handler_kind": "expression",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "web"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "other",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Bundled web frontend catch-all on the root listener; an HTML/asset response, not a native API operation. No ratified document names this exclusion, so it is a judgment call for maintainer review.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Serves the bundled web frontend; the browser is the consumer. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
+      "method": "QUERY",
       "path": "/",
       "registration_index": 0,
       "handler": "server.FrontendHandler()",
@@ -703,6 +745,50 @@
       "listener": "root",
       "namespace": "legacy_unversioned",
       "method": "PUT",
+      "path": "/api/",
+      "registration_index": 0,
+      "handler": "listener:api",
+      "handler_kind": "delegation",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": "api",
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Root-mux delegation to the API listener; the operations behind it are the API listener rows.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
+      "method": "QUERY",
       "path": "/api/",
       "registration_index": 0,
       "handler": "listener:api",
@@ -1085,6 +1171,48 @@
       "listener": "root",
       "namespace": "operational",
       "method": "PUT",
+      "path": "/metrics",
+      "registration_index": 0,
+      "handler": "http.NotFoundHandler()",
+      "handler_kind": "expression",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "unused"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "operator_metrics",
+      "disposition_rationale": "Unauthenticated operator-facing /metrics stays outside the native client contract (api-contract.md, \"What Huma covers\"). The primary port answers 404 here; metrics are served only by the opt-in operational_metrics listener.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "operational",
+      "method": "QUERY",
       "path": "/metrics",
       "registration_index": 0,
       "handler": "http.NotFoundHandler()",
@@ -19351,7 +19479,7 @@
       },
       "notes": "Authenticated. Same {status} answer and the same decision codes as approveDeviceLogin.",
       "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the request's user code; the denial is UPDATE ... WHERE status IN (pending, approved), a second deny is a no-op."
+      "retry_safety_note": "Keyed by the request's user code; the denial is UPDATE ... WHERE status is pending, or approved by the denying account, so a second deny is a no-op and a request another account approved stays approved (409)."
     },
     {
       "listener": "api",
@@ -26716,7 +26844,7 @@
         "path": "/api/v2/favorites/{item_id}",
         "operation_id": "getFavorite"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. getFavoriteMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -34697,6 +34825,50 @@
       "listener": "api",
       "namespace": "api_v1",
       "method": "PUT",
+      "path": "/api/v1/plugins/{installation_id}/*",
+      "registration_index": 0,
+      "handler": "literal:api:/api/v1/plugins/{installation_id}/*",
+      "handler_kind": "literal",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/v1",
+      "middleware_chain": 1,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.PluginHTTPProxy != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "dynamic_proxy",
+      "response_media_kind": "dynamic_proxy",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "unused"
+      ],
+      "consumer_call_sites": [],
+      "section": "plugin-proxy",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "dynamic_plugin_proxy",
+      "disposition_rationale": "Dynamic plugin HTTP proxy path; cannot have a finite static response schema (api-contract.md, \"What Huma covers\").",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Media kind deliberately overrides the inventory's heuristic value: a dynamic plugin proxy has no static request or response kind, so both are recorded as dynamic_proxy (the gate allows this override only under this rule). Conditionally registered: deps.PluginHTTPProxy != nil. v2 registers the operation unconditionally and reports capability state instead."
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v1",
+      "method": "QUERY",
       "path": "/api/v1/plugins/{installation_id}/*",
       "registration_index": 0,
       "handler": "literal:api:/api/v1/plugins/{installation_id}/*",
@@ -43605,7 +43777,7 @@
       },
       "notes": "Section personal-progress (profile_scoped). Media kind confirmed from ItemsHandler.HandleMarkUnwatched: request has no body, v1 answers JSON {content_id, type, affected_count, played:false}; v2 answers 204 with no body. Same target resolution as markWatched (movie, ebook, episode, season, series; season/series expand to episodes), unknown or inaccessible target 404. Retry safety: natural_idempotent (clearing an unwatched item is a no-op). Conditionally registered in v1 (authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil); v2 registers unconditionally and answers 503 when the items handler is not wired.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "recordMarkUnwatched hides history through a fresh time.Now() cutoff and re-dispatches the provider event, so a retry after a lost response also hides a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
+      "retry_safety_note": "recordMarkUnwatched clears watched state through a fresh time.Now() cutoff, so a retry after a lost response also stops a viewing recorded in between from counting as watched (the viewing stays in history). The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",
@@ -43903,7 +44075,7 @@
         "path": "/api/v2/watchlist/{item_id}",
         "operation_id": "getWatchlistEntry"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. getWatchlistMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -45318,6 +45490,50 @@
     {
       "listener": "api",
       "namespace": "api_v2",
+      "method": "QUERY",
+      "path": "/api/v2/*",
+      "registration_index": 0,
+      "handler": "listener:api_v2",
+      "handler_kind": "delegation",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": "api_v2",
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "v2-delegation",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "API-listener delegation to the native v2 listener; the operations behind it are described by contracts/api/v2/openapi.json, not by legacy ledger rows.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "API-listener hand-off of the /api/v2/ subtree to the sealed apiv2 listener (internal/apiv2). The operations behind it are v2 operations, not legacy rows."
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v2",
       "method": "TRACE",
       "path": "/api/v2/*",
       "registration_index": 0,
@@ -46059,6 +46275,53 @@
         "operation_id": null
       },
       "notes": "Retained on proxy listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols proxy GET /status. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. No caller found in this repository or the first-party clients; verify before treating as unused. No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Typed owning-listener response registry: x-silo-worker-protocols in the single OpenAPI artifact, with exact handler DTOs and text/plain worker failures. Retained path; no native v2 alias. Independent registry review pending."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/stream/bandwidth-probe/{token}",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 27,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": true,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "web",
+        "apple",
+        "android"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-proxy",
+      "release_flow": "playback_lifecycle",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Media-path bandwidth probe served at a version-neutral proxy route and described in x-silo-worker-protocols; no native API alias.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with public outer middleware and a signed probe-purpose token. Described by x-silo-worker-protocols; no native alias. Discovery is advertised by connection_speed_v1 at GET /api/v2/playback/capabilities."
     },
     {
       "listener": "proxy",

@@ -21449,7 +21449,7 @@
         {
           "id": "deny.approved",
           "category": "data_meaning",
-          "description": "Denying an approved-but-unconsumed request overrides the approval: the device's next poll sees denied and no tokens.",
+          "description": "Denying an approved-but-unconsumed request the same account approved withdraws the approval: the device's next poll sees denied and no tokens.",
           "principal": {
             "class": "authenticated"
           },
@@ -21574,7 +21574,7 @@
         {
           "id": "deny.any_account",
           "category": "authorization",
-          "description": "Any authenticated account may deny; ownership is not checked.",
+          "description": "Any authenticated account may deny a pending request; a request another account approved is 409 approval_conflict.",
           "principal": {
             "class": "admin"
           },
@@ -21588,7 +21588,7 @@
             "status": 200
           },
           "fresh_state": true,
-          "notes": "Deny has no ownership or disabled-account check, unlike approve. Flagged for the section PR.",
+          "notes": "Deny has no disabled-account check, unlike approve.",
           "v2_expectation": {
             "method": "POST",
             "request": {

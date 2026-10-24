@@ -5,12 +5,13 @@ type WebkitVideoElement = HTMLVideoElement & {
   webkitExitFullscreen?: () => void;
 };
 
+export function isNativeVideoFullscreen(video: HTMLVideoElement | null): boolean {
+  return !!(video as WebkitVideoElement | null)?.webkitDisplayingFullscreen;
+}
+
 /** True while the document or the video element (iOS WebKit) is fullscreen. */
 export function isPlayerFullscreen(video: HTMLVideoElement | null): boolean {
-  return (
-    !!document.fullscreenElement ||
-    !!(video as WebkitVideoElement | null)?.webkitDisplayingFullscreen
-  );
+  return !!document.fullscreenElement || isNativeVideoFullscreen(video);
 }
 
 /**

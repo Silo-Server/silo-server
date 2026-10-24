@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -40,12 +41,11 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	start10, end60 := 10.0, 60.0
 	negativeStart, endPastDuration := -1.0, 1801.0
 	creditsStart := 1700.0
-	previewStart := 1750.0
 	client := &fakePluginMarkerClient{fetchResp: &pluginv1.FetchMarkersResponse{Markers: []*pluginv1.MarkerSegment{
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &end60, Confidence: 0.8, SubmissionCount: 2, Algorithm: "intro:v1"},
-		{Segment: "credits", StartSeconds: &creditsStart, Confidence: 0.9, SubmissionCount: 3},
-		{Segment: "recap", EndSeconds: &start10, Confidence: 0.7},
-		{Segment: "preview", StartSeconds: &previewStart, Confidence: 0.6},
+		{Segment: "credits", StartSeconds: &creditsStart, Confidence: -0.2, SubmissionCount: 3},
+		{Segment: "recap", EndSeconds: &start10, Confidence: math.NaN()},
+		{Segment: "preview", Absent: true, Confidence: 0.95, Algorithm: "consensus:v1"},
 		{Segment: "intro", StartSeconds: &negativeStart},
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &endPastDuration},
 	}}}
@@ -74,6 +74,8 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		EpisodeNumbering:   "tvdb",
 		EpisodeTitle:       "Second Episode",
 		Duration:           1800 * time.Second,
+		FileHash:           "8e245d9679d31e12",
+		FileSize:           734003200,
 	})
 	if err != nil {
 		t.Fatalf("FetchMarkers: %v", err)
@@ -84,6 +86,9 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	if episode := client.fetchReq.GetEpisodeExternalIds(); episode.GetTvdbId() != "9001" || episode.GetTmdbId() != "63" ||
 		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
 		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
+	}
+	if client.fetchReq.GetFileHash() != "8e245d9679d31e12" || client.fetchReq.GetFileSize() != 734003200 || !client.fetchReq.GetAcceptsAbsent() {
+		t.Fatalf("fetch file facts = %q %d accepts_absent=%v", client.fetchReq.GetFileHash(), client.fetchReq.GetFileSize(), client.fetchReq.GetAcceptsAbsent())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {
 		t.Fatalf("result provenance = source %q provider %q", res.SourceClass, res.ProviderID)
@@ -98,11 +103,32 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	if len(res.Markers) != 4 || len(byKind) != 4 {
 		t.Fatalf("mapped %d markers, want 4: %+v", len(byKind), res.Markers)
 	}
-	if got := byKind[MarkerKindCredits]; got.End != 1800*time.Second {
-		t.Fatalf("credits end = %s, want duration default", got.End)
+	if got := byKind[MarkerKindIntro]; got.Confidence != 0.8 {
+		t.Fatalf("intro confidence = %v, want 0.8 kept", got.Confidence)
 	}
-	if got := byKind[MarkerKindRecap]; got.Start != 0 {
-		t.Fatalf("recap start = %s, want zero default", got.Start)
+	if got := byKind[MarkerKindCredits]; got.End != 1800*time.Second || got.Confidence != 0 {
+		t.Fatalf("credits end = %s confidence = %v, want duration default and 0 for a negative confidence", got.End, got.Confidence)
+	}
+	if got := byKind[MarkerKindRecap]; got.Start != 0 || got.Confidence != 0 {
+		t.Fatalf("recap start = %s confidence = %v, want zero defaults for a NaN confidence", got.Start, got.Confidence)
+	}
+	// An absent answer has no bounds, which must not default to the whole
+	// file: it is stored as a tombstone with the provider's provenance.
+	if got := byKind[MarkerKindPreview]; !got.Absent || got.Start != 0 || got.End != 0 {
+		t.Fatalf("absent preview = %+v, want an absent answer without bounds", got)
+	}
+	preview := BuildUpdatePayload(res).Preview
+	if preview.Present() || !preview.Absent() || preview.Source != models.MarkerSourcePlugin ||
+		preview.Provider == nil || *preview.Provider != "plugin:12:markers" || preview.Algorithm != "consensus:v1" ||
+		preview.Confidence == nil || *preview.Confidence != 0.95 {
+		t.Fatalf("absent preview payload = %+v, want a plugin tombstone", preview)
+	}
+	// A NaN confidence would win every comparison it is the incumbent of.
+	if got, ok := markerFromPluginSegment(&pluginv1.MarkerSegment{Segment: "intro", Absent: true, Confidence: math.NaN()}, time.Hour); !ok || got.Confidence != 0 {
+		t.Fatalf("absent intro with a NaN confidence = %+v ok=%v, want confidence 0", got, ok)
+	}
+	if got, ok := markerFromPluginSegment(&pluginv1.MarkerSegment{Segment: "intro", StartSeconds: &start10, EndSeconds: &end60, Confidence: 1.5}, time.Hour); !ok || got.Confidence != 0 {
+		t.Fatalf("intro with a confidence above 1 = %+v ok=%v, want confidence 0", got, ok)
 	}
 }
 
@@ -125,6 +151,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 		Start:       &start,
 		End:         &end,
 		Duration:    90 * time.Minute,
+		FileHash:    "8e245d9679d31e12",
+		FileSize:    734003200,
+		Source:      models.MarkerSourceScanner,
+		Algorithm:   "chromaprint:v3",
+		Confidence:  0.97,
 	})
 	if err != nil {
 		t.Fatalf("SubmitMarker: %v", err)
@@ -142,6 +173,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	}
 	if client.submitReq.GetSegment() != "intro" || client.submitReq.GetStartSeconds() != 5 || client.submitReq.GetEndSeconds() != 30 {
 		t.Fatalf("submit request segment = %+v", client.submitReq)
+	}
+	if client.submitReq.GetFileHash() != "8e245d9679d31e12" || client.submitReq.GetFileSize() != 734003200 ||
+		client.submitReq.GetSource() != models.MarkerSourceScanner || client.submitReq.GetAlgorithm() != "chromaprint:v3" ||
+		client.submitReq.GetConfidence() != 0.97 || client.submitReq.GetAbsent() {
+		t.Fatalf("submit request provenance = %+v", client.submitReq)
 	}
 }
 
@@ -271,23 +307,28 @@ func TestReadOnlyPluginProviderIsFetchOnly(t *testing.T) {
 	}
 }
 
-func TestPluginSupportsContributionFromMetadata(t *testing.T) {
+func TestPluginCapabilityFlagsFromMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
+		parse    func(map[string]any) bool
 		metadata map[string]any
 		want     bool
 	}{
-		{name: "key absent keeps legacy submitters", metadata: map[string]any{"default_fetch_priority": 20}, want: true},
-		{name: "explicit true", metadata: map[string]any{"supports_contribution": true}, want: true},
-		{name: "explicit false", metadata: map[string]any{"supports_contribution": false}, want: false},
-		{name: "string false", metadata: map[string]any{"supports_contribution": " false "}, want: false},
-		{name: "unparseable string stays compatible", metadata: map[string]any{"supports_contribution": "nope"}, want: true},
-		{name: "wrong type stays compatible", metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
+		{name: "contribution: key absent keeps legacy submitters", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"default_fetch_priority": 20}, want: true},
+		{name: "contribution: explicit true", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": true}, want: true},
+		{name: "contribution: explicit false", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": false}, want: false},
+		{name: "contribution: string false", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": " false "}, want: false},
+		{name: "contribution: unparseable string stays compatible", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": "nope"}, want: true},
+		{name: "contribution: wrong type stays compatible", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
+		{name: "amend: key absent", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_contribution": true}, want: false},
+		{name: "amend: explicit true", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": true}, want: true},
+		{name: "absent: key absent", parse: PluginSupportsAbsentFromMetadata, metadata: nil, want: false},
+		{name: "absent: explicit true", parse: PluginSupportsAbsentFromMetadata, metadata: map[string]any{"supports_absent": true}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := PluginSupportsContributionFromMetadata(tt.metadata); got != tt.want {
-				t.Fatalf("PluginSupportsContributionFromMetadata() = %v, want %v", got, tt.want)
+			if got := tt.parse(tt.metadata); got != tt.want {
+				t.Fatalf("parse() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -186,3 +186,63 @@ func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 		t.Fatal("an absent menu stays absent")
 	}
 }
+
+// TestPlaybackV2ProbeURLUsesForwardedOrigin: behind a TLS-terminating reverse
+// proxy the request's Host is the internal origin the proxy dialed, which a
+// client cannot reach. The advertised probe URL names the forwarded origin.
+func TestPlaybackV2ProbeURLUsesForwardedOrigin(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.Playback = &scheduleService{}
+	headers := with(with(viewerHeaders(), "X-Forwarded-Host", "media.example.test"), "X-Forwarded-Proto", "https")
+	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", headers)
+	var body PlaybackCapabilities
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+	}
+	if want := "https://media.example.test" + Prefix + "/playback/bandwidth-probe?media_path=true"; body.BandwidthProbeURL != want {
+		t.Fatalf("bandwidth_probe_url = %q, want %q", body.BandwidthProbeURL, want)
+	}
+}
+
+// TestPlaybackV2SpeedTestSchedule: with connection_speed_v1 the capability
+// carries the speed test's schedule; automatic tests switched off still read
+// false rather than vanishing, and a server with no target sends none. Without
+// the feature none of it appears.
+func TestPlaybackV2SpeedTestSchedule(t *testing.T) {
+	read := func(service PlaybackService) map[string]any {
+		t.Helper()
+		deps, _ := catalogDeps(t)
+		deps.Playback = service
+		response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", viewerHeaders())
+		var body map[string]any
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+		}
+		return body
+	}
+	body := read(&scheduleService{view: handlers.PlaybackCapabilitiesView{BandwidthProbeMaxAgeSeconds: 86400}})
+	if body["bandwidth_probe_automatic"] != false || body["bandwidth_probe_max_age_seconds"] != float64(86400) {
+		t.Fatalf("schedule = %v", body)
+	}
+	if _, ok := body["bandwidth_probe_target_kbps"]; ok {
+		t.Fatal("a zero target was sent")
+	}
+	body = read(&fakePlaybackService{})
+	for _, field := range []string{"bandwidth_probe_automatic", "bandwidth_probe_max_age_seconds", "bandwidth_probe_target_kbps", "bandwidth_probe_url"} {
+		if _, ok := body[field]; ok {
+			t.Fatalf("%s sent without connection_speed_v1", field)
+		}
+	}
+}
+
+type scheduleService struct {
+	fakePlaybackService
+	view handlers.PlaybackCapabilitiesView
+}
+
+func (f *scheduleService) PlaybackCapabilities(ctx context.Context, userID int, profileID string) (handlers.PlaybackCapabilitiesView, error) {
+	view, err := f.fakePlaybackService.PlaybackCapabilities(ctx, userID, profileID)
+	view.Features = append(view.Features, playback.FeatureConnectionSpeedV1)
+	view.BandwidthProbeAutomatic, view.BandwidthProbeMaxAgeSeconds, view.BandwidthProbeTargetKbps = f.view.BandwidthProbeAutomatic, f.view.BandwidthProbeMaxAgeSeconds, f.view.BandwidthProbeTargetKbps
+	return view, err
+}

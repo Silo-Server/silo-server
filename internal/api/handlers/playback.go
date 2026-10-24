@@ -21,7 +21,6 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -33,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -184,6 +184,10 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
+	Connections *connectionstore.Store
+	// SourceBitrates sets the connection speed test's target; nil sends none.
+	SourceBitrates         SourceBitratePercentiler
+	probeTargets           probeTargetCache
 	sessionMgr             SessionManagerInterface
 	fileResolver           FilePathResolver            // optional; enables stream_url in responses
 	StoreProvider          userstore.UserStoreProvider // optional; enables progress/history persistence
@@ -930,6 +934,17 @@ func (h *PlaybackHandler) resolveSeriesID(ctx context.Context, file *models.Medi
 	return ep.SeriesID
 }
 
+// playbackPreferenceKey names the content a file's audio and version choices
+// are remembered under: the parent series for an episode, the item itself for
+// anything else. A movie therefore keeps its own choice, as its subtitle
+// choice already does. It returns "" when neither is known.
+func (h *PlaybackHandler) playbackPreferenceKey(ctx context.Context, file *models.MediaFile) string {
+	if file.EpisodeID != "" {
+		return h.resolveSeriesID(ctx, file)
+	}
+	return file.ContentID
+}
+
 // resolveOriginalLanguage fetches the original language for a media file's content item.
 // For episodes, it looks up the parent series. Returns empty string if unavailable.
 func (h *PlaybackHandler) resolveOriginalLanguage(ctx context.Context, file *models.MediaFile) string {
@@ -1179,7 +1194,8 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		WatchedSeconds:  session.Position,
 		DurationSeconds: durationPtr,
 		Completed:       completed,
-		ClientIP:        clientip.FromContext(ctx),
+		ClientIP:        session.ClientIP,
+		Watch:           session.Watch,
 	}
 	return entry, nil
 }
@@ -1472,8 +1488,8 @@ func (h *PlaybackHandler) persistSeriesPlaybackPreference(
 		return
 	}
 
-	seriesID := h.resolveSeriesID(ctx, file)
-	if seriesID == "" {
+	key := h.playbackPreferenceKey(ctx, file)
+	if key == "" {
 		return
 	}
 
@@ -1483,14 +1499,21 @@ func (h *PlaybackHandler) persistSeriesPlaybackPreference(
 		return
 	}
 
-	if err := store.SetSeriesPlaybackPreference(ctx, userstore.SeriesPlaybackPreference{
+	pref := userstore.SeriesPlaybackPreference{
 		ProfileID:  profileID,
-		SeriesID:   seriesID,
+		SeriesID:   key,
 		Resolution: file.Resolution,
 		HDR:        file.HDR,
 		CodecVideo: file.CodecVideo,
-	}); err != nil {
-		slog.ErrorContext(ctx, "failed to persist series playback preference", "component", "api", "series_id", seriesID, "profile_id", profileID, "error", err)
+	}
+	// Only a row for the item itself can name one file; a series row spans
+	// episodes that each have their own.
+	if file.EpisodeID == "" {
+		pref.FileID = file.ID
+		pref.EditionKey = file.EditionKey
+	}
+	if err := store.SetSeriesPlaybackPreference(ctx, pref); err != nil {
+		slog.ErrorContext(ctx, "failed to persist series playback preference", "component", "api", "series_id", key, "profile_id", profileID, "error", err)
 	}
 }
 
@@ -1505,8 +1528,8 @@ func (h *PlaybackHandler) persistAudioPreference(
 		return
 	}
 
-	seriesID := h.resolveSeriesID(ctx, file)
-	if seriesID == "" {
+	key := h.playbackPreferenceKey(ctx, file)
+	if key == "" {
 		return
 	}
 
@@ -1519,12 +1542,12 @@ func (h *PlaybackHandler) persistAudioPreference(
 	track := file.AudioTracks[trackIndex]
 	if err := store.SetAudioPreference(ctx, userstore.AudioPreference{
 		ProfileID:       profileID,
-		SeriesID:        seriesID,
+		SeriesID:        key,
 		AudioTrackIndex: trackIndex,
 		AudioLanguage:   track.Language,
 		TrackSignature:  playback.AudioTrackSignatureFromTrack(track),
 	}); err != nil {
-		slog.ErrorContext(ctx, "failed to persist audio preference", "component", "api", "series_id", seriesID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist audio preference", "component", "api", "series_id", key, "profile_id", profileID, "error", err)
 	}
 }
 
@@ -1870,8 +1893,16 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	// no-transform keeps proxies and CDNs from re-encoding the playlist,
+	// which drops the Content-Length below (Cloudflare does).
+	w.Header().Set("Cache-Control", "no-store, no-transform, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
+	// The playlist is complete in memory, so state its length. Without it a
+	// playlist past net/http's small write buffer goes out chunked, and a
+	// player that opens HLS sources with a ranged byte reader (AetherEngine
+	// on Apple platforms) takes the length-less 200 for a non-seekable stream
+	// and misreads the playlist as media.
+	w.Header().Set("Content-Length", strconv.Itoa(len(manifest)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(manifest)
 }

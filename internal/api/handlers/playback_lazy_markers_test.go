@@ -329,6 +329,7 @@ func TestMissingLocalMarkersPerKind(t *testing.T) {
 		{"episode with only an intro", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60)}, true, kinds{Credits: true}},
 		{"episode with only credits", &models.MediaFile{CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{Intro: true}},
 		{"episode with both", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60), CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{}},
+		{"episode a provider says has no intro", &models.MediaFile{IntroMarkersSource: new(models.MarkerSourcePlugin)}, true, kinds{Credits: true}},
 		{"movie without markers", &models.MediaFile{}, false, kinds{Credits: true}},
 		{"movie with only an intro", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60)}, false, kinds{Credits: true}},
 		{"movie with credits", &models.MediaFile{CreditsStart: marker(6500), CreditsEnd: marker(7000)}, false, kinds{}},

@@ -100,7 +100,7 @@ func TestSectionForYouFillOrdersTheOtherPersonalRows(t *testing.T) {
 	r := &Reader{
 		repo:    repo,
 		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("first", "second")}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("first", "second")}).WithUserStoreOutsidePostgres(true),
 	}
 
 	fill, err := r.SectionForYouFill(t.Context(), 7, "p1", catalog.AccessFilter{})
@@ -203,7 +203,7 @@ func TestSectionBecauseYouWatchedMovesPastAnEmptiedAnchor(t *testing.T) {
 			RecTypeBecauseWatched + "|first":  {{MediaItemID: "seen", Score: 1}},
 			RecTypeBecauseWatched + "|second": {{MediaItemID: "fresh", Score: 1}},
 		}},
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true),
 	}
 	items, source, err := r.SectionBecauseYouWatched(t.Context(), 7, "p1", "", nil, catalog.AccessFilter{})
 	if err != nil || source != "second" || !slices.Equal(scoredIDs(items), []string{"fresh"}) {

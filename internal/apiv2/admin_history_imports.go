@@ -29,8 +29,8 @@ type AdminHistoryImportService interface {
 	DeleteMappingConditional(context.Context, int, int64) error
 	DiscoverExternalUsers(context.Context, int) ([]historyimport.ExternalUser, error)
 	AuthenticatePlex(context.Context, string, string) (string, error)
-	CreateAdminRun(context.Context, int) (*historyimport.Run, error)
-	BulkCreateAdminRuns(context.Context, int) (*historyimport.BulkRunResult, error)
+	CreateAdminRun(context.Context, int, historyimport.AdminRunOptions) (*historyimport.Run, error)
+	BulkCreateAdminRuns(context.Context, int, historyimport.AdminRunOptions) (*historyimport.BulkRunResult, error)
 	GetAdminRun(context.Context, string) (*historyimport.Run, error)
 	CancelAdminRun(context.Context, string) error
 }
@@ -42,7 +42,7 @@ type AdminHistoryImportSource struct {
 	ID                   ID     `json:"id"`
 	Name                 string `json:"name"`
 	SourceType           string `json:"source_type" enum:"emby,jellyfin,plex"`
-	BaseURL              string `json:"base_url"`
+	BaseURL              string `json:"base_url" format:"uri-reference"`
 	SystemID             string `json:"system_id"`
 	Enabled              bool   `json:"enabled"`
 	SortOrder            int    `json:"sort_order"`
@@ -149,6 +149,8 @@ func adminHistoryProblem(err error) *Problem {
 		return NewProblem(TypeValidationFailed, "Replace or clear the saved credential when changing the source address or system ID.")
 	case errors.Is(err, historyimport.ErrInvalidInput), errors.Is(err, historyimport.ErrProfileNotFound):
 		return NewProblem(TypeValidationFailed, "Check the source configuration and the selected account and profile.")
+	case errors.Is(err, historyimport.ErrLookbackUnsupported):
+		return NewProblem(TypeValidationFailed, "A lookback applies to Jellyfin sources only; start a full import for this source.")
 	case errors.Is(err, historyimport.ErrSourceDisabled), errors.Is(err, historyimport.ErrMappingDuplicate), errors.Is(err, historyimport.ErrSourceInUse), errors.Is(err, historyimport.ErrActiveRunExists), errors.Is(err, historyimport.ErrNoAdminToken):
 		return NewProblem(TypeConflict, "The current source, mapping, or run state does not permit this action.")
 	default:
@@ -160,7 +162,7 @@ type AdminHistoryImportSourceCreateInput struct {
 	Body struct {
 		Name       string `json:"name" minLength:"1"`
 		SourceType string `json:"source_type" enum:"emby,jellyfin,plex"`
-		BaseURL    string `json:"base_url" minLength:"1"`
+		BaseURL    string `json:"base_url" format:"uri" minLength:"1"`
 		SystemID   string `json:"system_id,omitempty"`
 		Enabled    bool   `json:"enabled"`
 		SortOrder  int    `json:"sort_order"`
@@ -174,7 +176,7 @@ type AdminHistoryImportSourceUpdateInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        struct {
 		Name       *string `json:"name,omitempty" nullable:"false" minLength:"1"`
-		BaseURL    *string `json:"base_url,omitempty" nullable:"false" minLength:"1"`
+		BaseURL    *string `json:"base_url,omitempty" format:"uri" nullable:"false" minLength:"1"`
 		SystemID   *string `json:"system_id,omitempty" nullable:"false"`
 		Enabled    *bool   `json:"enabled,omitempty" nullable:"false"`
 		SortOrder  *int    `json:"sort_order,omitempty" nullable:"false"`
@@ -202,6 +204,8 @@ type AdminHistoryImportCapabilitiesOutputBody struct {
 	GuardedConfiguration bool `json:"guarded_configuration"`
 	DurableRuns          bool `json:"durable_runs"`
 	MaxBulkMappings      int  `json:"max_bulk_mappings"`
+	PlayedLookback       bool `json:"played_lookback" doc:"Run and bulk-run accept lookback_hours for Jellyfin sources."`
+	MaxLookbackHours     int  `json:"max_lookback_hours" doc:"Largest accepted lookback_hours."`
 }
 
 func adminHistoryID(id ID) (int, *Problem) {
@@ -318,6 +322,8 @@ func registerAdminHistoryImports(reg *Registry) {
 		out.Body.GuardedConfiguration = available
 		out.Body.DurableRuns = available
 		out.Body.MaxBulkMappings = 200
+		out.Body.PlayedLookback = available
+		out.Body.MaxLookbackHours = adminHistoryMaxLookbackHours
 		return out, nil
 	})
 	Register(reg, op(http.MethodGet, "/admin/history-import-sources/{id}", "getAdminHistoryImportSource", false), reg.getAdminHistorySource)

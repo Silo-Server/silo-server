@@ -18,6 +18,7 @@ var (
 	ErrRunConfigurationChanged  = errors.New("history import source or mapping changed; start a new run after reviewing the configuration")
 	ErrRunCancellationRequested = errors.New("history import cancellation requested")
 	ErrBulkRunTooLarge          = errors.New("source has more than 200 mappings; start individual mapping runs")
+	ErrLookbackUnsupported      = errors.New("history import lookback is supported for Jellyfin sources only")
 )
 
 const MaxBulkAdminRuns = 200
@@ -38,7 +39,9 @@ type RunClaim struct {
 }
 
 // EnqueueAdminRun commits immutable intent; it never contacts an upstream server.
-func (r *Repository) EnqueueAdminRun(ctx context.Context, mappingID int) (*Run, error) {
+// A lookback cutoff in opts is stored on the run, so a run queued now reads the
+// same window when it executes.
+func (r *Repository) EnqueueAdminRun(ctx context.Context, mappingID int, opts AdminRunOptions) (*Run, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -71,6 +74,9 @@ func (r *Repository) EnqueueAdminRun(ctx context.Context, mappingID int) (*Run, 
 	if sourceType != SourceTypeEmby && sourceType != SourceTypeJellyfin && sourceType != SourceTypePlex {
 		return nil, fmt.Errorf("unsupported source type")
 	}
+	if opts.PlayedSince != nil && sourceType != SourceTypeJellyfin {
+		return nil, ErrLookbackUnsupported
+	}
 	var userID, lockedSourceID int
 	var profileID, externalID string
 	var mappingRevision int64
@@ -93,8 +99,8 @@ func (r *Repository) EnqueueAdminRun(ctx context.Context, mappingID int) (*Run, 
 	}
 	id := uuid.NewString()
 	_, err = tx.Exec(ctx, `INSERT INTO history_import_runs(id,user_id,profile_id,source_type,connection_mode,status,mapping_id,
- dispatch_version,dispatch_source_id,dispatch_source_revision,dispatch_mapping_id,dispatch_mapping_revision,dispatch_external_user_id)
- VALUES($1,$2,$3,$4,'admin_token','queued',$5,1,$6,$7,$5,$8,$9)`, id, userID, profileID, sourceType, mappingID, sourceID, sourceRevision, mappingRevision, externalID)
+ dispatch_version,dispatch_source_id,dispatch_source_revision,dispatch_mapping_id,dispatch_mapping_revision,dispatch_external_user_id,played_since)
+ VALUES($1,$2,$3,$4,'admin_token','queued',$5,1,$6,$7,$5,$8,$9,$10)`, id, userID, profileID, sourceType, mappingID, sourceID, sourceRevision, mappingRevision, externalID, opts.PlayedSince)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 		return nil, ErrActiveRunExists
 	}
@@ -124,9 +130,9 @@ func (r *Repository) claimDispatchRun(ctx context.Context, includePersonal bool)
 	run := &Run{}
 	claim := RunClaim{}
 	err = tx.QueryRow(ctx, `SELECT id,user_id,profile_id,source_type,connection_mode,mapping_id,COALESCE(dispatch_source_id,0),COALESCE(dispatch_source_revision,0),
- COALESCE(dispatch_mapping_id,0),COALESCE(dispatch_mapping_revision,0),COALESCE(dispatch_external_user_id,''),dispatch_kind,created_at FROM history_import_runs
+ COALESCE(dispatch_mapping_id,0),COALESCE(dispatch_mapping_revision,0),COALESCE(dispatch_external_user_id,''),dispatch_kind,created_at,played_since FROM history_import_runs
  WHERE status='queued' AND ((dispatch_kind='admin' AND dispatch_version=1) OR ($1 AND dispatch_kind='personal' AND dispatch_version=2)) AND cancel_requested_at IS NULL
- ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`, includePersonal).Scan(&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.MappingID, &claim.SourceID, &claim.SourceRevision, &claim.MappingID, &claim.MappingRevision, &claim.ExternalUserID, &claim.DispatchKind, &run.CreatedAt)
+ ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`, includePersonal).Scan(&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.MappingID, &claim.SourceID, &claim.SourceRevision, &claim.MappingID, &claim.MappingRevision, &claim.ExternalUserID, &claim.DispatchKind, &run.CreatedAt, &run.PlayedSince)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, RunClaim{}, nil
 	}
@@ -295,7 +301,7 @@ func (r *Repository) ListAdminRunsPage(ctx context.Context, sourceID *int, after
 	}
 	rows, err := r.pool.Query(ctx, `SELECT r.id,r.user_id,r.profile_id,r.source_type,r.connection_mode,r.status,r.mapping_id,
  r.fetched,r.matched,r.unmatched,r.progress_updated,r.history_created,r.watchlist_added,r.favorites_imported,r.skipped,
- r.warnings,r.unmatched_samples,COALESCE(r.error_message,''),r.created_at,r.started_at,r.completed_at,r.cancel_requested_at IS NOT NULL
+ r.warnings,r.unmatched_samples,COALESCE(r.error_message,''),r.created_at,r.started_at,r.completed_at,r.cancel_requested_at IS NOT NULL,r.played_since
  FROM history_import_runs r LEFT JOIN history_import_user_mappings m ON m.id=r.mapping_id
  WHERE ($1::integer IS NULL OR COALESCE(r.dispatch_source_id,m.source_id)=$1)
  AND ($2::timestamptz IS NULL OR (r.created_at,r.id)<($2,$3))
@@ -318,10 +324,13 @@ func (r *Repository) ListAdminRunsPage(ctx context.Context, sourceID *int, after
 	return runs, more, nil
 }
 
+// touchCompletedMapping records a completed full import on its mapping. A
+// lookback run does not count: last_imported_at says when the whole history
+// was last read.
 func (r *Repository) touchCompletedMapping(ctx context.Context, claim RunClaim) error {
 	_, err := r.pool.Exec(ctx, `UPDATE history_import_user_mappings m SET last_imported_at=now(),updated_at=now()
  WHERE m.id=$1 AND m.revision=$2 AND EXISTS(SELECT 1 FROM history_import_runs r
  WHERE r.id=$3 AND r.claim_generation=$4 AND r.status='completed' AND r.dispatch_mapping_id=m.id
- AND r.user_id=m.silo_user_id AND r.profile_id=m.silo_profile_id)`, claim.MappingID, claim.MappingRevision, claim.RunID, claim.Generation)
+ AND r.user_id=m.silo_user_id AND r.profile_id=m.silo_profile_id AND r.played_since IS NULL)`, claim.MappingID, claim.MappingRevision, claim.RunID, claim.Generation)
 	return err
 }

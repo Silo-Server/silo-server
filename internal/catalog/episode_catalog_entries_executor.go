@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -44,14 +47,19 @@ type episodeCatalogUserStatePlan struct {
 // (media_items.type = 'podcast') also land here. What keeps non-TV episodes out
 // of episode-scoped results is library scoping plus the `si.type = 'series'`
 // guard in episodeCatalogSelectBody (hydration), not the media-type clause.
-// content_rating filtering is preserved here (that column exists).
+// content_rating filtering is preserved here (that column exists). Every row
+// here is an episode, so excluding the episode type matches nothing.
+//
+// The parent series must belong to libraryID, the one library the read
+// resolved to, as the general episode relation requires; the viewer's wider
+// allowlist would admit a series filed only in another library.
 //
 // Because hydration's si.type='series' guard drops non-series rows AFTER the
 // page/count scans select them, the scan and hydration would otherwise diverge:
 // pages could under-fill and TotalRecordCount could count rows that never
 // render. episodeCatalogSeriesParentGuard re-expresses that same constraint at
 // the entry-scan level so both queries stay aligned with hydration.
-func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
+func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
 	if len(access.DisabledLibraryIDs) > 0 {
 		*whereParts = append(*whereParts,
 			"EXISTS (SELECT 1 FROM episode_libraries el_scope_any WHERE el_scope_any.episode_id = ece.episode_id)",
@@ -63,10 +71,269 @@ func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, 
 		*args = append(*args, access.DisabledLibraryIDs)
 		*argIdx++
 	}
-	appendEpisodeParentLibraryAccess("ece.series_id", access, whereParts, args, argIdx)
+	parentAccess := AccessFilter{AllowedLibraryIDs: []int{libraryID}, DisabledLibraryIDs: access.DisabledLibraryIDs}
+	appendEpisodeParentLibraryAccess("ece.series_id", parentAccess, whereParts, args, argIdx)
+	if slices.Contains(access.ExcludedMediaTypes, "episode") {
+		*whereParts = append(*whereParts, "1 = 0")
+	}
 	access.ExcludedMediaTypes = nil // access is a value param; caller unaffected
 	ApplySectionAccessFilter("ece", access, whereParts, args, argIdx)
 	*whereParts = append(*whereParts, episodeCatalogSeriesParentGuard)
+}
+
+// episodeCatalogQuery is a definition rendered against
+// episode_catalog_entries. A page and its total share the CTEs, FROM, WHERE,
+// and args; only the page adds the sort join, order, and bounds.
+type episodeCatalogQuery struct {
+	// empty marks a definition that matches nothing for this viewer.
+	empty    bool
+	withCTEs string
+	from     string
+	sortJoin string
+	where    string
+	orderBy  string
+	args     []any
+	// requiresFullPageGate sends a short page to the general query; see
+	// episodeCatalogUserStatePlan.
+	requiresFullPageGate bool
+}
+
+// usesEpisodeCatalogQueries reports whether the executor may answer from
+// episode_catalog_entries: work grouping and source predicates exist only on
+// the general query.
+func (e *QueryExecutor) usesEpisodeCatalogQueries() bool {
+	return !e.GroupByWork && e.SourceWhere == "" && e.SourceJoin == "" && len(e.SourceOrder) == 0
+}
+
+// episodeCatalogTotalQuery renders every row of def against
+// episode_catalog_entries, choosing between the user-state and entry queries
+// as PreviewPage does for a page with its total. ok is false when neither
+// applies and the general query must answer.
+func (e *QueryExecutor) episodeCatalogTotalQuery(def QueryDefinition, access AccessFilter) (episodeCatalogQuery, bool, error) {
+	if !e.usesEpisodeCatalogQueries() {
+		return episodeCatalogQuery{}, false, nil
+	}
+	q, ok, err := e.episodeCatalogUserStateQuery(def, access, true)
+	if err == nil && !ok {
+		q, ok, err = e.episodeCatalogEntriesQuery(def, access)
+	}
+	return q, ok, err
+}
+
+// episodeCatalogCountQuery renders the total PreviewPage reports for def from
+// episode_catalog_entries. ok is false when the general query must count.
+func (e *QueryExecutor) episodeCatalogCountQuery(def QueryDefinition, access AccessFilter) (string, []any, bool, error) {
+	q, ok, err := e.episodeCatalogTotalQuery(def, access)
+	if err != nil || !ok {
+		return "", nil, ok, err
+	}
+	if q.empty {
+		return "SELECT 0", nil, true, nil
+	}
+	_, _, maxResults := normalizePreviewPageBounds(def, 1, 0)
+	countSQL, countArgs := episodeCatalogCountSQL(q.withCTEs, q.from, q.where, q.args, maxResults)
+	return countSQL, countArgs, true, nil
+}
+
+// episodeCatalogSeekSorts are the sorts whose episode_catalog_entries order
+// is pinned to the general episode relation's, so a row number in one names
+// the same episode in the other.
+var episodeCatalogSeekSorts = []string{querySortTitle, defaultSortField, querySortReleaseDate, querySortLastAirDate}
+
+// episodeCatalogSeek finds the cursor offset rows into def. Numbering rows in
+// the general relation evaluates and sorts every match, so it numbers them in
+// episode_catalog_entries and reads that episode's sort tuple from the general
+// plan, where the cursor's pages continue. ok is false when the general query
+// must seek.
+func (e *QueryExecutor) episodeCatalogSeek(ctx context.Context, def QueryDefinition, access AccessFilter, plan previewPagePlan, offset int) (*QueryCursor, bool, error) {
+	if !slices.Contains(episodeCatalogSeekSorts, NormalizeQuerySort(def.Sort).Field) {
+		return nil, false, nil
+	}
+	q, ok, err := e.episodeCatalogTotalQuery(def, access)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if q.empty {
+		return nil, true, pgx.ErrNoRows
+	}
+	withClause := ""
+	if q.withCTEs != "" {
+		withClause = "WITH " + q.withCTEs + "\n"
+	}
+	args := append(append([]any{}, q.args...), offset)
+	sql := fmt.Sprintf("%sSELECT ece.episode_id %s%s %s %s LIMIT 1 OFFSET $%d", withClause, q.from, q.sortJoin, q.where, q.orderBy, len(args))
+	var episodeID string
+	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(&episodeID); err != nil {
+		if episodeCatalogEntriesUnavailable(err) {
+			return nil, false, nil
+		}
+		return nil, true, err
+	}
+	key, err := e.queryTupleFor(ctx, plan, episodeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The projection listed an episode the general relation does not:
+		// seek there instead of handing out a cursor it cannot continue.
+		slog.WarnContext(ctx, "catalog: episode catalog seek target missing from the episode relation", "component", "catalog", "episode_id", episodeID)
+		return nil, false, nil
+	}
+	return key, true, err
+}
+
+func (e *QueryExecutor) episodeCatalogUserStateQuery(
+	def QueryDefinition,
+	access AccessFilter,
+	includeTotal bool,
+) (episodeCatalogQuery, bool, error) {
+	def = def.Normalize()
+	effectiveScope := e.Scope
+	if effectiveScope == "" {
+		effectiveScope = def.MediaScope
+	}
+	if !isEpisodeCatalogScope(effectiveScope) {
+		return episodeCatalogQuery{}, false, nil
+	}
+	if access.UserID == 0 || strings.TrimSpace(access.ProfileID) == "" {
+		return episodeCatalogQuery{}, false, nil
+	}
+
+	plan, ok, err := extractEpisodeCatalogUserStatePlan(def)
+	if err != nil || !ok {
+		return episodeCatalogQuery{}, ok, err
+	}
+	// A sort-only plan joins just the viewed or in-progress episodes, so it
+	// can order a page but not count the definition.
+	if includeTotal && plan.sortOnly {
+		return episodeCatalogQuery{}, false, nil
+	}
+
+	libraryID, empty, ok := singleEpisodeCatalogLibraryID(def, access)
+	if !ok {
+		return episodeCatalogQuery{}, false, nil
+	}
+	if empty {
+		return episodeCatalogQuery{empty: true}, true, nil
+	}
+
+	args := []any{access.UserID, access.ProfileID, libraryID}
+	argIdx := 4
+	whereParts := []string{"ece.media_folder_id = $3"}
+
+	if access.AllowedContentIDs != nil {
+		if len(access.AllowedContentIDs) == 0 {
+			return episodeCatalogQuery{empty: true}, true, nil
+		}
+		whereParts = append(whereParts, fmt.Sprintf("ece.episode_id = ANY($%d)", argIdx))
+		args = append(args, access.AllowedContentIDs)
+		argIdx++
+	}
+
+	applyEpisodeCatalogAccessFilter(libraryID, access, &whereParts, &args, &argIdx)
+	e.appendEpisodeCatalogViewerFilters(access, &whereParts, &args, &argIdx)
+
+	queryWhere, queryArgs, nextArgIdx, ok, err := buildEpisodeCatalogEntryQueryWhere(plan.entryDef, argIdx)
+	if err != nil || !ok {
+		return episodeCatalogQuery{}, ok, err
+	}
+	if queryWhere != "" {
+		whereParts = append(whereParts, queryWhere)
+		args = append(args, queryArgs...)
+		argIdx = nextArgIdx
+	}
+
+	whereParts = append(whereParts, rebindUserStateClauses(plan.userClauses, argIdx)...)
+	args = append(args, plan.userArgs...)
+
+	orderBy, ok := episodeCatalogUserStateOrderBy(plan)
+	if !ok {
+		return episodeCatalogQuery{}, false, nil
+	}
+	return episodeCatalogQuery{
+		withCTEs:             episodeCatalogUserStateCTE(plan),
+		from:                 episodeCatalogUserStateFromClause(plan),
+		sortJoin:             episodeCatalogEntrySortJoin(plan.sortField),
+		where:                "WHERE " + strings.Join(whereParts, " AND "),
+		orderBy:              orderBy,
+		args:                 args,
+		requiresFullPageGate: plan.requiresFullPageGate,
+	}, true, nil
+}
+
+func (e *QueryExecutor) episodeCatalogEntriesQuery(def QueryDefinition, access AccessFilter) (episodeCatalogQuery, bool, error) {
+	def = def.Normalize()
+	effectiveScope := e.Scope
+	if effectiveScope == "" {
+		effectiveScope = def.MediaScope
+	}
+	if !isEpisodeCatalogScope(effectiveScope) {
+		return episodeCatalogQuery{}, false, nil
+	}
+
+	allowPersonalized := strings.TrimSpace(access.ProfileID) != ""
+	if err := def.ValidateWithOptions(allowPersonalized, allowPersonalized); err != nil {
+		return episodeCatalogQuery{}, true, err
+	}
+
+	libraryID, empty, ok := singleEpisodeCatalogLibraryID(def, access)
+	if !ok {
+		return episodeCatalogQuery{}, false, nil
+	}
+	if empty {
+		return episodeCatalogQuery{empty: true}, true, nil
+	}
+
+	whereParts := []string{"ece.media_folder_id = $1"}
+	args := []any{libraryID}
+	argIdx := 2
+
+	if access.AllowedContentIDs != nil {
+		if len(access.AllowedContentIDs) == 0 {
+			return episodeCatalogQuery{empty: true}, true, nil
+		}
+		whereParts = append(whereParts, fmt.Sprintf("ece.episode_id = ANY($%d)", argIdx))
+		args = append(args, access.AllowedContentIDs)
+		argIdx++
+	}
+
+	applyEpisodeCatalogAccessFilter(libraryID, access, &whereParts, &args, &argIdx)
+	e.appendEpisodeCatalogViewerFilters(access, &whereParts, &args, &argIdx)
+
+	queryWhere, queryArgs, _, ok, err := buildEpisodeCatalogEntryQueryWhere(def, argIdx)
+	if err != nil || !ok {
+		return episodeCatalogQuery{}, ok, err
+	}
+	if queryWhere != "" {
+		whereParts = append(whereParts, queryWhere)
+		args = append(args, queryArgs...)
+	}
+
+	orderBy, ok := episodeCatalogEntryOrderBy(def.Sort)
+	if !ok {
+		return episodeCatalogQuery{}, false, nil
+	}
+	return episodeCatalogQuery{
+		from:     "FROM episode_catalog_entries ece",
+		sortJoin: episodeCatalogEntrySortJoin(def.Sort.Field),
+		where:    "WHERE " + strings.Join(whereParts, " AND "),
+		orderBy:  orderBy,
+		args:     args,
+	}, true, nil
+}
+
+// appendEpisodeCatalogViewerFilters adds the executor's snapshot and the
+// viewer's name prefix.
+func (e *QueryExecutor) appendEpisodeCatalogViewerFilters(access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
+	if e.SnapshotAt != nil {
+		*whereParts = append(*whereParts, fmt.Sprintf("ece.episode_created_at <= $%d", *argIdx))
+		*args = append(*args, *e.SnapshotAt)
+		*argIdx++
+	}
+	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
+		// sort_key is the lowered episode title (or "episode N"), the key
+		// the list sorts by, so it alone decides the letter.
+		*whereParts = append(*whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", *argIdx))
+		*args = append(*args, escapePrefixForLike(prefix)+"%")
+		*argIdx++
+	}
 }
 
 func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
@@ -77,159 +344,11 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	offset int,
 	includeTotal bool,
 ) ([]*models.MediaItem, int, bool, bool, error) {
-	def = def.Normalize()
-	effectiveScope := e.Scope
-	if effectiveScope == "" {
-		effectiveScope = def.MediaScope
-	}
-	if !isEpisodeCatalogScope(effectiveScope) {
-		return nil, 0, false, false, nil
-	}
-	if access.UserID == 0 || strings.TrimSpace(access.ProfileID) == "" {
-		return nil, 0, false, false, nil
-	}
-
-	plan, ok, err := extractEpisodeCatalogUserStatePlan(def)
+	q, ok, err := e.episodeCatalogUserStateQuery(def, access, includeTotal)
 	if err != nil || !ok {
 		return nil, 0, false, ok, err
 	}
-	if includeTotal && plan.sortOnly {
-		return nil, 0, false, false, nil
-	}
-
-	libraryID, empty, ok := singleEpisodeCatalogLibraryID(def, access)
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-	if empty {
-		return []*models.MediaItem{}, 0, false, true, nil
-	}
-
-	limit, offset, maxResults := normalizePreviewPageBounds(def, limit, offset)
-
-	ctes := []string{episodeCatalogUserStateCTE(plan)}
-	args := []any{access.UserID, access.ProfileID, libraryID}
-	argIdx := 4
-	whereParts := []string{"ece.media_folder_id = $3"}
-
-	if access.AllowedContentIDs != nil {
-		if len(access.AllowedContentIDs) == 0 {
-			return []*models.MediaItem{}, 0, false, true, nil
-		}
-		whereParts = append(whereParts, fmt.Sprintf("ece.episode_id = ANY($%d)", argIdx))
-		args = append(args, access.AllowedContentIDs)
-		argIdx++
-	}
-
-	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
-
-	if e.SnapshotAt != nil {
-		whereParts = append(whereParts, fmt.Sprintf("ece.episode_created_at <= $%d", argIdx))
-		args = append(args, *e.SnapshotAt)
-		argIdx++
-	}
-
-	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		// sort_key is the lowered episode title (or "episode N"), the key
-		// the list sorts by, so it alone decides the letter.
-		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, escapePrefixForLike(prefix)+"%")
-		argIdx++
-	}
-
-	queryWhere, queryArgs, nextArgIdx, ok, err := buildEpisodeCatalogEntryQueryWhere(plan.entryDef, argIdx)
-	if err != nil || !ok {
-		return nil, 0, false, ok, err
-	}
-	if queryWhere != "" {
-		whereParts = append(whereParts, queryWhere)
-		args = append(args, queryArgs...)
-		argIdx = nextArgIdx
-	}
-
-	userClauses := rebindUserStateClauses(plan.userClauses, argIdx)
-	whereParts = append(whereParts, userClauses...)
-	args = append(args, plan.userArgs...)
-	argIdx += len(plan.userArgs)
-
-	fromClause := episodeCatalogUserStateFromClause(plan)
-	orderBy, ok := episodeCatalogUserStateOrderBy(plan)
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-	whereClause := "WHERE " + strings.Join(whereParts, " AND ")
-
-	pageLimit := limit
-	if maxResults <= 0 || offset+limit < maxResults {
-		pageLimit++
-	}
-	pageArgs := append([]any{}, args...)
-	limitArgIdx := argIdx
-	pageArgs = append(pageArgs, pageLimit)
-	offsetClause := ""
-	if offset > 0 {
-		offsetClause = fmt.Sprintf(" OFFSET $%d", limitArgIdx+1)
-		pageArgs = append(pageArgs, offset)
-	}
-
-	pageSQL := fmt.Sprintf(
-		`WITH %s
-		SELECT ece.episode_id, ece.added_at
-		%s
-		%s
-		%s
-		LIMIT $%d%s`,
-		strings.Join(ctes, ",\n"),
-		fromClause+episodeCatalogEntrySortJoin(plan.sortField),
-		whereClause,
-		orderBy,
-		limitArgIdx,
-		offsetClause,
-	)
-
-	pageRows, err := e.queryEpisodeCatalogEntryPage(ctx, pageSQL, pageArgs...)
-	if err != nil {
-		if episodeCatalogEntriesUnavailable(err) {
-			return nil, 0, false, false, nil
-		}
-		return nil, 0, false, true, err
-	}
-	if plan.requiresFullPageGate && len(pageRows) < pageLimit {
-		return nil, 0, false, false, nil
-	}
-
-	hasMore := len(pageRows) > limit
-	if hasMore {
-		pageRows = pageRows[:limit]
-	}
-
-	items, err := e.hydrateEpisodeCatalogEntryPage(ctx, pageRows)
-	if err != nil {
-		if episodeCatalogEntriesUnavailable(err) {
-			return nil, 0, false, false, nil
-		}
-		return nil, 0, false, true, err
-	}
-
-	total := 0
-	if includeTotal {
-		countSQL, countArgs := episodeCatalogCountSQL(
-			strings.Join(ctes, ",\n"),
-			fromClause,
-			whereClause,
-			args,
-			maxResults,
-		)
-		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			if episodeCatalogEntriesUnavailable(err) {
-				return nil, 0, false, false, nil
-			}
-			return nil, 0, false, true, fmt.Errorf("counting episode user-state catalog entries: %w", err)
-		}
-		hasMore = total > offset+len(items)
-	}
-
-	return items, total, hasMore, true, nil
+	return e.episodeCatalogPreviewPage(ctx, q, def, limit, offset, includeTotal)
 }
 
 func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
@@ -240,100 +359,56 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 	offset int,
 	includeTotal bool,
 ) ([]*models.MediaItem, int, bool, bool, error) {
-	def = def.Normalize()
-	effectiveScope := e.Scope
-	if effectiveScope == "" {
-		effectiveScope = def.MediaScope
+	q, ok, err := e.episodeCatalogEntriesQuery(def, access)
+	if err != nil || !ok {
+		return nil, 0, false, ok, err
 	}
-	if !isEpisodeCatalogScope(effectiveScope) {
-		return nil, 0, false, false, nil
-	}
+	return e.episodeCatalogPreviewPage(ctx, q, def, limit, offset, includeTotal)
+}
 
-	allowPersonalized := strings.TrimSpace(access.ProfileID) != ""
-	if err := def.ValidateWithOptions(allowPersonalized, allowPersonalized); err != nil {
-		return nil, 0, false, true, err
-	}
-
-	libraryID, empty, ok := singleEpisodeCatalogLibraryID(def, access)
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-	if empty {
+// episodeCatalogPreviewPage reads one page of q and, with includeTotal, its
+// total. ok is false when the general query must answer instead.
+func (e *QueryExecutor) episodeCatalogPreviewPage(
+	ctx context.Context,
+	q episodeCatalogQuery,
+	def QueryDefinition,
+	limit int,
+	offset int,
+	includeTotal bool,
+) ([]*models.MediaItem, int, bool, bool, error) {
+	if q.empty {
 		return []*models.MediaItem{}, 0, false, true, nil
 	}
+	limit, offset, maxResults := normalizePreviewPageBounds(def.Normalize(), limit, offset)
 
-	limit, offset, maxResults := normalizePreviewPageBounds(def, limit, offset)
-
-	whereParts := []string{"ece.media_folder_id = $1"}
-	args := []any{libraryID}
-	argIdx := 2
-
-	if access.AllowedContentIDs != nil {
-		if len(access.AllowedContentIDs) == 0 {
-			return []*models.MediaItem{}, 0, false, true, nil
-		}
-		whereParts = append(whereParts, fmt.Sprintf("ece.episode_id = ANY($%d)", argIdx))
-		args = append(args, access.AllowedContentIDs)
-		argIdx++
-	}
-
-	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
-
-	if e.SnapshotAt != nil {
-		whereParts = append(whereParts, fmt.Sprintf("ece.episode_created_at <= $%d", argIdx))
-		args = append(args, *e.SnapshotAt)
-		argIdx++
-	}
-
-	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		// sort_key is the lowered episode title (or "episode N"), the key
-		// the list sorts by, so it alone decides the letter.
-		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
-		args = append(args, escapePrefixForLike(prefix)+"%")
-		argIdx++
-	}
-
-	queryWhere, queryArgs, nextArgIdx, ok, err := buildEpisodeCatalogEntryQueryWhere(def, argIdx)
-	if err != nil {
-		return nil, 0, false, true, err
-	}
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-	if queryWhere != "" {
-		whereParts = append(whereParts, queryWhere)
-		args = append(args, queryArgs...)
-		argIdx = nextArgIdx
-	}
-
-	orderBy, ok := episodeCatalogEntryOrderBy(def.Sort)
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-
-	whereClause := "WHERE " + strings.Join(whereParts, " AND ")
 	pageLimit := limit
 	if maxResults <= 0 || offset+limit < maxResults {
 		pageLimit++
 	}
-	pageArgs := append([]any{}, args...)
-	limitArgIdx := argIdx
+	pageArgs := append([]any{}, q.args...)
+	limitArgIdx := len(pageArgs) + 1
 	pageArgs = append(pageArgs, pageLimit)
 	offsetClause := ""
 	if offset > 0 {
 		offsetClause = fmt.Sprintf(" OFFSET $%d", limitArgIdx+1)
 		pageArgs = append(pageArgs, offset)
 	}
+	withClause := ""
+	if q.withCTEs != "" {
+		withClause = "WITH " + q.withCTEs + "\n"
+	}
 
 	pageSQL := fmt.Sprintf(
-		`SELECT ece.episode_id, ece.added_at
-		FROM episode_catalog_entries ece%s
+		`%sSELECT ece.episode_id, ece.added_at
+		%s%s
 		%s
 		%s
 		LIMIT $%d%s`,
-		episodeCatalogEntrySortJoin(def.Sort.Field),
-		whereClause,
-		orderBy,
+		withClause,
+		q.from,
+		q.sortJoin,
+		q.where,
+		q.orderBy,
 		limitArgIdx,
 		offsetClause,
 	)
@@ -344,6 +419,9 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 			return nil, 0, false, false, nil
 		}
 		return nil, 0, false, true, err
+	}
+	if q.requiresFullPageGate && len(pageRows) < pageLimit {
+		return nil, 0, false, false, nil
 	}
 
 	hasMore := len(pageRows) > limit
@@ -361,13 +439,7 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 
 	total := 0
 	if includeTotal {
-		countSQL, countArgs := episodeCatalogCountSQL(
-			"",
-			"FROM episode_catalog_entries ece",
-			whereClause,
-			args,
-			maxResults,
-		)
+		countSQL, countArgs := episodeCatalogCountSQL(q.withCTEs, q.from, q.where, q.args, maxResults)
 		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 			if episodeCatalogEntriesUnavailable(err) {
 				return nil, 0, false, false, nil
@@ -898,7 +970,8 @@ func buildEpisodeCatalogTypeClause(rule QueryRule, argIdx int) (string, []any, i
 	if !ok {
 		return "", nil, argIdx, true, fmt.Errorf("type requires a string value")
 	}
-	isEpisode := strings.EqualFold(strings.TrimSpace(value), "episode")
+	// The general episode relation compares its type exactly.
+	isEpisode := value == browseTypeEpisode
 	switch rule.Op {
 	case "is":
 		if isEpisode {
@@ -931,7 +1004,8 @@ func buildEpisodeCatalogLanguageArrayClause(column string, rule QueryRule, argId
 	if !ok {
 		return "", nil, argIdx, true, fmt.Errorf("%s requires a string value", rule.Field)
 	}
-	rule.Value = strings.ToLower(strings.TrimSpace(value))
+	// Lowered, not trimmed, as the general query binds it.
+	rule.Value = strings.ToLower(value)
 	return buildEpisodeCatalogArrayClause(column, rule, argIdx)
 }
 

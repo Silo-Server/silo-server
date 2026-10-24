@@ -86,6 +86,77 @@ of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
 and silence-extended chapters 0.98. Contribution to online providers compares
 these values with each provider's minimum confidence.
 
+### Chapters and online markers
+
+Between online providers, `markers.mergeProviderResults` picks one provider per
+kind and keeps every range that provider returned for the kind. Each provider
+is ranked by its best marker of that kind, compared with
+`markers.mergeCandidate.better`: the highest confidence, then the lower
+`fetch_priority`, then the higher submission count, then the provider ID. A
+marker without a confidence, or with a non-finite one or one outside 0 to 1,
+counts as 0 and loses to any rated one, but is still used when no other
+provider has that kind. Confidences are compared as
+each provider reports them, on their own scales; a marker below its provider's
+`fetch_min_confidence` is left out before the comparison. `selectResults`
+applies the current settings to fetched and cached answers alike, so a
+settings change applies without a refetch.
+
+Source priority puts online and plugin markers above every local one. The
+marker writer, `markers.CanWriteMarkerUpdate`, makes one exception for markers
+placed from the file's own chapters (`chapter:v1`, `chapter:silence:v1`,
+`chapter:silence:v2`, and `credits-chapter:v1`), which were authored for that
+exact file while a provider answers from other copies: between such a marker
+and an online one, the higher confidence wins and a tie goes to the online
+marker. So an online marker rated below the chapter does not replace it, and
+the chapter step replaces an online marker rated below it. Copies from another
+version of the episode, Chromaprint, and audio or video credits keep source
+priority, since their confidence scale is not comparable with a provider's.
+
+The episode chapter steps, for intros and credits, consider files whose marker
+came online and offer the chapter when the writer would take it, judged on the
+unrefined chapter, whose confidence silence refinement can only raise. Once
+the chapter is stored, a later lookup returning the same online marker leaves
+it in place, so neither side replaces the other on the next run. A file whose
+online marker arrived first, through the 03:00 sync or lazy playback, gets its
+chapter the next time local analysis of that kind covers its episode: the
+scheduled run, a re-detection, or a playback or admin refresh that starts local
+analysis because a file of the episode lacks a marker. Playback analyzes the
+kinds the played file lacks; admin refresh then analyzes every enabled kind.
+Both cover every version of the episode. The nightly movie pass does not list
+movies whose online credits are a range, so a movie's credits chapter replaces
+weaker online credits only on re-detection. It does list movies whose credits
+are a provider's absent answer (below), since their bounds are NULL; there a
+stronger credits chapter replaces the absent answer on the nightly run, and a
+movie without one is skipped before its file is read.
+
+### Absent answers
+
+The host sets `accepts_absent` on every marker fetch, so a provider may answer
+that an item has no segment of a kind: a `MarkerSegment` with `absent` set and
+no bounds. `markerFromPluginSegment` maps it to a `Marker` with `Absent` set,
+never to a range; a segment without bounds would otherwise default to the
+whole file. Between providers an absent answer competes for its kind like a
+marker, through the same comparator and minimum confidence. A provider that
+returns both a range and an absent answer for one kind answered with the
+range.
+
+The writer stores an absent answer as a tombstone, the same shape a manual
+clear stores: NULL bounds and no ranges, with the provider's source, ID,
+algorithm, and confidence. `SegmentPayload.Absent` names that shape. Under
+`CanWriteMarkerUpdate` it holds its kind like the provider's marker would: a
+manual marker or clear keeps it out, it replaces scanner results, and a
+chapter marker and an absent answer are weighed by confidence under the rule
+above. With `markers.online_storage` set to `on_demand`, `ApplyResult` and
+`OverlayOnline` project it the same way without saving it. A refreshed
+provider that no longer gives the answer withdraws the tombstone like any
+withdrawn range.
+
+Local analysis treats a provider tombstone as that provider's marker: the
+analyzer leaves the kind alone (`Candidate.hasHigherPriority`) unless the
+chapter rule lets a chapter replace it, and lazy playback does not ask local
+analysis for the kind. Playback, jellycompat, and the APIs read bounds, so a
+tombstone is no marker to clients, as a manual clear is.
+
 ## Versions and caches
 
 - `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
@@ -114,7 +185,8 @@ analysis, and admin refresh. Intro and credits season groups share one work
 list, the ffmpeg limit, and the Chromaprint capability check. Each kind is
 judged on its own: a file whose intro came from an online provider or a
 manual edit can still get local credits, and local analysis never replaces
-credits from a higher-priority source.
+credits from a higher-priority source, except online credits rated below the
+file's credits chapter ([above](#chapters-and-online-markers)).
 
 Credits start in the file's tail window: the last 450 seconds of an episode,
 or its last 40 percent when that is shorter. They last 15 to 450 seconds. An
@@ -314,7 +386,9 @@ A movie file is analyzed when its item is a movie, it is not an episode or an
 extra, it is not a part of a multi-part film, it is at least 1200 seconds
 long, it is not missing, and its library is enabled, of type movies or mixed,
 with marker detection on. Credits from a higher-priority source, such as an
-online provider or a manual edit, are left alone.
+online provider or a manual edit, are left alone, except online credits rated
+below the movie's credits chapter, which re-detection replaces
+([above](#chapters-and-online-markers)).
 
 - **Chapters.** A credits chapter, by the episode title rules without
   `Ending`, which in a movie is as likely the story's ending, places the
@@ -367,6 +441,122 @@ remaining movies wait for the next run. Run summaries count
 
 Playback analysis of a movie without credits analyzes that file alone, with
 playback priority. Admin refresh of a movie analyzes each of its files.
+
+## Contribution
+
+Providers with contribution enabled receive this server's markers through
+`markers.ContributionService`: a manual save sends the saved kinds at once,
+and the daily task sends scanner intros and credits at or above each
+provider's minimum confidence to providers with automatic sharing on. Online
+and plugin markers are never sent, so a provider's data does not reach
+another provider through this server. Automated "nothing found" results are
+never sent either: a detector that finds nothing is no evidence of absence.
+
+A manual clear is sent as an absent submission (`absent` set, no times,
+source `manual`, algorithm `manual:v1`, confidence 1), only to providers whose
+marker capability declares `supports_absent`. Every clear path sends it: the
+v1 segment clear (`HandleClearFileSegment`) and the set-markers clear that the
+v1 and v2 marker writes share. Its content hash and claim carry NULL times,
+which `currentAmendHashSQL` hashes as `ContentHash` does, so the amend check
+below matches them against the stored tombstone.
+
+Each attempt first claims a target in `marker_contributions`, keyed by
+provider, kind, and `target_key`; a partial unique index allows one active
+claim per target. The target key is the item kind, the provider's first
+required external ID (or else TMDB, TVDB, then IMDb), and the season and
+episode. An active claim blocks every later payload for that target, whatever
+times it carries, because most providers keep one submission per account for
+each item. A stale in-flight claim, a retryable error, and an `invalid`
+refusal older than 30 days free the target.
+
+A provider whose marker capability declares `supports_amend` replaces its
+earlier submission instead. For it, the target key is `file:<media_file_id>`,
+so each file is its own target. The key names no external ID, so a submission
+still in flight when the item's IDs change holds the target, and the next one
+waits for it. The content hash also covers the episode's own IDs, the
+numbering it follows, the file's hash and size, and the marker's source,
+algorithm, and confidence in whole thousandths, so a corrected episode ID, a
+file replaced at the same path, a new detection version, or a rescore is a
+change. A claim whose
+content hash differs from the new one is taken over once it is settled, even
+as a `conflict`. Before taking over a target, `Claim` checks under its lock
+that the payload's content hash is still the one the file's current state
+gives (`currentAmendHashSQL`: the stored marker, the file's duration, hash
+and size, and the item's IDs and episode numbering as the resolver reads
+them), so an older save, or a run that read
+the file before a save, a new detection, a re-probe, or a metadata change,
+never replaces a newer payload at the provider.
+
+`Claim` and both daily candidate queries use `currentAmendHashSQL`, which
+must hash exactly as `newContributionRow` does; the database contract tests
+`TestContributionStoreAmendResubmitsChangedMarkers` and
+`TestContributionStoreAmendSendsAnUnsentManualCorrection` check that. The
+queries offer a marker again when it no longer matches its active claim.
+
+A save's background contribution tries each provider once and never waits,
+and stops at a rate limit like any run. At a provider that supports amend,
+the daily task sends what it did not: a skip behind another submission in
+flight, a rate limit or other retryable error, or a run lost when its server
+stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
+a movie or an episode, when the provider already has a `marker_contributions`
+row for that file and segment and none of its active claims there has the
+marker's current content hash. A change to the item's IDs therefore sends a
+correction again. It offers a manual clear the same way, but only to a
+provider that declares `supports_absent`. The run uses
+`ContributeOptions.Corrections`, which `Claim` accepts only with such a row
+(`ContributionRow.Correction`). It runs for every provider with contribution
+enabled that supports amend, whether or not automatic sharing is on, before
+the scanner passes. The state is in the database, so this works whichever
+server saved. A manual marker or clear at a provider that holds nothing for
+the file is never offered. Providers without
+`supports_amend` get only scanner markers from the daily task.
+
+A manual save of a kind whose bounds are both within a second of a marker an
+online or plugin provider supplied, as the user was shown it, may repeat that
+provider's data (`markers.KeepsProviderMarker`, which checks every occurrence
+of the kind). The save stores that kind with source `manual` and algorithm
+`manual:withheld:v1` instead of `manual:v1`, and no contribution path sends
+it: not the save's own run, the daily task, an admin contribution, or an amend
+resend, to any provider, including the one whose marker it kept. A save that
+keeps an earlier withheld marker stays withheld. A manual clear of a kind
+that, as the user was shown it, held an online or plugin provider's absent
+answer, or an earlier withheld clear, repeats that answer
+(`markers.KeepsProviderAbsence`); its tombstone stores `manual:withheld:v1`
+the same way. The comparison uses the stored row, which is what a player is
+shown unless online lookups run with `markers.online_storage` set to
+`on_demand` (`PopulationService.ShowsStoredMarkers`). In that mode a player is
+shown provider answers that each replica caches in its own memory for a while
+and never stores, and a provider's answer can change between playback and the
+save, so no lookup at save time can say which marker or answer the user saw.
+Every kind such a save sets or clears is withheld, except a kind the file
+already held as a `manual:v1` marker: no provider marker replaces one, and
+since every other save in that mode is withheld, the kind already held it when
+any editor still open loaded the file. A withheld marker or a manual clear
+does not exempt a save, because an editor opened before the save that wrote it
+may still show a provider's marker. Provenance is written with the marker in
+one statement, so it survives restarts, races between saves, and changes to
+the item's metadata. Everywhere else, including write priority, local
+detection, the API, and jellycompat, `manual:withheld:v1` is a manual marker
+like `manual:v1`. `/api/v2` reports the stored algorithm; the frozen `/api/v1`
+reports `manual:v1` for both.
+
+With stored markers, a save is compared with the row as it is when the save
+arrives, not with what the editor showed, which the API does not send. If the
+stored kind changes while an editor is open, through a provider refresh or
+another user's save, a save that keeps the provider marker or answer the
+editor showed can be stored as `manual:v1` and shared. Closing this needs the
+save to name the state it edited, such as an `If-Match` precondition on the
+`/api/v2` marker write.
+
+Builds from before this rule do not know `manual:withheld:v1`. During a
+rolling upgrade from one, an older replica can still send a withheld marker
+when an admin contribution of that file reaches it, as it sends its own saves
+that keep a provider's marker, until the last older replica is replaced.
+
+The rule exists because TheIntroDB's terms forbid using its data to seed other
+databases, so Silo must not pass a provider's marker on as if a person had
+found it. It applies to every provider, the one the marker came from
+included, so it stays one simple rule.
 
 ## Measuring accuracy
 

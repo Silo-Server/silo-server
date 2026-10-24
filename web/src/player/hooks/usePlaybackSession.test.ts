@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { forgetBandwidthEstimate, recordObservedBandwidthLimitKbps } from "../bandwidth-probe";
+import { forgetBandwidthEstimate } from "../bandwidth-probe";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { markPlaybackIntent } from "../first-frame";
 import {
@@ -30,6 +30,19 @@ import {
 // These hook tests exercise plan adoption and replacement against a transport
 // boundary. The v2 start/replan helpers are covered by their own tests; here
 // they forward to the same fetch stubs under the v2 base.
+// The stored speed-test reading a start would send; tests set it.
+const speedReading = vi.hoisted(() => ({ kbps: undefined as number | undefined }));
+vi.mock("../client-context-v3", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../client-context-v3")>()),
+  detectBandwidthEstimateKbpsV3: () => speedReading.kbps,
+}));
+
+const startEnded = vi.hoisted(() => vi.fn());
+vi.mock("../bandwidth-probe", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../bandwidth-probe")>()),
+  playbackStartEnded: startEnded,
+}));
+
 vi.mock("../start-v2", () => ({
   startPlaybackV2: async (config: PlayerConfig, body: unknown) => {
     const { playerFetch } = await import("../player-fetch");
@@ -119,6 +132,7 @@ function sessionFetch(
 }
 
 afterEach(() => {
+  speedReading.kbps = undefined;
   resetCodecDetectionForTests();
   resetSessionMutations();
   forgetBandwidthEstimate();
@@ -476,10 +490,15 @@ describe("usePlaybackSession quality changes", () => {
     expect(bodiesTo("/playback/start")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
     expect(bodiesTo("/playback/start")[0]?.bandwidth_cap_kbps).toBe(8_000);
 
-    // What VideoPlayer does when Auto keeps stalling: record the lower
-    // estimate, then replan Auto.
-    recordObservedBandwidthLimitKbps(4_200);
-    act(() => result.current.changeQuality("auto", 120));
+    // What the buffering controller sends when Auto keeps stalling.
+    act(() =>
+      result.current.changeQuality("auto", 120, {
+        operation: "quality_change",
+        quality_preference: "auto",
+        bandwidth_estimate_kbps: 4200,
+        bandwidth_estimate_source: "observed_rebuffer",
+      }),
+    );
     await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
     expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
       operation: "quality_change",
@@ -1139,6 +1158,74 @@ describe("usePlaybackSession output capability changes", () => {
       quality_preference: "1080p",
     });
     expect(result.current.qualityPreference).toBe("1080p");
+    unmount();
+  });
+
+  it.each([
+    ["replays a queued audio pick when the quality change keeps the file", "audio", 7, true],
+    ["drops a queued audio pick once the quality change moves to another file", "audio", 8, false],
+    [
+      "drops a queued subtitle pick once the quality change moves to another file",
+      "subtitle",
+      8,
+      false,
+    ],
+    ["replays queued subtitles off on another file", "off", 8, true],
+  ] as const)("%s", async (_name, pick, nextFileId, replayed) => {
+    let resolveQualityReplan: ((response: Response) => void) | undefined;
+    const qualityReplanResponse = new Promise<Response>((resolve) => {
+      resolveQualityReplan = resolve;
+    });
+    const operations: string[] = [];
+    const fetchMock = sessionFetch((init) => {
+      const body = JSON.parse(String(init?.body)) as { operation: string };
+      operations.push(body.operation);
+      if (operations.length === 1) return qualityReplanResponse;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            session_id: "session-1",
+            plan_id: "plan:replayedpick0001",
+            plan_attempt_key: "v3:replayedpick0001",
+            effective_media_file_id: nextFileId,
+          }),
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(operations).toEqual(["quality_change"]));
+    // Index 2 of file 7's tracks (or subtitles off), picked while the quality
+    // change runs.
+    act(() => {
+      if (pick === "audio") result.current.switchAudioTrack(2, 31);
+      else result.current.changeSubtitleTrack(pick === "subtitle" ? 2 : null, 31);
+    });
+    await act(async () => {
+      resolveQualityReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              session_id: "session-1",
+              plan_id: "plan:otherversion0001",
+              plan_attempt_key: "v3:otherversion0001",
+              effective_media_file_id: nextFileId,
+            }),
+          ),
+        ),
+      );
+      await qualityReplanResponse;
+    });
+
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+    expect(result.current.mediaFileId).toBe(nextFileId);
+    expect(operations).toEqual(replayed ? ["quality_change", "track_change"] : ["quality_change"]);
     unmount();
   });
 
@@ -2517,7 +2604,11 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     await waitFor(() => expect(result.current.planRevision).toBe(1));
 
     act(() => result.current.recoverFromFailure({ classification: "startup_timeout" }, 0));
-    await waitFor(() => expect(result.current.error).toBe("Failed to fetch"));
+    await waitFor(() =>
+      expect(result.current.error).toBe(
+        "Silo couldn't reach the server. Check your connection, then try again.",
+      ),
+    );
     expect(result.current.connectionStatus).toBe("connected");
     expect(harness.replanBodies).toHaveLength(1);
 
@@ -2543,4 +2634,448 @@ describe("usePlaybackSession mid-stream reconnect", () => {
 
     unmount();
   });
+});
+
+async function startSession() {
+  const hook = renderHook(() => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"), {
+    wrapper,
+  });
+  await waitFor(() => expect(hook.result.current.planRevision).toBe(1));
+  return hook;
+}
+
+it("reports each adoption's summary once, with the estimate it was requested with", async () => {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const summaries: Record<string, unknown>[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "playback_plan_summary_v1"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: plan,
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        const body = JSON.parse(String(init?.body));
+        if (body.event === "plan_summary") summaries.push(body);
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  const { result, unmount } = await startSession();
+  const adopted = vi.fn();
+  act(() =>
+    result.current.changeQuality(
+      "auto",
+      120,
+      {
+        operation: "quality_change",
+        quality_preference: "auto",
+        bandwidth_estimate_kbps: 44100,
+        bandwidth_estimate_source: "observed_rebuffer",
+      },
+      adopted,
+    ),
+  );
+  // The server plan ID repeats; the adoptions stay apart.
+  await waitFor(() => expect(adopted).toHaveBeenCalledWith(2));
+  act(() => {
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "1",
+      diagnostics: { buffering_action: "lowered" },
+    });
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "2",
+      diagnostics: { buffering_action: "cant_lower" },
+    });
+    // A second summary for an adoption is dropped, not sent as the live plan's.
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "1",
+      diagnostics: { buffering_action: "none" },
+    });
+    // The plan adopted again after the back-forward cache reports on its own,
+    // against the plan it adopted again.
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "2.1",
+      diagnostics: { buffering_action: "none" },
+    });
+  });
+  await waitFor(() => expect(summaries).toHaveLength(3));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(summaries).toHaveLength(3);
+  expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id, plan.plan_id]);
+  expect(summaries[0]?.plan_attempt_id).not.toBe(summaries[1]?.plan_attempt_id);
+  expect(summaries[2]?.plan_attempt_id).toBe(summaries[1]?.plan_attempt_id);
+  expect(summaries.map((s) => s.diagnostics)).toEqual([
+    { buffering_action: "lowered" },
+    { buffering_action: "cant_lower", bandwidth_estimate_kbps: "44100" },
+    { buffering_action: "none", bandwidth_estimate_kbps: "44100" },
+  ]);
+  expect(summaries[0]).not.toHaveProperty("adoptionId");
+  unmount();
+});
+
+it.each([
+  ["never", "ignore"],
+  ["always", undefined],
+  // An omitted mode uses the default and does not exclude learned limits.
+  [undefined, undefined],
+] as const)("in %s mode sends learned_limit %s", async (mode, expected) => {
+  const { bodiesTo } = recordingServer();
+  const { result, unmount } = renderHook(
+    () =>
+      usePlaybackSession(
+        "request-1",
+        [],
+        [],
+        7,
+        0,
+        false,
+        "auto",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        mode,
+      ),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  act(() => result.current.changeQuality("auto", 120));
+  await waitFor(() => expect(bodiesTo("/replan")).toHaveLength(1));
+  expect(bodiesTo("/playback/start")[0]?.learned_limit).toBe(expected);
+  expect(bodiesTo("/replan")[0]?.learned_limit).toBe(expected);
+  unmount();
+});
+
+it("repeats the kept step-down estimate, without a source, on later Auto replans", async () => {
+  const server = recordingServer();
+  const replans = () => server.bodiesTo("/replan");
+  const { result, unmount } = await startSession();
+
+  // The controller lowered Auto and reported its step-down estimate.
+  act(() => result.current.setKeptEstimate(44100));
+  act(() => result.current.recoverFromFailure({ classification: "decoder_failure" }, 120));
+  await waitFor(() => expect(replans()).toHaveLength(1));
+  expect(replans()[0]).toMatchObject({
+    operation: "failure_recovery",
+    quality_preference: "auto",
+    bandwidth_estimate_kbps: 44100,
+  });
+  expect(replans()[0]).not.toHaveProperty("bandwidth_estimate_source");
+  await waitFor(() => expect(result.current.replanning).toBe(false));
+
+  // A fixed quality the viewer picked does not carry it.
+  act(() => result.current.changeQuality("720p", 130));
+  await waitFor(() => expect(replans()).toHaveLength(2));
+  expect(replans()[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+  unmount();
+});
+
+/** Records every request body, optionally holding the first replan until release. */
+function recordingServer({ holdFirstReplan = false, holdSecondStart = false } = {}) {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const decision = (planId: string) =>
+    jsonResponse({
+      protocol_version: 3,
+      server_features: ["playback_plan_v3", "buffering_quality_v1"],
+      outcome: "playable",
+      session_id: "session-1",
+      playback_plan: { ...plan, plan_id: planId, plan_attempt_key: `v3:${planId}` },
+    });
+  let release: (() => void) | undefined;
+  const held = new Promise<Response>((resolve) => {
+    release = () => resolve(decision("plan:held0001"));
+  });
+  let releaseStart: ((refused?: boolean) => void) | undefined;
+  const heldStart = new Promise<Response>((resolve) => {
+    releaseStart = (refused) =>
+      resolve(
+        refused
+          ? jsonResponse({
+              protocol_version: 3,
+              server_features: ["playback_plan_v3", "buffering_quality_v1"],
+              outcome: "adaptation_unavailable",
+              session_id: "session-1",
+            })
+          : decision("plan:start0002"),
+      );
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/playback/start")) {
+      const count = fetchMock.mock.calls.filter(([u]) =>
+        String(u).endsWith("/playback/start"),
+      ).length;
+      return holdSecondStart && count === 2 ? heldStart : decision(plan.plan_id);
+    }
+    if (url.endsWith("/replan")) {
+      const count = fetchMock.mock.calls.filter(([u]) => String(u).endsWith("/replan")).length;
+      return holdFirstReplan && count === 1 ? held : decision(`plan:next000${count}`);
+    }
+    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const bodiesTo = (suffix: string) =>
+    fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith(suffix))
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  return {
+    bodiesTo,
+    release: () => release?.(),
+    releaseStart: (refused?: boolean) => releaseStart?.(refused),
+  };
+}
+
+const lowering = {
+  operation: "quality_change",
+  quality_preference: "auto",
+  bandwidth_estimate_kbps: 44100,
+  bandwidth_estimate_source: "observed_rebuffer",
+} as const;
+const restore = {
+  operation: "quality_change",
+  quality_preference: "auto",
+  learned_limit: "clear",
+} as const;
+
+// A start the player leaves still loading must not hold off speed tests.
+it("ends its start's hold on speed tests when the player goes away", async () => {
+  recordingServer();
+  const { unmount } = await startSession();
+  startEnded.mockClear();
+  unmount();
+  expect(startEnded).toHaveBeenCalledTimes(1);
+});
+
+it("sends the speed-test reading on a start but never on a replan", async () => {
+  speedReading.kbps = 48000;
+  const server = recordingServer();
+  const { result, unmount } = await startSession();
+  expect(server.bodiesTo("/playback/start")[0]).toMatchObject({
+    bandwidth_estimate_kbps: 48000,
+    bandwidth_estimate_source: "probe",
+  });
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
+  expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_source");
+  unmount();
+});
+
+// C3: the server plans with the lower of the estimate and what the stalled
+// plan's media arrived at.
+it("sends a lowering's observed throughput with its estimate", async () => {
+  const server = recordingServer();
+  const { result, unmount } = await startSession();
+  act(() =>
+    result.current.changeQuality("auto", 120, { ...lowering, observed_throughput_kbps: 11_800 }),
+  );
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).toMatchObject({
+    bandwidth_estimate_kbps: 44100,
+    bandwidth_estimate_source: "observed_rebuffer",
+    observed_throughput_kbps: 11_800,
+  });
+  unmount();
+});
+
+// The player counts a quality pick once the session adopts its plan, and the
+// controller must hear of the pick before that plan's adoption.
+it("tells a quality change it was adopted before the new plan renders", async () => {
+  recordingServer();
+  const events: string[] = [];
+  const { result, unmount } = renderHook(
+    () => {
+      const session = usePlaybackSession("request-1", [], [], 7, 0, false, "auto");
+      const revision = session.planRevision;
+      useEffect(() => {
+        events.push(`rendered ${revision}`);
+      }, [revision]);
+      return session;
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  // A discrete-priority update renders, effects included, before the promise
+  // continuations that follow it, so no later callback can come first.
+  const click = vi.spyOn(window, "event", "get").mockReturnValue(new MouseEvent("click"));
+  onTestFinished(() => click.mockRestore());
+  act(() =>
+    result.current.changeQuality("720p", 120, undefined, (revision) => {
+      events.push(`adopted ${revision}`);
+    }),
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(2));
+  expect(events.filter((event) => event.endsWith(" 2"))).toEqual(["adopted 2", "rendered 2"]);
+  unmount();
+});
+
+it("refuses a lowering while another replan is in flight, and sends a Restore after it", async () => {
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+
+  // The lowering is not queued: the controller hears it was never sent.
+  const lowered = vi.fn();
+  act(() => result.current.changeQuality("auto", 121, lowering, lowered));
+  expect(lowered).toHaveBeenCalledWith(undefined, false);
+
+  const restored = vi.fn();
+  act(() => result.current.changeQuality("auto", 122, restore, restored));
+  await act(async () => server.release());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(2));
+  expect(server.bodiesTo("/replan")[1]).toMatchObject({
+    operation: "quality_change",
+    learned_limit: "clear",
+  });
+  expect(server.bodiesTo("/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(3));
+  unmount();
+});
+
+it("sends a Restore answered during a start once that start's plan is adopted", async () => {
+  const server = recordingServer({ holdSecondStart: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.switchVersion(99, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  const restored = vi.fn();
+  await act(async () => {
+    result.current.changeQuality("auto", 121, restore, restored);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(server.bodiesTo("/replan")).toHaveLength(0);
+  await act(async () => server.releaseStart());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).toMatchObject({
+    operation: "quality_change",
+    learned_limit: "clear",
+    plan_attempt_key: "v3:plan:start0002",
+  });
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(3));
+  unmount();
+});
+
+it("owes a Restore answered during a start that plays nothing to the next start", async () => {
+  const server = recordingServer({ holdSecondStart: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.switchVersion(99, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  const restored = vi.fn();
+  act(() => result.current.changeQuality("auto", 121, restore, restored));
+  await act(async () => server.releaseStart(true));
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(undefined));
+  act(() => result.current.switchVersion(100, 130));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(3));
+  expect(server.bodiesTo("/playback/start")[2]).toMatchObject({ learned_limit: "clear" });
+  expect(server.bodiesTo("/replan")).toHaveLength(0);
+  unmount();
+});
+
+// S3: Auto under any budget may swap in a lower-bitrate sibling version, so a
+// file the viewer chose, or a Watch Party's, starts with alternates refused.
+it.each([
+  { name: "a default play", party: false, picked: false, switchTo: null, sent: [undefined] },
+  { name: "a Watch Party", party: true, picked: false, switchTo: null, sent: [false] },
+  {
+    name: "a version picked before Play",
+    party: false,
+    picked: true,
+    switchTo: null,
+    sent: [false],
+  },
+  { name: "a version switch", party: false, picked: false, switchTo: 99, sent: [undefined, false] },
+])("pins the file of $name", async ({ party, picked, switchTo, sent }) => {
+  const server = recordingServer();
+  const { result, unmount } = renderHook(
+    () =>
+      usePlaybackSession(
+        "request-1",
+        [],
+        [],
+        7,
+        0,
+        false,
+        "auto",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        !party,
+        "always",
+        picked,
+      ),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  if (switchTo !== null) act(() => result.current.switchVersion(switchTo, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(sent.length));
+  expect(server.bodiesTo("/playback/start").map((body) => body.allow_alternate_versions)).toEqual(
+    sent,
+  );
+  unmount();
+});
+
+// D12/D16: a version switch tells its caller whether it adopted a plan.
+it("tells a version switch's caller the adopted revision, or none", async () => {
+  recordingServer();
+  const { result, unmount } = await startSession();
+  const sameFile = vi.fn();
+  act(() => result.current.switchVersion(result.current.mediaFileId ?? 7, 10, sameFile));
+  expect(sameFile).toHaveBeenCalledWith(undefined);
+  const switched = vi.fn();
+  act(() => result.current.switchVersion(99, 10, switched));
+  await waitFor(() => expect(switched).toHaveBeenCalledWith(2));
+  expect(switched).toHaveBeenCalledTimes(1);
+  unmount();
+});
+
+it("sends a displaced Restore's clear on one start only", async () => {
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  act(() => result.current.changeQuality("auto", 121, restore));
+  // A version switch starts over and takes the queued Restore's place.
+  act(() => result.current.switchVersion(99, 122));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  expect(server.bodiesTo("/playback/start")[1]).toMatchObject({ learned_limit: "clear" });
+  await act(async () => server.release());
+  await waitFor(() => expect(result.current.planRevision).toBe(2));
+
+  // A later start must not clear a limit learned since.
+  act(() => result.current.switchVersion(100, 130));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(3));
+  expect(server.bodiesTo("/playback/start")[2]).not.toHaveProperty("learned_limit");
+  unmount();
+});
+
+it("carries a displaced Restore's clear on the request that replaced it", async () => {
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  act(() => result.current.changeQuality("auto", 121, restore));
+  // The viewer's track change takes the queued Restore's place.
+  act(() => result.current.switchAudioTrack(1, 122));
+  await act(async () => server.release());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(2));
+  expect(server.bodiesTo("/replan")[1]).toMatchObject({
+    operation: "track_change",
+    learned_limit: "clear",
+  });
+  unmount();
 });

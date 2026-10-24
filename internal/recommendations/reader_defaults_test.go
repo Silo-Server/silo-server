@@ -52,7 +52,7 @@ func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 		RecTypeTopRated:      scored("watched", "disliked", "liked", "top-1", "top-2"),
 		RecTypeRecentlyAdded: scored("recent-1", "watched"),
 	}, rated: []string{"disliked", "liked"}}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}
 
 	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestDefaultRowSectionsMatchDiscover(t *testing.T) {
 		},
 		hidden: map[string]struct{}{"hidden": {}},
 	}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}
 
 	discover, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil {

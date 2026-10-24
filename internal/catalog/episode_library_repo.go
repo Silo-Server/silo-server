@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -99,26 +100,72 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 		}
 	}
 
-	args := []any{folderID}
-	episodePredicate := ""
-	if episodeIDs != nil {
-		args = append(args, episodeIDs)
-		episodePredicate = " AND el.episode_id = ANY($2::text[])"
+	removed, deletedSeriesIDs, err := deleteStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+	if err != nil {
+		return 0, err
 	}
 
+	affectedSeriesIDs := append(insertedSeriesIDs, deletedSeriesIDs...)
+	if err := RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, affectedSeriesIDs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("committing episode membership reconciliation transaction: %w", err)
+	}
+	return removed, nil
+}
+
+// noActiveEpisodeFileSQL holds for a membership el whose episode has no
+// active file in its folder.
+const noActiveEpisodeFileSQL = `NOT EXISTS (
+		SELECT 1
+		FROM media_files mf
+		WHERE mf.media_folder_id = el.media_folder_id
+		  AND mf.episode_id = el.episode_id
+		  AND mf.missing_since IS NULL
+	)`
+
+// deleteStaleEpisodeMemberships removes the folder's memberships whose
+// episode has no active file there, limited to episodeIDs when it is non-nil,
+// and returns how many it removed and their series. It locks those series
+// before deleting: curated rebind and split lock the series row and then
+// delete its memberships, and do not retry a deadlock, so deleting first and
+// locking in the recompute would take the two in the opposite order.
+func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int, episodeIDs []string) (int, []string, error) {
+	scope := "el.media_folder_id = $1"
+	args := []any{folderID}
+	if episodeIDs != nil {
+		scope += " AND el.episode_id = ANY($2::text[])"
+		args = append(args, episodeIDs)
+	}
+	var staleEpisodeIDs, staleSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(el.episode_id), ARRAY[]::text[]),
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM episode_libraries el
+		LEFT JOIN episodes e ON e.content_id = el.episode_id
+		WHERE `+scope+` AND `+noActiveEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
+		return 0, nil, fmt.Errorf("finding stale episode library membership: %w", err)
+	}
+	if len(staleEpisodeIDs) == 0 {
+		return 0, nil, nil
+	}
+	if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, staleSeriesIDs); err != nil {
+		return 0, nil, fmt.Errorf("locking series for episode library membership removal: %w", err)
+	}
+
+	// Recheck each membership: a file may have been linked since the select.
 	var removed int
 	var deletedSeriesIDs []string
 	if err := tx.QueryRow(ctx, `
 		WITH deleted AS (
 			DELETE FROM episode_libraries el
-			WHERE el.media_folder_id = $1`+episodePredicate+`
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM media_files mf
-				WHERE mf.media_folder_id = el.media_folder_id
-				  AND mf.episode_id = el.episode_id
-				  AND mf.missing_since IS NULL
-			)
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = ANY($2::text[])
+			  AND `+noActiveEpisodeFileSQL+`
 			RETURNING el.episode_id
 		)
 		SELECT COUNT(*)::int,
@@ -128,16 +175,8 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 		       )
 		FROM deleted d
 		LEFT JOIN episodes e ON e.content_id = d.episode_id
-	`, args...).Scan(&removed, &deletedSeriesIDs); err != nil {
-		return 0, fmt.Errorf("reconciling episode library membership: %w", err)
+	`, folderID, staleEpisodeIDs).Scan(&removed, &deletedSeriesIDs); err != nil {
+		return 0, nil, fmt.Errorf("reconciling episode library membership: %w", err)
 	}
-
-	affectedSeriesIDs := append(insertedSeriesIDs, deletedSeriesIDs...)
-	if err := RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("committing episode membership reconciliation transaction: %w", err)
-	}
-	return removed, nil
+	return removed, deletedSeriesIDs, nil
 }

@@ -84,7 +84,8 @@ release event's episode key:
   - A per-card Continue Watching dismissal clears `continue_watching` while
     the dismissed episode's progress is unchanged. As on Home, an in-progress
     episode no longer counts once a later episode of the series was completed
-    more recently.
+    more recently. Specials (season 0) have no airing position, so only a
+    later special supersedes an in-progress special.
   - A per-card Next Up dismissal clears `next_up` while the dismissed episode
     is still the card Home would show: the first episode after the most
     recently completed one that has a present file and that the profile has

@@ -207,8 +207,14 @@ func isCompatHEVCV1Route(r *http.Request) bool {
 	return marked
 }
 
-func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatHEVCV1Route(r) == required {
+// validateCompatHLSRoute checks that the request arrived on the one versioned
+// route compatHLSRoutePathSegment names for source.
+func validateCompatHLSRoute(w http.ResponseWriter, r *http.Request, source PlaybackMediaSource) bool {
+	if isCompatHEVCV1Route(r) == compatHLSUsesHEVCV1Route(source) &&
+		isCompatAudioV2Route(r) == compatHLSUsesAudioV2Route(source) &&
+		isCompatRemuxV1Route(r) == compatHLSUsesRemuxV1Route(source) &&
+		isCompatRemuxDVV1Route(r) == compatHLSUsesRemuxDVV1Route(source) &&
+		isCompatRemuxTSV1Route(r) == compatHLSUsesRemuxTSV1Route(source) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -217,30 +223,6 @@ func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required 
 
 func validateCompatAudioV2Route(w http.ResponseWriter, r *http.Request, required bool) bool {
 	if isCompatAudioV2Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxTSV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxTSV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxDVV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxDVV1Route(r) == required {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -290,7 +272,7 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 	if compatHLSUsesRemuxDVV1Route(source) {
 		return compatRemuxDVV1PathSegment
 	}
-	if source.HLSRemuxMPEGTS {
+	if compatHLSUsesRemuxTSV1Route(source) {
 		return compatRemuxTSV1PathSegment
 	}
 	if compatHLSUsesRemuxV1Route(source) {
@@ -304,6 +286,10 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 
 func compatHLSUsesAudioV2Route(source PlaybackMediaSource) bool {
 	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && !compatHLSUsesHEVCV1Route(source) && compatHLSRequiresAudioV2(source)
+}
+
+func compatHLSUsesRemuxTSV1Route(source PlaybackMediaSource) bool {
+	return source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source)
 }
 
 // HEVC encoding uses a route older API binaries cannot serve. Those binaries
@@ -346,6 +332,26 @@ func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
 	}
 	video := compatPrimaryVideoTrack(source.Version)
 	return playback.VideoSampleEntryForDVCopy(video.DVProfile) == playback.VideoSampleEntryDVH1
+}
+
+// compatContainerTS is the MPEG-TS container name in device profiles.
+const compatContainerTS = "ts"
+
+// compatRokuMPEGTS packages a Roku's video-copy HLS stream as MPEG-TS. Roku
+// players can play the audio of an fMP4 copy silently (JellyRock issue #573),
+// and Roku clients list their MPEG-TS transcoding profile first, as Jellyfin
+// would use it. The copy was negotiated for fMP4, so the profile's MPEG-TS
+// rules must accept the same video and audio. The Dolby Vision strip keeps
+// fMP4, which its hvc1 output needs.
+func compatRokuMPEGTS(userAgent string, profile DeviceProfile, source PlaybackMediaSource) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(userAgent)), "roku/") ||
+		!compatHLSCopiesVideo(source) || source.DVStripToHDR10 {
+		return false
+	}
+	if source.TranscodeAudio {
+		return profile.supportsHLSRemuxWithAudioTranscodeIn(source.Version, source.SelectedAudioStreamIndex, source.TargetAudioChannels, compatContainerTS)
+	}
+	return profile.supportsHLSRemuxIn(source.Version, source.SelectedAudioStreamIndex, compatContainerTS)
 }
 
 func compatHLSTranscodesAudio(source PlaybackMediaSource) bool {
@@ -534,13 +540,13 @@ func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) 
 }
 
 type sessionReportRequest struct {
-	ItemID              string          `json:"ItemId"`
-	MediaSourceID       string          `json:"MediaSourceId"`
-	PlaySessionID       string          `json:"PlaySessionId"`
-	PositionTicks       *int64          `json:"PositionTicks,omitempty"`
-	IsPaused            bool            `json:"IsPaused"`
-	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	ItemID              string         `json:"ItemId"`
+	MediaSourceID       string         `json:"MediaSourceId"`
+	PlaySessionID       string         `json:"PlaySessionId"`
+	PositionTicks       *int64         `json:"PositionTicks,omitempty"`
+	IsPaused            bool           `json:"IsPaused"`
+	AudioStreamIndex    compatIntValue `json:"AudioStreamIndex"`
+	SubtitleStreamIndex compatIntValue `json:"SubtitleStreamIndex"`
 }
 
 // HandleVideoStream serves Jellyfin-style progressive stream URLs.
@@ -759,19 +765,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
@@ -1042,19 +1036,7 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1116,19 +1098,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1956,6 +1926,11 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
 }
 
+// compatTargetAudioProfile is the profile FFmpeg's native aac encoder writes;
+// clients such as Roku require AudioProfile != Main, so leaving it unknown
+// would fail that rule closed.
+const compatTargetAudioProfile = "LC"
+
 // The compat transcode ladder always lands on H.264/AAC; these name the
 // target codecs the Jellyfin-compat pipeline hands to ffmpeg.
 const (
@@ -2361,37 +2336,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
-	audioTrackIndex := 0
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
-	if (!stop || !unidentified) && req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
-		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
-		updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
-			r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds,
-		)
-		if updatedPlaySession != nil {
-			playSession = updatedPlaySession
-		}
-		if selectionErr != nil {
-			slog.WarnContext(r.Context(), "jellycompat audio selection update failed", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"error", selectionErr,
-			)
-		} else if updatedSource != nil {
-			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
-				audioTrackIndex = resolvedAudioTrackIndex
-			}
-			slog.InfoContext(r.Context(), "jellycompat audio selection updated", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"media_source_id", updatedSource.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"audio_track_index", audioTrackIndex,
-				"transcode_restarted", restarted,
-			)
-		}
+	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
+		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -3309,6 +3259,37 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 		return nil
 	}
 	return h.requireLocalAudioDownmixCapability(ctx, compatHLSRecipeSourceAudioChannels(source))
+}
+
+// applyReportedAudioSelection switches a playback session to the audio stream a
+// progress report names and returns the session to continue with.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+	audioTrackIndex := 0
+	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
+		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
+	)
+	if updatedPlaySession != nil {
+		playSession = updatedPlaySession
+	}
+	if selectionErr != nil {
+		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"error", selectionErr,
+		)
+	} else if updatedSource != nil {
+		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
+			audioTrackIndex = resolvedAudioTrackIndex
+		}
+		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"media_source_id", updatedSource.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"audio_track_index", audioTrackIndex,
+			"transcode_restarted", restarted,
+		)
+	}
+	return playSession
 }
 
 func (h *PlaybackHandler) applyCompatAudioSelection(
