@@ -537,10 +537,12 @@ func TestStartRemoteTranscodeDoesNotAdoptMismatchedAudioRecipe(t *testing.T) {
 		oldMediaFileID     int
 		oldAudioTrackIndex int
 		oldSourceChannels  int
+		oldOptionalAudio   bool
 	}{
 		{name: "media file changed with same audio facts", oldMediaFileID: 41, oldAudioTrackIndex: 1, oldSourceChannels: 0},
 		{name: "selected track changed channel layout", oldMediaFileID: 42, oldAudioTrackIndex: 1, oldSourceChannels: 6},
 		{name: "selected track changed at same channel layout", oldMediaFileID: 42, oldAudioTrackIndex: 0, oldSourceChannels: 0},
+		{name: "legacy optional audio recipe", oldMediaFileID: 42, oldAudioTrackIndex: 1, oldOptionalAudio: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -554,6 +556,7 @@ func TestStartRemoteTranscodeDoesNotAdoptMismatchedAudioRecipe(t *testing.T) {
 				TargetCodecAudio:    compatTargetAudioCodec,
 				SegmentDuration:     compatSegmentDuration,
 				AudioTrackIndex:     tt.oldAudioTrackIndex,
+				RequireAudioTrack:   !tt.oldOptionalAudio,
 				SourceAudioChannels: tt.oldSourceChannels,
 			})
 			playbackStore.Put(PlaybackSession{
@@ -567,11 +570,11 @@ func TestStartRemoteTranscodeDoesNotAdoptMismatchedAudioRecipe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("startRemoteTranscode: %v", err)
 			}
-			if received.AudioTrackIndex != 1 || received.SourceAudioChannels != 0 {
+			if received.AudioTrackIndex != 1 || received.SourceAudioChannels != 0 || !received.RequireAudioTrack {
 				t.Fatalf("replacement request = track %d, channels %d; want track 1, channels 0", received.AudioTrackIndex, received.SourceAudioChannels)
 			}
 			stored, ok := playbackStore.Get("play-1")
-			if !ok || stored.Recipe == nil || stored.Recipe.AudioTrackIndex != 1 || stored.Recipe.SourceAudioChannels != 0 {
+			if !ok || stored.Recipe == nil || stored.Recipe.AudioTrackIndex != 1 || stored.Recipe.SourceAudioChannels != 0 || !stored.Recipe.RequireAudioTrack {
 				t.Fatalf("replacement recipe = %+v, found=%v; want track 1, channels 0", stored.Recipe, ok)
 			}
 		})
@@ -622,6 +625,7 @@ func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
 					TranscodeNodeURL:    adoptedURL,
 					MediaFileID:         source.FileID,
 					AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+					RequireAudioTrack:   true,
 					SourceAudioChannels: compatSourceAudioChannels(source),
 				},
 			})
@@ -684,6 +688,7 @@ func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
 			TranscodeNodeURL:    adoptedURL + "/",
 			MediaFileID:         source.FileID,
 			AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+			RequireAudioTrack:   true,
 			SourceAudioChannels: compatSourceAudioChannels(source),
 		},
 	})
@@ -756,8 +761,9 @@ func TestMasterManifestWrapsRemoteCopyMediaPlaylistAsVariant(t *testing.T) {
 	card := playback.NewRecipeCard(7, "profile-1", source.FileID, adoptedURL, playback.TranscodeOpts{
 		SessionID: "upstream-1", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "copy", TargetCodecAudio: "copy",
-		SegmentDuration: compatSegmentDuration,
-		AudioTrackIndex: compatAudioTrackIndexOrDefault(source),
+		SegmentDuration:   compatSegmentDuration,
+		AudioTrackIndex:   compatAudioTrackIndexOrDefault(source),
+		RequireAudioTrack: true,
 	})
 	playbackStore.Put(PlaybackSession{
 		ID: "play-1", CompatToken: "compat-token", RouteItemID: "item",

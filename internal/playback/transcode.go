@@ -153,6 +153,8 @@ type TranscodeOpts struct {
 	// subtitle-free layout that older artifacts were encoded with.
 	PreparedTracks  *PreparedTracks
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
+	// RequireAudioTrack rejects sources missing the negotiated audio ordinal.
+	RequireAudioTrack bool
 	// SourceAudioChannels is the selected source stream's channel count. Zero
 	// means unknown and deliberately disables stereo downmix gain: boosting an
 	// already-stereo stream would change its authored level.
@@ -1045,7 +1047,11 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-map", "0:v:0")
 	}
 	if audioTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
+		audioMap := fmt.Sprintf("0:a:%d", audioTrackIndex)
+		if !opts.RequireAudioTrack {
+			audioMap += "?"
+		}
+		args = append(args, "-map", audioMap)
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}

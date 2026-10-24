@@ -629,7 +629,7 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 	const nodeURL = "http://transcode-node"
 	recipe := playback.NewRecipeCard(7, "profile-1", version.FileID, nodeURL, playback.TranscodeOpts{
 		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		AudioTrackIndex: 1, SegmentDuration: 2,
+		AudioTrackIndex: 1, RequireAudioTrack: true, SegmentDuration: 2,
 	})
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
@@ -791,7 +791,7 @@ func TestEnsureTranscodeSessionReplacesRecipeForDifferentSelectedSourceFacts(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = transcodeSession.Close() })
-	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 1 || opts.SourceAudioChannels != 6 {
+	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 1 || opts.SourceAudioChannels != 6 || !opts.RequireAudioTrack {
 		t.Fatalf("fresh opts = track %d channels %d, want track 1 channels 6", opts.AudioTrackIndex, opts.SourceAudioChannels)
 	}
 	persisted, ok := store.Get("play-1")
@@ -847,6 +847,9 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		t.Fatalf("startRemoteTranscode: %v", err)
 	}
 
+	if !remoteReq.RequireAudioTrack {
+		t.Fatal("remote request omitted negotiated audio requirement")
+	}
 	if got := remoteReq.AudioTrackIndex; got != 1 {
 		t.Fatalf("remote AudioTrackIndex = %d, want 1", got)
 	}
@@ -863,7 +866,7 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		t.Fatalf("remote AudioRecipeVersion = %q, want %q", got, playback.TransformationAudioToAACRecipeVersionV3)
 	}
 	persisted, ok := playbackStore.Get("play-1")
-	if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 6 {
+	if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 6 || !persisted.Recipe.RequireAudioTrack {
 		t.Fatalf("persisted remote recipe = %#v, want six source channels", persisted)
 	}
 }

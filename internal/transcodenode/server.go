@@ -82,6 +82,7 @@ type TranscodeStartRequest struct {
 	SegmentDuration            int                    `json:"segment_duration"`
 	HWAccel                    string                 `json:"hw_accel"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
+	RequireAudioTrack          bool                   `json:"require_audio_track,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
@@ -1806,6 +1807,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		// and reconstructed sessions balance identically.
 		HWDevice:           cfg.Playback.HWDevice,
 		AudioTrackIndex:    req.AudioTrackIndex,
+		RequireAudioTrack:  req.RequireAudioTrack,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
 		SubtitleCodec:      req.SubtitleCodec,
