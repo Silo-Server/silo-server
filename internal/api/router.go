@@ -2488,7 +2488,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// userRepo is a concrete pointer, so it has to stay out of the
 	// interface parameter when unset — a typed nil would satisfy the
 	// handler's nil check and panic on first use.
-	var compatUsers handlers.UserRepository
+	var compatUsers handlers.CompatConnectUsers
 	if userRepo != nil {
 		compatUsers = userRepo
 	}

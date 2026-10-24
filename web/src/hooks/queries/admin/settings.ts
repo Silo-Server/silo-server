@@ -57,6 +57,12 @@ function invalidateAdminDefaults(
   });
 }
 
+// Connect Apps connect-info reads the compat settings and, for
+// password_login_available, the server-wide local password switch.
+function affectsConnectInfo(key: string) {
+  return key.startsWith("jellyfin_compat.") || key === "auth.local_password_login";
+}
+
 /* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
 function useRetainedSettingsBaseline(
   displayed: SettingsValues | undefined,
@@ -254,10 +260,12 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
-          // The user-facing Connect Apps card reads the same settings and
-          // caches them for minutes, so it has to drop its copy too.
-          queryClient.invalidateQueries({ queryKey: compatKeys.all }),
         );
+      }
+      if (keys.some(affectsConnectInfo)) {
+        // The user-facing Connect Apps card reads the same settings and
+        // caches them for minutes, so it has to drop its copy too.
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
       }
       if (keys.includes("server.public_url")) {
         // Invitation and reset links are built on the public URL, so the
@@ -375,6 +383,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         );
+      }
+      if (affectsConnectInfo(variables.key)) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
       }
       if (variables.key.startsWith("catalog.search.")) {
         invalidations.push(

@@ -751,7 +751,8 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	result, err := h.SetWatchedState(r.Context(), userID, profileID, id, played, filter)
+	// The frozen v1 mark leaves a rewatch in progress alone.
+	result, err := h.SetWatchedState(r.Context(), userID, profileID, id, played, false, filter)
 	if err != nil {
 		writeAPIError(w, err)
 		return

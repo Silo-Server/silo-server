@@ -26844,7 +26844,7 @@
         "path": "/api/v2/favorites/{item_id}",
         "operation_id": "getFavorite"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. getFavoriteMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -43777,7 +43777,7 @@
       },
       "notes": "Section personal-progress (profile_scoped). Media kind confirmed from ItemsHandler.HandleMarkUnwatched: request has no body, v1 answers JSON {content_id, type, affected_count, played:false}; v2 answers 204 with no body. Same target resolution as markWatched (movie, ebook, episode, season, series; season/series expand to episodes), unknown or inaccessible target 404. Retry safety: natural_idempotent (clearing an unwatched item is a no-op). Conditionally registered in v1 (authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil); v2 registers unconditionally and answers 503 when the items handler is not wired.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "recordMarkUnwatched hides history through a fresh time.Now() cutoff and re-dispatches the provider event, so a retry after a lost response also hides a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
+      "retry_safety_note": "recordMarkUnwatched clears watched state through a fresh time.Now() cutoff, so a retry after a lost response also stops a viewing recorded in between from counting as watched (the viewing stays in history). The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",
@@ -44075,7 +44075,7 @@
         "path": "/api/v2/watchlist/{item_id}",
         "operation_id": "getWatchlistEntry"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. getWatchlistMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",

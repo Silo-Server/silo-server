@@ -25,7 +25,7 @@ func (s *SQLiteUserStore) LatestHistoryIDs(ctx context.Context, profileID string
    SELECT candidate.id FROM watch_history candidate
    WHERE candidate.profile_id = ? AND candidate.media_item_id = member.value
     AND candidate.watched_at > COALESCE((
-     SELECT hidden.hidden_before FROM hidden_history_items hidden
+     SELECT COALESCE(hidden.removed_before, hidden.hidden_before) FROM hidden_history_items hidden
      WHERE hidden.profile_id = candidate.profile_id AND hidden.media_item_id = candidate.media_item_id
     ), '')
    ORDER BY candidate.watched_at DESC, candidate.id DESC

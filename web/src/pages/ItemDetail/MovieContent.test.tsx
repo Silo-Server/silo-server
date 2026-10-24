@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -60,15 +61,6 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
-}));
-
-const resetProgressMocks = vi.hoisted(() => ({
-  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
-}));
-
-vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
-  useResetProgressAction: resetProgressMocks.useResetProgressAction,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -201,9 +193,11 @@ function makeMovieItem(overrides: Partial<ItemDetail> = {}) {
 
 function renderMovie(item = makeMovieItem()) {
   renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/item/movie-1"]}>
-      <MovieContent item={item} />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={item} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -251,9 +245,13 @@ describe("MovieContent", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent item={makeMovieItem({ runtime: 163, versions: [standard, directorsCut] })} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/movie-1"]}>
+          <MovieContent
+            item={makeMovieItem({ runtime: 163, versions: [standard, directorsCut] })}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "2h 43m" });

@@ -44,6 +44,10 @@ const (
 	warnJellyfinResumeUnavailable         = "fetching Jellyfin resume positions failed"
 	warnJellyfinFavoritesUnavailable      = "fetching Jellyfin favorites failed"
 	warnJellyfinFavoriteSeriesUnavailable = "fetching Jellyfin series metadata for favorites failed"
+	// warnJellyfinLookbackUnsorted reports a lookback run that read the full
+	// played history because the server did not return plays newest first, or
+	// the list kept moving while the run read it.
+	warnJellyfinLookbackUnsorted = "jellyfin played items were not newest first or kept moving; read the full played history"
 
 	embyFavoritesUnavailableSummary      = "Emby favorites couldn't be read, so none were imported."
 	embySeriesUnavailableSummary         = "Emby show details couldn't be read, so some episodes may be unmatched."
@@ -53,6 +57,7 @@ const (
 	jellyfinResumeUnavailableSummary         = "Jellyfin in-progress items couldn't be read, so partly watched titles may be missing."
 	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so some favorites may be missing."
 	jellyfinFavoriteSeriesUnavailableSummary = "Jellyfin show details couldn't be read, so some favorite episodes may be unmatched."
+	jellyfinLookbackUnsortedSummary          = "Jellyfin didn't list plays newest first, or its list kept changing during the read, so this run read the full played history instead of only the lookback window."
 )
 
 // hiddenHistoryWarning is the stored diagnostic for records this profile keeps
@@ -110,6 +115,8 @@ func PublicWarning(diagnostic string) string {
 		return jellyfinFavoritesUnavailableSummary
 	case diagnostic == warnJellyfinFavoriteSeriesUnavailable:
 		return jellyfinFavoriteSeriesUnavailableSummary
+	case diagnostic == warnJellyfinLookbackUnsorted:
+		return jellyfinLookbackUnsortedSummary
 	}
 	return GenericRunWarning
 }

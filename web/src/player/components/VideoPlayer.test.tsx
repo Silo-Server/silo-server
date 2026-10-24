@@ -3652,6 +3652,49 @@ describe("VideoPlayer plan failure recovery", () => {
     expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(2, 0);
   });
 
+  // A sync request built from the player's stale "off" would turn the restored
+  // subtitle off on the server, and the auto-selection would then turn it on again.
+  it("adopts a subtitle a version change dropped and brought back without replanning", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const sidecarTrack: PlayerSubtitleInfo = {
+      index: 0,
+      media_file_id: 7,
+      track_id: "file:7:subtitle:0",
+      language: "en",
+      codec: "srt",
+      label: "English",
+      source: "external",
+      url: "/stream/session-1/subtitles/0.vtt",
+    };
+    const withSubtitle = (planId: string) =>
+      fixturePlanV3({
+        ...directPlan,
+        plan_id: planId,
+        selected_tracks: { ...directPlan.selected_tracks, subtitle: { id: "", index: 0 } },
+      });
+    const { rerenderPlayer } = renderPlayer({
+      plan: withSubtitle("plan:2160p"),
+      subtitleUrls: [sidecarTrack],
+      subtitleMode: "always",
+      preferredSubtitleLanguage: "en",
+      onSubtitleTrackChange,
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(0));
+
+    // A fallback version without subtitles, then back to the first.
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:1080p" }),
+      planRevision: 2,
+      subtitleUrls: [],
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBeNull());
+    rerenderPlayer({ plan: withSubtitle("plan:2160p-again"), planRevision: 3 });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(0));
+    await act(async () => Promise.resolve());
+    expect(onSubtitleTrackChange).not.toHaveBeenCalled();
+  });
+
   // The rollback is otherwise silent: the refusal only renders inside the
   // quality menu, which a user who just picked a subtitle never opens.
   it("toasts the server's refusal when a subtitle change is rolled back", async () => {

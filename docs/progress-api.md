@@ -91,8 +91,20 @@ clears the acting profile's resume position on a movie or episode and answers
 204. It is the manual edit for an item someone skimmed and does not want left
 partly watched. The progress entry stays with `position_seconds` 0 and keeps
 `completed` and `duration_seconds`, so a rewatched item stays watched. Watch
-history is untouched. Mark unwatched (`unmarkWatched`) is different: it removes
-the item's history, including unfinished plays.
+history is untouched. Mark unwatched (`unmarkWatched`) is different: it also
+clears the watched state. It keeps watch history too, but plays from before the
+unmark no longer count as watched, and watch providers keep theirs. Only
+`removeHistoryEntries` removes plays from history. The web app offers Mark
+Watched and Mark Unwatched (`unmarkWatched`) on a partly watched movie or
+episode, rewatches included.
+
+`markWatched` on a partly watched item records a play. On a rewatch in progress
+(a watched movie or episode with a resume position) it records another completed
+play and clears the position, where it used to be a no-op. A season or series
+mark leaves those episodes alone, as do the frozen v1 operation and the
+Jellyfin played endpoints. A repeated mark records nothing until playback sets
+a new position, so it is not exactly once: a retry that lands after a new
+progress report records another play.
 
 The write is stamped with the server time. It advances the delta-sync cursor, so
 other devices receive the cleared position, and an older provider resume point
@@ -111,7 +123,10 @@ first request.
 
 Clients detect the operation with `getProgressCapabilities`
 (GET `/api/v2/progress/capabilities`), a profile-scoped capability document
-whose `clear_resume_position` is true when it is served. Jellyfin clients
+whose `clear_resume_position` is true when it is served, and whose
+`mark_watched_records_rewatch` is true when `markWatched` records a rewatch in
+progress. An older server answers that mark with a 204 that records nothing, so
+a client checks the flag before offering Mark Watched on a rewatch. Jellyfin clients
 already have the equivalent: `PlaybackPositionTicks` 0 without `Played` on
 `/UserItems/{itemId}/UserData` ([Jellyfin compatibility](jellycompat-api.md)).
 

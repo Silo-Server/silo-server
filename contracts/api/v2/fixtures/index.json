@@ -7028,6 +7028,69 @@
       "body_file": "get_favorite_authentication_required.json"
     },
     {
+      "name": "get_favorite_membership_member",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "The item is one of the profile's favorites: is_member true with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:c/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_favorite_membership_member.json"
+    },
+    {
+      "name": "get_favorite_membership_not_found",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "An item the viewer may not see is 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:hidden/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_favorite_membership_not_found.json"
+    },
+    {
+      "name": "get_favorite_membership_not_member",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "The item is not one of the profile's favorites: 200 with is_member false, not a 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:nope/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_favorite_membership_not_member.json"
+    },
+    {
       "name": "get_favorite_not_found",
       "operation_id": "getFavorite",
       "scenario": "The item is not one of the profile's favorites.",
@@ -7945,6 +8008,28 @@
       "body_file": "get_person_ok.json"
     },
     {
+      "name": "get_personal_list_capability_ok",
+      "operation_id": "getPersonalListCapability",
+      "scenario": "The personal-list capability document: the favorites and watchlist membership reads are supported.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/personal-lists",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"98fb041ee1ec885522a26301c4c6120233fbe27744670884c8fe13bcc8520cdb\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListCapability",
+      "body_file": "get_personal_list_capability_ok.json"
+    },
+    {
       "name": "get_plugin_settings_authentication_required",
       "operation_id": "getPluginSettings",
       "scenario": "A plugin's settings read without a credential.",
@@ -8059,7 +8144,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"2ff6c702f87c15b4122063ead741b7271dbbbc461a5a54a97379df4b16633a18\""
+        "ETag": "\"c4488bd6fb6b5c2a8059c048014e2ad89b2e5f3b9a1816ba9a074bad84eabf16\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ProgressCapabilities",
@@ -8878,6 +8963,48 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/WatchlistEntry",
       "body_file": "get_watchlist_entry_ok.json"
+    },
+    {
+      "name": "get_watchlist_membership_member",
+      "operation_id": "getWatchlistMembership",
+      "scenario": "The item is on the profile's watchlist: is_member true with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:c/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_watchlist_membership_member.json"
+    },
+    {
+      "name": "get_watchlist_membership_not_member",
+      "operation_id": "getWatchlistMembership",
+      "scenario": "The item is not on the profile's watchlist: 200 with is_member false, not a 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:nope/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_watchlist_membership_not_member.json"
     },
     {
       "name": "guarded_delete_ok",

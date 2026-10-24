@@ -53,7 +53,7 @@ func queueRunnerRepositoryFromPool(t *testing.T, pool *pgxpool.Pool) *Repository
 func TestQueueClaimGenerationCancellationAndLegacyWriters(t *testing.T) {
 	repo := queueRunnerRepository(t)
 	ctx := t.Context()
-	run, err := repo.EnqueueAdminRun(ctx, 1)
+	run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestQueueClaimGenerationCancellationAndLegacyWriters(t *testing.T) {
 	if err = repo.failRun(ctx, claim, ExecutionSummary{}, "late failure"); err == nil {
 		t.Fatal("terminal rewritten")
 	}
-	next, err := repo.EnqueueAdminRun(ctx, 1)
+	next, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestQueueTwoNodesAdmissionAndClaim(t *testing.T) {
 	var accepted atomic.Int32
 	for range 12 {
 		wg.Go(func() {
-			_, err := repo.EnqueueAdminRun(ctx, 1)
+			_, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 			if err == nil {
 				accepted.Add(1)
 			} else if !errors.Is(err, ErrActiveRunExists) {
@@ -149,7 +149,7 @@ func TestQueueTwoNodesAdmissionAndClaim(t *testing.T) {
 func TestQueueRecoversExpiredCancellation(t *testing.T) {
 	repo := queueRunnerRepository(t)
 	ctx := t.Context()
-	run, err := repo.EnqueueAdminRun(ctx, 1)
+	run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestQueueRecoversExpiredCancellation(t *testing.T) {
 	if err := repo.completeRun(ctx, claim, ExecutionSummary{}); err == nil {
 		t.Fatal("late worker completed a canceled run")
 	}
-	if _, err := repo.EnqueueAdminRun(ctx, 1); err != nil {
+	if _, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{}); err != nil {
 		t.Fatalf("canceled run still blocks its mapping: %v", err)
 	}
 }
@@ -198,7 +198,7 @@ func TestQueueConfigurationChangesAndStaleWorkAreNotReplayed(t *testing.T) {
 		`UPDATE history_import_sources SET revision=revision+1 WHERE id=1`,
 		`UPDATE history_import_user_mappings SET revision=revision+1,silo_profile_id='other' WHERE id=1`,
 	} {
-		run, err := repo.EnqueueAdminRun(ctx, 1)
+		run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +220,7 @@ func TestQueueConfigurationChangesAndStaleWorkAreNotReplayed(t *testing.T) {
 			t.Fatalf("failed=%+v %v", got, err)
 		}
 	}
-	run, err := repo.EnqueueAdminRun(ctx, 1)
+	run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestQueuePersistedIntentRestartAndCapacity(t *testing.T) {
 	}
 	// No Service exists at acceptance: simulates process death after persistence,
 	// before an in-memory wake or provider construction.
-	run, err := repo.EnqueueAdminRun(ctx, 1)
+	run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,10 +294,10 @@ func TestQueueBulkLimitAndOrderedOutcomes(t *testing.T) {
 	repo := queueRunnerRepository(t)
 	ctx := t.Context()
 	service := &Service{repo: repo}
-	if _, err := repo.EnqueueAdminRun(ctx, 1); err != nil {
+	if _, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.BulkCreateAdminRuns(ctx, 1)
+	result, err := service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestQueueBulkLimitAndOrderedOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = service.BulkCreateAdminRuns(ctx, 1); !errors.Is(err, ErrBulkRunTooLarge) {
+	if _, err = service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{}); !errors.Is(err, ErrBulkRunTooLarge) {
 		t.Fatalf("oversize=%v", err)
 	}
 	var count int
@@ -338,7 +338,7 @@ func TestQueueWorkerAcknowledgesRemoteCancelAndConfigurationChange(t *testing.T)
 		t.Run(change, func(t *testing.T) {
 			repo := queueRunnerRepository(t)
 			ctx := t.Context()
-			run, err := repo.EnqueueAdminRun(ctx, 1)
+			run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,7 +441,7 @@ func TestQueueBulkPartialFailureAndSourceAuditPaging(t *testing.T) {
 			t.Error(err)
 		}
 	}))
-	result, err := service.BulkCreateAdminRuns(ctx, 1)
+	result, err := service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestQueueCancelCompletionRaceHasOneTerminalOutcome(t *testing.T) {
 	repo := queueRunnerRepository(t)
 	ctx := t.Context()
 	for range 12 {
-		run, err := repo.EnqueueAdminRun(ctx, 1)
+		run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -541,7 +541,7 @@ func TestQueueDisabledSourceRejectsBeforeAdmission(t *testing.T) {
 	if _, err := repo.pool.Exec(ctx, `UPDATE history_import_sources SET enabled=false WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.EnqueueAdminRun(ctx, 1); !errors.Is(err, ErrSourceDisabled) {
+	if _, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{}); !errors.Is(err, ErrSourceDisabled) {
 		t.Fatalf("disabled=%v", err)
 	}
 	var count int

@@ -178,6 +178,10 @@ func (s *SQLiteUserStore) RemoveHistoryItems(_ context.Context, profileID string
 	return RemoveHistoryItems(s.db, profileID, mediaItemIDs, removedAt)
 }
 
+func (s *SQLiteUserStore) ClearWatchedState(_ context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error {
+	return ClearWatchedState(s.db, profileID, mediaItemIDs, clearedAt)
+}
+
 func (s *SQLiteUserStore) DeleteHistoryBySource(_ context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {
 	return DeleteHistoryBySource(s.db, profileID, mediaItemIDs, source)
 }

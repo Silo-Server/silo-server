@@ -1764,7 +1764,40 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, notInterestedFixtureCases()...)
 	cases = append(cases, notificationSeriesFixtureCases()...)
 	cases = append(cases, notificationSeriesMuteFixtureCases()...)
-	return append(cases, seasonalThemeFixtureCases()...)
+	cases = append(cases, seasonalThemeFixtureCases()...)
+	return append(cases, personalListMembershipFixtureCases()...)
+}
+
+// personalListMembershipFixtureCases covers the favorites and watchlist
+// membership reads, which answer a non-member with 200 rather than 404.
+func personalListMembershipFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_favorite_membership_member", operationID: "getFavoriteMembership",
+			scenario: "The item is one of the profile's favorites: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_member", operationID: "getFavoriteMembership",
+			scenario: "The item is not one of the profile's favorites: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_found", operationID: "getFavoriteMembership",
+			scenario: "An item the viewer may not see is 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:hidden/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_personal_list_capability_ok", operationID: "getPersonalListCapability",
+			scenario: "The personal-list capability document: the favorites and watchlist membership reads are supported.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/personal-lists", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/PersonalListCapability"},
+		{name: "get_watchlist_membership_member", operationID: "getWatchlistMembership",
+			scenario: "The item is on the profile's watchlist: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_watchlist_membership_not_member", operationID: "getWatchlistMembership",
+			scenario: "The item is not on the profile's watchlist: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+	}
 }
 
 // fixtureSeasonalThemes is recipes.SeasonalThemes with every list link moved

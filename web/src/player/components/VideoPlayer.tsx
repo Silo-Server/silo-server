@@ -295,7 +295,6 @@ interface VideoPlayerProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
   /**
    * null means the connected server's answer is not in yet, which is not the
@@ -515,7 +514,6 @@ export function VideoPlayer({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
   intro,
   introSkipMode = "ask",
   bufferingMode = "always",
@@ -3705,7 +3703,31 @@ export function VideoPlayer({
       ? (effectiveSubtitleTracks.find((track) => track.index === activeSubtitleIndex) ?? null)
       : null;
   const requestedSubtitleTrackChangeRef = useRef<string | null>(null);
+  const lastPlanSubtitleRef = useRef({
+    sessionId,
+    planId: plan.plan_id,
+    index: plan.selected_tracks.subtitle?.index ?? null,
+  });
   useEffect(() => {
+    const planSubtitleIndex = plan.selected_tracks.subtitle?.index ?? null;
+    const previousPlan = lastPlanSubtitleRef.current;
+    lastPlanSubtitleRef.current = { sessionId, planId: plan.plan_id, index: planSubtitleIndex };
+    // A replan in the same session that moved the subtitle on its own (a
+    // version change dropping it, or bringing the viewer's kept subtitle back)
+    // is the server's selection to adopt, not a difference to send back. Only
+    // when the player still showed the previous plan's track: a pick of the
+    // viewer's own that has not landed yet still goes out below.
+    if (
+      previousPlan.sessionId === sessionId &&
+      previousPlan.planId !== plan.plan_id &&
+      previousPlan.index !== planSubtitleIndex &&
+      activeSubtitleIndex === previousPlan.index
+    ) {
+      subtitleSelectionWasManualRef.current = true;
+      requestedSubtitleTrackChangeRef.current = null;
+      setActiveSubtitleIndex(planSubtitleIndex);
+      return;
+    }
     // Live AI cues belong to the client overlay, not the server inventory.
     // Leave the current plan alone until a real downloaded track is ready.
     if (activeSubtitleIndex === LIVE_SUBTITLE_INDEX) {
@@ -3748,6 +3770,7 @@ export function VideoPlayer({
     plan.plan_id,
     plan.selected_tracks.subtitle?.index,
     plan.subtitle.mode,
+    sessionId,
     subtitleHandoverPending,
   ]);
 
@@ -3822,7 +3845,6 @@ export function VideoPlayer({
       preferredLanguage: preferredSubtitleLanguage ?? null,
       preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
       audioLanguage: audioLang,
-      profileLanguage: profileLanguage ?? null,
       showForcedSubtitles: showForcedSubtitles ?? true,
     });
 
@@ -3840,7 +3862,6 @@ export function VideoPlayer({
     effectiveSubtitleTracks,
     subtitleMode,
     showForcedSubtitles,
-    profileLanguage,
     audioTracks,
     activeAudioIndex,
     selectedVersion,

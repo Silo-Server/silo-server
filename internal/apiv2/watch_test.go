@@ -23,10 +23,11 @@ type fakeWatch struct {
 }
 
 type fakeMark struct {
-	userID    int
-	profileID string
-	contentID string
-	played    bool
+	userID        int
+	profileID     string
+	contentID     string
+	played        bool
+	recordRewatch bool
 }
 
 func (f *fakeWatch) ContextAccessFilter(_ context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
@@ -72,14 +73,14 @@ func (f *fakeWatch) WatchDetail(_ context.Context, userID int, profileID, conten
 	return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Watch target not found"}
 }
 
-func (f *fakeWatch) SetWatchedState(_ context.Context, userID int, profileID, contentID string, played bool, _ catalogpkg.AccessFilter) (handlers.WatchedStateView, error) {
+func (f *fakeWatch) SetWatchedState(_ context.Context, userID int, profileID, contentID string, played, recordRewatch bool, _ catalogpkg.AccessFilter) (handlers.WatchedStateView, error) {
 	if f.err != nil {
 		return handlers.WatchedStateView{}, f.err
 	}
 	if contentID != "movie:heat-1995" && contentID != "series:heat" {
 		return handlers.WatchedStateView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 	}
-	f.marks = append(f.marks, fakeMark{userID: userID, profileID: profileID, contentID: contentID, played: played})
+	f.marks = append(f.marks, fakeMark{userID: userID, profileID: profileID, contentID: contentID, played: played, recordRewatch: recordRewatch})
 	return handlers.WatchedStateView{ContentID: contentID, Type: "movie", AffectedCount: 1, Played: played}, nil
 }
 
@@ -137,7 +138,8 @@ func TestMarkWatched(t *testing.T) {
 	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if len(watch.marks) != 2 || watch.marks[0] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "series:heat", played: true}) ||
+	// A v2 mark asks for a rewatch to be recorded; an unmark does not.
+	if len(watch.marks) != 2 || watch.marks[0] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "series:heat", played: true, recordRewatch: true}) ||
 		watch.marks[1] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "movie:heat-1995", played: false}) {
 		t.Fatalf("marks = %+v", watch.marks)
 	}

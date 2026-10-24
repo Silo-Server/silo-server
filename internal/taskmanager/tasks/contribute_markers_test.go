@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,10 +26,11 @@ type fakeContribRunner struct {
 	segments [][]markers.MarkerKind
 	autoSeen bool
 	outcomes []markers.ContributionOutcome
-	errs     map[int]error
 	// sequence, when set, returns one entry per call before falling back to
 	// outcomes.
 	sequence [][]markers.ContributionOutcome
+	// errs fails the calls at these indexes without using up sequence.
+	errs map[int]error
 }
 
 func (f *fakeContribRunner) AutoContributors(context.Context) ([]markers.AutoContributor, error) {
@@ -40,10 +42,11 @@ func (f *fakeContribRunner) AmendContributors(context.Context) ([]markers.AmendC
 }
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
+	call := len(f.calls)
 	f.calls = append(f.calls, file.ID)
 	f.segments = append(f.segments, opts.Segments)
 	f.autoSeen = opts.Auto
-	if err := f.errs[file.ID]; err != nil {
+	if err := f.errs[call]; err != nil {
 		return nil, err
 	}
 	if len(f.sequence) > 0 {
@@ -236,6 +239,7 @@ func TestContributeMarkersTaskFailsWhenAllSubmissionsError(t *testing.T) {
 	cands := &fakeCandidates{ids: []int{10, 11}}
 	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
 	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
+	task.wait = noWait
 
 	prog := &contribTestProgress{}
 	err := task.Execute(context.Background(), prog)
@@ -277,11 +281,13 @@ func TestContributeMarkersTaskLogsResolverErrorText(t *testing.T) {
 	slog.SetDefault(slog.New(opslog.NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "test")))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 	runner := &fakeContribRunner{
-		errs:     map[int]error{10: fmt.Errorf("resolve movie external ids: %w", errors.New("database unavailable"))},
+		// File 10, the first call, fails before reaching a provider.
+		errs:     map[int]error{0: fmt.Errorf("resolve movie external ids: %w", errors.New("database unavailable"))},
 		outcomes: []markers.ContributionOutcome{{Status: markers.SubmissionStatusPending, Provider: "introdb", Segment: markers.MarkerKindIntro}},
 	}
 	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
 	task := NewContributeMarkersTask(runner, &fakeCandidates{ids: []int{10, 11}}, fakeFileLoader{})
+	task.wait = noWait
 	progress := &contribTestProgress{}
 	if err := task.Execute(t.Context(), progress); err != nil {
 		t.Fatal(err)
@@ -298,5 +304,102 @@ func TestContributeMarkersTaskLogsResolverErrorText(t *testing.T) {
 	}
 	if counts["submitted"] != 1 || counts["failed"] != 1 {
 		t.Fatalf("counts = %v", counts)
+	}
+}
+
+func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
+	failed := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.OutcomeStatusError}}
+	skipped := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.OutcomeStatusSkipped}}
+	refused := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.OutcomeStatusInvalid}}
+	pending := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.SubmissionStatusPending}}
+	cases := []struct {
+		name     string
+		ids      []int
+		sequence [][]markers.ContributionOutcome
+		errs     map[int]error
+		// fallback answers every call after sequence.
+		fallback   []markers.ContributionOutcome
+		wantCalls  []int
+		wantWaits  []time.Duration
+		wantFailed int
+		// wantErr is a run where every attempt failed, which Execute reports.
+		wantErr bool
+	}{
+		{
+			name:       "stops after the longest backoff",
+			ids:        []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+			fallback:   failed,
+			wantCalls:  []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			wantWaits:  []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute},
+			wantFailed: 9,
+			wantErr:    true,
+		},
+		{
+			name:       "a provider refusal resets the streak",
+			ids:        []int{1, 2, 3, 4},
+			sequence:   [][]markers.ContributionOutcome{failed, failed, refused, failed},
+			fallback:   pending,
+			wantCalls:  []int{1, 2, 3, 4, 100},
+			wantWaits:  []time.Duration{30 * time.Second, time.Minute, 30 * time.Second},
+			wantFailed: 3,
+		},
+		{
+			name: "lookup errors count and skips leave the streak",
+			ids:  []int{1, 2, 3, 4},
+			// File 1 fails before reaching a provider, file 2 is skipped, and
+			// file 3 fails for one provider and is skipped by another.
+			errs:       map[int]error{0: errors.New("resolve ids")},
+			sequence:   [][]markers.ContributionOutcome{skipped, append(slices.Clone(failed), markers.ContributionOutcome{Provider: "other", Status: markers.OutcomeStatusSkipped})},
+			fallback:   pending,
+			wantCalls:  []int{1, 2, 3, 4, 100},
+			wantWaits:  []time.Duration{30 * time.Second, time.Minute},
+			wantFailed: 2,
+		},
+		{
+			// The files after one failure that a provider never sees wait once
+			// between them, not once each.
+			name:       "skips after a failure wait once",
+			ids:        []int{1, 2, 3, 4},
+			sequence:   [][]markers.ContributionOutcome{failed, skipped, skipped, skipped},
+			fallback:   pending,
+			wantCalls:  []int{1, 2, 3, 4, 100},
+			wantWaits:  []time.Duration{30 * time.Second},
+			wantFailed: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeContribRunner{
+				auto:     []markers.AutoContributor{{Provider: "introdb"}},
+				sequence: tc.sequence,
+				errs:     tc.errs,
+				outcomes: tc.fallback,
+			}
+			// The credits pass holds file 100, which a stopped run never reaches.
+			task := NewContributeMarkersTask(runner, &fakeCandidates{ids: tc.ids, credits: []int{100}}, fakeFileLoader{})
+			var waited []time.Duration
+			task.wait = func(_ context.Context, d time.Duration) error {
+				waited = append(waited, d)
+				return nil
+			}
+
+			prog := &contribTestProgress{}
+			if err := task.Execute(context.Background(), prog); (err != nil) != tc.wantErr {
+				t.Fatalf("Execute error = %v, want an error: %v", err, tc.wantErr)
+			}
+			var data map[string]int
+			if err := json.Unmarshal(prog.data, &data); err != nil {
+				t.Fatalf("decode result data: %v", err)
+			}
+			if data["failed"] != tc.wantFailed {
+				t.Errorf("failed = %d, want %d", data["failed"], tc.wantFailed)
+			}
+			if !slices.Equal(runner.calls, tc.wantCalls) {
+				t.Errorf("calls = %v, want %v", runner.calls, tc.wantCalls)
+			}
+			if !slices.Equal(waited, tc.wantWaits) {
+				t.Errorf("waits = %v, want %v", waited, tc.wantWaits)
+			}
+		})
 	}
 }

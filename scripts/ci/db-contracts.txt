@@ -243,6 +243,8 @@
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
 ./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
 ./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
+./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
+./internal/metadata TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
@@ -278,6 +280,8 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
+./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
+./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 
@@ -510,6 +514,7 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
@@ -545,3 +550,7 @@
 # The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
 # keeps a value an administrator chose.
 ./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
+
+# A stored collection's Jellyfin BoxSet page skips members the viewer can't see
+# without shortening the page or shifting later pages.
+./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB

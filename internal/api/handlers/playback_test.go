@@ -814,19 +814,25 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-// A start remembers the version and audio track it played: under the series
-// for an episode, so the next episode opens on the same traits, and under the
-// movie itself, naming the exact file, so a play too short to leave progress
-// still keeps the viewer's choice.
-func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
+// A start remembers the version it played: under the series for an episode,
+// so the next episode opens on the same traits, and under the movie itself,
+// naming the exact file, so a play too short to leave progress still keeps
+// the viewer's choice. On /api/v2 it never saves the audio track: a start
+// cannot tell a pick from Auto, a Next Up carry, or a fallback, and a saved
+// track would outrank the profile's language for the rest of the series, so
+// picks reach the audio preference through PUT /audio-prefs. The frozen
+// /api/v1 bridge keeps saving it.
+func TestHandleStartPlaybackV3_RemembersVersionButNotAudioTrack(t *testing.T) {
 	tests := []struct {
 		name       string
 		episodeID  string
 		key        string
 		wantFileID int
+		v1         bool
 	}{
 		{name: "episode", episodeID: "episode-1", key: "series-1", wantFileID: 0},
 		{name: "movie", key: "movie-1", wantFileID: 42},
+		{name: "v1 bridge episode", episodeID: "episode-1", key: "series-1", wantFileID: 0, v1: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -849,7 +855,16 @@ func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
 			request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 			audioTrack := 1
 			request.AudioTrackIndex = &audioTrack
-			response := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, request))
+			ctx, path := WithNativeAPIV2(newAuthorizedPlaybackContext()), "/api/v2/playback/start"
+			if tt.v1 {
+				ctx, path = newAuthorizedPlaybackContext(), "/api/v1/playback/start"
+			}
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, path, strings.NewReader(marshalV3StartRequest(t, request))).WithContext(ctx))
+			var response playback.DecisionResponseV3
+			if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil {
+				t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+			}
 			handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
 
 			pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", tt.key)
@@ -868,11 +883,13 @@ func TestHandleStartPlaybackV3_RemembersVersionAndAudioChoice(t *testing.T) {
 			}
 
 			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
-			if err != nil || audio == nil {
-				t.Fatalf("GetAudioPreference(%q) = %+v, %v", tt.key, audio, err)
-			}
-			if audio.AudioTrackIndex != 1 {
-				t.Fatalf("stored audio track = %d, want 1", audio.AudioTrackIndex)
+			switch {
+			case err != nil:
+				t.Fatalf("GetAudioPreference(%q): %v", tt.key, err)
+			case tt.v1 && (audio == nil || audio.AudioTrackIndex != 1):
+				t.Fatalf("v1 bridge saved audio %+v, want track 1", audio)
+			case !tt.v1 && audio != nil:
+				t.Fatalf("GetAudioPreference(%q) = %+v; want no saved audio preference", tt.key, audio)
 			}
 		})
 	}

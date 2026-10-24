@@ -172,7 +172,11 @@ export interface CompatConnectInfo {
     server_name: string;
   };
   account: {
-    /** False for SSO/plugin-provisioned accounts, which cannot use compat login. */
+    /**
+     * False when the account's local password can't sign in: SSO/plugin-provisioned
+     * accounts, and accounts that aren't break-glass while the server turns
+     * password sign-in off.
+     */
     password_login_available: boolean;
   };
 }

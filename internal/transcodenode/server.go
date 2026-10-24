@@ -2816,8 +2816,12 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Cache-Control", "no-store, no-transform, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
+	// Same reason as the API's manifest handler. The API relays a playlist
+	// requested without a stream token as-is, headers included, so the length
+	// has to start here.
+	w.Header().Set("Content-Length", strconv.Itoa(len(manifest)))
 	w.Write(manifest)
 }
 
