@@ -216,8 +216,8 @@ export interface ActionBarProps {
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
-  /** Mark Unwatched for a partly watched item: clears its resume position and keeps history. */
-  onClearResumePosition?: () => void;
+  /** Mark Unwatched in the More menu for a partly watched movie or episode. */
+  onMarkUnwatched?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -298,7 +298,7 @@ export default function ActionBar({
   playLabel = "Play",
   playProgress,
   restartHref,
-  onClearResumePosition,
+  onMarkUnwatched,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -719,11 +719,11 @@ export default function ActionBar({
         Play from Beginning
       </DetailOverflowMenuItem>
     ),
-    onClearResumePosition && (
+    onMarkUnwatched && (
       <DetailOverflowMenuItem
         key="markUnwatched"
         closeMenu={closeOverflowMenu}
-        onAction={onClearResumePosition}
+        onAction={onMarkUnwatched}
       >
         <Eye className="size-4" />
         Mark Unwatched

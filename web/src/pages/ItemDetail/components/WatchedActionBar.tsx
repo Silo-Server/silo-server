@@ -7,7 +7,7 @@ type WatchedActionProps =
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
-  | "onClearResumePosition";
+  | "onMarkUnwatched";
 
 interface WatchedActionBarProps extends Omit<ActionBarProps, WatchedActionProps> {
   item: ItemDetail;

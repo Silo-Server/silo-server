@@ -138,14 +138,14 @@ describe("ActionBar marker re-detection", () => {
 
 describe("ActionBar Mark Unwatched for a partly watched item", () => {
   it("leaves Play from Beginning to the Play button's resume prompt", async () => {
-    const onClearResumePosition = vi.fn();
+    const onMarkUnwatched = vi.fn();
     renderBar(
       <ActionBar
         contentId="movie-1"
         playHref="/watch/movie-1"
         playLabel="Resume"
         restartHref="/watch/movie-1?restart=1"
-        onClearResumePosition={onClearResumePosition}
+        onMarkUnwatched={onMarkUnwatched}
       />,
     );
 
@@ -153,7 +153,7 @@ describe("ActionBar Mark Unwatched for a partly watched item", () => {
     expect(screen.queryByRole("menuitem", { name: "Play from Beginning" })).toBeNull();
     await userEvent.click(screen.getByRole("menuitem", { name: "Mark Unwatched" }));
 
-    expect(onClearResumePosition).toHaveBeenCalledOnce();
+    expect(onMarkUnwatched).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
@@ -165,7 +165,7 @@ describe("ActionBar Mark Unwatched for a partly watched item", () => {
         playLabel="Resume"
         restartHref="/watch/movie-1?restart=1"
         versions={[{ file_id: 1 }, { file_id: 2 }] as never}
-        onClearResumePosition={vi.fn()}
+        onMarkUnwatched={vi.fn()}
       />,
     );
 

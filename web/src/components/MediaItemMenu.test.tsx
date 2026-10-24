@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   matchItem: vi.fn(),
   toggleFavorite: vi.fn(),
   toggleWatched: vi.fn(),
-  clearResumePosition: vi.fn(),
   posterSize: "standard" as "compact" | "standard" | "large",
   authState: undefined as { user: { role: "admin" | "user" } } | undefined,
 }));
@@ -56,13 +55,6 @@ vi.mock("@/hooks/queries/items", () => ({
   useWatchedStateMutation: () => ({
     isPending: false,
     mutateAsync: (...args: unknown[]) => mocks.toggleWatched(...args),
-  }),
-}));
-
-vi.mock("@/hooks/queries/progress", () => ({
-  useClearResumePosition: () => ({
-    isPending: false,
-    mutate: (...args: unknown[]) => mocks.clearResumePosition(...args),
   }),
 }));
 
@@ -119,7 +111,6 @@ beforeEach(() => {
   mocks.toggleFavorite.mockResolvedValue(undefined);
   mocks.toggleWatched.mockReset();
   mocks.toggleWatched.mockResolvedValue(undefined);
-  mocks.clearResumePosition.mockReset();
   mocks.posterSize = "standard";
   mocks.authState = undefined;
 });
@@ -291,7 +282,7 @@ describe("buildMediaItemMenuModel", () => {
         ).toEqual([
           "playFromBeginning:Play from Beginning",
           "markWatched:Mark Watched",
-          "clearResumePosition:Mark Unwatched",
+          "markUnwatched:Mark Unwatched",
           "dismissFromHome:Remove from Continue Watching",
         ]);
       }
@@ -309,7 +300,7 @@ describe("buildMediaItemMenuModel", () => {
     });
 
     const keys = model.flatMap((item) => (item.kind === "action" ? [item.key] : []));
-    expect(keys).toContain("clearResumePosition");
+    expect(keys).toContain("markUnwatched");
     expect(keys).not.toContain("toggleWatched");
   });
 
@@ -330,7 +321,7 @@ describe("buildMediaItemMenuModel", () => {
 
       expect(keys, mediaType).toContain("toggleWatched");
       expect(keys, mediaType).not.toContain("markWatched");
-      expect(keys, mediaType).not.toContain("clearResumePosition");
+      expect(keys, mediaType).not.toContain("markUnwatched");
     }
   });
 
@@ -511,7 +502,7 @@ describe("MediaItemMenu trigger visibility", () => {
     });
   });
 
-  it("only clears a partly watched item's resume position on Mark Unwatched", async () => {
+  it("unmarks a rewatch from its Mark Unwatched", async () => {
     render(
       menu({
         variant: "wide",
@@ -524,8 +515,8 @@ describe("MediaItemMenu trigger visibility", () => {
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Mark Unwatched" }));
 
-    expect(mocks.clearResumePosition).toHaveBeenCalledWith({ contentId: "movie-1" });
-    expect(mocks.toggleWatched).not.toHaveBeenCalled();
+    expect(mocks.toggleWatched).toHaveBeenCalledWith(false);
+    expect(mocks.toggleWatched).not.toHaveBeenCalledWith(true);
   });
 
   it("marks a rewatch watched from its card shortcut instead of unmarking it", async () => {

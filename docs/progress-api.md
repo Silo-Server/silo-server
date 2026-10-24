@@ -88,16 +88,18 @@ Storage and transaction invariants are described in
 
 `clearResumePosition` (DELETE `/api/v2/progress/{media_item_id}/position`)
 clears the acting profile's resume position on a movie or episode and answers
-204. Clients offer it as Mark Unwatched on a partly watched movie or episode,
-next to Mark Watched. The progress entry stays with `position_seconds` 0 and
-keeps `completed` and `duration_seconds`, so a rewatched item stays watched.
-Watch history is untouched. Mark unwatched (`unmarkWatched`) is different: it also
+204. It is the manual edit for an item someone skimmed and does not want left
+partly watched. The progress entry stays with `position_seconds` 0 and keeps
+`completed` and `duration_seconds`, so a rewatched item stays watched. Watch
+history is untouched. Mark unwatched (`unmarkWatched`) is different: it also
 clears the watched state. It keeps watch history too, but plays from before the
 unmark no longer count as watched, and watch providers keep theirs. Only
-`removeHistoryEntries` removes plays from history.
+`removeHistoryEntries` removes plays from history. The web app offers Mark
+Watched and Mark Unwatched (`unmarkWatched`) on a partly watched movie or
+episode, rewatches included.
 
-`markWatched` on such an item records a play. On a rewatch in progress (a
-watched movie or episode with a resume position) it records another completed
+`markWatched` on a partly watched item records a play. On a rewatch in progress
+(a watched movie or episode with a resume position) it records another completed
 play and clears the position, where it used to be a no-op. A season or series
 mark leaves those episodes alone, as do the frozen v1 operation and the
 Jellyfin played endpoints. A repeated mark records nothing until playback sets

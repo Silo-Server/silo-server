@@ -12,7 +12,7 @@ type UserActionProps =
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
-  | "onClearResumePosition"
+  | "onMarkUnwatched"
   | "onToggleFavorite"
   | "isFavorite"
   | "onToggleWatchlist"
