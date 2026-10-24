@@ -327,8 +327,8 @@ func (c *extrasClassifier) walkMedia(dir string, depth int, inherited []ignoreRu
 	if err != nil {
 		return false, ""
 	}
-	rules, ignored := dirIgnoreRules(inherited, dir, dir, entries)
-	if ignored {
+	rules, ignored, err := dirIgnoreRules(inherited, dir, dir, entries)
+	if err != nil || ignored {
 		return false, ""
 	}
 	for _, entry := range entries {

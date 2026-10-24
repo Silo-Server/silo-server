@@ -78,8 +78,15 @@ principles as Plex's `.plexignore`:
   apply. An ignore marker does not authorize cleanup of an empty library.
 - Ignored entries do not count as walk failures. They never suppress
   missing-file reconciliation the way unreadable paths do.
-- An unreadable `.ignore` or `.siloignore` is treated as absent; a broken
-  ignore file never aborts a library walk.
+- An `.ignore` or `.siloignore` that a directory listing shows but that cannot
+  be read (permissions, or an I/O error on a network mount) makes its
+  directory a walk failure: nothing under it is imported, and what is already
+  cataloged there is protected from missing-file reconciliation, as for an
+  unreadable directory. Treating it as absent would import what it excludes,
+  then retire all of it once the file reads again. A file deleted between the
+  listing and the read is absent. A subtree scan whose configured library root
+  has an unreadable ignore file fails. Real-time monitoring keeps watching such
+  a directory; the scans its changes trigger record the failure.
 - An explicit single-file scan (`ScanFile`) ignores ignore files: an
   explicitly requested file is scanned even if a pattern would exclude it.
   For audiobooks, this rebuilds the containing book as a whole.
