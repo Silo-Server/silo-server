@@ -915,12 +915,19 @@ func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
 }
 
 // lowerVersionTakesTranscodeV3 reports whether a transcode of a 4K source to
-// height, which 4K transcoding allows, belongs to its lower version instead:
-// the lower version serves lower qualities and reaches height. A quality
-// above the lower version's class still transcodes the 4K source.
-func lowerVersionTakesTranscodeV3(input PlannerInputV3, source SourceDescriptorV3, height int) bool {
-	return input.Settings.Allow4KTranscode && lowerVersionServesQualitiesV3(input) && is4KSourceV3(input.EffectiveFile, source) &&
-		height > 0 && height <= sourceLadderHeightV3(input.LowerVersion.Lower)
+// quality, which 4K transcoding allows, belongs to its lower version instead:
+// the lower version serves lower qualities and reaches quality's resolution
+// class. A quality above the lower version's class still transcodes the 4K
+// source.
+func lowerVersionTakesTranscodeV3(input PlannerInputV3, source SourceDescriptorV3, quality QualityResultV3) bool {
+	if !input.Settings.Allow4KTranscode || !lowerVersionServesQualitiesV3(input) || !is4KSourceV3(input.EffectiveFile, source) {
+		return false
+	}
+	class := quality.Class
+	if class == 0 {
+		class = ladderClassForSize(quality.Width, quality.Height)
+	}
+	return class > 0 && class <= sourceLadderHeightV3(input.LowerVersion.Lower)
 }
 
 // lowerVersionQualitiesV3 is the menu of a 4K version whose lower qualities
@@ -1238,7 +1245,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
-	if lowerVersionTakesTranscodeV3(input, source, quality.Height) {
+	if lowerVersionTakesTranscodeV3(input, source, quality) {
 		// The handler's alternate-version fallback transcodes the lower
 		// version instead, and replans this source without it if that fails.
 		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
@@ -1300,7 +1307,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if top := bitrateLadder[0]; quality.Height > top.Height {
 		width, height := FitLadderBox(source.Width, source.Height, top.Height)
 		width, height = encodedFrame(source.Width, source.Height, width, height)
-		quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+		quality.Label, quality.Width, quality.Height, quality.Class = heightLabel(height), width, height, top.Height
 		quality.PreservesSource = false
 	}
 	targetVideoCodec := transcodeCodecH264
@@ -1463,7 +1470,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 				width = class.Width
 			}
 			if anyTakes(width, height, class.Height) || i == len(classes)-1 {
-				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+				quality.Label, quality.Width, quality.Height, quality.Class = heightLabel(height), width, height, class.Height
 				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
 				quality.PreservesSource = false
 				break
@@ -1719,6 +1726,11 @@ type QualityResultV3 struct {
 	// ExplicitRung marks a user-selected fixed rung, as opposed to an
 	// automatic reduction from device limits, bandwidth evidence, or caps.
 	ExplicitRung bool
+	// Class is the resolution class a reduction encodes at, which its frame
+	// alone does not give: a 2.67:1 film's 720p High rung and its 1080p class
+	// fitted to the box are both 1920x720. 0 when the quality keeps the
+	// source's frame.
+	Class int
 	// BudgetKbps is the share of a bandwidth estimate an automatic encode's
 	// video and audio fit within together; 0 when no estimate bounds it.
 	BudgetKbps int
@@ -1874,7 +1886,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, Class: class.Height, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }
@@ -1949,6 +1961,7 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 		Label:             targetLabel,
 		Width:             width,
 		Height:            height,
+		Class:             rung.Height,
 		BitrateKbps:       bitrate,
 		RequiresTranscode: true,
 		ExplicitRung:      true,

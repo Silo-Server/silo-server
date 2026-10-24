@@ -2861,6 +2861,41 @@ func TestPlanPlaybackV3AutoBandwidthLimitRefusesDV7SourceForLowerVersion(t *test
 	}
 }
 
+// A cropped 4K film's 1080p frame fits the class's box at Auto or a plain
+// resolution (1920x696) and keeps the class height at a fixed rung
+// (2978x1080). Either way it is the 1080p class, above a 720p-class lower
+// version, so the 4K source keeps it; 720p goes to the lower version.
+func TestPlanPlaybackV3LowerVersionTakesTranscodeByResolutionClass(t *testing.T) {
+	// A 2.67:1 film's fitted 1080p frame is 1920x720, as tall as the 720p
+	// class.
+	for _, source := range []SourceDescriptorV3{
+		{VideoCodec: "hevc", Width: 3840, Height: 1392, BitrateKbps: 40_000, FrameRate: 24},
+		{VideoCodec: "hevc", Width: 3840, Height: 1440, BitrateKbps: 40_000, FrameRate: 24},
+	} {
+		lower := SourceDescriptorV3{VideoCodec: "h264", Width: 1280, Height: source.Height / 3, BitrateKbps: 4_000, FrameRate: 24}
+		input := PlannerInputV3{
+			Request:      validStartRequestV3(),
+			Settings:     PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+			LowerVersion: &LowerVersionV3{Requested: source, Lower: lower},
+		}
+		for _, tc := range []struct {
+			preference string
+			want       bool
+		}{
+			{"1080p", false},
+			{QualityRung1080pHighV3, false},
+			{"720p", true},
+			{QualityRung720pHighV3, true},
+		} {
+			input.Request.QualityPreference = tc.preference
+			quality := ResolveQualityPolicyV3(input.Request, source)
+			if got := lowerVersionTakesTranscodeV3(input, source, quality); got != tc.want {
+				t.Errorf("%dx%d at %s (%dx%d): lower version takes it = %v, want %v", source.Width, source.Height, tc.preference, quality.Width, quality.Height, got, tc.want)
+			}
+		}
+	}
+}
+
 // A 4K version that may not be transcoded offers the qualities its
 // lower-resolution version serves: that version as it is, then the rungs a
 // transcode of it can reach. Original stays the 4K version.
