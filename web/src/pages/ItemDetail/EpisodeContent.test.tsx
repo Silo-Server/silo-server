@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import type { ItemDetail, Season } from "@/api/types";
+import type { FileVersion, ItemDetail, Season } from "@/api/types";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
@@ -395,6 +395,7 @@ describe("EpisodeContent", () => {
       explicitAudioTrackIndex: number | null;
       onSelectAudioTrack: (index: number) => void;
       onResetAudioSelection: () => void;
+      onSelectVersion: (version: FileVersion) => void;
     };
     const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
 
