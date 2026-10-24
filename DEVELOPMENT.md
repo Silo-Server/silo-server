@@ -26,17 +26,30 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 Source builds use [docker-compose.yml](docker-compose.yml) only for PostgreSQL
 and Redis; the deploy-oriented stack in the README is separate.
 
-```sh
-# Create the local bootstrap configuration
-cp .env.example .env
-chmod 600 .env
-printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
-  "$(openssl rand -base64 48)" \
-  'postgres://silo:silo@localhost:5432/silo?sslmode=disable' \
-  'redis://localhost:6379' >> .env
+[scripts/init-dev-env.sh](scripts/init-dev-env.sh) creates `.env` with a new
+PostgreSQL password, a `SECRET_KEY`, and matching local `DATABASE_URL` and
+`REDIS_URL` values. It refuses to overwrite an existing `.env`.
 
-# Start local PostgreSQL and Redis
-docker compose up -d postgres redis
+For an existing local database, pass its current password instead of
+generating a new one. Changing `.env` does not change the password stored in
+PostgreSQL. A database created by the previous Compose default uses `silo`:
+
+```sh
+POSTGRES_PASSWORD='current-password' scripts/init-dev-env.sh
+```
+
+If you keep an existing `.env`, add `POSTGRES_PASSWORD` to it in single quotes
+and make sure `DATABASE_URL` uses the same password, percent-encoded. A
+single-quoted value can't contain a single quote or end with a backslash, so
+rotate a password like that before using it here.
+
+```sh
+# Create the bootstrap configuration for a new local database. Skip this if
+# you already ran the existing-database command above.
+scripts/init-dev-env.sh
+
+# Start local PostgreSQL and Redis and wait until they are healthy
+docker compose up -d --wait postgres redis
 
 # Install frontend dependencies and create the embedded-frontend test stub
 cd web
