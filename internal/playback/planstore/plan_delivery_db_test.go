@@ -104,21 +104,28 @@ func TestAttemptDesiredTracksRoundTrip(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	unique := "desired-tracks-" + uuid.NewString()
-	var userID int
+	var folderID, userID, fileID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('movies',$1) RETURNING id`, unique).Scan(&folderID); err != nil {
+		t.Fatal(err)
+	}
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, unique).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
+	if err := pool.QueryRow(ctx, `INSERT INTO media_files(media_folder_id,file_path) VALUES($1,$2) RETURNING id`, folderID, "/fixtures/"+unique+".mkv").Scan(&fileID); err != nil {
+		t.Fatal(err)
+	}
 	store := NewPostgres(pool)
 	newRecord := func(desired *playback.DesiredTracksV3) playback.AttemptRecordV3 {
 		session, attempt := uuid.NewString(), uuid.NewString()
 		plan := playback.PlanV3{ProtocolVersion: 3, PlanID: "plan-1", SessionID: session, Delivery: playback.DeliveryOriginalHTTPV3}
 		return playback.AttemptRecordV3{
 			PlaybackAttemptID: attempt, SessionID: session, UserID: userID, ProfileID: "profile-1",
-			RequestedMediaFileID: 1, EffectiveMediaFileID: 1, CurrentPlanID: "plan-1", CurrentPlan: plan,
-			NormalizedRequest: playback.StartRequestV3{ProtocolVersion: 3, FileID: 1, PlaybackAttemptID: attempt},
+			RequestedMediaFileID: fileID, EffectiveMediaFileID: fileID, CurrentPlanID: "plan-1", CurrentPlan: plan,
+			NormalizedRequest: playback.StartRequestV3{ProtocolVersion: 3, FileID: fileID, PlaybackAttemptID: attempt},
 			RequestDigest:     "digest",
 			ExpiresAt:         time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
 			StartResponse:     playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, SessionID: session, PlaybackPlan: &plan},
@@ -136,9 +143,9 @@ func TestAttemptDesiredTracksRoundTrip(t *testing.T) {
 
 	desired := &playback.DesiredTracksV3{
 		PlanID: "plan-1",
-		Audio:  &playback.DesiredAudioTrackV3{FileID: 1, Index: 1, Track: models.AudioTrack{Language: "ja", Codec: "ac3", Channels: 6}},
+		Audio:  &playback.DesiredAudioTrackV3{FileID: fileID, Index: 1, Track: models.AudioTrack{Language: "ja", Codec: "ac3", Channels: 6}},
 		Subtitle: &playback.DesiredSubtitleTrackV3{
-			FileID: 1, Source: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71, Language: "en", Format: "srt",
+			FileID: fileID, Source: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71, Language: "en", Format: "srt",
 		},
 	}
 	record := newRecord(desired)
