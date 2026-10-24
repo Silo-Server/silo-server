@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,14 +45,19 @@ type episodeCatalogUserStatePlan struct {
 // (media_items.type = 'podcast') also land here. What keeps non-TV episodes out
 // of episode-scoped results is library scoping plus the `si.type = 'series'`
 // guard in episodeCatalogSelectBody (hydration), not the media-type clause.
-// content_rating filtering is preserved here (that column exists).
+// content_rating filtering is preserved here (that column exists). Every row
+// here is an episode, so excluding the episode type matches nothing.
+//
+// The parent series must belong to libraryID, the one library the read
+// resolved to, as the general episode relation requires; the viewer's wider
+// allowlist would admit a series filed only in another library.
 //
 // Because hydration's si.type='series' guard drops non-series rows AFTER the
 // page/count scans select them, the scan and hydration would otherwise diverge:
 // pages could under-fill and TotalRecordCount could count rows that never
 // render. episodeCatalogSeriesParentGuard re-expresses that same constraint at
 // the entry-scan level so both queries stay aligned with hydration.
-func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
+func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
 	if len(access.DisabledLibraryIDs) > 0 {
 		*whereParts = append(*whereParts,
 			"EXISTS (SELECT 1 FROM episode_libraries el_scope_any WHERE el_scope_any.episode_id = ece.episode_id)",
@@ -63,7 +69,11 @@ func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, 
 		*args = append(*args, access.DisabledLibraryIDs)
 		*argIdx++
 	}
-	appendEpisodeParentLibraryAccess("ece.series_id", access, whereParts, args, argIdx)
+	parentAccess := AccessFilter{AllowedLibraryIDs: []int{libraryID}, DisabledLibraryIDs: access.DisabledLibraryIDs}
+	appendEpisodeParentLibraryAccess("ece.series_id", parentAccess, whereParts, args, argIdx)
+	if slices.Contains(access.ExcludedMediaTypes, "episode") {
+		*whereParts = append(*whereParts, "1 = 0")
+	}
 	access.ExcludedMediaTypes = nil // access is a value param; caller unaffected
 	ApplySectionAccessFilter("ece", access, whereParts, args, argIdx)
 	*whereParts = append(*whereParts, episodeCatalogSeriesParentGuard)
@@ -164,7 +174,7 @@ func (e *QueryExecutor) episodeCatalogUserStateQuery(
 		argIdx++
 	}
 
-	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
+	applyEpisodeCatalogAccessFilter(libraryID, access, &whereParts, &args, &argIdx)
 	e.appendEpisodeCatalogViewerFilters(access, &whereParts, &args, &argIdx)
 
 	queryWhere, queryArgs, nextArgIdx, ok, err := buildEpisodeCatalogEntryQueryWhere(plan.entryDef, argIdx)
@@ -231,7 +241,7 @@ func (e *QueryExecutor) episodeCatalogEntriesQuery(def QueryDefinition, access A
 		argIdx++
 	}
 
-	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
+	applyEpisodeCatalogAccessFilter(libraryID, access, &whereParts, &args, &argIdx)
 	e.appendEpisodeCatalogViewerFilters(access, &whereParts, &args, &argIdx)
 
 	queryWhere, queryArgs, _, ok, err := buildEpisodeCatalogEntryQueryWhere(def, argIdx)

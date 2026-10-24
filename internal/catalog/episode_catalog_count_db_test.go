@@ -57,6 +57,7 @@ func TestEpisodeCatalogCountsMatchCursorPagesPostgres(t *testing.T) {
 			return a
 		}, want: 3},
 		{name: "unwatched disabled library", rules: unwatched, access: func(a AccessFilter) AccessFilter { a.DisabledLibraryIDs = []int{disabled}; return a }, want: 5},
+		{name: "episodes excluded", rules: unwatched, access: func(a AccessFilter) AccessFilter { a.ExcludedMediaTypes = []string{"episode"}; return a }, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			def := QueryDefinition{MediaScope: "episode", LibraryIDs: []int{library}, Limit: tc.limit, Match: "all"}
@@ -135,21 +136,24 @@ func seedEpisodeCountLibrary(t *testing.T, pool *pgxpool.Pool) episodeCountLibra
 		t.Fatal(err)
 	}
 
-	alpha, bravo, podcast := prefix+"-alpha", prefix+"-bravo", prefix+"-podcast"
+	alpha, bravo, charlie, podcast := prefix+"-alpha", prefix+"-bravo", prefix+"-charlie", prefix+"-podcast"
 	for _, parent := range []struct {
 		id, kind, genre, rating string
-		age                     int
+		age, folder             int
 	}{
-		{alpha, "series", "Comedy", "TV-PG", 10},
-		{bravo, "series", "Drama", "TV-MA", 17},
+		{alpha, "series", "Comedy", "TV-PG", 10, library},
+		{bravo, "series", "Drama", "TV-MA", 17, library},
+		// Filed only in the second library, which the viewer can open, so
+		// its episode in the first library belongs to no page of it.
+		{charlie, "series", "Drama", "TV-PG", 10, disabled},
 		// Not a TV series: its episodes reach episode_catalog_entries but
 		// never a catalog page.
-		{podcast, "podcast", "Comedy", "TV-PG", 10},
+		{podcast, "podcast", "Comedy", "TV-PG", 10, library},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,$2,$1,'released',ARRAY[$3],$4,$5)`, parent.id, parent.kind, parent.genre, parent.rating, parent.age); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, parent.id, library); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, parent.id, parent.folder); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,6 +170,7 @@ func seedEpisodeCountLibrary(t *testing.T, pool *pgxpool.Pool) episodeCountLibra
 		{bravo, "fig", false},
 		{bravo, "grape", false},
 		{bravo, "apricot", true},
+		{charlie, "kiwi", false},
 		{podcast, "avocado", false},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,$3,$4)`, id(episode.title), episode.series, i+1, episode.title); err != nil {
