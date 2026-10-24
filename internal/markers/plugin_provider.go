@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -348,13 +349,19 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	if !ok {
 		return Marker{}, false
 	}
+	// Confidence decides between providers, and NaN compares false both ways,
+	// so a non-finite value counts as unrated, on an absent answer too.
+	confidence := segment.GetConfidence()
+	if math.IsNaN(confidence) || math.IsInf(confidence, 0) {
+		confidence = 0
+	}
 	// An absent answer has no bounds. Read as a segment, the missing bounds
 	// would default to the whole file.
 	if segment.GetAbsent() {
 		return Marker{
 			Kind:            kind,
 			Absent:          true,
-			Confidence:      segment.GetConfidence(),
+			Confidence:      confidence,
 			SubmissionCount: int(segment.GetSubmissionCount()),
 			Algorithm:       strings.TrimSpace(segment.GetAlgorithm()),
 		}, true
@@ -380,7 +387,7 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 		Kind:            kind,
 		Start:           start,
 		End:             end,
-		Confidence:      segment.GetConfidence(),
+		Confidence:      confidence,
 		SubmissionCount: int(segment.GetSubmissionCount()),
 		Algorithm:       strings.TrimSpace(segment.GetAlgorithm()),
 	}, true

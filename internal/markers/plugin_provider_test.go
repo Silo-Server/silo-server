@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -118,6 +119,10 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		preview.Provider == nil || *preview.Provider != "plugin:12:markers" || preview.Algorithm != "consensus:v1" ||
 		preview.Confidence == nil || *preview.Confidence != 0.95 {
 		t.Fatalf("absent preview payload = %+v, want a plugin tombstone", preview)
+	}
+	// A NaN confidence would win every comparison it is the incumbent of.
+	if got, ok := markerFromPluginSegment(&pluginv1.MarkerSegment{Segment: "intro", Absent: true, Confidence: math.NaN()}, time.Hour); !ok || got.Confidence != 0 {
+		t.Fatalf("absent intro with a NaN confidence = %+v ok=%v, want confidence 0", got, ok)
 	}
 }
 
