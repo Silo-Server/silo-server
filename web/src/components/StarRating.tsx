@@ -5,13 +5,11 @@ interface StarRatingProps {
   value: number | null;
   onChange: (rating: number | null) => void;
   size?: number;
-  /** When false, ArrowUp/ArrowDown are left to an enclosing menu's navigation. */
-  verticalArrows?: boolean;
 }
 
 const STAR_COUNT = 5;
 
-function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
+function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
   function handleClick(star: number) {
     if (star === value) {
       onChange(null);
@@ -20,24 +18,26 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
     }
   }
 
+  // Only Left and Right rate. Up and Down belong to whatever surrounds the
+  // stars (a menu, or a remote moving between controls), and Left or Right
+  // past either end leaves the stars too, so a remote is never trapped here.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newValue: number | null = null;
-      if (e.key === "ArrowRight" || (verticalArrows && e.key === "ArrowUp")) {
-        e.preventDefault();
+      if (e.key === "ArrowRight") {
         newValue = Math.min((value ?? 0) + 1, STAR_COUNT);
-      } else if (e.key === "ArrowLeft" || (verticalArrows && e.key === "ArrowDown")) {
-        e.preventDefault();
-        newValue = Math.max((value ?? 2) - 1, 1);
+      } else if (e.key === "ArrowLeft" && value !== null) {
+        newValue = Math.max(value - 1, 1);
       }
-      if (newValue !== null) {
+      if (newValue !== null && newValue !== value) {
+        e.preventDefault();
         onChange(newValue);
         e.currentTarget
           .querySelector<HTMLButtonElement>(`[data-rating="${newValue}"]`)
           ?.focus({ preventScroll: true });
       }
     },
-    [value, onChange, verticalArrows],
+    [value, onChange],
   );
 
   const tabbableStar = value ?? 1;
