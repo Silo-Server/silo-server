@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"testing"
@@ -115,15 +116,18 @@ func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
 				}
 			}
 
+			// Read the statement EnqueueLadderBackfill sends without enqueueing
+			// anything; the limit leaves room for every candidate in a shared
+			// database.
 			var enqueueable int
 			if err := pool.QueryRow(ctx, `
 				SELECT count(*)
-				FROM (`+ladderCandidateRowsSQL()+`) ac
-				WHERE ac.target_type = 'item'
-				  AND ac.image_type = 'poster'
-				  AND ac.target_content_id = $1
-				  AND NOT `+ladderCandidateHeldSQL, contentID).Scan(&enqueueable); err != nil {
-				t.Fatalf("query enqueueable candidates: %v", err)
+				FROM (`+ladderBackfillBatchSQL()+`) batch
+				WHERE batch.target_type = 'item'
+				  AND batch.image_type = 'poster'
+				  AND batch.target_content_id = $2
+			`, math.MaxInt32, contentID).Scan(&enqueueable); err != nil {
+				t.Fatalf("query ladder backfill batch: %v", err)
 			}
 			want := 1
 			if tc.held {

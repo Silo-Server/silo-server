@@ -1523,23 +1523,10 @@ const ladderCandidateHeldSQL = `EXISTS (
 				  )
 			)`
 
-// EnqueueLadderBackfill queues a bounded batch of cached artwork that is still
-// missing the rung its image type gained at the current
-// artworkkey.LadderVersion, so the cacher regenerates it.
-//
-// It is the mirror image of EnqueueExistingProviderArtwork: that sweep looks for
-// artwork with no cached destination, this one looks for artwork whose
-// destination exists but predates a rung.
-//
-// The job check below is deduplication only: it keeps a row whose job is queued,
-// running, or parked after failing from being enqueued again. It is deliberately NOT the
-// completion signal: a row held by another node's in-flight job is absent here
-// but is not done. HasLadderBackfillRemaining answers that question instead.
-func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
-	if r == nil || r.pool == nil || limit <= 0 {
-		return 0, nil
-	}
-	query := `
+// ladderBackfillBatchSQL selects the next EnqueueLadderBackfill batch: at most
+// $1 ladder candidates that no job holds, in a stable order.
+func ladderBackfillBatchSQL() string {
+	return `
 		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
 		),
 		candidates AS (
@@ -1556,8 +1543,25 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
 	`
+}
 
-	rows, err := r.pool.Query(ctx, query, limit)
+// EnqueueLadderBackfill queues a bounded batch of cached artwork that is still
+// missing the rung its image type gained at the current
+// artworkkey.LadderVersion, so the cacher regenerates it.
+//
+// It is the mirror image of EnqueueExistingProviderArtwork: that sweep looks for
+// artwork with no cached destination, this one looks for artwork whose
+// destination exists but predates a rung.
+//
+// The batch's job check is deduplication only: it keeps a row whose job is queued,
+// running, or parked after failing from being enqueued again. It is deliberately NOT the
+// completion signal: a row held by another node's in-flight job is absent here
+// but is not done. HasLadderBackfillRemaining answers that question instead.
+func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return 0, nil
+	}
+	rows, err := r.pool.Query(ctx, ladderBackfillBatchSQL(), limit)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing artwork ladder backfill: %w", err)
 	}
