@@ -85,27 +85,35 @@ func (h *CatalogHandler) Browse(ctx context.Context, v ItemViewer, req catalog.C
 		return CatalogBrowseView{}, catalogResolveError(ctx, err, true)
 	}
 	if groupedByWork || boxSets != nil {
-		result, entries, err := h.resolveGroupedCatalogByWork(ctx, req, v.Access)
-		if err != nil {
-			return CatalogBrowseView{}, catalogResolveError(ctx, err, true)
-		}
-		resultItems := groupedCatalogItems(entries)
-		items := h.catalogItemResponses(ctx, v, resultItems, catalogSortMetricField(req, result), playableTargetLibraryIDs(req), v.Access)
-		for i := range items {
-			if i < len(entries) && entries[i].summary != nil {
-				applyWorkSummaryToCatalogItem(&items[i], entries[i].summary)
-			}
-		}
-		if boxSets != nil {
-			h.applyBoxSets(ctx, v, playableTargetLibraryIDs(req)[0], items, boxSets)
-		}
-		return catalogBrowseView(result, items), nil
+		return h.browseGrouped(ctx, v, req, boxSets)
 	}
 	result, err := h.resolver.Resolve(ctx, req, v.Access)
 	if err != nil {
 		return CatalogBrowseView{}, catalogResolveError(ctx, err, false)
 	}
 	items := h.catalogItemResponses(ctx, v, result.Items, catalogSortMetricField(req, result), playableTargetLibraryIDs(req), v.Access)
+	return catalogBrowseView(result, items), nil
+}
+
+// browseGrouped answers a browse grouped by work or into box sets: boxSets
+// holds the box sets the page may show, keyed by member content ID, or is nil.
+func (h *CatalogHandler) browseGrouped(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, boxSets map[string]catalog.BoxSetGroup) (CatalogBrowseView, error) {
+	result, entries, err := h.resolveGroupedCatalogByWork(ctx, req, v.Access)
+	if err != nil {
+		return CatalogBrowseView{}, catalogResolveError(ctx, err, true)
+	}
+	resultItems := groupedCatalogItems(entries)
+	items := h.catalogItemResponses(ctx, v, resultItems, catalogSortMetricField(req, result), playableTargetLibraryIDs(req), v.Access)
+	for i := range items {
+		if i < len(entries) && entries[i].summary != nil {
+			applyWorkSummaryToCatalogItem(&items[i], entries[i].summary)
+		}
+	}
+	if boxSets != nil {
+		if err := h.applyBoxSets(ctx, v, playableTargetLibraryIDs(req)[0], items, boxSets); err != nil {
+			return CatalogBrowseView{}, err
+		}
+	}
 	return catalogBrowseView(result, items), nil
 }
 

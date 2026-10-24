@@ -85,8 +85,10 @@ func (h *CatalogHandler) prepareBoxSetBrowse(ctx context.Context, req *catalog.C
 
 // applyBoxSets replaces each card that stands for a box set with the box
 // set. The grouped query keeps one movie per box set, so any member on the
-// page is that box set's representative.
-func (h *CatalogHandler) applyBoxSets(ctx context.Context, v ItemViewer, libraryID int, items []itemListResponse, byMember map[string]catalog.BoxSetGroup) {
+// page is that box set's representative. It fails rather than leave a
+// representative as a plain movie card: its siblings are already folded out
+// of the page and the totals.
+func (h *CatalogHandler) applyBoxSets(ctx context.Context, v ItemViewer, libraryID int, items []itemListResponse, byMember map[string]catalog.BoxSetGroup) error {
 	var groups []catalog.BoxSetGroup
 	for _, item := range items {
 		if g, ok := byMember[item.ContentID]; ok {
@@ -94,12 +96,11 @@ func (h *CatalogHandler) applyBoxSets(ctx context.Context, v ItemViewer, library
 		}
 	}
 	if len(groups) == 0 {
-		return
+		return nil
 	}
 	views, err := h.boxSetViews(ctx, v, libraryID, groups, false)
 	if err != nil {
-		slog.WarnContext(ctx, "catalog: box set cards unavailable", "component", "api", "error", err)
-		return
+		return boxSetError(ctx, err)
 	}
 	for i := range items {
 		g, ok := byMember[items[i].ContentID]
@@ -110,6 +111,7 @@ func (h *CatalogHandler) applyBoxSets(ctx context.Context, v ItemViewer, library
 			items[i] = boxSetCatalogItem(items[i], view)
 		}
 	}
+	return nil
 }
 
 // boxSetViews builds the views of groups, which belong to one library,
