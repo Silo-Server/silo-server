@@ -967,7 +967,8 @@ func buildEpisodeCatalogTypeClause(rule QueryRule, argIdx int) (string, []any, i
 	if !ok {
 		return "", nil, argIdx, true, fmt.Errorf("type requires a string value")
 	}
-	isEpisode := strings.EqualFold(strings.TrimSpace(value), "episode")
+	// The general episode relation compares its type exactly.
+	isEpisode := value == browseTypeEpisode
 	switch rule.Op {
 	case "is":
 		if isEpisode {
@@ -1000,7 +1001,8 @@ func buildEpisodeCatalogLanguageArrayClause(column string, rule QueryRule, argId
 	if !ok {
 		return "", nil, argIdx, true, fmt.Errorf("%s requires a string value", rule.Field)
 	}
-	rule.Value = strings.ToLower(strings.TrimSpace(value))
+	// Lowered, not trimmed, as the general query binds it.
+	rule.Value = strings.ToLower(value)
 	return buildEpisodeCatalogArrayClause(column, rule, argIdx)
 }
 

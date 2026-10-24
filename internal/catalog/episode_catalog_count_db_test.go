@@ -58,6 +58,10 @@ func TestEpisodeCatalogCountsMatchCursorPagesPostgres(t *testing.T) {
 		}, want: 3},
 		{name: "unwatched disabled library", rules: unwatched, access: func(a AccessFilter) AccessFilter { a.DisabledLibraryIDs = []int{disabled}; return a }, want: 5},
 		{name: "episodes excluded", rules: unwatched, access: func(a AccessFilter) AccessFilter { a.ExcludedMediaTypes = []string{"episode"}; return a }, want: 0},
+		{name: "audio language", rules: []QueryRule{{Field: "audio_language", Op: "is", Value: "EN"}}, want: 1},
+		{name: "padded audio language", rules: []QueryRule{{Field: "audio_language", Op: "is_not", Value: " en "}}, want: 8},
+		{name: "type", rules: []QueryRule{{Field: "type", Op: "is", Value: "episode"}}, want: 8},
+		{name: "mixed-case type", rules: []QueryRule{{Field: "type", Op: "is_not", Value: "Episode"}}, want: 8},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			def := QueryDefinition{MediaScope: "episode", LibraryIDs: []int{library}, Limit: tc.limit, Match: "all"}
@@ -160,6 +164,12 @@ func seedEpisodeCountLibrary(t *testing.T, pool *pgxpool.Pool) episodeCountLibra
 			if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries(episode_id,media_folder_id) VALUES($1,$2)`, id(episode.title), folder); err != nil {
 				t.Fatal(err)
 			}
+		}
+	}
+	// apple has an English audio track and fig a French one.
+	for _, file := range []struct{ series, title, language string }{{alpha, "apple", "en"}, {bravo, "fig", "fr"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_files(content_id,episode_id,media_folder_id,file_path,audio_tracks) VALUES($1,$2,$3,$4,jsonb_build_array(jsonb_build_object('language',$5::text)))`, file.series, id(file.title), library, id(file.title)+".mkv", file.language); err != nil {
+			t.Fatal(err)
 		}
 	}
 	// apple is watched; cherry finished through progress; banana is half
