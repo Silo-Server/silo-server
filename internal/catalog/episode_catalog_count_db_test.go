@@ -68,33 +68,9 @@ func TestEpisodeCatalogCountsMatchCursorPagesPostgres(t *testing.T) {
 			if tc.access != nil {
 				access = tc.access(access)
 			}
-			executor := &QueryExecutor{Pool: pool, Scope: "episode"}
-			if _, _, ok, err := executor.episodeCatalogCountQuery(def, access); err != nil || !ok {
-				t.Fatalf("episode_catalog_entries count unavailable: ok=%v err=%v", ok, err)
-			}
-			count, err := executor.Count(ctx, def, access)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			listed, total := 0, -1
-			var cursor *QueryCursor
-			for range 10 {
-				page, err := executor.PreviewCursorPage(ctx, def, access, 3, cursor, cursor == nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if cursor == nil {
-					total = page.Total
-				}
-				listed += len(page.Items)
-				if !page.HasMore {
-					break
-				}
-				cursor = page.Next
-			}
-			if count != tc.want || listed != tc.want || total != tc.want {
-				t.Fatalf("count = %d, cursor total = %d, cursor pages listed %d; want %d", count, total, listed, tc.want)
+			for _, sort := range []QuerySort{{}, {Field: "added_at", Order: "desc"}} {
+				def.Sort = sort
+				checkEpisodeCountPaths(t, &QueryExecutor{Pool: pool, Scope: "episode"}, def, access, tc.want)
 			}
 		})
 	}
@@ -203,4 +179,66 @@ func seedEpisodeCountLibrary(t *testing.T, pool *pgxpool.Pool) episodeCountLibra
 		}
 	}
 	return episodeCountLibrary{library: library, disabled: disabled, userID: userID, profile: profile, id: id}
+}
+
+// checkEpisodeCountPaths requires def's count and cursor total to equal the
+// episodes its cursor pages list, and a jump to each of them to land on it.
+func checkEpisodeCountPaths(t *testing.T, executor *QueryExecutor, def QueryDefinition, access AccessFilter, want int) {
+	t.Helper()
+	ctx := t.Context()
+	if _, _, ok, err := executor.episodeCatalogCountQuery(def, access); err != nil || !ok {
+		t.Fatalf("episode_catalog_entries count unavailable: ok=%v err=%v", ok, err)
+	}
+	count, err := executor.Count(ctx, def, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var listed []string
+	total := -1
+	var cursor *QueryCursor
+	for range 10 {
+		page, err := executor.PreviewCursorPage(ctx, def, access, 3, cursor, cursor == nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cursor == nil {
+			total = page.Total
+		}
+		for _, item := range page.Items {
+			listed = append(listed, item.ContentID)
+		}
+		if !page.HasMore {
+			break
+		}
+		cursor = page.Next
+	}
+	if count != want || len(listed) != want || total != want {
+		t.Fatalf("sort %q: count = %d, cursor total = %d, cursor pages listed %d; want %d", def.Sort.Field, count, total, len(listed), want)
+	}
+
+	plan, err := executor.buildPreviewPagePlan(def, access, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index < len(listed); index++ {
+		if _, ok, err := executor.episodeCatalogSeek(ctx, def, access, plan, index-1); err != nil || !ok {
+			t.Fatalf("sort %q: episode_catalog_entries seek to %d unavailable: ok=%v err=%v", def.Sort.Field, index, ok, err)
+		}
+		jump, err := executor.SeekCursor(ctx, def, access, index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, err := executor.PreviewCursorPage(ctx, def, access, 1, jump, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, item := range page.Items {
+			got = append(got, item.ContentID)
+		}
+		if len(got) != 1 || got[0] != listed[index] {
+			t.Fatalf("sort %q: jump to %d listed %v, want %s", def.Sort.Field, index, got, listed[index])
+		}
+	}
 }

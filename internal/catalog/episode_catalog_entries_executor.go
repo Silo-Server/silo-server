@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -103,18 +105,25 @@ func (e *QueryExecutor) usesEpisodeCatalogQueries() bool {
 	return !e.GroupByWork && e.SourceWhere == "" && e.SourceJoin == "" && len(e.SourceOrder) == 0
 }
 
-// episodeCatalogCountQuery renders the total PreviewPage reports for def from
+// episodeCatalogTotalQuery renders every row of def against
 // episode_catalog_entries, choosing between the user-state and entry queries
-// as PreviewPage does. ok is false when neither applies and the general query
-// must count.
-func (e *QueryExecutor) episodeCatalogCountQuery(def QueryDefinition, access AccessFilter) (string, []any, bool, error) {
+// as PreviewPage does for a page with its total. ok is false when neither
+// applies and the general query must answer.
+func (e *QueryExecutor) episodeCatalogTotalQuery(def QueryDefinition, access AccessFilter) (episodeCatalogQuery, bool, error) {
 	if !e.usesEpisodeCatalogQueries() {
-		return "", nil, false, nil
+		return episodeCatalogQuery{}, false, nil
 	}
 	q, ok, err := e.episodeCatalogUserStateQuery(def, access, true)
 	if err == nil && !ok {
 		q, ok, err = e.episodeCatalogEntriesQuery(def, access)
 	}
+	return q, ok, err
+}
+
+// episodeCatalogCountQuery renders the total PreviewPage reports for def from
+// episode_catalog_entries. ok is false when the general query must count.
+func (e *QueryExecutor) episodeCatalogCountQuery(def QueryDefinition, access AccessFilter) (string, []any, bool, error) {
+	q, ok, err := e.episodeCatalogTotalQuery(def, access)
 	if err != nil || !ok {
 		return "", nil, ok, err
 	}
@@ -124,6 +133,47 @@ func (e *QueryExecutor) episodeCatalogCountQuery(def QueryDefinition, access Acc
 	_, _, maxResults := normalizePreviewPageBounds(def, 1, 0)
 	countSQL, countArgs := episodeCatalogCountSQL(q.withCTEs, q.from, q.where, q.args, maxResults)
 	return countSQL, countArgs, true, nil
+}
+
+// episodeCatalogSeekSorts are the sorts whose episode_catalog_entries order
+// is pinned to the general episode relation's, so a row number in one names
+// the same episode in the other.
+var episodeCatalogSeekSorts = []string{querySortTitle, defaultSortField, querySortReleaseDate, querySortLastAirDate}
+
+// episodeCatalogSeek finds the cursor offset rows into def. Numbering rows in
+// the general relation evaluates and sorts every match, so it numbers them in
+// episode_catalog_entries and reads that episode's sort tuple from the general
+// plan, where the cursor's pages continue. ok is false when the general query
+// must seek.
+func (e *QueryExecutor) episodeCatalogSeek(ctx context.Context, def QueryDefinition, access AccessFilter, plan previewPagePlan, offset int) (*QueryCursor, bool, error) {
+	if !slices.Contains(episodeCatalogSeekSorts, NormalizeQuerySort(def.Sort).Field) {
+		return nil, false, nil
+	}
+	q, ok, err := e.episodeCatalogTotalQuery(def, access)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if q.empty {
+		return nil, true, pgx.ErrNoRows
+	}
+	withClause := ""
+	if q.withCTEs != "" {
+		withClause = "WITH " + q.withCTEs + "\n"
+	}
+	args := append(append([]any{}, q.args...), offset)
+	sql := fmt.Sprintf("%sSELECT ece.episode_id %s%s %s %s LIMIT 1 OFFSET $%d", withClause, q.from, q.sortJoin, q.where, q.orderBy, len(args))
+	var episodeID string
+	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(&episodeID); err != nil {
+		return nil, true, err
+	}
+	key, err := e.queryTupleFor(ctx, plan, episodeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The projection listed an episode the general relation does not:
+		// seek there instead of handing out a cursor it cannot continue.
+		slog.WarnContext(ctx, "catalog: episode catalog seek target missing from the episode relation", "component", "catalog", "episode_id", episodeID)
+		return nil, false, nil
+	}
+	return key, true, err
 }
 
 func (e *QueryExecutor) episodeCatalogUserStateQuery(
