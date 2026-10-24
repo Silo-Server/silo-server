@@ -9,6 +9,7 @@ OPTIONS /api/v2/*	non-media
 PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
+QUERY /api/v2/*	non-media
 TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
@@ -1298,6 +1299,7 @@ OPTIONS /api/v2/*	non-media
 PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
+QUERY /api/v2/*	non-media
 TRACE /api/v2/*	non-media
 GET /api/v2/account/identities	non-media
 POST /api/v2/account/identities/link-complete	non-media
