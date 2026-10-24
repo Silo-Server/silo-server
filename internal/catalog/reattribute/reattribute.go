@@ -407,8 +407,10 @@ func moveProgressPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) 
 // moveIntentPairs moves one intent table for the pairs; on a destination
 // collision the destination row wins and the source duplicate is dropped.
 func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, keyCols []string, fromIDs, toIDs []string) (int, error) {
+	merged := 0
 	if table == historyCutoffTable {
-		if err := mergeHistoryCutoffPairs(ctx, tx, fromIDs, toIDs); err != nil {
+		var err error
+		if merged, err = mergeHistoryCutoffPairs(ctx, tx, fromIDs, toIDs); err != nil {
 			return 0, err
 		}
 	}
@@ -431,7 +433,7 @@ func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, key
 	if err != nil {
 		return 0, fmt.Errorf("reattribute: %s move: %w", table, err)
 	}
-	return int(tag.RowsAffected()), nil
+	return merged + int(tag.RowsAffected()), nil
 }
 
 const historyCutoffTable = "user_history_hidden_items"
@@ -441,9 +443,10 @@ const historyCutoffTable = "user_history_hidden_items"
 // a mark unwatched keeps plays in history, so a destination that kept only its
 // own older cutoff would count the source's unmarked plays as watched. The
 // listing cutoff stays the destination's: a history removal already deleted
-// the source's plays behind it.
-func mergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
-	if _, err := tx.Exec(ctx, `
+// the source's plays behind it. It reports how many destination rows it
+// raised, since a raised cutoff changes what the profile has watched.
+func mergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) (int, error) {
+	tag, err := tx.Exec(ctx, `
 		UPDATE user_history_hidden_items dest
 		SET hidden_before = GREATEST(dest.hidden_before, src.hidden_before),
 		    removed_before = COALESCE(dest.removed_before, dest.hidden_before),
@@ -453,10 +456,12 @@ func mergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []st
 		  AND dest.media_item_id = p.to_id
 		  AND dest.user_id = src.user_id
 		  AND dest.profile_id = src.profile_id
-	`, fromIDs, toIDs); err != nil {
-		return fmt.Errorf("reattribute: history cutoff merge: %w", err)
+		  AND src.hidden_before > dest.hidden_before
+	`, fromIDs, toIDs)
+	if err != nil {
+		return 0, fmt.Errorf("reattribute: history cutoff merge: %w", err)
 	}
-	return nil
+	return int(tag.RowsAffected()), nil
 }
 
 // moveFileSubset is the split path: only the state attributable to

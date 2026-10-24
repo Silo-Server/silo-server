@@ -50,6 +50,11 @@ func TestMovedHistoryKeepsItsCutoffsDB(t *testing.T) {
 		if err := movePairs(ctx, tx, []IDPair{{From: from, To: to}}, &report); err != nil {
 			t.Fatal(err)
 		}
+		// A raised cutoff changes what the profile has watched, so the
+		// merge refreshes its recommendations.
+		if !report.MovedUserState() {
+			t.Fatal("a merge that raised the destination's cutoff reported no user-state change")
+		}
 		hidden, removed := read(t, to)
 		if !hidden.Equal(unmarked) || removed == nil || !removed.Equal(older) {
 			t.Fatalf("destination cutoffs = %s, %v; want the source's unmark %s and its own removal %s", hidden, removed, unmarked, older)
