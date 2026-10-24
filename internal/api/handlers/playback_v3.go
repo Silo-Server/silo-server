@@ -4075,7 +4075,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		}
 	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.RecipeOpts())
 	card.OriginalStartedAt = session.StartedAt
 	card.StreamLocation = session.StreamLocation
 	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
