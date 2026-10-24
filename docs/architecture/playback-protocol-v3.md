@@ -1687,7 +1687,10 @@ remux without video encoding.
 
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
-version fallback. The menu then lists the
+version fallback. With 4K transcoding allowed, the same holds while
+`playback.prefer_lower_version_transcode` is on (the default), except that the
+4K rungs above the lower version's class stay on the menu and transcode the 4K
+version. The menu then lists the
 first non-4K version in fallback order at its plain resolution class (`1080p`
 or `720p`, with that version's height and bitrate; omitted when the version is
 taller than its class or the requested version is not taller than it), and the
@@ -1697,9 +1700,13 @@ the fallback adopts a later non-4K version, the plan it returns describes the
 version it adopted.
 Choosing any of them refuses the 4K source, so the fallback plays the lower
 version: unchanged for its plain label or a rung it fits, transcoded for a lower
-rung. `auto` returns to the 4K version. The menu stays the same while the
-lower version plays. It needs HLS and transcoding enabled, because the 4K
-refusal under any other policy is not one the fallback acts on.
+rung. `auto` returns to the 4K version unless a bandwidth estimate, cap or
+device limit needs a lower quality; that reduction also comes from the lower
+version, transcoded to fit, rather than the 4K source at original quality.
+When no version can play the reduction, the 4K version plans as though it had
+no lower version. The menu stays the same while the lower version plays. It
+needs HLS and transcoding enabled, because the 4K refusal under any other
+policy is not one the fallback acts on.
 
 | label | display_name | height | kbps |
 | --- | --- | --- | --- |
