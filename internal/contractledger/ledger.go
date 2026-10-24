@@ -506,12 +506,12 @@ func operationalRoute(r inventoryRoute) bool {
 	return operationalProfilingRoute(r) || operationalMetricsRoute(r)
 }
 
-// serveMuxMethod reports whether m is one of the nine method variants the
+// serveMuxMethod reports whether m is one of the ten method variants the
 // inventory expands a ServeMux Handle registration into.
 func serveMuxMethod(m string) bool {
 	switch m {
 	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
-		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace:
+		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, "QUERY", http.MethodTrace:
 		return true
 	default:
 		return false
