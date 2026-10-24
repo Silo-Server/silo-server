@@ -1,4 +1,4 @@
-import type { ItemDetail, Season } from "@/api/types";
+import type { EpisodeListItem, ItemDetail, Season } from "@/api/types";
 
 export interface SeriesPrimaryAction {
   label: string;
@@ -13,6 +13,19 @@ export interface LeafPrimaryAction {
 export interface EpisodeNavigationState {
   parentSeasonHref?: string;
   parentSeasonLabel?: string;
+}
+
+/**
+ * The library an episode card links to the episode with. An episode with no
+ * file in the list keeps none: with catalog.scope_versions_to_library on, the
+ * list holds only the opened library's files, and that episode then opens
+ * with every version instead of nothing to play.
+ */
+export function episodeLinkLibraryId(
+  episode: Pick<EpisodeListItem, "files">,
+  libraryId: number | undefined,
+): number | undefined {
+  return (episode.files?.length ?? 0) > 0 ? libraryId : undefined;
 }
 
 function clampProgress(progress: number): number {

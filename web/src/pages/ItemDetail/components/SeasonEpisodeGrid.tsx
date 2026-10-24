@@ -13,12 +13,13 @@ import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import EpisodeCardCaption from "./EpisodeCardCaption";
-import type { EpisodeNavigationState } from "../itemDetailLayout";
+import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -35,16 +36,20 @@ interface SeasonEpisodeGridProps {
   episodes: EpisodeListItem[];
   isLoading: boolean;
   episodeLinkState?: EpisodeNavigationState;
+  /** The page's library scope, kept on each episode link. */
+  libraryId?: number;
 }
 
 export default function SeasonEpisodeGrid({
   episodes,
   isLoading,
   episodeLinkState,
+  libraryId,
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
-  const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
+  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
 
   if (isLoading) {
@@ -71,10 +76,15 @@ export default function SeasonEpisodeGrid({
           key={episode.content_id}
           episode={episode}
           episodeLinkState={episodeLinkState}
+          libraryId={libraryId}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
-          onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
+          onPrefetch={() =>
+            (episodeLinkLibraryId(episode, libraryId) === undefined
+              ? prefetchEpisode
+              : prefetchScopedEpisode)(episode.content_id)
+          }
         />
       ))}
     </div>
@@ -84,6 +94,7 @@ export default function SeasonEpisodeGrid({
 function SeasonEpisodeCard({
   episode,
   episodeLinkState,
+  libraryId,
   overlayPrefs,
   quickActionMode,
   spoilerPrefs,
@@ -91,6 +102,7 @@ function SeasonEpisodeCard({
 }: {
   episode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
+  libraryId?: number;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
   spoilerPrefs: EpisodeSpoilerPrefs;
@@ -107,15 +119,15 @@ function SeasonEpisodeCard({
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
+  const episodeHref = buildItemHref({
+    contentId: episode.content_id,
+    libraryId: episodeLinkLibraryId(episode, libraryId),
+  });
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
       <div className="relative">
-        <ViewTransitionLink
-          to={`/item/${episode.content_id}`}
-          state={episodeLinkState}
-          className="group block"
-        >
+        <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="group block">
           <div className="media-card-image relative aspect-video">
             {episode.still_url ? (
               <img
@@ -175,11 +187,7 @@ function SeasonEpisodeCard({
           itemTitle={episodeTitle}
         />
       </div>
-      <ViewTransitionLink
-        to={`/item/${episode.content_id}`}
-        state={episodeLinkState}
-        className="block"
-      >
+      <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="block">
         <EpisodeCardCaption
           episode={episode}
           hideOverview={hideOverview}

@@ -709,6 +709,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 		}
 		opts.PresentationLibraryID = &n
 		opts.ScopeFilesToLibrary = reg.versionsScopedToLibrary(ctx)
+		opts.SeriesLibraryCoversEpisodes = true
 	}
 	if fileID != "" {
 		n, p := fileID.positive("query.file_id")

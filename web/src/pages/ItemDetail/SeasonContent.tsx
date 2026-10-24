@@ -22,6 +22,7 @@ import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
 
@@ -31,7 +32,14 @@ function seasonLabel(seasonNumber: number, title?: string) {
   return `Season ${seasonNumber}`;
 }
 
-export default function SeasonContent({ item }: { item: ItemDetail & { type: "season" } }) {
+export default function SeasonContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "season" };
+  /** The page's ?libraryId= scope; series and episode links keep it. */
+  libraryId?: number;
+}) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -48,7 +56,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
     data: episodesData,
     isLoading: episodesLoading,
     error: episodesError,
-  } = useItemEpisodes(item.content_id);
+  } = useItemEpisodes(item.content_id, libraryId);
 
   const episodes = episodesData?.episodes ?? [];
   // The season's pending language also covers its episodes. While an episode
@@ -62,10 +70,28 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   const label = item.is_specials ? "Specials" : seasonLabel(seasonNumber, item.title);
   const seriesTitle = item.series_title ?? "Series";
   const seriesId = item.series_id;
+  const seriesHref = seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/";
   const firstEpisode = episodes[0];
-  const playableEpisodes = episodes.filter((episode) => (episode.files?.length ?? 0) > 0);
-  const firstUnwatched =
-    playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0];
+  // With catalog.scope_versions_to_library on, a list read under a library
+  // holds only that library's files, but playback uses every version. When an
+  // episode shows no file here, the season's unscoped list decides what plays.
+  const needsUnscopedFiles =
+    libraryId !== undefined && episodes.some((episode) => (episode.files?.length ?? 0) === 0);
+  const { data: unscopedEpisodesData } = useItemEpisodes(
+    needsUnscopedFiles ? item.content_id : undefined,
+  );
+  const playbackEpisodes =
+    (needsUnscopedFiles ? unscopedEpisodesData?.episodes : undefined) ?? episodes;
+  const playableEpisodes = playbackEpisodes.filter((episode) => (episode.files?.length ?? 0) > 0);
+  // Until that list arrives (or if it fails), an episode with no file here may
+  // still play from another library, so the season's episode count stands in.
+  const unscopedPending = needsUnscopedFiles && !unscopedEpisodesData;
+  const canShuffle = playableEpisodes.length > 1 || (unscopedPending && episodes.length > 1);
+  // The scoped list can't name the first unwatched playable episode, so Watch
+  // Party gets no target (its sheet asks for one) until the unscoped list does.
+  const firstUnwatched = unscopedPending
+    ? undefined
+    : (playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0]);
   const watchTogether = useDetailWatchTogether({
     item,
     target: firstUnwatched
@@ -81,7 +107,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
     initialSeasonNumber: item.season_number ?? undefined,
   });
   const episodeLinkState: EpisodeNavigationState = {
-    parentSeasonHref: `/item/${item.content_id}`,
+    parentSeasonHref: buildItemHref({ contentId: item.content_id, libraryId }),
     parentSeasonLabel: label,
   };
 
@@ -90,10 +116,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
 
   const breadcrumb = (
     <DetailBreadcrumb
-      segments={[
-        { label: seriesTitle, href: seriesId ? `/item/${seriesId}` : "/" },
-        { label: seasonIndicator },
-      ]}
+      segments={[{ label: seriesTitle, href: seriesHref }, { label: seasonIndicator }]}
     />
   );
 
@@ -103,7 +126,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
     return (
       <div className="px-4 py-6 sm:px-6 sm:py-10 lg:px-12">
         <ViewTransitionLink
-          to={seriesId ? `/item/${seriesId}` : "/"}
+          to={seriesHref}
           up
           className="text-muted-foreground hover:text-foreground text-sm"
         >
@@ -157,7 +180,9 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
                         item,
                         mode,
                         onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                          navigate(buildItemHref({ contentId: contentID, libraryId }), {
+                            replace: true,
+                          }),
                       })
                   : undefined
               }
@@ -166,9 +191,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
               canCurateMetadata={canCurateMetadata}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onShuffle={
-                playableEpisodes.length > 1
-                  ? () => startShuffle({ kind: "season", id: item.content_id })
-                  : undefined
+                canShuffle ? () => startShuffle({ kind: "season", id: item.content_id }) : undefined
               }
             />
           }
@@ -199,6 +222,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
               episodes={episodes}
               isLoading={episodesLoading}
               episodeLinkState={episodeLinkState}
+              libraryId={libraryId}
             />
           </section>
         </div>
