@@ -228,6 +228,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	registerQuickConnectRoutes(r, deps, authHandler)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
+	// Roku clients probe for artwork with HEAD before showing it.
+	r.Head(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Head(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
@@ -287,6 +290,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
+			r.Get("/Items/{id}/Images", itemsHandler.HandleItemImageInfos)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Studios", itemsHandler.HandleStudios)

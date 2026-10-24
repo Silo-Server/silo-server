@@ -349,10 +349,11 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	if !ok {
 		return Marker{}, false
 	}
-	// Confidence decides between providers, and NaN compares false both ways,
-	// so a non-finite value counts as unrated, on an absent answer too.
+	// Confidence decides between providers, so a value that is not a valid
+	// 0-1 score (NaN, infinite, or out of range) counts as unrated, on an
+	// absent answer too.
 	confidence := segment.GetConfidence()
-	if math.IsNaN(confidence) || math.IsInf(confidence, 0) {
+	if math.IsNaN(confidence) || confidence < 0 || confidence > 1 {
 		confidence = 0
 	}
 	// An absent answer has no bounds. Read as a segment, the missing bounds

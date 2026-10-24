@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
@@ -149,5 +150,40 @@ func addCompletedHistoryForJellycompatTest(t *testing.T, store userstore.UserSto
 		Source:          userstore.WatchHistorySourceTrakt,
 	}); err != nil {
 		t.Fatalf("AddHistory: %v", err)
+	}
+}
+
+// ListResumableProgress keeps the ids with a resume point, newest first, as
+// ListProgress("in_progress") orders them.
+func TestDirectUserDataServiceListResumableProgress(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, row := range []struct {
+		id        string
+		position  float64
+		completed bool
+		at        time.Time
+	}{
+		{"ep-old", 10, false, now.Add(-2 * time.Hour)},
+		{"ep-new", 20, false, now.Add(-time.Hour)},
+		{"ep-done", 0, true, now},
+		{"other", 30, false, now},
+	} {
+		if err := store.SetProgressAt(t.Context(), "profile-1", row.id, row.position, 100, row.completed, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &directUserDataService{storeProvider: compatTestUserStoreProvider{store: store}}
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	entries, err := service.ListResumableProgress(t.Context(), session, []string{"ep-old", "ep-new", "ep-done", "ep-none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.MediaItemID)
+	}
+	if fmt.Sprint(got) != "[ep-new ep-old]" {
+		t.Fatalf("resumable = %v, want [ep-new ep-old]", got)
 	}
 }

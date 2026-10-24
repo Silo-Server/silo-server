@@ -101,6 +101,15 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		// The episode fast path leaves title to the generic executor, whose
 		// placeholders follow the episode relation's library arguments.
 		{"episode title", "episode", QueryRule{Field: "title", Op: "is", Value: "pilot"}, []string{"fresh-e1", "stale-e1"}},
+		{"show title contains", "episode", QueryRule{Field: "show_title", Op: "contains", Value: "FRESH"}, []string{"fresh-e1"}},
+		{"show title is", "episode", QueryRule{Field: "show_title", Op: "is", Value: " fresh show "}, []string{"fresh-e1"}},
+		{"show title is not", "episode", QueryRule{Field: "show_title", Op: "is_not", Value: "Fresh Show"}, []string{"stale-e1"}},
+		{"show title not contains", "episode", QueryRule{Field: "show_title", Op: "not_contains", Value: "fresh"}, []string{"stale-e1"}},
+		{"show title prefix", "episode", QueryRule{Field: "show_title", Op: "begins_with", Value: "fresh"}, []string{"fresh-e1"}},
+		{"show title suffix", "episode", QueryRule{Field: "show_title", Op: "ends_with", Value: "show"}, []string{"fresh-e1", "stale-e1"}},
+		{"show title wildcard is literal", "episode", QueryRule{Field: "show_title", Op: "contains", Value: "%"}, []string{}},
+		{"movies have no show title", "movie", QueryRule{Field: "show_title", Op: "is_not", Value: "Fresh Show"}, []string{}},
+		{"shows have no parent show title", "series", QueryRule{Field: "show_title", Op: "contains", Value: "Show"}, []string{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,6 +139,50 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("show title combines with watched and episode-title exclusions", func(t *testing.T) {
+		batchEquivExec(t, pool, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'other')`, profile+"-other", userID)
+		for i, title := range []string{"Finale", "Return", "Unseen", "In progress"} {
+			episodeID := id(fmt.Sprintf("fresh-e%d", i+2))
+			batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1, $2, $2 || '-s1', 1, $3, $4)`, episodeID, id("fresh"), i+2, title)
+			batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1, $2)`, episodeID, shows)
+			watcher := profile
+			if i == 1 {
+				watcher += "-other"
+			}
+			if i != 2 { // Unseen has no watch history for any profile.
+				batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW(), $5)`, episodeID+"-history", userID, watcher, episodeID, i != 3)
+			}
+		}
+		for _, tc := range []struct {
+			name    string
+			watched bool
+			want    []string
+		}{
+			{"watched", true, []string{id("fresh-e1")}},
+			{"unwatched", false, []string{id("fresh-e3"), id("fresh-e4"), id("fresh-e5")}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				items, total, err := executor.Preview(ctx, QueryDefinition{
+					MediaScope: "episode",
+					LibraryIDs: []int{shows},
+					Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{
+						{Field: "show_title", Op: "contains", Value: "fresh"},
+						{Field: "watched", Op: "is", Value: tc.watched},
+						{Field: "title", Op: "is_not", Value: "Finale"},
+					}}},
+				}.Normalize(), viewer, 50)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := contentIDs(items)
+				slices.Sort(got)
+				if !slices.Equal(got, tc.want) || total != len(tc.want) {
+					t.Fatalf("episodes excluding Finale = %v (total %d), want %v", got, total, tc.want)
+				}
+			})
+		}
+	})
 
 	// The last air date sort reads the same value as the rule, in catalog
 	// queries and in library browse. A show that premiered recently but has

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -271,6 +272,44 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 	result := make([]upstreamProgress, 0, len(progress))
 	for _, entry := range progress {
 		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
+func (s *directUserDataService) ListResumableProgress(ctx context.Context, session *Session, mediaItemIDs []string) ([]upstreamProgress, error) {
+	mediaItemIDs = normalizeContentIDs(mediaItemIDs)
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	// Chunked like chunkedProgressByMediaItems: a long series expands to
+	// thousands of episode ids.
+	const chunkSize = 500
+	var rows []userstore.WatchProgress
+	for start := 0; start < len(mediaItemIDs); start += chunkSize {
+		chunk, err := store.ListProgressByMediaItems(ctx, session.ProfileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		if err != nil {
+			return nil, fmt.Errorf("list progress by media items: %w", err)
+		}
+		for _, row := range chunk {
+			// The in_progress predicate of ListProgress.
+			if row.PositionSeconds > 0 {
+				rows = append(rows, row)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].UpdatedAt != rows[j].UpdatedAt {
+			return rows[i].UpdatedAt > rows[j].UpdatedAt
+		}
+		return rows[i].MediaItemID > rows[j].MediaItemID
+	})
+	result := make([]upstreamProgress, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, toUpstreamProgress(row))
 	}
 	return result, nil
 }
