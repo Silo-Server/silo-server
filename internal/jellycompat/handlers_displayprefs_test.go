@@ -21,11 +21,11 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
-	read := func(profileID string) displayPreferencesDTO {
+	readID := func(profileID, id string) displayPreferencesDTO {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/DisplayPreferences/usersettings?client=emby", nil)
+		req := httptest.NewRequest(http.MethodGet, "/DisplayPreferences/"+id+"?client=emby", nil)
 		route := chi.NewRouteContext()
-		route.URLParams.Add("displayPreferencesId", "usersettings")
+		route.URLParams.Add("displayPreferencesId", id)
 		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
 		ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: profileID})
 		rec := httptest.NewRecorder()
@@ -39,6 +39,7 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 		}
 		return dto
 	}
+	read := func(profileID string) displayPreferencesDTO { return readID(profileID, "usersettings") }
 	if got := read("profile-1"); got.SortBy != "DateCreated" || got.CustomPrefs["homesection0"] != "resume" {
 		t.Fatalf("legacy customization lost: %+v", got)
 	}
@@ -50,6 +51,21 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 	}
 	if got := read("profile-1"); got.SortBy != "ProductionYear" {
 		t.Fatalf("scoped customization overwritten: %+v", got)
+	}
+
+	// Older servers stored an ID that reads like a route word under its
+	// rewritten case (#2990); the exact-case document wins once it exists.
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "Items"), "emby", `{"Id":"Items","SortBy":"DateCreated","Client":"emby"}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := readID("profile-1", "items"); got.SortBy != "DateCreated" || got.ID != "items" {
+		t.Fatalf("rewritten-key customization lost: %+v", got)
+	}
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "items"), "emby", `{"SortBy":"Random"}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := readID("profile-1", "items"); got.SortBy != "Random" {
+		t.Fatalf("exact-case document not preferred: %+v", got)
 	}
 }
 
