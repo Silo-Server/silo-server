@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 const (
@@ -378,15 +379,8 @@ func (r *serviceFakeRepo) ListLocalWatchEventConnections(_ context.Context, user
 		if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(time.Now()) {
 			continue
 		}
-		switch kind {
-		case LocalWatchEventMarkedWatched:
-			if conn.ExportWatchedEnabled {
-				conns = append(conns, cloneConnectionForTest(conn))
-			}
-		case LocalWatchEventMarkedUnwatched:
-			if conn.ExportUnwatchedEnabled {
-				conns = append(conns, cloneConnectionForTest(conn))
-			}
+		if kind == LocalWatchEventMarkedWatched && conn.ExportWatchedEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
 		}
 	}
 	return conns, nil
@@ -3167,6 +3161,47 @@ func TestServiceLocalWatchEventCommitsPartialResultAndDefersRateLimit(t *testing
 	wantUntil := now.Add(24 * time.Hour)
 	if updated.RateLimitedUntil == nil || !updated.RateLimitedUntil.Equal(wantUntil) {
 		t.Fatalf("RateLimitedUntil = %v, want %v", updated.RateLimitedUntil, wantUntil)
+	}
+}
+
+// A marked-watched event queued before the profile marked the item unwatched
+// must not send the play: the unmark keeps it in history but stops it counting
+// as watched, and no removal follows it to the provider.
+func TestServiceLocalWatchEventSkipsPlaysUnmarkedSinceQueued(t *testing.T) {
+	db := openUserDB(t)
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-1", Name: "Viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	watchedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID, WatchedAt: watchedAt.Format(time.RFC3339), Completed: true, Source: userstore.WatchHistorySourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	if err := watchstate.NewService(staticStoreProvider{store: store}).RecordManualMarkUnwatched(ctx, 7, "profile-1", []string{testMovieMediaID}); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := newServiceFakeRepo()
+	var exported []LocalPlay
+	registry := NewRegistry()
+	if err := registry.Register(watchedExporterStub{exported: &exported}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry).WithUserStoreProvider(staticStoreProvider{store: store})
+	conn := Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ProviderAccountID: testProviderAccountID, ExportWatchedEnabled: true}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	if err := service.processLocalWatchEvent(ctx, LocalWatchEvent{
+		Kind:      LocalWatchEventMarkedWatched,
+		UserID:    conn.UserID,
+		ProfileID: conn.ProfileID,
+		Plays:     []LocalPlay{{HistoryID: "history-1", MediaItemID: testMovieMediaID, ProviderItemKey: testMovieProviderItemKey, WatchedAt: watchedAt}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 0 {
+		t.Fatalf("exported %+v, want nothing for a play unmarked since the event was queued", exported)
 	}
 }
 

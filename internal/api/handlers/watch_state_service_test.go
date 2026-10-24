@@ -58,15 +58,16 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListHistory: %v", err)
 	}
-	if len(history) != 1 {
-		t.Fatalf("visible history after unmark+mark = %d rows, want the one new play", len(history))
+	// Unmark keeps the first play in history and sends providers nothing;
+	// the mark after it records and sends a second play.
+	if len(history) != 2 {
+		t.Fatalf("history after unmark+mark = %d rows, want the first play and the new one", len(history))
 	}
-	if len(dispatcher.events) != 3 ||
-		dispatcher.events[1].Kind != watchsync.LocalWatchEventMarkedUnwatched ||
-		dispatcher.events[2].Kind != watchsync.LocalWatchEventMarkedWatched || len(dispatcher.events[2].Plays) != 1 {
-		t.Fatalf("events = %+v, want watched, unwatched, watched", dispatcher.events)
+	if len(dispatcher.events) != 2 ||
+		dispatcher.events[1].Kind != watchsync.LocalWatchEventMarkedWatched || len(dispatcher.events[1].Plays) != 1 {
+		t.Fatalf("events = %+v, want watched, watched", dispatcher.events)
 	}
-	if dispatcher.events[2].Plays[0].HistoryID == dispatcher.events[0].Plays[0].HistoryID {
+	if dispatcher.events[1].Plays[0].HistoryID == dispatcher.events[0].Plays[0].HistoryID {
 		t.Fatal("the second play reused the first history id")
 	}
 }

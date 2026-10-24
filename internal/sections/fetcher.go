@@ -3528,6 +3528,7 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
 	args = append(args, scope.interval)
 	argIdx++
+	conditions = append(conditions, catalog.HistoryCountsAsWatchedSQL("uwh"))
 
 	if scope.userID > 0 {
 		conditions = append(conditions, fmt.Sprintf("uwh.user_id = $%d", argIdx))
@@ -4145,6 +4146,7 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			JOIN episodes we ON we.content_id = uwh.media_item_id
 			WHERE uwh.user_id = $1
 			  AND uwh.profile_id = $2
+			  AND `+catalog.HistoryCountsAsWatchedSQL("uwh")+`
 			GROUP BY we.series_id
 		)
 		SELECT %s FROM %s JOIN watched w ON w.series_id = mi.content_id WHERE %s

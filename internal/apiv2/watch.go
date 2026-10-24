@@ -272,7 +272,7 @@ func registerWatch(reg *Registry) {
 	})
 
 	unmark := humaOp(http.MethodDelete, Prefix+"/watched/{id}", "unmarkWatched", "watch",
-		"Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.")
+		"Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched.")
 	unmark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: unmark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, false)

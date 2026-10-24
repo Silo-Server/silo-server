@@ -178,7 +178,7 @@ var intentTables = []struct {
 	{"user_personal_collection_items", colMediaItemID, []string{colUserID, "collection_id", "sub_item_id"}},
 	{"library_collection_items", colMediaItemID, []string{"collection_id"}},
 	{"user_home_item_dismissals", colMediaItemID, []string{colUserID, colProfileID, "surface"}},
-	{"user_history_hidden_items", colMediaItemID, []string{colUserID, colProfileID}},
+	{historyCutoffTable, colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
@@ -407,6 +407,11 @@ func moveProgressPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) 
 // moveIntentPairs moves one intent table for the pairs; on a destination
 // collision the destination row wins and the source duplicate is dropped.
 func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, keyCols []string, fromIDs, toIDs []string) (int, error) {
+	if table == historyCutoffTable {
+		if err := mergeHistoryCutoffPairs(ctx, tx, fromIDs, toIDs); err != nil {
+			return 0, err
+		}
+	}
 	join := ""
 	for _, col := range keyCols {
 		join += fmt.Sprintf(" AND dest.%s = src.%s", col, col)
@@ -427,6 +432,31 @@ func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, key
 		return 0, fmt.Errorf("reattribute: %s move: %w", table, err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+const historyCutoffTable = "user_history_hidden_items"
+
+// mergeHistoryCutoffPairs raises a destination's watched-state cutoff to its
+// source's before the source row is dropped. History moves with its item, and
+// a mark unwatched keeps plays in history, so a destination that kept only its
+// own older cutoff would count the source's unmarked plays as watched. The
+// listing cutoff stays the destination's: a history removal already deleted
+// the source's plays behind it.
+func mergeHistoryCutoffPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_history_hidden_items dest
+		SET hidden_before = GREATEST(dest.hidden_before, src.hidden_before),
+		    removed_before = COALESCE(dest.removed_before, dest.hidden_before),
+		    updated_at = GREATEST(dest.updated_at, src.updated_at)
+		FROM `+pairsCTE+`, user_history_hidden_items src
+		WHERE src.media_item_id = p.from_id
+		  AND dest.media_item_id = p.to_id
+		  AND dest.user_id = src.user_id
+		  AND dest.profile_id = src.profile_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: history cutoff merge: %w", err)
+	}
+	return nil
 }
 
 // moveFileSubset is the split path: only the state attributable to
@@ -580,6 +610,23 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 		)`
 
 	if opts.Mode == HistoryModeEvidence {
+		// The source item keeps its cutoffs for the profiles whose history
+		// stays; a profile whose history moves takes its watched-state cutoff
+		// along, as in mergeHistoryCutoffPairs.
+		if _, err := tx.Exec(ctx, evidenceCTE+`
+			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
+			SELECT hhi.user_id, hhi.profile_id, $3, hhi.hidden_before, '-infinity', hhi.updated_at
+			FROM user_history_hidden_items hhi
+			JOIN evidence e ON e.user_id = hhi.user_id AND e.profile_id = hhi.profile_id
+			WHERE hhi.media_item_id = $1
+			  AND e.any_moved AND NOT e.any_stayed
+			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+			SET hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
+			    removed_before = COALESCE(user_history_hidden_items.removed_before, user_history_hidden_items.hidden_before),
+			    updated_at = GREATEST(user_history_hidden_items.updated_at, EXCLUDED.updated_at)
+		`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID); err != nil {
+			return fmt.Errorf("reattribute: history cutoff evidence copy: %w", err)
+		}
 		tag, err := tx.Exec(ctx, evidenceCTE+`
 			UPDATE user_watch_history h
 			SET media_item_id = $3

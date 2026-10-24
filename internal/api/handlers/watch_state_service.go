@@ -209,17 +209,12 @@ func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, p
 	return nil
 }
 
-// markLeafTargetsUnwatched hides the targets' history and clears their
-// progress, then queues the removal of the manual plays that were visible.
+// markLeafTargetsUnwatched clears the targets' watched state and progress.
+// Their plays stay in watch history, here and on watch providers.
 func (h *ItemsHandler) markLeafTargetsUnwatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
 	targetIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
 		targetIDs = append(targetIDs, target.ContentID)
 	}
-	result, err := h.watchState.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
-	if err != nil {
-		return err
-	}
-	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
-	return nil
+	return h.watchState.RecordManualMarkUnwatched(ctx, userID, profileID, targetIDs)
 }

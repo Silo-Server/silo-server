@@ -49,8 +49,8 @@ func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profil
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if edit.ClearHistory {
-		if err := s.removeHistoryItems(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
+	if edit.ClearWatched {
+		if err := s.clearWatchedState(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

@@ -49965,6 +49965,7 @@
             "type": "boolean"
           },
           "export_unwatched": {
+            "description": "Always false: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched": {
@@ -50055,6 +50056,7 @@
             "type": "boolean"
           },
           "export_unwatched_enabled": {
+            "description": "Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched_enabled": {
@@ -50274,6 +50276,7 @@
             "type": "boolean"
           },
           "export_unwatched_enabled": {
+            "description": "Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals.",
             "type": "boolean"
           },
           "export_watched_enabled": {
@@ -216620,7 +216623,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.",
+        "summary": "Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched.",
         "tags": [
           "watch"
         ],

@@ -53,7 +53,7 @@ func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 	for _, clear := range []bool{false, true} {
 		failed := edit
 		failed.PositionSeconds = 321
-		failed.ClearHistory = clear
+		failed.ClearWatched = clear
 		failed.Completed = !clear
 		if clear {
 			failed.History = nil
@@ -75,16 +75,16 @@ func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 		t.Fatal(err)
 	}
 	check(true, 123, 2, edit.EventAt)
-	// Explicit unplayed clears history and retains the requested resume position.
-	edit.ClearHistory = true
+	// Explicit unplayed keeps history and retains the requested resume position.
+	edit.ClearWatched = true
 	edit.Completed = false
 	edit.PositionSeconds = 77
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(false, 77, 0, edit.EventAt)
+	check(false, 77, 2, edit.EventAt)
 	// History failure leaves the prior progress/date intact too.
-	edit.ClearHistory = false
+	edit.ClearWatched = false
 	edit.Completed = true
 	edit.PositionSeconds = 88
 	edit.History = &userstore.WatchHistoryEntry{ID: "00000000-0000-0000-0000-000000000002", WatchedAt: date.Format(time.RFC3339), Completed: true}
@@ -95,5 +95,5 @@ func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err == nil {
 		t.Fatal("duplicate history key accepted")
 	}
-	check(true, 88, 1, edit.EventAt)
+	check(true, 88, 3, edit.EventAt)
 }

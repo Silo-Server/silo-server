@@ -50,8 +50,8 @@ func (s *SQLiteUserStore) ApplyJellycompatProgress(ctx context.Context, profileI
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if edit.ClearHistory {
-		if err := removeHistoryItems(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
+	if edit.ClearWatched {
+		if err := clearWatchedState(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

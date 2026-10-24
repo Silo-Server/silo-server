@@ -43777,7 +43777,7 @@
       },
       "notes": "Section personal-progress (profile_scoped). Media kind confirmed from ItemsHandler.HandleMarkUnwatched: request has no body, v1 answers JSON {content_id, type, affected_count, played:false}; v2 answers 204 with no body. Same target resolution as markWatched (movie, ebook, episode, season, series; season/series expand to episodes), unknown or inaccessible target 404. Retry safety: natural_idempotent (clearing an unwatched item is a no-op). Conditionally registered in v1 (authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil); v2 registers unconditionally and answers 503 when the items handler is not wired.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "recordMarkUnwatched hides history through a fresh time.Now() cutoff and re-dispatches the provider event, so a retry after a lost response also hides a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
+      "retry_safety_note": "recordMarkUnwatched clears watched state through a fresh time.Now() cutoff, so a retry after a lost response also stops a viewing recorded in between from counting as watched (the viewing stays in history). The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",

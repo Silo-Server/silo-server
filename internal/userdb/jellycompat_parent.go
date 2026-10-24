@@ -22,7 +22,7 @@ func (s *SQLiteUserStore) ApplyJellycompatParent(ctx context.Context, profileID 
 		for _, target := range edit.Targets {
 			ids = append(ids, target.MediaItemID)
 		}
-		if err := removeHistoryItems(ctx, tx, profileID, ids, time.Now().UTC()); err != nil {
+		if err := clearWatchedState(ctx, tx, profileID, ids, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

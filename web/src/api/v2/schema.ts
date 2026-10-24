@@ -12258,7 +12258,7 @@ export interface paths {
     put?: never;
     /** Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op. */
     post: operations["markWatched"];
-    /** Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs. */
+    /** Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched. */
     delete: operations["unmarkWatched"];
     options?: never;
     head?: never;
@@ -32437,6 +32437,7 @@ export interface components {
     WatchProviderCapabilities: {
       export_favorites: boolean;
       export_ratings: boolean;
+      /** @description Always false: mark unwatched keeps watch history, so Silo sends providers no history removals. */
       export_unwatched: boolean;
       export_watched: boolean;
       export_watchlist: boolean;
@@ -32461,6 +32462,7 @@ export interface components {
       display_name: string;
       export_favorites_enabled: boolean;
       export_ratings_enabled: boolean;
+      /** @description Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals. */
       export_unwatched_enabled: boolean;
       export_watched_enabled: boolean;
       export_watchlist_enabled: boolean;
@@ -32551,6 +32553,7 @@ export interface components {
       export_favorites_enabled: boolean;
       /** @description Send the profile's star ratings to the provider (stars times two) and clear removed ones. */
       export_ratings_enabled: boolean;
+      /** @description Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals. */
       export_unwatched_enabled: boolean;
       export_watched_enabled: boolean;
       export_watchlist_enabled: boolean;

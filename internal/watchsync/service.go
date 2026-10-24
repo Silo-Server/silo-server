@@ -411,9 +411,18 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 	if err != nil {
 		return err
 	}
-	if len(conns) > 0 {
-		event.Plays = s.withPlayTitles(ctx, event.Plays)
+	if len(conns) == 0 {
+		return nil
 	}
+	// A mark unwatched that landed after the event was queued keeps the play
+	// in history but stops it counting as watched, and no removal follows it
+	// to the provider. Send only plays that still count; the next scheduled
+	// export finds nothing to send for the rest.
+	event.Plays, err = s.playsStillWatched(ctx, event.UserID, event.ProfileID, event.Plays)
+	if err != nil {
+		return err
+	}
+	event.Plays = s.withPlayTitles(ctx, event.Plays)
 	for _, conn := range conns {
 		provider, ok := s.registry.Get(conn.Provider)
 		if !ok {
@@ -441,24 +450,6 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 				} else {
 					s.recordLocalWatchEventError(ctx, conn, err)
 				}
-			}
-		case LocalWatchEventMarkedUnwatched:
-			if !provider.Capabilities().ExportUnwatched {
-				continue
-			}
-			remover, ok := provider.(UnwatchedExporter)
-			if !ok {
-				continue
-			}
-			if _, err := remover.RemoveHistory(ctx, cfg, conn, event.Plays); err != nil {
-				s.recordLocalWatchEventError(ctx, conn, err)
-				continue
-			}
-			now := s.now()
-			update := flowSucceeded(now)
-			update.LastOutboundSyncAt = &now
-			if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
-				return err
 			}
 		}
 	}
@@ -1062,7 +1053,6 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 	return caps.ImportWatched ||
 		caps.ImportProgress ||
 		caps.ExportWatched ||
-		caps.ExportUnwatched ||
 		caps.ImportFavorites ||
 		caps.ExportFavorites ||
 		caps.RemoveFavorites ||
@@ -1432,7 +1422,18 @@ func (s *Service) nearRunDeadline(ctx context.Context) bool {
 	return ok && deadline.Sub(s.now()) < exportDrainReserve
 }
 
-// visiblePlays keeps the plays whose history entries are still visible.
+func (s *Service) playsStillWatched(ctx context.Context, userID int, profileID string, plays []LocalPlay) ([]LocalPlay, error) {
+	if len(plays) == 0 || s.storeProvider == nil {
+		return plays, nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	return visiblePlays(ctx, store, userstore.CompletedHistoryQuery{ProfileID: profileID}, plays)
+}
+
+// visiblePlays keeps the plays whose history entries still count as watched.
 func visiblePlays(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery, plays []LocalPlay) ([]LocalPlay, error) {
 	if len(plays) == 0 {
 		// An empty media filter would read the whole history.

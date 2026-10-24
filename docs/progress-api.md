@@ -91,8 +91,10 @@ clears the acting profile's resume position on a movie or episode and answers
 204. It is the manual edit for an item someone skimmed and does not want left
 partly watched. The progress entry stays with `position_seconds` 0 and keeps
 `completed` and `duration_seconds`, so a rewatched item stays watched. Watch
-history is untouched. Mark unwatched (`unmarkWatched`) is different: it removes
-the item's history, including unfinished plays.
+history is untouched. Mark unwatched (`unmarkWatched`) is different: it also
+clears the watched state. It keeps watch history too, but plays from before the
+unmark no longer count as watched, and watch providers keep theirs. Only
+`removeHistoryEntries` removes plays from history.
 
 The write is stamped with the server time. It advances the delta-sync cursor, so
 other devices receive the cleared position, and an older provider resume point

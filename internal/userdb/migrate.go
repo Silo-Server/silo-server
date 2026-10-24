@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 35
+const schemaVersion = 36
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -372,6 +372,17 @@ WHERE COALESCE(section_id, '') = ''
 			}
 		}
 		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 35"); err != nil {
+			return err
+		}
+	}
+	if version < 36 {
+		// The history-listing cutoff; the Postgres store adds the same column
+		// in 20261024034851_history_removal_cutoff.sql. NULL reads as
+		// hidden_before, so existing rows need no backfill.
+		if err := addHistoryRemovalCutoff(tx); err != nil {
+			return fmt.Errorf("migration v36 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 36"); err != nil {
 			return err
 		}
 	}
@@ -745,4 +756,12 @@ func migrateToV7(tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+func addHistoryRemovalCutoff(tx *sql.Tx) error {
+	if columnExists(tx, "hidden_history_items", "removed_before") {
+		return nil
+	}
+	_, err := tx.ExecContext(context.Background(), "ALTER TABLE hidden_history_items ADD COLUMN removed_before TEXT")
+	return err
 }
