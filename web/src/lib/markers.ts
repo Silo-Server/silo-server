@@ -51,4 +51,4 @@ export function parseClock(value: string): number | null {
  * manifest declares default_contribute_enabled show it.
  */
 export const MARKER_SHARING_DISCLOSURE =
-  "Help other Silo servers skip intros and credits. Silo shares the show and episode IDs, a hash of each file, and the intro and credits times it finds or you edit. It never shares file names, paths or your library list.";
+  "Help other Silo servers skip intros, credits, recaps and previews. Silo shares the show and episode IDs, each file's hash, size and length, and the marker times it finds or you edit, with how each was found and how sure it is. It never shares file names, paths or your library list.";
