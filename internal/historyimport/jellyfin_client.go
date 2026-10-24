@@ -205,9 +205,9 @@ func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinL
 //
 // The early stop is only as good as the server's sort, so sorted is false,
 // with no items, when the plays visibly are not newest first: a page starts
-// with a play newer than the last one on the page before it, or the page that
-// would end the read is itself out of order. The caller then falls back to the
-// full played read.
+// with a play newer than the last one on the page before it, or the read would
+// stop early after any page that was itself out of order. The caller then
+// falls back to the full played read.
 func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLocalAuth, since time.Time) (items []jellyfinItem, sorted bool, err error) {
 	query := url.Values{}
 	query.Set("UserId", auth.UserID)
@@ -222,6 +222,7 @@ func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLoca
 	endpoint := auth.endpoint("/Items")
 	var budget listingBudget
 	var previous *time.Time // the last dated play on the pages read so far
+	disordered := false     // some page read so far was not newest first
 	startIndex := 0
 	for {
 		payload, err := c.fetchPage(ctx, auth, endpoint, query, startIndex, &budget)
@@ -230,7 +231,6 @@ func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLoca
 		}
 		inWindow, older := 0, 0
 		var first, last *time.Time
-		descending := true
 		for _, item := range payload.Items {
 			played := item.UserData.LastPlayedDate
 			if played == nil {
@@ -240,7 +240,7 @@ func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLoca
 				first = played
 			}
 			if last != nil && played.After(*last) {
-				descending = false
+				disordered = true
 			}
 			last = played
 			if played.Before(since) {
@@ -255,7 +255,7 @@ func (c *JellyfinClient) FetchPlayedSince(ctx context.Context, auth jellyfinLoca
 		}
 		startIndex += len(payload.Items)
 		if older > 0 && inWindow == 0 {
-			if !descending {
+			if disordered {
 				return nil, false, nil
 			}
 			return items, true, nil

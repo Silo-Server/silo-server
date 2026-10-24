@@ -178,6 +178,39 @@ func TestJellyfinFetchPlayedSince_UnsortedAcrossPagesIsReported(t *testing.T) {
 	}
 }
 
+// A page that is out of order but still holds in-window plays doesn't end the
+// read, and it must not be forgotten: when a later, sorted page of only older
+// plays would stop the read, the earlier disorder means plays further on may
+// still be recent, so the read reports it instead of returning a partial window.
+func TestJellyfinFetchPlayedSince_EarlierDisorderBlocksEarlyStop(t *testing.T) {
+	t.Parallel()
+
+	since := time.Date(2026, 10, 14, 4, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := make([]jellyfinItem, jellyfinPageSize)
+		for i := range page {
+			// Page 1 descends from +10h but has one recent play out of
+			// order; page 2 is sorted and wholly older than the cutoff.
+			offset := 10*time.Hour - time.Duration(i)*time.Minute
+			if r.URL.Query().Get("StartIndex") != "0" {
+				offset = -time.Duration(i+1) * time.Minute
+			}
+			page[i] = jellyfinItem{ID: "item-" + strconv.Itoa(i), Type: "Movie", UserData: playedAt(since.Add(offset))}
+		}
+		if r.URL.Query().Get("StartIndex") == "0" {
+			page[5].UserData = playedAt(since.Add(11 * time.Hour))
+		}
+		writeJellyfinItems(t, w, 100000, page)
+	}))
+	defer server.Close()
+
+	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}
+	items, sorted, err := newUnthrottledJellyfinClient().FetchPlayedSince(trustLoopback(context.Background()), auth, since)
+	if err != nil || sorted || items != nil {
+		t.Fatalf("FetchPlayedSince: items=%d sorted=%v err=%v, want an unsorted report", len(items), sorted, err)
+	}
+}
+
 // When the server ignores the sort, the lookback run reads the full played
 // history and says so in a run warning, so nothing recent is silently missed.
 // Here the first page holds only older plays, out of order, which would
