@@ -52,8 +52,12 @@
 ./internal/catalog TestEpisodeCatalogCountsMatchCursorPagesPostgres
 
 # PostgreSQL search keeps typo matches that contain every query word and ranks
-# titles starting with the query first, on the cursor and offset paths.
+# titles starting with the query first, on the cursor and offset paths. Search
+# folds diacritics alike in Go and SQL, and the folding migration refreshes
+# stored search fields and collapses colliding aliases.
 ./internal/catalog TestSearchRelevancePostgres
+./internal/catalog TestSearchTextFoldMatchesGoPostgres
+./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB

@@ -2841,13 +2841,17 @@ func main() {
 		isMemory := true
 
 		if cfg.RateLimit.Backend == "redis" {
-			redisClient, redisErr := cache.NewRedisClientForRole(cfg.Redis, "tasks")
+			// Each check bounds its own call, so the client must let that
+			// deadline end a stalled socket read.
+			redisClient, redisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "tasks")
 			if redisErr != nil {
 				log.Fatalf("failed to create Redis client for rate limiting: %v", redisErr)
 			}
 			if redisClient != nil {
-				perKeyLimiter = ratelimit.NewRedisLimiter(redisClient)
-				globalLimiter = ratelimit.NewRedisLimiter(redisClient)
+				// One limiter for both, so a Redis outage pauses every check
+				// of a request at once.
+				redisLimiter := ratelimit.NewRedisLimiter(redisClient)
+				perKeyLimiter, globalLimiter = redisLimiter, redisLimiter
 				isMemory = false
 				defer func() { _ = cache.CloseRedisClient(redisClient) }()
 			}
