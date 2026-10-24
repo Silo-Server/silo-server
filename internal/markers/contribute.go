@@ -140,33 +140,41 @@ const manualKeepTolerance = 1.0
 // KeepsProviderMarker reports whether a manual save of kind from start to end
 // keeps a provider's marker: shown, the file as the user saw it before the
 // save, held an online or plugin marker of kind, or a manual one an earlier
-// save withheld, and neither bound moved by more than a second.
+// save withheld, and neither bound moved by more than a second from any of
+// its occurrences (models.EffectiveMarkerSegments).
 func KeepsProviderMarker(shown *models.MediaFile, kind MarkerKind, start, end float64) bool {
 	if shown == nil {
 		return false
 	}
 	for _, seg := range fileSegments(shown) {
-		if seg.kind != kind || seg.start == nil || seg.end == nil || seg.source == nil {
+		if seg.kind != kind || seg.source == nil {
 			continue
 		}
 		fromProvider := *seg.source == models.MarkerSourceOnline || *seg.source == models.MarkerSourcePlugin ||
 			(seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm)
-		return fromProvider && math.Abs(*seg.start-start) <= manualKeepTolerance && math.Abs(*seg.end-end) <= manualKeepTolerance
+		return fromProvider && slices.ContainsFunc(models.EffectiveMarkerSegments(shown), func(o models.MarkerSegment) bool {
+			return o.Kind == seg.name && math.Abs(o.StartSeconds-start) <= manualKeepTolerance && math.Abs(o.EndSeconds-end) <= manualKeepTolerance
+		})
 	}
 	return false
 }
 
-// HoldsManualMarker reports whether file holds a manual marker of kind or a
-// manual clear of it. No online or plugin marker replaces either
+// HoldsSharedManualMarker reports whether file holds a manual marker of kind
+// with algorithm ManualAlgorithm. No online or plugin marker replaces it
 // (CanWriteMarkerUpdate), so a player is shown the stored kind whatever an
-// on-demand lookup returns.
-func HoldsManualMarker(file *models.MediaFile, kind MarkerKind) bool {
+// on-demand lookup returns. A withheld marker or a manual clear does not
+// count: a player that loaded the file before the save that wrote one may
+// still show a provider's marker. With on-demand lookups every save over
+// anything else is withheld, so the kind can only hold a ManualAlgorithm
+// marker now if it held one when any open editor loaded the file.
+func HoldsSharedManualMarker(file *models.MediaFile, kind MarkerKind) bool {
 	if file == nil {
 		return false
 	}
 	for _, seg := range fileSegments(file) {
 		if seg.kind == kind {
-			return seg.source != nil && *seg.source == models.MarkerSourceManual
+			return seg.start != nil && seg.end != nil && seg.source != nil && *seg.source == models.MarkerSourceManual &&
+				seg.algorithm != nil && *seg.algorithm == ManualAlgorithm
 		}
 	}
 	return false

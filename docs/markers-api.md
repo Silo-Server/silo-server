@@ -113,10 +113,11 @@ changed, so editing another setting cannot turn sharing back on from a stale
 copy.
 
 A manual save is never shared for a kind it may copy from a provider: both
-bounds within 1 s of an online or plugin marker stored on the file, or of an
-earlier save withheld this way. With `markers.online_storage` set to
-`on_demand`, provider markers are not stored, so every kind a save sets is
-withheld unless the file already held that kind as manual. A withheld kind is
+bounds within 1 s of any occurrence of an online or plugin marker stored on
+the file, or of an earlier save withheld this way. With
+`markers.online_storage` set to `on_demand`, provider markers are not stored,
+so every kind a save sets is withheld unless the file already held that kind
+as a `manual:v1` marker. A withheld kind is
 stored with algorithm `manual:withheld:v1` and otherwise acts as a manual
 marker.
 

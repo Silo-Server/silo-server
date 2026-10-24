@@ -458,26 +458,38 @@ is never offered. Providers without
 `supports_amend` get only scanner markers from the daily task.
 
 A manual save of a kind whose bounds are both within a second of a marker an
-online or plugin provider supplied, as the user was shown it, may repeat
-that provider's data (`markers.KeepsProviderMarker`). The save stores that
-kind with source `manual` and algorithm `manual:withheld:v1` instead of
-`manual:v1`, and no contribution path sends it: not the save's own run, the
-daily task, an admin contribution, or an amend resend, to any provider,
-including the one whose marker it kept. A save that keeps an earlier withheld
-marker stays withheld. The comparison uses the stored row, which is what a
-player is shown unless online lookups run with `markers.online_storage` set to
-`on_demand` (`PopulationService.ShowsStoredMarkers`). In that mode a player is
-shown provider answers that each replica caches in its own memory for a
-while and never stores, and a provider's answer can change between playback
-and the save, so no lookup at save time can say which marker the user saw.
-Every kind such a save sets is withheld, except a kind the file already held
-as manual (a marker or a clear): no provider marker replaces one, so the
-stored row is what the player showed. Provenance is
-written with the marker in one statement, so it survives restarts, races
-between saves, and changes to the item's metadata. Everywhere else,
-including write priority, local detection, the API, and jellycompat,
-`manual:withheld:v1` is a manual marker like `manual:v1`. `/api/v2` reports
-the stored algorithm; the frozen `/api/v1` reports `manual:v1` for both.
+online or plugin provider supplied, as the user was shown it, may repeat that
+provider's data (`markers.KeepsProviderMarker`, which checks every occurrence
+of the kind). The save stores that kind with source `manual` and algorithm
+`manual:withheld:v1` instead of `manual:v1`, and no contribution path sends
+it: not the save's own run, the daily task, an admin contribution, or an amend
+resend, to any provider, including the one whose marker it kept. A save that
+keeps an earlier withheld marker stays withheld. The comparison uses the
+stored row, which is what a player is shown unless online lookups run with
+`markers.online_storage` set to `on_demand`
+(`PopulationService.ShowsStoredMarkers`). In that mode a player is shown
+provider answers that each replica caches in its own memory for a while and
+never stores, and a provider's answer can change between playback and the
+save, so no lookup at save time can say which marker the user saw. Every kind
+such a save sets is withheld, except a kind the file already held as a
+`manual:v1` marker: no provider marker replaces one, and since every other
+save in that mode is withheld, the kind already held it when any editor still
+open loaded the file. A withheld marker or a manual clear does not exempt a
+save, because an editor opened before the save that wrote it may still show a
+provider's marker. Provenance is written with the marker in one statement, so
+it survives restarts, races between saves, and changes to the item's metadata.
+Everywhere else, including write priority, local detection, the API, and
+jellycompat, `manual:withheld:v1` is a manual marker like `manual:v1`.
+`/api/v2` reports the stored algorithm; the frozen `/api/v1` reports
+`manual:v1` for both.
+
+With stored markers, a save is compared with the row as it is when the save
+arrives, not with what the editor showed, which the API does not send. If the
+stored kind changes while an editor is open, through a provider refresh or
+another user's save, a save that keeps the provider marker the editor showed
+can be stored as `manual:v1` and shared. Closing this needs the save to name
+the state it edited, such as an `If-Match` precondition on the `/api/v2`
+marker write.
 
 Builds from before this rule do not know `manual:withheld:v1`. During a
 rolling upgrade from one, an older replica can still send a withheld marker

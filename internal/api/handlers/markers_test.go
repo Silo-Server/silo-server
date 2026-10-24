@@ -253,8 +253,8 @@ func (p onDemandMarkerPopulation) ShowsStoredMarkers(context.Context) (bool, err
 // stores the withheld algorithm so no contribution passes the provider's data
 // on. In on_demand mode no replica knows which provider marker a player was
 // shown, so every save is withheld, unless the file already held the kind as
-// manual, which no provider marker replaces. A save that keeps an earlier
-// withheld save stays withheld.
+// a shared manual marker, which no provider marker replaces. A save that
+// keeps an earlier withheld save stays withheld.
 func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	plugin := func() *models.MediaFile {
 		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
@@ -266,6 +266,9 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 		return file
 	}
 	unmarked := &models.MediaFile{ID: 5, Duration: 1800}
+	cleared := &models.MediaFile{ID: 5, Duration: 1800, IntroMarkersSource: new(models.MarkerSourceManual), IntroMarkersAlgorithm: new(markers.ManualAlgorithm)}
+	twice := plugin()
+	twice.MarkerSegments = []models.MarkerSegment{{Kind: models.MarkerSegmentIntro, StartSeconds: 10, EndSeconds: 30}, {Kind: models.MarkerSegmentIntro, StartSeconds: 100, EndSeconds: 130}}
 	const kept = `{"intro":{"start":10.5,"end":70.9}}`
 	for _, tc := range []struct {
 		name       string
@@ -276,6 +279,7 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	}{
 		{"kept within a second", plugin(), nil, kept, true},
 		{"moved", plugin(), nil, `{"intro":{"start":11.5,"end":70}}`, false},
+		{"kept a later occurrence", twice, nil, `{"intro":{"start":100.3,"end":130.3}}`, true},
 		{"local marker", local(models.MarkerSourceScanner, "chapter:v1"), nil, kept, false},
 		{"own correction", local(models.MarkerSourceManual, markers.ManualAlgorithm), nil, kept, false},
 		{"kept an earlier withheld save", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), nil, kept, true},
@@ -284,6 +288,9 @@ func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 		{"storage setting unreadable", unmarked, onDemandMarkerPopulation{err: context.DeadlineExceeded}, kept, true},
 		{"on-demand, own correction", local(models.MarkerSourceManual, markers.ManualAlgorithm), onDemandMarkerPopulation{}, kept, false},
 		{"on-demand, earlier withheld save", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), onDemandMarkerPopulation{}, kept, true},
+		// An editor opened before the earlier save may show a provider's marker.
+		{"on-demand, moved from an earlier withheld save", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), onDemandMarkerPopulation{}, `{"intro":{"start":20,"end":80}}`, true},
+		{"on-demand, manual clear", cleared, onDemandMarkerPopulation{}, kept, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writer := &fakeMarkerWriter{}

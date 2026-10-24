@@ -176,8 +176,7 @@ var _ markerStorageReader = (*markers.PopulationService)(nil)
 // in on_demand mode. There a player is shown provider answers that each
 // replica caches for itself and drops, so no lookup at save time can tell
 // which one the user saw, and every kind is withheld, except a kind the file
-// already holds as manual, which no provider marker replaces
-// (markers.HoldsManualMarker).
+// already holds as a shared manual marker (markers.HoldsSharedManualMarker).
 func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate) {
 	known := true
 	if reader, ok := h.MarkerPopulation.(markerStorageReader); ok {
@@ -199,7 +198,7 @@ func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *
 		if seg.start == nil || seg.end == nil {
 			continue
 		}
-		if (!known && !markers.HoldsManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(file, seg.kind, *seg.start, *seg.end) {
+		if (!known && !markers.HoldsSharedManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(file, seg.kind, *seg.start, *seg.end) {
 			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence, Algorithm: markers.ManualWithheldAlgorithm}
 		}
 	}
