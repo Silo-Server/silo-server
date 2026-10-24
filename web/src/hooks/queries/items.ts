@@ -21,6 +21,7 @@ import {
 } from "@/pages/ItemDetail/watchedState";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   invalidateMediaSurfaceQueries,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
@@ -393,14 +394,20 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
     },
-    onSettled: () => {
+    onSettled: (_data, error) => {
       // The detail query has to be refreshed: marking watched also zeroes
       // `position_seconds` and moves season/series counts server-side, and the
-      // optimistic patch above only carries `played`.
+      // optimistic patch above only carries `played`. A mark that landed also
+      // clears the resume position, so a closed player must not start from
+      // its cached one while that refresh waits.
+      const knownRelatedIds = error
+        ? undefined
+        : dropInactiveWatchDetail(queryClient, item.content_id);
       scheduleMediaSurfaceInvalidation(queryClient, {
         itemId: item.content_id,
         watchedKeys: getCachedWatchedInvalidationKeys(queryClient, item),
         skipSimilarItems: true,
+        knownRelatedIds,
       });
     },
   });

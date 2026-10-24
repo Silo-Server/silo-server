@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   v2: vi.fn(),
   cancelItemDetailQueries: vi.fn(),
+  dropInactiveWatchDetail: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
   scheduleMediaSurfaceInvalidation: vi.fn(),
   toastError: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("@/pages/ItemDetail/watchedState", async () => {
 
 vi.mock("./mediaSurfaceRefresh", () => ({
   cancelItemDetailQueries: (...args: unknown[]) => mocks.cancelItemDetailQueries(...args),
+  dropInactiveWatchDetail: (...args: unknown[]) => mocks.dropInactiveWatchDetail(...args),
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
     mocks.invalidateMediaSurfaceQueries(...args),
   scheduleMediaSurfaceInvalidation: (...args: unknown[]) =>
@@ -80,7 +82,7 @@ type WatchedMutationOptions = {
   onMutate?: (nextPlayed: boolean) => Promise<unknown>;
   onError?: (error: unknown, nextPlayed: boolean, context?: unknown) => void;
   onSuccess?: (data: unknown, nextPlayed: boolean) => void;
-  onSettled?: () => Promise<unknown>;
+  onSettled?: (data?: unknown, error?: unknown) => Promise<unknown>;
 };
 
 type RefreshMetadataVariables = {
@@ -248,6 +250,27 @@ describe("item query helpers", () => {
     expect(
       revert({ user_data: { played: true }, user_state: { played: true, is_favorite: false } }),
     ).toMatchObject({ user_data: { played: true }, user_state: { played: true } });
+  });
+
+  it("drops a closed player's cached position once a mark lands", () => {
+    const queryClient = {};
+    mocks.useQueryClient.mockReturnValue(queryClient);
+    const related = new Set(["series-1"]);
+    mocks.dropInactiveWatchDetail.mockReturnValueOnce(related);
+    useWatchedStateMutation({ content_id: "episode-1", type: "episode" });
+    const options = mocks.useMutation.mock.calls.at(-1)?.[0] as WatchedMutationOptions;
+
+    options.onSettled?.(undefined, null);
+    expect(mocks.dropInactiveWatchDetail).toHaveBeenCalledWith(queryClient, "episode-1");
+    expect(mocks.scheduleMediaSurfaceInvalidation).toHaveBeenLastCalledWith(
+      queryClient,
+      expect.objectContaining({ itemId: "episode-1", knownRelatedIds: related }),
+    );
+
+    // A failed mark left the position alone.
+    mocks.dropInactiveWatchDetail.mockClear();
+    options.onSettled?.(undefined, new Error("boom"));
+    expect(mocks.dropInactiveWatchDetail).not.toHaveBeenCalled();
   });
 
   it("uses read toast copy and refreshes surfaces for ebook watched toggles", async () => {
