@@ -8144,7 +8144,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"2ff6c702f87c15b4122063ead741b7271dbbbc461a5a54a97379df4b16633a18\""
+        "ETag": "\"c4488bd6fb6b5c2a8059c048014e2ad89b2e5f3b9a1816ba9a074bad84eabf16\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ProgressCapabilities",

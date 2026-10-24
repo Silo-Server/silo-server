@@ -63,13 +63,13 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
-const resetProgressMocks = vi.hoisted(() => ({
-  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
+const clearResumePositionMocks = vi.hoisted(() => ({
+  useClearResumePositionAction: vi.fn((): (() => void) | undefined => undefined),
 }));
 
 vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
-  useResetProgressAction: resetProgressMocks.useResetProgressAction,
+  useClearResumePositionAction: clearResumePositionMocks.useClearResumePositionAction,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({

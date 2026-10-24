@@ -215,7 +215,7 @@ const markWatchedBatchProgressSQL = `
 			completed = 1,
 			updated_at = excluded.updated_at,
 			event_at = excluded.updated_at
- WHERE NOT watch_progress.completed OR EXISTS (
+ WHERE NOT watch_progress.completed OR watch_progress.position_seconds > 0 OR EXISTS (
   SELECT 1 FROM hidden_history_items hhi
   WHERE hhi.profile_id = watch_progress.profile_id AND hhi.media_item_id = watch_progress.media_item_id
   AND watch_progress.updated_at <= hhi.hidden_before

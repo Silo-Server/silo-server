@@ -1650,7 +1650,10 @@ nothing to clear), `422` at `path.media_item_id` for a season, series or ebook a
 kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
-`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
+`clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
+`markWatched` on a watched movie or episode with a resume position records another play and
+clears the position instead of answering a no-op `204`. Semantics are in
+[the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,

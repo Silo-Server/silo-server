@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
-import { useResetProgressAction } from "@/hooks/queries/progress";
+import { useClearResumePositionAction } from "@/hooks/queries/progress";
 import { useDeleteRating, useSetRating } from "@/hooks/queries/ratings";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
@@ -14,7 +14,7 @@ type UserActionProps =
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
-  | "onResetProgress"
+  | "onClearResumePosition"
   | "onToggleFavorite"
   | "isFavorite"
   | "onToggleWatchlist"
@@ -43,11 +43,16 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   const { mutate: toggleNotInterested } = useToggleNotInterested(item.content_id);
   const { mutate: setRating } = useSetRating(item.content_id);
   const { mutate: deleteRating } = useDeleteRating(item.content_id);
-  const resetProgress = useResetProgressAction(item);
+  // A partly watched movie or episode offers Mark Watched, which records a
+  // play even on a rewatch, and a Mark Unwatched in the More menu that only
+  // clears the resume position.
+  const clearResumePosition = useClearResumePositionAction(item);
+  const marksWatched = clearResumePosition !== undefined;
+  const played = item.user_data?.played ?? false;
 
   const handleToggleWatched = useCallback(
-    () => toggleWatched(!(item.user_data?.played ?? false)),
-    [item.user_data?.played, toggleWatched],
+    () => toggleWatched(marksWatched || !played),
+    [marksWatched, played, toggleWatched],
   );
   const handleToggleFavorite = useCallback(
     () => toggleFavorite(isFavorite),
@@ -76,11 +81,11 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
     <ActionBar
       {...props}
       itemTitle={item.title}
-      watchedLabel={getWatchedActionLabel(item)}
-      isWatched={item.user_data?.played ?? false}
+      watchedLabel={marksWatched ? "Mark Watched" : getWatchedActionLabel(item)}
+      isWatched={!marksWatched && played}
       onToggleWatched={handleToggleWatched}
       isUpdatingWatched={isUpdatingWatched}
-      onResetProgress={resetProgress}
+      onClearResumePosition={clearResumePosition}
       onToggleFavorite={handleToggleFavorite}
       isFavorite={isFavorite}
       onToggleWatchlist={handleToggleWatchlist}

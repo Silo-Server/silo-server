@@ -265,7 +265,7 @@ func registerWatch(reg *Registry) {
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
-		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.")
+		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, unless it has a resume position from a rewatch: that records another play and clears the position.")
 	mark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, true)

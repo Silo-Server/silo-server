@@ -740,3 +740,53 @@ func TestManualMarkWatchedSkipsAlreadyCompletedTargets(t *testing.T) {
 		t.Fatalf("history = %+v, want one row per leaf", history)
 	}
 }
+
+// A completed item with a resume position is a rewatch in progress. Marking it
+// watched records another play and clears the position; a repeat, with no new
+// position in between, records nothing.
+func TestManualMarkWatchedRecordsRewatchInProgress(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	createWatchstateProfile(t, store)
+	service := NewService(testStoreProvider{store: store})
+	target := []LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}}
+
+	if err := service.RecordManualMarkWatched(ctx, 1, "profile-1", target, time.Now().UTC().Add(-48*time.Hour)); err != nil {
+		t.Fatalf("first mark: %v", err)
+	}
+	if _, err := service.RecordPlaybackStop(ctx, 1, "profile-1", "movie-1", 7200, 1800, time.Now().UTC().Add(-time.Hour), userstore.VersionHints{}, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("RecordPlaybackStop: %v", err)
+	}
+	if progress, err := store.GetProgress(ctx, "profile-1", "movie-1"); err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 1800 {
+		t.Fatalf("progress before = %+v, %v; want a watched item with a resume position", progress, err)
+	}
+
+	rewatch, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", target, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("rewatch mark: %v", err)
+	}
+	if len(rewatch.Entries) != 1 || !rewatch.Entries[0].Completed {
+		t.Fatalf("rewatch mark entries = %+v, want one completed play", rewatch.Entries)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
+		t.Fatalf("progress after = %+v, %v; want watched with no resume position", progress, err)
+	}
+
+	repeat, err := service.RecordManualMarkWatchedWithResult(ctx, 1, "profile-1", target, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("repeat mark: %v", err)
+	}
+	if len(repeat.Entries) != 0 {
+		t.Fatalf("repeat mark entries = %+v, want none", repeat.Entries)
+	}
+	history, err := store.ListHistory(ctx, "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	// The first mark, the partial rewatch play and the rewatch mark.
+	if len(history) != 3 {
+		t.Fatalf("history = %+v, want three rows", history)
+	}
+}

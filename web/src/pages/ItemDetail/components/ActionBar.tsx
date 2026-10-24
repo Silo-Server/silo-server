@@ -35,7 +35,7 @@ import {
   RotateCcw,
   Shuffle,
   Tags,
-  TimerReset,
+  EyeOff,
   ThumbsDown,
   UsersRound,
   Hand,
@@ -217,7 +217,8 @@ export interface ActionBarProps {
   playProgress?: number;
   restartHref?: string;
   /** Clears the resume position without marking the item watched. */
-  onResetProgress?: () => void;
+  /** Mark Unwatched for a partly watched item: clears its resume position and keeps history. */
+  onClearResumePosition?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -298,7 +299,7 @@ export default function ActionBar({
   playLabel = "Play",
   playProgress,
   restartHref,
-  onResetProgress,
+  onClearResumePosition,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -719,10 +720,14 @@ export default function ActionBar({
         Play from Beginning
       </DetailOverflowMenuItem>
     ),
-    onResetProgress && (
-      <DetailOverflowMenuItem key="reset" closeMenu={closeOverflowMenu} onAction={onResetProgress}>
-        <TimerReset className="size-4" />
-        Reset Progress
+    onClearResumePosition && (
+      <DetailOverflowMenuItem
+        key="markUnwatched"
+        closeMenu={closeOverflowMenu}
+        onAction={onClearResumePosition}
+      >
+        <EyeOff className="size-4" />
+        Mark Unwatched
       </DetailOverflowMenuItem>
     ),
   ];

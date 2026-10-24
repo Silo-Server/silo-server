@@ -58,7 +58,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { useClearResumePosition, useReportMediaProgress, useResetProgressAction } from "./progress";
+import {
+  useClearResumePosition,
+  useReportMediaProgress,
+  useClearResumePositionAction,
+} from "./progress";
 
 describe("useReportMediaProgress", () => {
   type ReportOptions = {
@@ -178,7 +182,7 @@ describe("useClearResumePosition", () => {
     });
     // Once at once from the patched cache, once after the server refresh.
     expect(mocks.bumpHomeRefreshSignal).toHaveBeenCalledTimes(2);
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Progress reset");
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Marked as unwatched");
 
     const updater = mocks.updateCatalogItemDetail.mock.calls[0]?.[2] as (
       detail: ItemDetail,
@@ -209,7 +213,7 @@ describe("useClearResumePosition", () => {
   });
 });
 
-describe("useResetProgressAction", () => {
+describe("useClearResumePositionAction", () => {
   const mutate = vi.fn();
 
   beforeEach(() => {
@@ -220,7 +224,7 @@ describe("useResetProgressAction", () => {
     mocks.useQueryClient.mockReturnValue({});
   });
 
-  it("offers the reset for a movie or episode with a resume position", () => {
+  it("offers Mark Unwatched for a movie or episode with a resume position", () => {
     for (const type of ["movie", "episode"] as const) {
       // As the API answers a leaf: the season counters come along too.
       // A rewatch: watched and with a live resume point.
@@ -233,7 +237,7 @@ describe("useResetProgressAction", () => {
         in_progress_count: 0,
       } as unknown as ItemDetail["user_data"];
       const { result } = renderHook(() =>
-        useResetProgressAction({ content_id: `${type}-1`, type, user_data: userData }),
+        useClearResumePositionAction({ content_id: `${type}-1`, type, user_data: userData }),
       );
 
       result.current?.();
@@ -257,7 +261,7 @@ describe("useResetProgressAction", () => {
       },
     ];
     for (const item of items) {
-      const { result } = renderHook(() => useResetProgressAction(item));
+      const { result } = renderHook(() => useClearResumePositionAction(item));
       expect(result.current, item.content_id).toBeUndefined();
     }
   });

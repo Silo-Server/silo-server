@@ -131,9 +131,10 @@ interface ClearResumePositionVars {
 
 /**
  * Clears the acting profile's resume position on a movie or episode, keeping
- * its watched state and watch history (issue #2134). The item leaves Continue
- * Watching at once, and its cached watch detail is dropped so playing it next
- * starts from the beginning instead of a stale resume point.
+ * its watched state and watch history. It backs Mark Unwatched on a partly
+ * watched item. The item leaves Continue Watching at once, and its cached watch
+ * detail is dropped so playing it next starts from the beginning instead of a
+ * stale resume point.
  */
 export function useClearResumePosition() {
   const queryClient = useQueryClient();
@@ -143,7 +144,7 @@ export function useClearResumePosition() {
         path: { media_item_id: contentId },
       }),
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to reset progress");
+      toast.error(error instanceof Error ? error.message : "Failed to update watched state");
     },
     onSuccess: async (_data, { contentId }) => {
       await cancelItemDetailQueries(queryClient, contentId);
@@ -157,7 +158,7 @@ export function useClearResumePosition() {
       );
       removeItemFromHomeSectionCaches(queryClient, contentId, "continue_watching");
       bumpHomeRefreshSignal(queryClient);
-      toast.success("Progress reset");
+      toast.success("Marked as unwatched");
       // The next play must start from the beginning, not the cached position.
       const knownRelatedIds = dropInactiveWatchDetail(queryClient, contentId);
       await invalidateMediaSurfaceQueries(queryClient, {
@@ -171,19 +172,20 @@ export function useClearResumePosition() {
 }
 
 /**
- * The detail page's Reset Progress action: offered for a movie or episode with
- * a resume position, otherwise undefined.
+ * The detail page's Mark Unwatched for a partly watched item: offered for a
+ * movie or episode with a resume position, rewatches included, otherwise
+ * undefined.
  */
-export function useResetProgressAction(
+export function useClearResumePositionAction(
   item: Pick<ItemDetail, "content_id" | "type" | "user_data">,
 ): (() => void) | undefined {
   const { mutate } = useClearResumePosition();
   const contentId = item.content_id;
-  const reset = useCallback(() => mutate({ contentId }), [contentId, mutate]);
+  const clear = useCallback(() => mutate({ contentId }), [contentId, mutate]);
   // Leaf detail also carries the season counters, so read the position itself.
   const userData = item.user_data;
   const position =
     userData && "position_seconds" in userData ? (userData.position_seconds ?? 0) : 0;
   const hasResumePosition = (item.type === "movie" || item.type === "episode") && position > 0;
-  return hasResumePosition ? reset : undefined;
+  return hasResumePosition ? clear : undefined;
 }

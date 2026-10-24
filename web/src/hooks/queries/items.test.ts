@@ -78,7 +78,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "./items";
 type WatchedMutationOptions = {
   mutationFn: (nextPlayed: boolean) => Promise<unknown>;
   onMutate?: (nextPlayed: boolean) => Promise<unknown>;
-  onError?: (error: unknown, nextPlayed: boolean) => void;
+  onError?: (error: unknown, nextPlayed: boolean, context?: unknown) => void;
   onSuccess?: (data: unknown, nextPlayed: boolean) => void;
   onSettled?: () => Promise<unknown>;
 };
@@ -231,6 +231,23 @@ describe("item query helpers", () => {
       user_state: { played: false, is_favorite: true, in_watchlist: true },
     });
     expect(mocks.toastError).toHaveBeenCalledWith("boom");
+  });
+
+  it("keeps a rewatch watched when marking it watched again fails", async () => {
+    mocks.cancelItemDetailQueries.mockResolvedValueOnce(undefined);
+    useWatchedStateMutation({ content_id: "movie-1", type: "movie", user_data: { played: true } });
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as WatchedMutationOptions;
+
+    const context = await options.onMutate?.(true);
+    options.onError?.(new Error("boom"), true, context);
+    const revert = mocks.updateCatalogItemDetail.mock.calls.at(-1)?.[2] as (
+      detail: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    expect(
+      revert({ user_data: { played: true }, user_state: { played: true, is_favorite: false } }),
+    ).toMatchObject({ user_data: { played: true }, user_state: { played: true } });
   });
 
   it("uses read toast copy and refreshes surfaces for ebook watched toggles", async () => {
