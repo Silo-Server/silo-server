@@ -1,0 +1,24 @@
+{
+  "series": {
+    "id": 12,
+    "title": "Example Show",
+    "path": "/data/tv/Example Show",
+    "tvdbId": 123456,
+    "type": "standard"
+  },
+  "episodes": [
+    {"id": 101, "episodeNumber": 1, "seasonNumber": 1, "title": "Pilot"},
+    {"id": 102, "episodeNumber": 2, "seasonNumber": 1, "title": "Second"}
+  ],
+  "episodeFiles": [
+    {"id": 201, "relativePath": "Season 01/Example Show - S01E01.mkv", "path": "/data/tv/Example Show/Season 01/Example Show - S01E01.mkv"},
+    {"id": 202, "relativePath": "Season 01/Example Show - S01E02.mkv", "path": "/data/tv/Example Show/Season 01/Example Show - S01E02.mkv"}
+  ],
+  "downloadClient": "qBittorrent",
+  "downloadId": "ABCDEF",
+  "fileCount": 2,
+  "sourcePath": "/downloads/Example.Show.S01",
+  "destinationPath": "/data/tv/Example Show",
+  "eventType": "ImportComplete",
+  "instanceName": "Sonarr"
+}

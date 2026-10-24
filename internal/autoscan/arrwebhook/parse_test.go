@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
@@ -138,7 +139,64 @@ func TestParseUpgradeIncludesReplacedFiles(t *testing.T) {
 					t.Fatalf("upgrade change = %+v, want file scope", change)
 				}
 			}
+			if parsed.Changes[0].Removed || !parsed.Changes[1].Removed {
+				t.Fatalf("upgrade changes = %+v, want only the replaced file marked removed", parsed.Changes)
+			}
 		})
+	}
+}
+
+// An upgrade that keeps the file name replaces the file in place: the path
+// holds the new file, so it must not be reported as removed.
+func TestParseUpgradeInPlaceIsNotRemoved(t *testing.T) {
+	body := []byte(`{
+		"eventType": "Download",
+		"series": {"path": "/data/tv/Show"},
+		"episodeFile": {"path": "/data/tv/Show/same.mkv"},
+		"deletedFiles": [{"path": "/data/tv/Show/same.mkv"}],
+		"isUpgrade": true
+	}`)
+	parsed, err := Parse(ProviderAuto, body)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(parsed.Changes) != 1 || parsed.Changes[0].Removed {
+		t.Fatalf("changes = %+v, want one change not marked removed", parsed.Changes)
+	}
+}
+
+// Only reasons where arr deleted the file itself mark it removed.
+// MissingFromDisk means arr found it already gone, which a lost mount also
+// produces.
+func TestParseFileDeleteReasons(t *testing.T) {
+	for reason, want := range map[string]bool{
+		"upgrade":         true,
+		"Upgrade":         true,
+		"manual":          true,
+		"manualOverride":  true,
+		"missingFromDisk": false,
+		"MissingFromDisk": false,
+		"":                false,
+		"somethingNew":    false,
+	} {
+		for _, event := range []string{
+			`{"eventType":"EpisodeFileDelete","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/a.mkv"},"deleteReason":"` + reason + `"}`,
+			`{"eventType":"MovieFileDelete","movie":{"folderPath":"/movies/x"},"movieFile":{"path":"/movies/x/a.mkv"},"deleteReason":"` + reason + `"}`,
+		} {
+			parsed, err := Parse(ProviderAuto, []byte(event))
+			if err != nil {
+				t.Fatalf("Parse(%s): %v", event, err)
+			}
+			if len(parsed.Changes) != 1 || parsed.Changes[0].Removed != want {
+				t.Fatalf("reason %q: changes = %+v, want removed=%v", reason, parsed.Changes, want)
+			}
+		}
+	}
+	// A reason that is not a string loses only the removed mark; the path is
+	// still scanned.
+	parsed, err := Parse(ProviderAuto, []byte(`{"eventType":"EpisodeFileDelete","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/a.mkv"},"deleteReason":2}`))
+	if err != nil || len(parsed.Changes) != 1 || parsed.Changes[0].Removed {
+		t.Fatalf("numeric reason: parsed = %+v, err = %v; want one change not marked removed", parsed, err)
 	}
 }
 
@@ -178,19 +236,46 @@ func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 }
 
 // SeriesDelete and MovieDelete send deletedFiles as a bool, not the file list
-// an upgrade's download carries; they are valid deliveries with nothing to do.
-func TestParseSeriesAndMovieDeleteAreNoOps(t *testing.T) {
-	for _, tc := range []struct{ fixture, eventType, provider string }{
-		{"sonarr_series_delete.json", "SeriesDelete", ProviderSonarr},
-		{"radarr_movie_delete.json", "MovieDelete", ProviderRadarr},
+// an upgrade's download carries. When arr deleted the folder, it is one
+// removed subtree change; when it only stopped managing it, the media is still
+// on disk and the delivery is a no-op.
+func TestParseSeriesAndMovieDelete(t *testing.T) {
+	for _, tc := range []struct {
+		fixture, eventType, provider string
+		want                         []autoscan.Change
+	}{
+		{"sonarr_series_delete.json", "SeriesDelete", ProviderSonarr,
+			[]autoscan.Change{{SourcePath: "/data/tv/Example Show", Scope: autoscan.ChangeScopeSubtree, Removed: true}}},
+		{"radarr_movie_delete.json", "MovieDelete", ProviderRadarr, nil},
+		{"radarr_movie_delete_files.json", "MovieDelete", ProviderRadarr,
+			[]autoscan.Change{{SourcePath: "/data/movies/Example Movie (2024)", Scope: autoscan.ChangeScopeSubtree, Removed: true}}},
 	} {
 		parsed, err := Parse(ProviderAuto, fixture(t, tc.fixture))
 		if err != nil {
 			t.Fatalf("%s: Parse: %v", tc.fixture, err)
 		}
-		if parsed.EventType != tc.eventType || parsed.Provider != tc.provider || parsed.Test || len(parsed.Changes) != 0 {
-			t.Fatalf("%s: want a no-op %s from %s, got %+v", tc.fixture, tc.eventType, tc.provider, parsed)
+		if parsed.EventType != tc.eventType || parsed.Provider != tc.provider || parsed.Test {
+			t.Fatalf("%s: want %s from %s, got %+v", tc.fixture, tc.eventType, tc.provider, parsed)
 		}
+		if !slices.Equal(parsed.Changes, tc.want) {
+			t.Fatalf("%s: changes = %+v, want %+v", tc.fixture, parsed.Changes, tc.want)
+		}
+	}
+}
+
+// Sonarr's ImportComplete carries every episode file of the finished
+// download, like a Download event.
+func TestParseSonarrImportComplete(t *testing.T) {
+	parsed, err := Parse(ProviderAuto, fixture(t, "sonarr_import_complete.json"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []autoscan.Change{
+		{SourcePath: "/data/tv/Example Show/Season 01/Example Show - S01E01.mkv", Scope: autoscan.ChangeScopeFile},
+		{SourcePath: "/data/tv/Example Show/Season 01/Example Show - S01E02.mkv", Scope: autoscan.ChangeScopeFile},
+	}
+	if parsed.Provider != ProviderSonarr || !slices.Equal(parsed.Changes, want) {
+		t.Fatalf("parsed = %+v, want sonarr with %+v", parsed, want)
 	}
 }
 

@@ -1046,6 +1046,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
+		removal_confirmed_at = NULL,
 		updated_at = NOW()
 	RETURNING ` + fileColumns
 
@@ -3181,7 +3182,10 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, filePath strin
 // marked missing for longer than the grace period. Missing files are already
 // hidden from clients; the grace only delays deleting the row so a file that
 // reappears within the window restores without re-probing or re-matching.
-// A zero grace deletes all missing-marked rows immediately.
+// A zero grace deletes all missing-marked rows immediately. Rows whose
+// removal arr confirmed (ConfirmFilesRemoved) skip the grace unless they hold
+// a removed membership's first-seen data: that waits for the replacement
+// file to claim it, or for the grace to end.
 //
 // Rows of an item that still exists without any library membership are kept
 // whatever their age: membership reconciliation runs first and deletes every
@@ -3200,7 +3204,11 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 		DELETE FROM media_files mf
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NOT NULL
-		  AND mf.missing_since < $2
+		  AND (mf.missing_since < $2 OR (
+			mf.removal_confirmed_at IS NOT NULL
+			AND mf.held_item_first_seen_at IS NULL
+			AND mf.held_episode_first_seen_at IS NULL
+		  ))
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_items mi
 			WHERE mi.content_id = mf.content_id
@@ -3222,6 +3230,87 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	return deleted, nil
 }
 
+// ConfirmFilesRemoved records that the arr managing the files at paths
+// deleted them. It does not mark them missing: the scan that next finds them
+// gone does, reconciles their memberships, and its trash sweep then deletes
+// them without waiting out the removal grace. A scan that still finds a file
+// clears the confirmation (ClearRemovalConfirmed, and the upsert).
+func (r *FileRepository) ConfirmFilesRemoved(ctx context.Context, paths []string) (int, error) {
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	// The application clock, like the scans' seenAt in ClearRemovalConfirmed.
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET removal_confirmed_at = $2,
+		    updated_at = NOW()
+		WHERE file_path = ANY($1)
+	`, paths, time.Now().UTC())
+	if err != nil {
+		return 0, fmt.Errorf("confirming removed files: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// folderRemovalSettle is how far ahead ConfirmFilesRemovedUnder dates its
+// confirmations. Arr sends a series or movie delete event while it is still
+// removing the folder, so scans can see the files for a while after the
+// confirmation; ClearRemovalConfirmed only drops confirmations no newer than
+// what the scan saw, so these survive until arr is done. A folder arr failed
+// to delete loses its confirmation at the first scan after the window.
+const folderRemovalSettle = 10 * time.Minute
+
+// ConfirmFilesRemovedUnder is ConfirmFilesRemoved for every file at or
+// beneath roots: the series or movie folders arr deleted whole. The
+// confirmations are dated folderRemovalSettle ahead.
+func (r *FileRepository) ConfirmFilesRemovedUnder(ctx context.Context, roots []string) (int, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", roots, 2)
+	if len(clauses) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET removal_confirmed_at = $1,
+		    updated_at = NOW()
+		WHERE `+strings.Join(clauses, " OR "), append([]any{time.Now().UTC().Add(folderRemovalSettle)}, args...)...)
+	if err != nil {
+		return 0, fmt.Errorf("confirming removed folders: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// RemovalConfirmedUnder reports whether root holds cataloged files of the
+// folder and arr confirmed removing every one of them.
+func (r *FileRepository) RemovalConfirmedUnder(ctx context.Context, folderID int, root string) (bool, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{root}, 2)
+	if len(clauses) == 0 {
+		return false, nil
+	}
+	var total, unconfirmed int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE removal_confirmed_at IS NULL)
+		FROM media_files
+		WHERE media_folder_id = $1 AND (`+strings.Join(clauses, " OR ")+`)`,
+		append([]any{folderID}, args...)...).Scan(&total, &unconfirmed)
+	if err != nil {
+		return false, fmt.Errorf("checking removal confirmations under %q: %w", root, err)
+	}
+	return total > 0 && unconfirmed == 0, nil
+}
+
+// ClearRemovalConfirmed drops a removal confirmation for a file a scan found
+// on disk, so a later outage cannot reuse it to skip the grace. Only a
+// confirmation recorded at or before seenAt is dropped: one written after the
+// scan looked describes a deletion the scan did not see.
+func (r *FileRepository) ClearRemovalConfirmed(ctx context.Context, id int, seenAt time.Time) error {
+	if _, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET removal_confirmed_at = NULL WHERE id = $1 AND removal_confirmed_at <= $2", id, seenAt,
+	); err != nil {
+		return fmt.Errorf("clearing removal confirmation: %w", err)
+	}
+	return nil
+}
+
 // ListRootsWithCatalogedFiles returns the subset of roots (in input order)
 // that still have any media_files rows at or under them in the folder,
 // whether those rows are present or already marked missing.
@@ -3237,6 +3326,9 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 // A genuinely emptied root also matches, which is intended: emptying a root
 // is confirmed through the operator's one-time cleanup allowance rather than
 // inferred from a single scan.
+//
+// Rows arr confirmed removing (removal_confirmed_at) are left out: arr
+// deleting a root's last title empties the root without any mount trouble.
 func (r *FileRepository) ListRootsWithCatalogedFiles(ctx context.Context, folderID int, roots []string) ([]string, error) {
 	if len(roots) == 0 {
 		return nil, nil
@@ -3251,6 +3343,7 @@ func (r *FileRepository) ListRootsWithCatalogedFiles(ctx context.Context, folder
 		WHERE EXISTS (
 			SELECT 1 FROM media_files mf
 			WHERE mf.media_folder_id = $1
+			  AND mf.removal_confirmed_at IS NULL
 			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
 		)
 		ORDER BY r.ord

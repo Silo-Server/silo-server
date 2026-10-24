@@ -47,6 +47,12 @@ const (
 type Change struct {
 	SourcePath string      `json:"source_path"`
 	Scope      ChangeScope `json:"scope"`
+	// Removed marks a file the provider itself deleted (a Sonarr/Radarr
+	// upgrade or manual delete), or on a subtree change a series or movie
+	// folder it deleted, as opposed to one it only noticed was gone. When
+	// the path is confirmed absent on disk, its rows skip the scanner's
+	// file-removal grace period.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // DeliveryMode selects how a source's changes reach the host: the host polls

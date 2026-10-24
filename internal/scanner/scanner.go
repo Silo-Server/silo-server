@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -772,6 +773,7 @@ func (s *Scanner) scanPaths(
 
 	// Get existing files in this scan scope from the DB. Full library scans
 	// returned above, so this is always a single subtree.
+	stateLoadedAt := time.Now().UTC()
 	existingFiles, err := s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
 	if err != nil {
 		return nil, fmt.Errorf("getting existing files for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
@@ -803,6 +805,7 @@ func (s *Scanner) scanPaths(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
+	walkFailures = s.dropConfirmedRemovedPaths(ctx, folder.ID, walkFailures)
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 		if err := s.setPartialWalkWarning(ctx, folder.ID, len(walkFailures), true); err != nil {
@@ -1019,7 +1022,7 @@ func (s *Scanner) scanPaths(
 	}
 
 	// protectedRoots was resolved above, before any reconciliation ran.
-	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
+	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result, stateLoadedAt)
 
 	// Reconcile only the content this subtree's files link to, now or before
 	// processing. Present-state repair above was scoped the same way.
@@ -1115,6 +1118,9 @@ type scopedScan struct {
 	walkRoots      []string
 	reconcileRoots []string
 	existingFiles  []*scanStateFile
+	// stateLoadedAt is when existingFiles was read; confirmations dated
+	// after it survive the scan seeing their file.
+	stateLoadedAt  time.Time
 	filePaths      []string
 	seenPaths      map[string]bool
 	rootInference  rootInferenceResult
@@ -1693,6 +1699,7 @@ func (s *Scanner) scanScope(
 	reconcileRoots []string,
 ) (*scopedScan, error) {
 	result := &ScanResult{}
+	stateLoadedAt := time.Now().UTC()
 	existingFiles, err := s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
 	if err != nil {
 		return nil, fmt.Errorf("getting existing files for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
@@ -1717,6 +1724,7 @@ func (s *Scanner) scanScope(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
+	walkFailures = s.dropConfirmedRemovedPaths(ctx, folder.ID, walkFailures)
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
@@ -1866,6 +1874,7 @@ func (s *Scanner) scanScope(
 		walkRoots:      append([]string(nil), walkRoots...),
 		reconcileRoots: append([]string(nil), reconcileRoots...),
 		existingFiles:  existingFiles,
+		stateLoadedAt:  stateLoadedAt,
 		filePaths:      filePaths,
 		seenPaths:      seenPaths,
 		rootInference:  rootInference,
@@ -1934,7 +1943,8 @@ func (s *Scanner) applyScopedScan(
 	if len(scope.walkFailures) > 0 {
 		protectedRoots = append(append([]string(nil), protectedRoots...), scope.walkFailures...)
 	}
-	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result)
+	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result,
+		scope.stateLoadedAt)
 
 	staleFileIDs := collectStaleRemovedPathFileIDs(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
 	if forceDeleteAll && len(scope.filePaths) == 0 {
@@ -1991,10 +2001,22 @@ func (s *Scanner) markMissingExcludingProtected(
 	seenPaths map[string]bool,
 	protectedRoots []string,
 	result *ScanResult,
+	stateLoadedAt time.Time,
 ) {
 	now := time.Now().UTC()
 	for _, existing := range existingFiles {
 		if seenPaths[existing.FilePath] {
+			// Clear only confirmations dated before this scan loaded its state.
+			// One written during the walk, or a folder confirmation dated
+			// ahead while arr is still deleting, survives.
+			if existing.RemovalConfirmedAt != nil {
+				if err := s.fileRepo.ClearRemovalConfirmed(ctx, existing.ID, stateLoadedAt); err != nil {
+					slog.WarnContext(ctx, "scanner: failed to clear removal confirmation", "component", "scanner",
+						"path", existing.FilePath,
+						"error", err,
+					)
+				}
+			}
 			continue
 		}
 		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
@@ -2123,6 +2145,43 @@ func anyPathWithinRoots(paths, roots []string) bool {
 		}
 	}
 	return false
+}
+
+// dropConfirmedRemovedPaths takes out of walkFailures the paths arr deleted
+// whole: gone from disk while their parent directory is still there, with
+// every file cataloged beneath them confirmed removed. Their files were
+// deleted, not hidden by a lost mount, so the scan reconciles them as missing
+// instead of protecting them. Anything uncertain stays a failure.
+func (s *Scanner) dropConfirmedRemovedPaths(ctx context.Context, folderID int, walkFailures []string) []string {
+	if len(walkFailures) == 0 || s.fileRepo == nil {
+		return walkFailures
+	}
+	kept := make([]string, 0, len(walkFailures))
+	for _, path := range walkFailures {
+		if pathRemovedFromLiveDir(path) {
+			confirmed, err := s.fileRepo.RemovalConfirmedUnder(ctx, folderID, path)
+			if err != nil {
+				slog.WarnContext(ctx, "scanner: checking removal confirmations failed", "component", "scanner",
+					"folder_id", folderID, "path", path, "error", err)
+			} else if confirmed {
+				slog.InfoContext(ctx, "scanner: reconciling a folder arr deleted", "component", "scanner",
+					"folder_id", folderID, "path", path)
+				continue
+			}
+		}
+		kept = append(kept, path)
+	}
+	return kept
+}
+
+// pathRemovedFromLiveDir reports whether nothing is at path while its parent
+// directory exists.
+func pathRemovedFromLiveDir(path string) bool {
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	return err == nil && info.IsDir()
 }
 
 // logIncompleteWalk reports that a scope's traversal could not read part of
@@ -2717,6 +2776,9 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		return fmt.Errorf("unrecognized video extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 	}
+	// Before the presence check: a confirmation written after it is newer
+	// than what this scan saw and must survive.
+	presenceCheckedAt := time.Now().UTC()
 	if handled, err := s.reconcileVanishedFileIfNeeded(ctx, folder, cleanFile); handled {
 		if err != nil {
 			return err
@@ -2729,6 +2791,11 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	existing, err := s.fileRepo.GetByPath(ctx, filePath)
 	if err == nil {
 		existingByPath[filePath] = scanStateFromMediaFile(existing)
+		// The file is on disk, so an earlier removal confirmation is stale.
+		// An unchanged file takes no upsert, which would otherwise clear it.
+		if err := s.fileRepo.ClearRemovalConfirmed(ctx, existing.ID, presenceCheckedAt); err != nil {
+			return err
+		}
 	}
 
 	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity

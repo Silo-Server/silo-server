@@ -293,6 +293,18 @@
 ./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
 ./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
 
+# Files and folders arr confirmed removing skip the grace, a scan that still
+# sees one clears its confirmation, and a folder arr deleted is reconciled
+# rather than protected as a lost mount.
+./internal/scanner TestConfirmFilesRemovedSkipsGracePostgres
+./internal/scanner TestConfirmedRemovalExceptionsPostgres
+./internal/scanner TestConfirmedReplacedEpisodeKeepsFirstSeenAndSkipsGrace
+./internal/scanner TestScanFolderHonorsAndClearsRemovalConfirmation
+./internal/scanner TestScanFileClearsRemovalConfirmation
+./internal/scanner TestScanSubtreeReconcilesFolderArrDeleted
+./internal/scanner TestScanSubtreeReconcilesLastFolderArrDeleted
+./internal/scanner TestScanSubtreeWaitsForFolderArrIsDeleting
+
 # Server collection counts for a restricted viewer: one statement for stored
 # members and at most four for smart collections, however many are listed.
 ./internal/catalog TestViewerCollectionCountsStatementBudgetDB
