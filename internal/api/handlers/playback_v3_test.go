@@ -3832,6 +3832,33 @@ func TestHandleReplanPlaybackV3ReturnsToOriginalWhenChosenSubtitleIsGone(t *test
 	}
 }
 
+// A subtitle the client switched on locally, without a track change, reaches
+// the server as the subtitle a quality change names; returning to the
+// original version restores it even though the fallback version lacked it.
+func TestHandleReplanPlaybackV3QualityChangeRecordsLocallyChosenSubtitle(t *testing.T) {
+	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+		f.startRequest.SubtitleTrackIndex = nil
+		f.startRequest.SubtitleTrackID = ""
+	})
+	if f.started.PlaybackPlan.SelectedTracks.Subtitle != nil {
+		t.Fatalf("start selected a subtitle: %#v", f.started.PlaybackPlan.SelectedTracks.Subtitle)
+	}
+	subtitle := 0
+	lower := f.replan(t, f.started, "local-subtitle-lower-0001", playback.ReplanOperationQualityChangeV3, "1080p", playback.SelectedTracksV3{
+		Audio:    f.started.PlaybackPlan.SelectedTracks.Audio,
+		Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(f.source.ID, "subtitle", subtitle), Index: &subtitle},
+	})
+	if lower.PlaybackPlan.EffectiveMediaFileID != f.alternate.ID {
+		t.Fatalf("1080p version: file=%d, want %d", lower.PlaybackPlan.EffectiveMediaFileID, f.alternate.ID)
+	}
+	original := f.qualityChange(t, lower, "local-subtitle-original-0001", "original")
+	if plan := original.PlaybackPlan; plan.EffectiveMediaFileID != f.source.ID ||
+		selectedTrackIDV3(plan.SelectedTracks.Subtitle) != playback.TrackIDV3(f.source.ID, "subtitle", subtitle) {
+		t.Fatalf("back on the 4K version: file=%d subtitle=%q, want %d with subtitle %d",
+			plan.EffectiveMediaFileID, selectedTrackIDV3(plan.SelectedTracks.Subtitle), f.source.ID, subtitle)
+	}
+}
+
 // perFileSubtitleRepoV3 lists each file's own downloaded subtitles.
 type perFileSubtitleRepoV3 struct{ *handlerMockSubtitleRepo }
 

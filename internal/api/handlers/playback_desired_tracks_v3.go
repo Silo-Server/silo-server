@@ -313,7 +313,7 @@ func (h *PlaybackHandler) replanDesiredTracksV3(ctx context.Context, record *pla
 	return desired
 }
 
-// updateDesiredTracksV3 folds a track change's choices into desired. Clients
+// updateDesiredTracksV3 folds a replan's track choices into desired. Clients
 // resend the tracks they are playing with every replan, so only a track that
 // differs from the current plan's is a new choice; an echo keeps the desired
 // track even when the current plan could not deliver it. A track_change that

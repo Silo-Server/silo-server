@@ -5517,9 +5517,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// move to another file resolves it afresh rather than remapping whatever
 	// the current plan could deliver.
 	desired := h.replanDesiredTracksV3(r.Context(), record, currentEffectiveFile)
-	// Only a track change records a new choice. Other replans echo the tracks
-	// playing, which after a fallback may not be the ones the viewer chose.
-	choosesTracks := trackChange || req.Failure.Classification == "audio_track_changed" || req.Failure.Classification == "subtitle_track_changed"
+	// Replans the viewer asked for can carry a choice: a track change, and a
+	// quality or output change echoing a track the client switched to locally
+	// without telling the server. A failure recovery may send a track the
+	// client fell back to, so only its track-change classifications count.
+	choosesTracks := userIntentOperation || req.Failure.Classification == "audio_track_changed" || req.Failure.Classification == "subtitle_track_changed"
 	if choosesTracks && !seekScopedRecovery {
 		var intentErr error
 		desired, intentErr = h.updateDesiredTracksV3(r.Context(), desired, record.CurrentPlan.SelectedTracks, req.SelectedTracks, trackChange, currentEffectiveFile)

@@ -1067,11 +1067,14 @@ omitted `selected_tracks.subtitle` the explicit meaning "subtitles off".
 The attempt also keeps the audio and subtitle the viewer asked for, apart from
 what the current plan could deliver (`desired_tracks` on the attempt row). A
 start records the audio resolved on the requested file and the subtitle the
-client named there (or, when it named none, the one the plan selected). Only a
-`track_change` (or a failure replan classified `audio_track_changed` or
-`subtitle_track_changed`) changes that intent, and only where its
-`selected_tracks` name a track other than the current plan's, so the tracks
-clients echo with every replan never overwrite it; a `track_change` that omits
+client named there (or, when it named none, the one the plan selected). A
+`track_change`, `quality_change` or `output_change` (or a failure replan
+classified `audio_track_changed` or `subtitle_track_changed`) changes that
+intent, and only where its `selected_tracks` name a track other than the
+current plan's: a quality change can carry a track the client switched to
+locally, while the tracks clients echo with every replan never overwrite it.
+Other failure recoveries never change it, since they may name a track the
+client fell back to; a `track_change` that omits
 the subtitle turns subtitles off only when the current plan was showing one. Whenever a replan
 moves playback to another file, the server resolves that intent on the new
 file instead of remapping the current plan's selection: on the file a track
