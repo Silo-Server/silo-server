@@ -238,7 +238,7 @@ func (h *PlaybackHandler) startDesiredTracksV3(ctx context.Context, requestedFil
 	if intent.subtitle == nil {
 		subtitleFile, subtitleIndex = effectiveFile, trackIdentityIndexV3(plan.SelectedTracks.Subtitle, effectiveFile, "subtitle")
 	}
-	if subtitle := plannedDownloadedSubtitleV3(subtitleFile, subtitleIndex, effectiveFile, plan, recipe); subtitle != nil {
+	if subtitle := h.plannedDownloadedSubtitleV3(ctx, subtitleFile, subtitleIndex, effectiveFile, plan, recipe); subtitle != nil {
 		desired.Subtitle = subtitle
 		return desired
 	}
@@ -248,7 +248,7 @@ func (h *PlaybackHandler) startDesiredTracksV3(ctx context.Context, requestedFil
 		// subtitle the plan selected on the effective file instead.
 		slog.WarnContext(ctx, "protocol v3 start: requested subtitle snapshot unavailable", logComponentKey, playbackLogValueV3, "error", err)
 		subtitleIndex = trackIdentityIndexV3(plan.SelectedTracks.Subtitle, effectiveFile, "subtitle")
-		subtitle = plannedDownloadedSubtitleV3(effectiveFile, subtitleIndex, effectiveFile, plan, recipe)
+		subtitle = h.plannedDownloadedSubtitleV3(ctx, effectiveFile, subtitleIndex, effectiveFile, plan, recipe)
 		if subtitle == nil {
 			subtitle, err = h.desiredSubtitleFromFileV3(ctx, effectiveFile, subtitleIndex)
 		} else {
@@ -267,8 +267,9 @@ func (h *PlaybackHandler) startDesiredTracksV3(ctx context.Context, requestedFil
 // plannedDownloadedSubtitleV3 snapshots a downloaded subtitle the plan itself
 // selected from the frozen recipe and the plan's inventory, the snapshot the
 // planner used, rather than listing downloaded subtitles again: the list can
-// change in between, and its positions with it.
-func plannedDownloadedSubtitleV3(file *models.MediaFile, index int, effectiveFile *models.MediaFile, plan *playback.PlanV3, recipe playback.ExecutableRecipeV3) *playback.DesiredSubtitleTrackV3 {
+// change in between, and its positions with it. The release, which only the
+// stored row has, is read by the frozen id.
+func (h *PlaybackHandler) plannedDownloadedSubtitleV3(ctx context.Context, file *models.MediaFile, index int, effectiveFile *models.MediaFile, plan *playback.PlanV3, recipe playback.ExecutableRecipeV3) *playback.DesiredSubtitleTrackV3 {
 	if file == nil || effectiveFile == nil || file.ID != effectiveFile.ID || index < 0 ||
 		recipe.SubtitleSource != playback.SubtitleSourceDownloadedV3 || recipe.DownloadedSubtitleID <= 0 ||
 		index != trackIdentityIndexV3(plan.SelectedTracks.Subtitle, effectiveFile, "subtitle") {
@@ -276,10 +277,18 @@ func plannedDownloadedSubtitleV3(file *models.MediaFile, index int, effectiveFil
 	}
 	for _, item := range plan.Subtitle.Inventory {
 		if item.CombinedIndex == index && item.Source == playback.SubtitleSourceDownloadedV3 {
-			return &playback.DesiredSubtitleTrackV3{
+			desired := &playback.DesiredSubtitleTrackV3{
 				FileID: file.ID, Source: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: recipe.DownloadedSubtitleID,
 				Language: item.Language, Format: item.Codec, HearingImpaired: item.HearingImpaired,
 			}
+			if h.SubtitleRepo != nil {
+				// Without the release the subtitle still restores on this
+				// file; it just cannot match a download on another version.
+				if row, err := h.SubtitleRepo.GetDownloadedSubtitle(ctx, recipe.DownloadedSubtitleID); err == nil && row != nil {
+					desired.ReleaseName = row.ReleaseName
+				}
+			}
+			return desired
 		}
 	}
 	return nil

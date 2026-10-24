@@ -15,7 +15,10 @@ import {
   sendSubtitleChoiceRequest,
 } from "../utils/subtitleChoicePersistence";
 import { buildAudioPreferenceBody, sendAudioChoiceRequest } from "../utils/audioChoicePersistence";
-import { runTrackPreferenceWrite } from "../utils/trackPreferenceWrites";
+import {
+  runPlayerTrackPreferenceWrite,
+  StaleTrackPreferenceWriteError,
+} from "../utils/trackPreferenceWrites";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
@@ -393,6 +396,8 @@ function WatchPagePlayer({
       ).then(
         () => invalidateItemDetails(queryClient),
         (err: unknown) => {
+          // The viewer switched profile before it went out; it isn't theirs.
+          if (err instanceof StaleTrackPreferenceWriteError) return;
           toast.error(err instanceof Error ? err.message : "Failed to save audio preference");
         },
       );
@@ -429,11 +434,13 @@ function WatchPagePlayer({
       });
       if (requests.length === 0) return;
       // Best effort, but after any earlier pick for the series has landed.
-      void runTrackPreferenceWrite(
-        { profileId: config.getProfileId() ?? "", dimension: "subtitle", targetId: seriesId },
-        () =>
-          Promise.allSettled(requests.map((request) => sendSubtitleChoiceRequest(config, request))),
-      );
+      void runPlayerTrackPreferenceWrite(config, "subtitle", seriesId, (ownerConfig) =>
+        Promise.allSettled(
+          requests.map((request) => sendSubtitleChoiceRequest(ownerConfig, request)),
+        ),
+      ).catch(() => {
+        // Best effort; a write for a profile no longer active is dropped.
+      });
     },
     [config, seriesContext, contentId, playableSubtitles],
   );

@@ -2,7 +2,7 @@ import { canonicalLanguageWireValue, normalizeLanguageCode } from "@/lib/languag
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2, type PlayerV2Body } from "../player-v2";
 import type { PlayerAudioTrack } from "../types";
-import { runTrackPreferenceWrite } from "./trackPreferenceWrites";
+import { runPlayerTrackPreferenceWrite } from "./trackPreferenceWrites";
 
 export type AudioPreferenceBody = PlayerV2Body<"PUT /api/v2/audio-prefs/{series_id}">;
 
@@ -50,18 +50,19 @@ export function buildAudioPreferenceBody(
   };
 }
 
-/** Saves an in-player audio pick for the series, after earlier writes for it. */
+/**
+ * Saves an in-player audio pick for the series, after earlier writes for it,
+ * for the profile that made it.
+ */
 export function sendAudioChoiceRequest(
   config: PlayerConfig,
   seriesId: string,
   body: AudioPreferenceBody,
 ): Promise<unknown> {
-  return runTrackPreferenceWrite(
-    { profileId: config.getProfileId() ?? "", dimension: "audio", targetId: seriesId },
-    () =>
-      playerV2(config, "PUT /api/v2/audio-prefs/{series_id}", {
-        path: { series_id: seriesId },
-        body,
-      }),
+  return runPlayerTrackPreferenceWrite(config, "audio", seriesId, (ownerConfig) =>
+    playerV2(ownerConfig, "PUT /api/v2/audio-prefs/{series_id}", {
+      path: { series_id: seriesId },
+      body,
+    }),
   );
 }

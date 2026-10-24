@@ -9,7 +9,17 @@
  * were made. Different keys stay independent.
  */
 
+import type { PlayerConfig } from "../context/PlayerConfigContext";
+
 export type TrackPreferenceDimension = "audio" | "subtitle";
+
+/** A queued write whose profile or sign-in changed before it could go out. */
+export class StaleTrackPreferenceWriteError extends Error {
+  constructor() {
+    super("The profile that made this choice is no longer active.");
+    this.name = "StaleTrackPreferenceWriteError";
+  }
+}
 
 const pending = new Map<string, Promise<void>>();
 
@@ -36,6 +46,31 @@ export function runTrackPreferenceWrite<T>(
     if (pending.get(key) === settled) pending.delete(key);
   });
   return result;
+}
+
+/**
+ * Runs a player write after earlier writes for the same title and dimension,
+ * for the profile that made the choice. The player's credential getters are
+ * live, so a write waiting in line would otherwise go out as whoever is active
+ * when its turn comes; if the profile or sign-in changed meanwhile, the write
+ * is dropped with StaleTrackPreferenceWriteError instead of saving one
+ * profile's pick on another.
+ */
+export function runPlayerTrackPreferenceWrite<T>(
+  config: PlayerConfig,
+  dimension: TrackPreferenceDimension,
+  targetId: string,
+  write: (config: PlayerConfig) => Promise<T>,
+): Promise<T> {
+  const profileId = config.getProfileId();
+  const profileToken = config.getProfileToken?.() ?? null;
+  const authContext = config.getAuthContext?.();
+  return runTrackPreferenceWrite({ profileId: profileId ?? "", dimension, targetId }, () => {
+    if (config.getProfileId() !== profileId || config.getAuthContext?.() !== authContext) {
+      return Promise.reject(new StaleTrackPreferenceWriteError());
+    }
+    return write({ ...config, getProfileId: () => profileId, getProfileToken: () => profileToken });
+  });
 }
 
 /**

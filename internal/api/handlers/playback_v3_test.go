@@ -3697,7 +3697,7 @@ type versionChangeFixtureV3 struct {
 	started           playback.DecisionResponseV3
 }
 
-func newVersionChangeFixtureV3(t *testing.T) *versionChangeFixtureV3 {
+func newVersionChangeFixtureV3(t *testing.T, configure ...func(*versionChangeFixtureV3)) *versionChangeFixtureV3 {
 	t.Helper()
 	source := uhdSourceFileV3(t)
 	source.AudioTracks = []models.AudioTrack{
@@ -3738,10 +3738,12 @@ func newVersionChangeFixtureV3(t *testing.T) *versionChangeFixtureV3 {
 			ValidatedClaims: []string{playback.ClaimClientSelectedAudioTrackV3},
 		}
 	}
-	return &versionChangeFixtureV3{
-		handler: handler, store: store, source: source, alternate: alternate, startRequest: startRequest,
-		started: startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest)),
+	f := &versionChangeFixtureV3{handler: handler, store: store, source: source, alternate: alternate, startRequest: startRequest}
+	for _, apply := range configure {
+		apply(f)
 	}
+	f.started = startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, f.startRequest))
+	return f
 }
 
 func (f *versionChangeFixtureV3) replan(t *testing.T, previous playback.DecisionResponseV3, id string, operation playback.ReplanOperationV3, quality string, tracks playback.SelectedTracksV3) playback.DecisionResponseV3 {
@@ -3827,6 +3829,48 @@ func TestHandleReplanPlaybackV3ReturnsToOriginalWhenChosenSubtitleIsGone(t *test
 	if plan := original.PlaybackPlan; plan.EffectiveMediaFileID != f.source.ID || plan.SelectedTracks.Subtitle != nil {
 		t.Fatalf("Original after the subtitle went away: file=%d subtitle=%q, want %d without a subtitle",
 			plan.EffectiveMediaFileID, selectedTrackIDV3(plan.SelectedTracks.Subtitle), f.source.ID)
+	}
+}
+
+// perFileSubtitleRepoV3 lists each file's own downloaded subtitles.
+type perFileSubtitleRepoV3 struct{ *handlerMockSubtitleRepo }
+
+func (m perFileSubtitleRepoV3) ListDownloadedSubtitles(_ context.Context, fileID int) ([]subtitles.DownloadedSubtitle, error) {
+	m.listCalls++
+	var rows []subtitles.DownloadedSubtitle
+	for _, row := range m.list {
+		if row.MediaFileID == fileID {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+// A downloaded subtitle chosen at the start carries to another version that
+// has a download of the same release, the cut it was timed for.
+func TestHandleReplanPlaybackV3VersionChangeKeepsDownloadedSubtitleOfSameRelease(t *testing.T) {
+	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+		f.source.ExternalSubtitles = nil
+		repo := newMockSubtitleRepoForHandler()
+		repo.list = []subtitles.DownloadedSubtitle{
+			{ID: 71, MediaFileID: f.source.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "same-cut"},
+			{ID: 72, MediaFileID: f.alternate.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "same-cut"},
+		}
+		for i := range repo.list {
+			repo.subtitles[repo.list[i].ID] = &repo.list[i]
+		}
+		f.handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+		downloaded := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks)
+		f.startRequest.SubtitleTrackIndex = &downloaded
+		f.startRequest.SubtitleTrackID = playback.TrackIDV3(f.source.ID, "subtitle", downloaded)
+	})
+	if selectedTrackIDV3(f.started.PlaybackPlan.SelectedTracks.Subtitle) == "" {
+		t.Fatalf("start did not select the downloaded subtitle: %#v", f.started.PlaybackPlan.Subtitle)
+	}
+	lower := f.qualityChange(t, f.started, "downloaded-release-lower-0001", "1080p")
+	want := playback.TrackIDV3(f.alternate.ID, "subtitle", len(f.alternate.ExternalSubtitles)+len(f.alternate.SubtitleTracks))
+	if plan := lower.PlaybackPlan; plan.EffectiveMediaFileID != f.alternate.ID || selectedTrackIDV3(plan.SelectedTracks.Subtitle) != want {
+		t.Fatalf("1080p version: file=%d subtitle=%q, want %d with %q", plan.EffectiveMediaFileID, selectedTrackIDV3(plan.SelectedTracks.Subtitle), f.alternate.ID, want)
 	}
 }
 
