@@ -11,17 +11,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// ContributionRunner lists the providers that share automatically and submits
-// a file's eligible markers (satisfied by *markers.ContributionService).
+// ContributionRunner lists the providers that share automatically or take
+// manual corrections and submits a file's eligible markers (satisfied by
+// *markers.ContributionService).
 type ContributionRunner interface {
 	AutoContributors(ctx context.Context) ([]markers.AutoContributor, error)
+	AmendContributors(ctx context.Context) ([]markers.AmendContributor, error)
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
 }
 
 // ContributionCandidateSource lists local-marker files eligible for auto
-// contribution (satisfied by *markers.ContributionStore).
+// contribution and manual corrections to resend (satisfied by
+// *markers.ContributionStore).
 type ContributionCandidateSource interface {
 	CandidateLocalMarkerFiles(ctx context.Context, kind markers.MarkerKind, providers []markers.AutoContributor, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
+	CandidateManualCorrections(ctx context.Context, providers []markers.AmendContributor, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
 }
 
 // ContributionFileLoader loads files by id (satisfied by *scanner.FileRepository).
@@ -30,8 +34,9 @@ type ContributionFileLoader interface {
 }
 
 // ContributeMarkersTask submits high-confidence local intro and credits markers
-// to providers that have auto-contribution enabled. It is a no-op when no
-// provider opts in.
+// to providers that have auto-contribution enabled, and resends manual
+// corrections a save did not deliver to providers that support amend. It is a
+// no-op when no provider opts in.
 type ContributeMarkersTask struct {
 	service    ContributionRunner
 	candidates ContributionCandidateSource
@@ -69,7 +74,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 func (t *ContributeMarkersTask) Key() string  { return "contribute_markers" }
 func (t *ContributeMarkersTask) Name() string { return "Share detected markers" }
 func (t *ContributeMarkersTask) Description() string {
-	return "Sends eligible intros and credits detected on this server to providers with automatic sharing enabled."
+	return "Sends eligible intros and credits detected on this server to providers with automatic sharing enabled, and manual corrections a save could not deliver to providers that accept corrections."
 }
 func (t *ContributeMarkersTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -92,17 +97,35 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	if err != nil {
 		return fmt.Errorf("load marker sharing settings: %w", err)
 	}
-	if len(providers) == 0 {
+	amenders, err := t.service.AmendContributors(ctx)
+	if err != nil {
+		return fmt.Errorf("load marker sharing settings: %w", err)
+	}
+	if len(providers) == 0 && len(amenders) == 0 {
 		progress.Report(100, "No provider has auto-contribution enabled")
 		return nil
 	}
 
 	var counts contributionCounts
 	rateLimitWaits := 0
+	// Manual corrections first: there are few, and a backlog of local
+	// markers must not hold them back when a provider's daily limit ends the
+	// run.
+	corrections := func(after *markers.ContributionCandidate) ([]markers.ContributionCandidate, error) {
+		return t.candidates.CandidateManualCorrections(ctx, amenders, after, contributionCandidateBatch)
+	}
+	stopped, err := t.contributeCandidates(ctx, progress, markers.ContributeOptions{Corrections: true}, corrections, &counts, &rateLimitWaits)
+	if err != nil || stopped {
+		return err
+	}
 	// One pass per kind, intros first, so a pass asks each file for the one
 	// segment it was selected for.
 	for _, kind := range markers.AutoContributedKinds() {
-		stopped, err := t.contributeKind(ctx, progress, kind, providers, &counts, &rateLimitWaits)
+		next := func(after *markers.ContributionCandidate) ([]markers.ContributionCandidate, error) {
+			return t.candidates.CandidateLocalMarkerFiles(ctx, kind, providers, after, contributionCandidateBatch)
+		}
+		opts := markers.ContributeOptions{Segments: []markers.MarkerKind{kind}, Auto: true}
+		stopped, err := t.contributeCandidates(ctx, progress, opts, next, &counts, &rateLimitWaits)
 		if err != nil || stopped {
 			return err
 		}
@@ -113,20 +136,19 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	return nil
 }
 
-// contributeKind submits one segment kind for every candidate file. It reports
-// stopped when a provider's usage limit ends the run.
-func (t *ContributeMarkersTask) contributeKind(
+// contributeCandidates runs opts for every candidate file next pages through.
+// It reports stopped when a provider's usage limit ends the run.
+func (t *ContributeMarkersTask) contributeCandidates(
 	ctx context.Context,
 	progress taskmanager.ProgressReporter,
-	kind markers.MarkerKind,
-	providers []markers.AutoContributor,
+	opts markers.ContributeOptions,
+	next func(after *markers.ContributionCandidate) ([]markers.ContributionCandidate, error),
 	counts *contributionCounts,
 	rateLimitWaits *int,
 ) (bool, error) {
-	opts := markers.ContributeOptions{Segments: []markers.MarkerKind{kind}, Auto: true}
 	var after *markers.ContributionCandidate
 	for {
-		candidates, err := t.candidates.CandidateLocalMarkerFiles(ctx, kind, providers, after, contributionCandidateBatch)
+		candidates, err := next(after)
 		if err != nil {
 			return false, fmt.Errorf("load contribution candidates: %w", err)
 		}

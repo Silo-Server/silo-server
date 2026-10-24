@@ -239,6 +239,7 @@ func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result,
 		EpisodeTitle:       req.EpisodeTitle,
 		FileHash:           req.FileHash,
 		FileSize:           req.FileSize,
+		AcceptsAbsent:      true,
 	})
 	if err != nil {
 		return Result{}, pluginProviderError(p.ID(), err)
@@ -290,6 +291,7 @@ func (p *PluginProvider) SubmitMarker(ctx context.Context, req SubmissionRequest
 		Source:             req.Source,
 		Algorithm:          req.Algorithm,
 		Confidence:         req.Confidence,
+		Absent:             req.Absent,
 	}
 	if req.Start != nil {
 		start := req.Start.Seconds()
@@ -347,6 +349,24 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	if !ok {
 		return Marker{}, false
 	}
+	// Confidence decides between providers, so a value that is not a valid
+	// 0-1 score (NaN, infinite, or out of range) counts as unrated, on an
+	// absent answer too.
+	confidence := segment.GetConfidence()
+	if math.IsNaN(confidence) || confidence < 0 || confidence > 1 {
+		confidence = 0
+	}
+	// An absent answer has no bounds. Read as a segment, the missing bounds
+	// would default to the whole file.
+	if segment.GetAbsent() {
+		return Marker{
+			Kind:            kind,
+			Absent:          true,
+			Confidence:      confidence,
+			SubmissionCount: int(segment.GetSubmissionCount()),
+			Algorithm:       strings.TrimSpace(segment.GetAlgorithm()),
+		}, true
+	}
 	start := time.Duration(0)
 	end := duration
 	if segment.StartSeconds != nil {
@@ -363,12 +383,6 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	}
 	if end <= start {
 		return Marker{}, false
-	}
-	// Confidence decides between providers, so a value that is not a valid
-	// 0-1 score (NaN, infinite, or out of range) counts as unrated.
-	confidence := segment.GetConfidence()
-	if math.IsNaN(confidence) || confidence < 0 || confidence > 1 {
-		confidence = 0
 	}
 	return Marker{
 		Kind:            kind,

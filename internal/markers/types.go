@@ -161,6 +161,9 @@ type Marker struct {
 	// so a merged result records correct per-segment provenance.
 	ProviderID string
 	Algorithm  string
+	// Absent is a provider's answer that the item has no segment of Kind.
+	// Start and End are zero, and Confidence applies to the absence.
+	Absent bool
 }
 
 // SubmissionRequest is a single-segment contribution to an online marker
@@ -186,6 +189,9 @@ type SubmissionRequest struct {
 	Source     string
 	Algorithm  string
 	Confidence float64
+	// Absent says the item has no segment of this kind; Start and End are
+	// nil. Only a manual clear is submitted this way.
+	Absent bool
 }
 
 // SubmissionStatus values returned by a Submitter.
@@ -203,8 +209,8 @@ type SubmissionResult struct {
 }
 
 // SubmissionConflictError marks a provider refusal that cannot succeed when
-// the exact same payload is retried. A changed marker produces a different
-// content hash and remains eligible for a later submission.
+// the exact same payload is retried. The refusal holds the provider target: a
+// changed marker is submitted again only to a provider that supports amend.
 type SubmissionConflictError struct {
 	Provider   string
 	HTTPStatus int
@@ -398,6 +404,7 @@ func mergeProviderResults(results []providerResult) Result {
 	type candidate struct {
 		rank   mergeCandidate
 		ranges []Marker
+		absent bool
 	}
 	best := make(map[MarkerKind]candidate)
 	merged := Result{SourceClass: models.MarkerSourceOnline}
@@ -405,7 +412,7 @@ func mergeProviderResults(results []providerResult) Result {
 		refreshed := fetched.refreshed
 		grouped := make(map[MarkerKind]candidate)
 		for _, m := range fetched.result.Markers {
-			if m.Kind < MarkerKindIntro || m.Kind > MarkerKindPreview || m.Start < 0 || m.End <= m.Start {
+			if m.Kind < MarkerKindIntro || m.Kind > MarkerKindPreview || (!m.Absent && (m.Start < 0 || m.End <= m.Start)) {
 				continue
 			}
 			if m.Confidence < fetched.entry.minConfidence {
@@ -417,6 +424,17 @@ func mergeProviderResults(results []providerResult) Result {
 			m.Algorithm = firstNonEmpty(m.Algorithm, fetched.result.Algorithm)
 			rank := mergeCandidate{marker: m, priority: fetched.entry.priority}
 			group := grouped[m.Kind]
+			// An absent answer competes like a range. A provider that also
+			// returned a range for the kind answered with the range.
+			if m.Absent {
+				if len(group.ranges) == 0 || (group.absent && rank.better(group.rank)) {
+					grouped[m.Kind] = candidate{rank: rank, ranges: []Marker{m}, absent: true}
+				}
+				continue
+			}
+			if group.absent {
+				group = candidate{}
+			}
 			if len(group.ranges) == 0 || rank.better(group.rank) {
 				group.rank = rank
 			}

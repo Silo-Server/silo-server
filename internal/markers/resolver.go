@@ -88,6 +88,32 @@ type ExternalIDResolver interface {
 	ResolveForFile(ctx context.Context, file *models.MediaFile) (ExternalIDs, error)
 }
 
+// episodeNumberingSQL is ExternalIDs.EpisodeNumbering for the episodes row e
+// of a file in the media folder folder: the first metadata provider in the
+// folder's episode chain whose episode ID e carries, or empty. Episode rows merge
+// metadata providers' episodes by number, in the order of that chain, so it is
+// the provider whose numbering the row follows. The legacy flat chain applies
+// when the folder has no per-level chain, as metadata.ChainRepository.GetChain
+// does. currentAmendHashSQL uses it too, so both read the same numbering.
+func episodeNumberingSQL(folder string) string {
+	return `COALESCE((
+	    SELECT c.capability_id
+	    FROM library_provider_chains c
+	    JOIN plugin_installations pi ON pi.id = c.plugin_installation_id
+	    WHERE c.media_folder_id = ` + folder + `
+	      AND c.capability_type = 'metadata_provider.v1'
+	      AND c.enabled AND pi.enabled
+	      AND c.content_level = CASE WHEN EXISTS (
+	              SELECT 1 FROM library_provider_chains l
+	              WHERE l.media_folder_id = c.media_folder_id AND l.content_level = 'episode'
+	          ) THEN 'episode' ELSE '' END
+	      AND ((c.capability_id = 'tvdb' AND BTRIM(e.tvdb_id) <> '')
+	        OR (c.capability_id = 'tmdb' AND BTRIM(e.tmdb_id) <> ''))
+	    ORDER BY c.priority
+	    LIMIT 1
+	), '')`
+}
+
 // DBExternalIDResolver issues a single query per file against the postgres
 // pool. Episodes pull from `episodes`; movies fall back to `media_items`
 // via the file's content_id.
@@ -117,12 +143,6 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 		// refine it: they cannot substitute for an unmatched show. The episode
 		// row's season/episode numbers are authoritative; the media_files copy
 		// can drift during multi-version moves.
-		//
-		// Episode rows merge metadata providers' episodes by number, in the
-		// order of the library's episode chain, so the first provider in that
-		// chain whose ID the row carries is the one whose numbering it
-		// follows. The legacy flat chain applies when the library has no
-		// per-level chain, as metadata.ChainRepository.GetChain does.
 		var showTmdb, showImdb, showTvdb string
 		var episodeIDs EpisodeIDs
 		var title, numbering string
@@ -139,22 +159,7 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			       COALESCE(BTRIM(e.tvdb_id), ''),
 			       COALESCE(BTRIM(e.title), ''),
 			       e.air_date,
-			       COALESCE((
-			           SELECT c.capability_id
-			           FROM library_provider_chains c
-			           JOIN plugin_installations pi ON pi.id = c.plugin_installation_id
-			           WHERE c.media_folder_id = (SELECT media_folder_id FROM media_files WHERE id = $2)
-			             AND c.capability_type = 'metadata_provider.v1'
-			             AND c.enabled AND pi.enabled
-			             AND c.content_level = CASE WHEN EXISTS (
-			                     SELECT 1 FROM library_provider_chains l
-			                     WHERE l.media_folder_id = c.media_folder_id AND l.content_level = 'episode'
-			                 ) THEN 'episode' ELSE '' END
-			             AND ((c.capability_id = 'tvdb' AND BTRIM(e.tvdb_id) <> '')
-			               OR (c.capability_id = 'tmdb' AND BTRIM(e.tmdb_id) <> ''))
-			           ORDER BY c.priority
-			           LIMIT 1
-			       ), '')
+			       `+episodeNumberingSQL("(SELECT media_folder_id FROM media_files WHERE id = $2)")+`
 			FROM episodes e
 			LEFT JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.content_id = $1`, episodeID, file.ID).Scan(

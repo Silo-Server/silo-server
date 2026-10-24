@@ -175,6 +175,20 @@ func (s *PopulationService) Populate(ctx context.Context, file *models.MediaFile
 	return s.populate(ctx, file, false, true)
 }
 
+// ShowsStoredMarkers reports whether a player is shown a file's stored markers
+// and nothing else: online lookups are off, or their results are stored on
+// the file. In on_demand mode a player is shown provider answers each replica
+// caches in its own memory and drops, so no replica can tell later which
+// provider marker a player was shown.
+func (s *PopulationService) ShowsStoredMarkers(ctx context.Context) (bool, error) {
+	enabled, err := s.enabled(ctx)
+	if err != nil || !enabled {
+		return err == nil, err
+	}
+	storage, err := s.OnlineStorage(ctx)
+	return err == nil && storage == OnlineStorageStored, err
+}
+
 // Refresh bypasses successful cached results for an explicit refresh.
 // Active leases, provider cooldowns and failed-request backoff still apply.
 func (s *PopulationService) Refresh(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
@@ -490,7 +504,7 @@ func withoutMisplacedCredits(file *models.MediaFile, found []Marker) []Marker {
 		duration = float64(file.Duration)
 	}
 	return slices.DeleteFunc(slices.Clone(found), func(m Marker) bool {
-		return m.Kind == MarkerKindCredits && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
+		return m.Kind == MarkerKindCredits && !m.Absent && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
 	})
 }
 

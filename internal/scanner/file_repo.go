@@ -1517,20 +1517,9 @@ func applySegmentRanges(
 		}
 	}
 	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].StartSeconds < ranges[j].StartSeconds })
-	effectiveSource := state.source
-	if effectiveSource == nil && state.start != nil && state.end != nil {
-		effectiveSource = legacySharedSource
-	}
-	existing := markers.SegmentPayload{Start: state.start, End: state.end, Ranges: state.ranges, Provider: state.provider, Confidence: state.confidence}
-	if effectiveSource != nil {
-		existing.Source = *effectiveSource
-	}
-	if state.algorithm != nil {
-		existing.Algorithm = *state.algorithm
-	}
 	incoming := markers.SegmentPayload{Start: &ranges[0].StartSeconds, End: &ranges[0].EndSeconds, Ranges: ranges,
 		Source: source, Provider: provider, Confidence: confidence, Algorithm: algorithm}
-	if !markers.CanWriteMarkerUpdate(existing, incoming) {
+	if !markers.CanWriteMarkerUpdate(existingSegmentPayload(*state, legacySharedSource), incoming) {
 		return false, nil
 	}
 	next := segmentState{start: incoming.Start, end: incoming.End, ranges: ranges, source: &source,
@@ -1544,6 +1533,41 @@ func applySegmentRanges(
 	}
 	*state = next
 	return true, nil
+}
+
+// applyAbsentSegment writes a provider's absent answer as a tombstone, its
+// provenance without bounds, when source precedence lets it replace state.
+func applyAbsentSegment(
+	state *segmentState, legacySharedSource *string, source string, provider *string,
+	confidence *float64, algorithm string, mutationAt time.Time,
+) bool {
+	incoming := markers.SegmentPayload{Source: source, Provider: provider, Confidence: confidence, Algorithm: algorithm}
+	if !markers.CanWriteMarkerUpdate(existingSegmentPayload(*state, legacySharedSource), incoming) {
+		return false
+	}
+	next := segmentState{source: &source, provider: provider, confidence: confidence, algorithm: &algorithm, detectedAt: &mutationAt}
+	if segmentEqual(*state, next) {
+		return false
+	}
+	*state = next
+	return true
+}
+
+// existingSegmentPayload returns state for precedence checks. A segment written
+// before per-segment provenance carries only the file's shared source.
+func existingSegmentPayload(state segmentState, legacySharedSource *string) markers.SegmentPayload {
+	effectiveSource := state.source
+	if effectiveSource == nil && state.start != nil && state.end != nil {
+		effectiveSource = legacySharedSource
+	}
+	existing := markers.SegmentPayload{Start: state.start, End: state.end, Ranges: state.ranges, Provider: state.provider, Confidence: state.confidence}
+	if effectiveSource != nil {
+		existing.Source = *effectiveSource
+	}
+	if state.algorithm != nil {
+		existing.Algorithm = *state.algorithm
+	}
+	return existing
 }
 
 // resolveSegmentProvenance returns the source/provider/confidence/algorithm to
@@ -1589,13 +1613,6 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 		return false, fmt.Errorf("marker source is required")
 	}
 	return r.UpsertAndClearMarkers(ctx, fileID, update, nil)
-}
-
-// ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, retaining manual provenance to prevent automatic rediscovery. Returns
-// whether a row was updated.
-func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
-	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
 }
 
 // WithdrawScannerMarker clears a file's intro or credits segment while it
@@ -1967,6 +1984,11 @@ func applyMarkerUpdateToMutationState(update *MarkerUpdate, state *markerMutatio
 		{"recap", &state.recap, update.RecapStart, update.RecapEnd, update.RecapProvenance, &applied.recap},
 		{"preview", &state.preview, update.PreviewStart, update.PreviewEnd, update.PreviewProvenance, &applied.preview},
 	} {
+		if patch.provenance != nil && patch.provenance.Absent {
+			source, provider, confidence, algorithm := resolveSegmentProvenance(*update, patch.provenance)
+			*patch.changed = applyAbsentSegment(patch.state, state.existingSource, source, provider, confidence, algorithm, mutationAt)
+			continue
+		}
 		start, end, kindRanges := patch.start, patch.end, ranges[patch.kind]
 		if patch.kind == models.MarkerSegmentCredits {
 			// The intro has already been patched, so this checks against the
@@ -2143,7 +2165,7 @@ func clearSegmentState(state *segmentState) bool {
 }
 
 func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
-	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	source, algorithm, confidence := models.MarkerSourceManual, markers.ManualAlgorithm, 1.0
 	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
 	if segmentEqual(*state, next) {
 		return false
