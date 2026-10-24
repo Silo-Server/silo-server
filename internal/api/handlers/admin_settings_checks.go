@@ -33,6 +33,10 @@ import (
 // that was redirected to another scheme, host or port, which it does not follow.
 const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to another address. Enter the address it redirects to, such as its https:// URL, and enter the API key again."
 
+// adminMeilisearchKeyRejectedMessage answers a check whose key, or missing
+// key, Meilisearch refused for an authenticated request.
+const adminMeilisearchKeyRejectedMessage = "Meilisearch refused the API key, or requires one. Enter a key that can manage indexes and documents, such as the Default Admin API Key."
+
 const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
 type adminSettingsConnectionCheckRequest struct {
@@ -323,6 +327,9 @@ func checkMeilisearchConnection(ctx context.Context, settings map[string]string)
 	if err := checkAdminMeilisearchSettingsConnection(ctx, searchSettings); err != nil {
 		if errors.Is(err, catalog.ErrMeilisearchCheckRedirected) {
 			return connectionCheckResponse{Message: adminMeilisearchRedirectMessage, safeMessage: adminMeilisearchRedirectMessage}
+		}
+		if errors.Is(err, catalog.ErrMeilisearchCheckKeyRejected) {
+			return connectionCheckResponse{Message: adminMeilisearchKeyRejectedMessage, safeMessage: adminMeilisearchKeyRejectedMessage}
 		}
 		return connectionCheckResponse{Success: false, Message: err.Error()}
 	}
