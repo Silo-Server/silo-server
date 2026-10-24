@@ -37,7 +37,7 @@
   "$defs": {
     "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node"] },
     "namespace": { "enum": ["api_v1", "api_v2", "legacy_unversioned", "operational"] },
-    "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
+    "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "QUERY", "TRACE"] },
     "path": { "type": "string", "pattern": "^/" },
     "handlerKind": { "enum": ["method", "func", "expression", "literal", "delegation"] },
     "authClass": { "enum": ["public", "authenticated", "profile_scoped", "acting_admin", "permission_gated", "node_bearer", "delegated"] },
