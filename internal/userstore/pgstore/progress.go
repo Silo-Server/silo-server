@@ -396,6 +396,7 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 	mediaItemIDs := make([]string, 0, len(targets))
 	durations := make([]float64, 0, len(targets))
 	eventDates := make([]*time.Time, 0, len(targets))
+	rewatchIDs := make([]string, 0)
 	explicitDates := false
 	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -415,6 +416,9 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 		durations = append(durations, duration)
 		eventDates = append(eventDates, target.EventAt)
 		explicitDates = explicitDates || target.EventAt != nil
+		if target.RecordRewatch {
+			rewatchIDs = append(rewatchIDs, mediaItemID)
+		}
 	}
 	if len(mediaItemIDs) == 0 {
 		return nil, nil
@@ -510,13 +514,15 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 			completed = TRUE,
 			updated_at = EXCLUDED.updated_at,
 			event_at = EXCLUDED.event_at
- WHERE NOT user_watch_progress.completed OR EXISTS (
+ WHERE NOT user_watch_progress.completed
+  OR (user_watch_progress.position_seconds > 0 AND user_watch_progress.media_item_id = ANY($7::text[]))
+  OR EXISTS (
   SELECT 1 FROM user_history_hidden_items hhi
   WHERE hhi.user_id = user_watch_progress.user_id AND hhi.profile_id = user_watch_progress.profile_id
   AND hhi.media_item_id = user_watch_progress.media_item_id AND user_watch_progress.updated_at <= hhi.hidden_before
  )
  RETURNING media_item_id`,
-		s.userID, profileID, mediaItemIDs, durations, now, eventDates,
+		s.userID, profileID, mediaItemIDs, durations, now, eventDates, rewatchIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("marking watched batch: %w", err)

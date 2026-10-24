@@ -33,7 +33,7 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	targets := []watchedLeafTarget{{ContentID: "movie-1", DurationSeconds: 7200}}
 
 	for i := 0; i < 2; i++ {
-		if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets); err != nil {
+		if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets, false); err != nil {
 			t.Fatalf("mark %d: %v", i+1, err)
 		}
 	}
@@ -51,7 +51,7 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	if err := handler.markLeafTargetsUnwatched(ctx, 1, "profile-1", targets); err != nil {
 		t.Fatalf("unmark: %v", err)
 	}
-	if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets); err != nil {
+	if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets, false); err != nil {
 		t.Fatalf("mark after unmark: %v", err)
 	}
 	history, err = store.ListHistory(ctx, "profile-1", 10, 0)

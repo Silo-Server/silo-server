@@ -42333,6 +42333,13 @@
             ],
             "type": "boolean"
           },
+          "mark_watched_records_rewatch": {
+            "description": "Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -42350,6 +42357,7 @@
         },
         "required": [
           "clear_resume_position",
+          "mark_watched_records_rewatch",
           "revision",
           "state",
           "allowed"
@@ -216769,7 +216777,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.",
+        "summary": "Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie or episode with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.",
         "tags": [
           "watch"
         ],
