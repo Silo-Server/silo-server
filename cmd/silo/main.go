@@ -1148,6 +1148,7 @@ func main() {
 		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
+			srv.SetDownloadBandwidth(pool, redisClient)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
 				log.Fatalf("load trusted CIDRs: %v", resolverErr)
@@ -1284,6 +1285,18 @@ func main() {
 	} else if apiRedisClient != nil {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
+	// Download bandwidth accounting bounds each budget call with a deadline,
+	// which only a deadline-enabled client honors through Sentinel discovery.
+	var downloadBandwidthRedis *redis.Client
+	if apiRedisClient != nil {
+		var bandwidthRedisErr error
+		downloadBandwidthRedis, bandwidthRedisErr = cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if bandwidthRedisErr != nil {
+			slog.Warn("redis client init failed; download bandwidth limits stay per API process", "error", bandwidthRedisErr)
+		} else if downloadBandwidthRedis != nil {
+			defer func() { _ = cache.CloseRedisClient(downloadBandwidthRedis) }()
+		}
+	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
@@ -1330,6 +1343,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		DownloadBandwidthRedis:       downloadBandwidthRedis,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
