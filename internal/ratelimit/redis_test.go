@@ -99,7 +99,6 @@ func hookedRedisLimiter(t *testing.T, addr string, hook *commandHook) *RedisLimi
 	t.Cleanup(func() { _ = cache.CloseRedisClient(client) })
 	client.AddHook(hook)
 	rl := NewRedisLimiter(client)
-	t.Cleanup(rl.Close)
 	rl.callTimeout = 100 * time.Millisecond
 	return rl
 }
@@ -206,18 +205,28 @@ func TestRedisLimiterCountsLocallyWhileRedisIsDown(t *testing.T) {
 	}
 }
 
-// While Redis is down, the local count applies the windows Redis would, so a
-// batch Redis allows, such as 50 import webhooks over 10 s on a 60/minute,
-// burst 30 budget, is not refused.
+// While Redis is down, the local count applies the windows Redis would: two
+// batches of 30 import webhooks on a 60/minute, burst 30 budget, one each
+// side of a second boundary, are both allowed, and the minute then holds no
+// more until the next one.
 func TestRedisLimiterLocalCountKeepsRedisWindows(t *testing.T) {
 	rate := Rate{RequestsPerSecond: 1, RequestsPerMinute: 60, Burst: 30}
 	rl := hookedRedisLimiter(t, refusingRedisAddr(t), &commandHook{})
-	now := time.Now()
-	for i := range 50 {
-		at := now.Add(time.Duration(i) * 200 * time.Millisecond)
-		if got := rl.allowAt(t.Context(), "autoscan:1", rate, at); !got.Allowed {
-			t.Fatalf("check %d during the outage = %+v, want allowed as Redis would", i+1, got)
+	minuteStart := time.Unix(1_800_000_000-1_800_000_000%60, 0)
+	check := func(at time.Time) AllowResult { return rl.allowAt(t.Context(), "autoscan:1", rate, at) }
+
+	for _, at := range []time.Time{minuteStart.Add(900 * time.Millisecond), minuteStart.Add(1100 * time.Millisecond)} {
+		for i := range 30 {
+			if got := check(at); !got.Allowed {
+				t.Fatalf("check %d at %s = %+v, want allowed as Redis would", i+1, at.Sub(minuteStart), got)
+			}
 		}
+	}
+	if got := check(minuteStart.Add(2 * time.Second)); got.Allowed || got.RetryAfter != 58*time.Second {
+		t.Fatalf("check past the minute's 60 = %+v, want refused until the next minute", got)
+	}
+	if got := check(minuteStart.Add(time.Minute)); !got.Allowed {
+		t.Fatalf("check in the next minute = %+v, want allowed", got)
 	}
 }
 

@@ -82,10 +82,50 @@ type RedisLimiter struct {
 	// pausedUntil is the pauseTime before which Allow counts locally without
 	// calling Redis. It is zero while Redis answers.
 	pausedUntil atomic.Int64
-	// local counts the checks Redis cannot. It keeps its counters across
-	// pauses, so Redis failing again does not hand out a fresh allowance.
-	local     *MemoryLimiter
-	closeOnce sync.Once
+	// local counts the checks Redis cannot.
+	local localWindows
+}
+
+// localWindows counts the Redis script's second and minute windows in this
+// process. Every minute window rolls over at the same wall-clock boundary, so
+// a new minute drops all counts at once and nothing else needs evicting.
+type localWindows struct {
+	mu     sync.Mutex
+	minute int64
+	counts map[string]*localCount
+}
+
+type localCount struct {
+	second             int64
+	secCount, minCount int
+}
+
+// allow counts a check against key's windows at now, as the Redis script
+// would, and returns whether it was allowed and the counts after it.
+func (w *localWindows) allow(key string, secLimit, minLimit int, now time.Time) (allowed bool, secCount, minCount int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	second := now.Unix()
+	// A check that read the clock just before another moved the window on
+	// counts in the current window rather than moving it back.
+	if minute := second / 60; minute > w.minute || w.counts == nil {
+		w.minute = minute
+		w.counts = make(map[string]*localCount)
+	}
+	c := w.counts[key]
+	if c == nil {
+		c = &localCount{}
+		w.counts[key] = c
+	}
+	if second > c.second {
+		c.second, c.secCount = second, 0
+	}
+	if c.secCount >= secLimit || c.minCount >= minLimit {
+		return false, c.secCount, c.minCount
+	}
+	c.secCount++
+	c.minCount++
+	return true, c.secCount, c.minCount
 }
 
 // redisWindowLimits maps the shared rate model onto Redis fixed windows. The
@@ -112,7 +152,7 @@ func redisWindowLimits(limit Rate) (secLimit, minLimit, effectiveLimit int) {
 // cache.NewDeadlineRedisClientForRole does; on another client a stalled read
 // waits for the client's read timeout.
 func NewRedisLimiter(client *redis.Client) *RedisLimiter {
-	return &RedisLimiter{client: client, callTimeout: redisCallTimeout, local: NewMemoryLimiter()}
+	return &RedisLimiter{client: client, callTimeout: redisCallTimeout}
 }
 
 func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) AllowResult {
@@ -123,7 +163,7 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 	secLimit, minLimit, effectiveLimit := redisWindowLimits(limit)
 
 	if rl.paused(ctx, key, secLimit, minLimit, now) {
-		return rl.allowLocal(key, secLimit, minLimit, now)
+		return rl.allowLocal(key, secLimit, minLimit, effectiveLimit, now)
 	}
 
 	result, err := rl.count(ctx, key, secLimit, minLimit, now)
@@ -138,14 +178,25 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 		} else if rl.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
 			logRedisPause(ctx, err, key)
 		}
-		return rl.allowLocal(key, secLimit, minLimit, now)
+		return rl.allowLocal(key, secLimit, minLimit, effectiveLimit, now)
 	}
 
-	allowed := result[0] == 1
-	secCount := int(result[1])
-	minCount := int(result[3])
 	secTTL := time.Duration(result[5]) * time.Second
+	return windowResult(result[0] == 1, int(result[1]), int(result[3]), secLimit, minLimit, effectiveLimit, secTTL, now)
+}
 
+// allowLocal counts on this node a check Redis cannot count, with the same
+// windows, so an outage neither refuses a batch Redis would allow nor lets
+// through more than the windows hold.
+func (rl *RedisLimiter) allowLocal(key string, secLimit, minLimit, effectiveLimit int, now time.Time) AllowResult {
+	allowed, secCount, minCount := rl.local.allow(key, secLimit, minLimit, now)
+	untilNextSecond := now.Truncate(time.Second).Add(time.Second).Sub(now)
+	return windowResult(allowed, secCount, minCount, secLimit, minLimit, effectiveLimit, untilNextSecond, now)
+}
+
+// windowResult reports a window count; secTTL is how long the second window
+// has left.
+func windowResult(allowed bool, secCount, minCount, secLimit, minLimit, effectiveLimit int, secTTL time.Duration, now time.Time) AllowResult {
 	if !allowed {
 		retryAfter := redisRetryAfter(now, minCount, minLimit, secTTL)
 		return AllowResult{
@@ -171,17 +222,6 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 		Remaining: remaining,
 		ResetAt:   now.Add(time.Second).Truncate(time.Second),
 	}
-}
-
-// allowLocal counts a check Redis cannot on this node, with the second and
-// minute windows Redis would apply, so a batch the Redis windows allow is
-// not refused because Redis is down.
-func (rl *RedisLimiter) allowLocal(key string, secLimit, minLimit int, now time.Time) AllowResult {
-	return rl.local.allowAt(key, Rate{
-		RequestsPerSecond: float64(secLimit),
-		RequestsPerMinute: float64(minLimit),
-		Burst:             secLimit,
-	}, now)
 }
 
 // count runs the window script for key, giving up after the call timeout.
@@ -245,14 +285,6 @@ func redisRetryAfter(now time.Time, minCount, minLimit int, secTTL time.Duration
 	return secTTL
 }
 
-// Clear drops the local counters, so they pick up changed limits.
-func (rl *RedisLimiter) Clear() {
-	rl.local.Clear()
-}
-
-// Close stops the local counters. The Redis client's lifecycle is managed
-// externally. The server shares one limiter between two owners, so Close may
-// run twice.
 func (rl *RedisLimiter) Close() {
-	rl.closeOnce.Do(rl.local.Close)
+	// Redis client lifecycle managed externally
 }

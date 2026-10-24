@@ -86,11 +86,12 @@ func (mw *Middleware) Reload(ctx context.Context) error {
 	mw.cfg = cfg
 	mw.mu.Unlock()
 
-	// Local counters keep the limits they started with, so drop them. A
-	// Redis limiter keeps local counters for when Redis is down.
-	for _, limiter := range []RateLimiter{mw.perKey, mw.global} {
-		if c, ok := limiter.(interface{ Clear() }); ok {
-			c.Clear()
+	if mw.isMemory {
+		if ml, ok := mw.perKey.(*MemoryLimiter); ok {
+			ml.Clear()
+		}
+		if ml, ok := mw.global.(*MemoryLimiter); ok {
+			ml.Clear()
 		}
 	}
 
