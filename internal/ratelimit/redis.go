@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,10 +60,10 @@ const (
 	// distant Redis while keeping a check from waiting out go-redis's dial and
 	// command retries, about two seconds, when Redis is down.
 	redisCallTimeout = time.Second
-	// redisOutagePause is how long the limiter fails open without calling
-	// Redis after a call fails. When it runs out, the next check counts its
-	// request in the background to find out whether Redis answers again, so
-	// requests do not wait on Redis while it is down.
+	// redisOutagePause is how long the limiter counts on this node without
+	// calling Redis after a call fails. When it runs out, the next check also
+	// counts its request in Redis in the background to find out whether Redis
+	// answers again, so requests do not wait on Redis while it is down.
 	redisOutagePause = 5 * time.Second
 )
 
@@ -73,12 +74,18 @@ var pauseClock = time.Now()
 func pauseTime(t time.Time) int64 { return int64(t.Sub(pauseClock)) }
 
 // RedisLimiter is a Redis-backed rate limiter using fixed window counters.
+// A check Redis cannot count is counted on this node instead, so limits hold
+// per node while Redis is down rather than switching off.
 type RedisLimiter struct {
 	client      *redis.Client
 	callTimeout time.Duration
-	// pausedUntil is the pauseTime before which Allow fails open without
+	// pausedUntil is the pauseTime before which Allow counts locally without
 	// calling Redis. It is zero while Redis answers.
 	pausedUntil atomic.Int64
+	// local counts the checks Redis cannot. It keeps its counters across
+	// pauses, so Redis failing again does not hand out a fresh allowance.
+	local     *MemoryLimiter
+	closeOnce sync.Once
 }
 
 // redisWindowLimits maps the shared rate model onto Redis fixed windows. The
@@ -105,7 +112,7 @@ func redisWindowLimits(limit Rate) (secLimit, minLimit, effectiveLimit int) {
 // cache.NewDeadlineRedisClientForRole does; on another client a stalled read
 // waits for the client's read timeout.
 func NewRedisLimiter(client *redis.Client) *RedisLimiter {
-	return &RedisLimiter{client: client, callTimeout: redisCallTimeout}
+	return &RedisLimiter{client: client, callTimeout: redisCallTimeout, local: NewMemoryLimiter()}
 }
 
 func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) AllowResult {
@@ -116,22 +123,22 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 	secLimit, minLimit, effectiveLimit := redisWindowLimits(limit)
 
 	if rl.paused(ctx, key, secLimit, minLimit, now) {
-		return redisFailOpen(effectiveLimit, now)
+		return rl.local.allowAt(key, limit, now)
 	}
 
 	result, err := rl.count(ctx, key, secLimit, minLimit, now)
 	if err != nil {
-		// Fail-open: allow request if Redis is unreachable. A caller that
-		// gave up says nothing about Redis, so it does not pause the limiter.
+		// Count on this node if Redis is unreachable. A caller that gave up
+		// says nothing about Redis, so it does not pause the limiter.
 		// A pause already set is left alone: this check started before it,
 		// and overwriting it would stop a background count that finds Redis
 		// answering from ending it.
 		if ctx.Err() != nil {
-			slog.WarnContext(ctx, "rate limit Redis error, allowing request", "component", "ratelimit", "error", err, "key", key)
+			slog.WarnContext(ctx, "rate limit Redis error, counting request on this node", "component", "ratelimit", "error", err, "key", key)
 		} else if rl.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
 			logRedisPause(ctx, err, key)
 		}
-		return redisFailOpen(effectiveLimit, now)
+		return rl.local.allowAt(key, limit, now)
 	}
 
 	allowed := result[0] == 1
@@ -200,8 +207,8 @@ func (rl *RedisLimiter) paused(ctx context.Context, key string, secLimit, minLim
 	return true
 }
 
-// retry counts a request allowed while the limiter was paused and ends the
-// pause if Redis answers.
+// retry counts in Redis a request counted locally while the limiter was
+// paused, and ends the pause if Redis answers.
 func (rl *RedisLimiter) retry(ctx context.Context, pause int64, key string, secLimit, minLimit int, now time.Time) {
 	if _, err := rl.count(ctx, key, secLimit, minLimit, now); err != nil {
 		logRedisPause(ctx, err, key)
@@ -213,17 +220,7 @@ func (rl *RedisLimiter) retry(ctx context.Context, pause int64, key string, secL
 }
 
 func logRedisPause(ctx context.Context, err error, key string) {
-	slog.WarnContext(ctx, "rate limit Redis error, allowing requests until it answers", "component", "ratelimit", "error", err, "key", key, "retry_every", redisOutagePause)
-}
-
-// redisFailOpen allows a request the limiter could not count.
-func redisFailOpen(effectiveLimit int, now time.Time) AllowResult {
-	return AllowResult{
-		Allowed:   true,
-		Limit:     effectiveLimit,
-		Remaining: -1, // unknown -- signals fail-open to callers
-		ResetAt:   now.Add(time.Second).Truncate(time.Second),
-	}
+	slog.WarnContext(ctx, "rate limit Redis error, counting requests on this node until it answers", "component", "ratelimit", "error", err, "key", key, "retry_every", redisOutagePause)
 }
 
 // redisRetryAfter returns how long a refused request has to wait. Both window
@@ -237,6 +234,14 @@ func redisRetryAfter(now time.Time, minCount, minLimit int, secTTL time.Duration
 	return secTTL
 }
 
+// Clear drops the local counters, so they pick up changed limits.
+func (rl *RedisLimiter) Clear() {
+	rl.local.Clear()
+}
+
+// Close stops the local counters. The Redis client's lifecycle is managed
+// externally. The server shares one limiter between two owners, so Close may
+// run twice.
 func (rl *RedisLimiter) Close() {
-	// Redis client lifecycle managed externally
+	rl.closeOnce.Do(rl.local.Close)
 }

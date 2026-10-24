@@ -473,14 +473,17 @@ budget using the existing 429 response and `Retry-After`.
 Requests without an authenticated account do not spend an account allowance.
 Pre-authentication display-token lookup and public sign-in/device operations retain
 their source and global checks. With the memory backend, counters are per process;
-Redis shares them across instances. When Redis is unavailable the checks fail open.
-A check that fails, or gets no answer within a second, allows its request, and that
-process then stops waiting on Redis: its checks allow requests at once, and every
-five seconds one request is counted in the background to find out whether Redis
-answers again. The failure that stops the waiting and each failed background count
-are logged. Checks that start before the first failure is noticed, up to a second
-after Redis stops answering, each wait up to a second. A check that fails only
-because its own request ended early does not count as Redis failing. Disabling rate limiting disables the account
+Redis shares them across instances. When Redis is unavailable each process counts
+its checks in its own memory, so the limits keep holding per process instead of
+switching off. A check that fails, or gets no answer within a second, is counted
+locally, and that process then stops waiting on Redis: its checks count locally at
+once, and every five seconds one request is also counted in Redis in the background
+to find out whether Redis answers again. The local counters carry over between
+outages and are cleared when the limits are reloaded. The failure that stops the
+waiting and each failed background count are logged. Checks that start before the
+first failure is noticed, up to a second after Redis stops answering, each wait up
+to a second. A check that fails only because its own request ended early does not
+count as Redis failing. Disabling rate limiting disables the account
 allowance too.
 
 ## Profile PINs
@@ -541,7 +544,7 @@ authenticates.
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting
 is enabled. Only a server without Redis keeps it in process memory, which is correct
-for a single node. Like the request limiter, a Redis error fails open and is logged;
+for a single node. A Redis error fails open and is logged;
 a request whose own context was canceled is refused instead, so dropping the
 connection does not buy an uncounted guess. Clients show the lockout from
 `Retry-After`, for example "Too many incorrect PINs. Try again in 5 minutes.",

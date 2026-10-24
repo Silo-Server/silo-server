@@ -200,7 +200,7 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 	// The account budget comes first, so a refused request cannot fan out
 	// into the pending-language reads below without spending it.
 	if h.Limiter != nil && requestedBy != nil {
-		result := h.onViewAllow(ctx, *requestedBy)
+		result := h.Limiter.Allow(ctx, metadataAIOnViewLimiterKey(*requestedBy), metadataAIOnViewRate)
 		if !result.Allowed {
 			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many translation requests")
 			if result.RetryAfter > 0 {

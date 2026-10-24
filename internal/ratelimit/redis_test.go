@@ -99,6 +99,7 @@ func hookedRedisLimiter(t *testing.T, addr string, hook *commandHook) *RedisLimi
 	t.Cleanup(func() { _ = cache.CloseRedisClient(client) })
 	client.AddHook(hook)
 	rl := NewRedisLimiter(client)
+	t.Cleanup(rl.Close)
 	rl.callTimeout = 100 * time.Millisecond
 	return rl
 }
@@ -149,9 +150,10 @@ func silentRedisAddr(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-// A Redis outage must not delay requests: the first check gives up on Redis
-// within its timeout, and the checks after it skip Redis.
-func TestRedisLimiterFailsOpenQuicklyWhileRedisIsDown(t *testing.T) {
+// A Redis outage must neither delay requests nor switch limits off: the first
+// check gives up on Redis within its timeout, and the checks after it skip
+// Redis and count on this node.
+func TestRedisLimiterCountsLocallyWhileRedisIsDown(t *testing.T) {
 	rate := Rate{RequestsPerSecond: 10, RequestsPerMinute: 600, Burst: 10}
 	for _, tt := range []struct {
 		name string
@@ -168,8 +170,8 @@ func TestRedisLimiterFailsOpenQuicklyWhileRedisIsDown(t *testing.T) {
 			first := rl.Allow(t.Context(), "ip:192.0.2.1", rate)
 			elapsed := time.Since(start)
 			t.Logf("first check: %s", elapsed)
-			if !first.Allowed || first.Remaining != -1 {
-				t.Fatalf("first check = %+v, want allowed with remaining -1", first)
+			if !first.Allowed {
+				t.Fatalf("first check = %+v, want allowed", first)
 			}
 			// Unbounded, a check waits out go-redis's retries: about 2 s.
 			if elapsed >= time.Second {
@@ -183,11 +185,20 @@ func TestRedisLimiterFailsOpenQuicklyWhileRedisIsDown(t *testing.T) {
 			// The request's other checks, and the requests after it, skip Redis.
 			start = time.Now()
 			for _, key := range []string{"key:1", "account:1", "global", "ip:192.0.2.2"} {
-				if got := rl.Allow(t.Context(), key, rate); !got.Allowed || got.Remaining != -1 {
-					t.Fatalf("check %s during the pause = %+v, want allowed with remaining -1", key, got)
+				if got := rl.Allow(t.Context(), key, rate); !got.Allowed {
+					t.Fatalf("check %s during the pause = %+v, want allowed", key, got)
 				}
 			}
 			t.Logf("four checks during the pause: %s", time.Since(start))
+
+			// The limit still holds on this node.
+			refused := false
+			for i := 0; i < 2*rate.Burst && !refused; i++ {
+				refused = !rl.Allow(t.Context(), "ip:192.0.2.1", rate).Allowed
+			}
+			if !refused {
+				t.Fatalf("%d checks on one key during the pause were all allowed, want the burst of %d enforced", 2*rate.Burst, rate.Burst)
+			}
 			if got := commands.started.Load(); got != sent {
 				t.Fatalf("checks during the pause sent %d commands to Redis, want none", got-sent)
 			}
@@ -196,8 +207,9 @@ func TestRedisLimiterFailsOpenQuicklyWhileRedisIsDown(t *testing.T) {
 }
 
 // Once a pause runs out, checks still do not wait on Redis: one request is
-// counted in the background, and the limiter counts requests again as soon as
-// Redis answers. If the pause never ended, rate limiting would stay off.
+// counted in the background, and the limiter counts requests in Redis again as
+// soon as Redis answers. If the pause never ended, every node would keep its
+// own allowance.
 func TestRedisLimiterCountsAgainOnceRedisAnswers(t *testing.T) {
 	rate := Rate{RequestsPerSecond: 10, RequestsPerMinute: 600, Burst: 10}
 	var answering atomic.Bool
@@ -216,29 +228,30 @@ func TestRedisLimiterCountsAgainOnceRedisAnswers(t *testing.T) {
 	now := time.Now()
 
 	rl.allowAt(t.Context(), key, rate, now)
-	if got := rl.allowAt(t.Context(), key, rate, now.Add(time.Second)); got.Remaining != -1 || commands.started.Load() != 1 {
-		t.Fatalf("check during the pause = %+v after %d commands, want remaining -1 after 1", got, commands.started.Load())
+	rl.allowAt(t.Context(), key, rate, now.Add(time.Second))
+	if got := commands.started.Load(); got != 1 {
+		t.Fatalf("check during the pause left %d commands, want 1", got)
 	}
 
 	// Still down: the background count fails and the next pause holds.
 	later := now.Add(redisOutagePause)
-	if got := rl.allowAt(t.Context(), key, rate, later); got.Remaining != -1 {
-		t.Fatalf("first check after the pause = %+v, want remaining -1", got)
-	}
+	rl.allowAt(t.Context(), key, rate, later)
 	waitUntil(t, "the background count never ran", func() bool { return commands.started.Load() == 2 })
-	if got := rl.allowAt(t.Context(), key, rate, later.Add(time.Second)); got.Remaining != -1 || commands.started.Load() != 2 {
-		t.Fatalf("check during the next pause = %+v after %d commands, want remaining -1 after 2", got, commands.started.Load())
+	rl.allowAt(t.Context(), key, rate, later.Add(time.Second))
+	if got := commands.started.Load(); got != 2 {
+		t.Fatalf("check during the next pause left %d commands, want 2", got)
 	}
 
-	// Answering again: the first check after the pause still fails open at
-	// once, and the checks after the background count reach Redis.
+	// Answering again: the first check after the pause still does not wait
+	// on Redis, and the checks after the background count reach it.
 	answering.Store(true)
 	later = later.Add(redisOutagePause)
-	if got := rl.allowAt(t.Context(), key, rate, later); got.Remaining != -1 {
-		t.Fatalf("first check after the pause = %+v, want it to fail open without waiting", got)
-	}
+	rl.allowAt(t.Context(), key, rate, later)
+	waitUntil(t, "the background count never ran", func() bool { return commands.started.Load() == 3 })
 	waitUntil(t, "checks kept skipping Redis after it answered", func() bool {
-		return rl.allowAt(t.Context(), key, rate, later).Remaining >= 0
+		sent := commands.started.Load()
+		rl.allowAt(t.Context(), key, rate, later)
+		return commands.started.Load() > sent
 	})
 }
 
@@ -265,8 +278,8 @@ func TestRedisLimiterCanceledCallerDoesNotPause(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if got := rl.Allow(ctx, "ip:192.0.2.1", rate); !got.Allowed || got.Remaining != -1 {
-		t.Fatalf("canceled check = %+v, want allowed with remaining -1", got)
+	if got := rl.Allow(ctx, "ip:192.0.2.1", rate); !got.Allowed {
+		t.Fatalf("canceled check = %+v, want allowed", got)
 	}
 	sent := commands.started.Load()
 	rl.Allow(t.Context(), "ip:192.0.2.1", rate)
