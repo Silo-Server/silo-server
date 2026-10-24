@@ -445,17 +445,24 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 				continue
 			}
 			if err := s.exportLocalPlays(ctx, conn, cfg, exporter, plays); err != nil {
-				if limited, ok := AsRateLimited(err); ok {
-					if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
-						s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
-					}
-				} else {
-					s.recordLocalWatchEventError(ctx, conn, err)
-				}
+				s.recordLocalExportError(ctx, conn, err)
 			}
 		}
 	}
 	return nil
+}
+
+// recordLocalExportError defers a rate-limited connection and records any
+// other export failure on it.
+func (s *Service) recordLocalExportError(ctx context.Context, conn Connection, err error) {
+	limited, ok := AsRateLimited(err)
+	if !ok {
+		s.recordLocalWatchEventError(ctx, conn, err)
+		return
+	}
+	if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
+		s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
+	}
 }
 
 func (s *Service) recordLocalWatchEventError(ctx context.Context, conn Connection, err error) {

@@ -168,7 +168,8 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	// The rename drops a source cutoff row that collides with a leftover one
 	// on the new id, and the source's history moves either way, so merge the
 	// cutoffs first or an unmarked play would count as watched again.
-	if _, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, sources, targets); err != nil {
+	mergedCutoffs, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, sources, targets)
+	if err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
 	}
 	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, targets); err != nil {
@@ -179,6 +180,10 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit content_id rename transaction: %w", err)
+	}
+	// A raised cutoff can stop the new id's earlier plays counting as watched.
+	if mergedCutoffs > 0 {
+		MarkRecommendationsStale(ctx, s.recsStaler, targets...)
 	}
 	return nil
 }
