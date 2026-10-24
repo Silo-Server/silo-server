@@ -645,6 +645,42 @@ func (r *ReleaseRepository) RepeatedFromOtherLibraries(ctx context.Context, tx p
 	return repeated, nil
 }
 
+// EarlierEpisodeCopies returns, for each episode event, the other libraries
+// that hold the event's episode now and made the same logical episode (series
+// and episode key) available before the event.
+// Fanout skips a profile that can open the episode through one of them: the
+// copy is not news to that profile. A library whose copy is gone no longer
+// counts. Must run inside the caller's transaction.
+func (r *ReleaseRepository) EarlierEpisodeCopies(ctx context.Context, tx pgx.Tx, eventIDs []string) (map[string][]int, error) {
+	copies := make(map[string][]int)
+	if len(eventIDs) == 0 {
+		return copies, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT re.id, el.media_folder_id FROM release_events re
+		JOIN episode_libraries el
+		  ON el.episode_id = re.episode_id AND el.media_folder_id <> re.library_id
+		WHERE re.id = ANY($1) AND re.kind = 'episode'
+		  AND EXISTS (
+			SELECT 1 FROM episode_availability ea
+			WHERE ea.library_id = el.media_folder_id
+			  AND ea.series_id = re.series_id AND ea.episode_key = re.episode_key
+			  AND ea.created_at < re.created_at)`, eventIDs)
+	if err != nil {
+		return nil, fmt.Errorf("find earlier episode copies: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var eventID string
+		var libraryID int
+		if err := rows.Scan(&eventID, &libraryID); err != nil {
+			return nil, fmt.Errorf("scan earlier episode copy: %w", err)
+		}
+		copies[eventID] = append(copies[eventID], libraryID)
+	}
+	return copies, rows.Err()
+}
+
 // MarkProcessed marks events processed, optionally tagging them with a
 // suppression reason.
 func (r *ReleaseRepository) MarkProcessed(ctx context.Context, tx pgx.Tx, ids []string, suppressedReason *string) error {

@@ -317,14 +317,7 @@ func (a *Analyzer) settleUnusableCreditsTail(ctx context.Context, candidate Cand
 		if reason.Permanent() {
 			return false, a.storeCreditsTailUnusable(ctx, candidate, spec, string(reason))
 		}
-		if err := a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
-			MediaFileID: candidate.FileID,
-			Key:         spec.key,
-			Identity:    spec.window.identity(candidate),
-			RecordedBy:  a.nodeName(),
-			Error:       sampleErr.Error(),
-			At:          time.Now().UTC(),
-		}); err != nil {
+		if err := a.recordCreditsTailFailure(ctx, candidate, spec, sampleErr); err != nil {
 			a.logger.WarnContext(ctx, "credits tail failure record failed", "file_id", candidate.FileID, "error", err)
 		}
 		return false, nil
@@ -333,6 +326,22 @@ func (a *Analyzer) settleUnusableCreditsTail(ctx context.Context, candidate Cand
 		return false, a.storeCreditsTailUnusable(ctx, candidate, spec, detail)
 	}
 	return true, nil
+}
+
+// recordCreditsTailFailure records a failed tail pass so this server backs
+// off. It replaces an unusable row an earlier build stored from probe
+// metadata, which creditsTailArtifact reads as missing: left in place, the
+// file would be decoded again on every run.
+func (a *Analyzer) recordCreditsTailFailure(ctx context.Context, candidate Candidate, spec creditsTailSpec, failure error) error {
+	return a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
+		MediaFileID:      candidate.FileID,
+		Key:              spec.key,
+		Identity:         spec.window.identity(candidate),
+		RecordedBy:       a.nodeName(),
+		Error:            failure.Error(),
+		At:               time.Now().UTC(),
+		ReplacesUnusable: metadataTailDetails,
+	})
 }
 
 // storeCreditsTail stores a usable tail pass as the candidate's complete

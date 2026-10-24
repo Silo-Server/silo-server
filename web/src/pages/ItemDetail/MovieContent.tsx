@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { FileVersion, ItemDetail } from "@/api/types";
+import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
@@ -96,8 +96,7 @@ export default function MovieContent({
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions), [item.versions]);
-  const userData =
-    item.user_data && "position_seconds" in item.user_data ? item.user_data : undefined;
+  const userData = leafUserData(item.user_data);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -116,13 +115,14 @@ export default function MovieContent({
     ],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
-  const selectedVersion = useMemo(
+  const pickedVersion = useMemo(
     () =>
-      (manualSelectedFileId != null
+      manualSelectedFileId != null
         ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
-        : null) ?? defaultSelectedVersion,
-    [defaultSelectedVersion, manualSelectedFileId, sortedVersions],
+        : null,
+    [manualSelectedFileId, sortedVersions],
   );
+  const selectedVersion = pickedVersion ?? defaultSelectedVersion;
   const selectedMediaSummary = useMemo(
     () => resolveSelectedMediaSummary(selectedVersion, item.playback_variants, item.runtime ?? 0),
     [item.playback_variants, item.runtime, selectedVersion],
@@ -178,7 +178,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -188,7 +187,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection: null,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -339,6 +337,7 @@ export default function MovieContent({
               versions={item.versions}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
+              versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
               onDownload={
                 user?.download_allowed && item.versions.length > 0

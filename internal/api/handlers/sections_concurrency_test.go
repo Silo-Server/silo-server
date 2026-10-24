@@ -41,6 +41,33 @@ func (s *concurrentSectionLookups) FetchEpisodesByContentIDs(ctx context.Context
 	}
 }
 
+type panickingPlayableTargets struct{ called bool }
+
+func (p *panickingPlayableTargets) ResolvePlayableTargets(context.Context, catalog.PlayableTargetQuery) (map[string]string, error) {
+	p.called = true
+	panic("resolver bug")
+}
+
+// The card lookups run on their own goroutines, where a panic would end the
+// process instead of reaching the request's recovery. A lookup that panics
+// leaves its result unset, as one that fails does, and the others still fill
+// the cards.
+func TestBuildSectionsSurvivesALookupPanic(t *testing.T) {
+	episodes := &stubSectionEpisodeFetcher{meta: map[string]sections.SectionItemMeta{"episode": {SeriesTitle: "Series"}}}
+	resolver := &panickingPlayableTargets{}
+	handler := &SectionHandler{playableTargets: resolver, episodeFetcher: episodes}
+	response := handler.buildSections(t.Context(), []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded},
+		Items:           []*models.MediaItem{{ContentID: "episode", Type: "episode", Title: "Episode"}},
+	}}, nil, catalog.AccessFilter{}, imagesize.Request{})
+	if !resolver.called || len(response.Sections) != 1 || len(response.Sections[0].Items) != 1 {
+		t.Fatalf("resolver called %v, response %+v", resolver.called, response)
+	}
+	if item := response.Sections[0].Items[0]; item.PlayContentID != "" || item.SeriesTitle != "Series" {
+		t.Fatalf("card = %+v, want no play target and the episode's series", item)
+	}
+}
+
 func TestBuildSectionsEnrichesConcurrentlyForViewer(t *testing.T) {
 	// Both lookups must enter before either returns. The deadline only bounds a
 	// broken serial implementation; no elapsed-time assertion determines success.

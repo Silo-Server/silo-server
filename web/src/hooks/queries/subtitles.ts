@@ -225,8 +225,6 @@ interface SetSubtitlePreferenceInput {
   prefId: string;
   /** The chosen track, or null to persist "subtitles off". */
   selection: PrePlaySubtitleSelection | null;
-  /** Preserve the effective forced-subtitle behavior in the replaced row. */
-  showForcedSubtitles?: boolean;
 }
 
 /**
@@ -238,7 +236,7 @@ export function useSetSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ prefId, selection, showForcedSubtitles }: SetSubtitlePreferenceInput) =>
+    mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
       v2("PUT /api/v2/subtitle-prefs/{series_id}", {
         path: { series_id: prefId },
         body: {
@@ -259,7 +257,8 @@ export function useSetSubtitlePreference() {
                 hearing_impaired: selection.hearing_impaired,
               }
             : undefined,
-          show_forced_subtitles: showForcedSubtitles,
+          // show_forced_subtitles is left out so the series keeps following
+          // the profile's "Show forced subtitles" toggle.
         },
       }),
     onSuccess: () => invalidateItemDetails(queryClient),

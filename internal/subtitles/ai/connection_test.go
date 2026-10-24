@@ -102,7 +102,7 @@ func TestSubtitleJobUsesEnqueueProviderAcrossQueuedLiveChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Model != "whisper-1+selected-model" || job.IdempotencyKey != idempotencyKey(1, JobKindTranscribeTranslate, 0, job.TargetLanguage, job.Model) {
+	if job.Model != "whisper-1+selected-model" || job.IdempotencyKey != idempotencyKey(1, JobKindTranscribeTranslate, "0", job.TargetLanguage, job.Model) {
 		t.Fatal("recorded model or key used stale config")
 	}
 	current.Store(new(llm.Config{BaseURL: "https://later.example.test", ChatModel: "changed-while-queued"}))

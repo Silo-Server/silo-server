@@ -277,8 +277,17 @@ type TranscodeSession struct {
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
 	// subtitleSpans lists each generation's subtitle rendition cue file,
-	// oldest first. Guarded by mu.
+	// oldest first, including those an earlier session recorded in the same
+	// output directory. Guarded by mu.
 	subtitleSpans []subtitleCueSpan
+	// subtitleCueBase is added to segmentGeneration to number cue files, so
+	// a session rebuilt on an output directory never reuses a recorded name.
+	subtitleCueBase uint64
+	// subtitleRecordMu serializes writes of the span record.
+	subtitleRecordMu sync.Mutex
+	// outputRemoved is set once shutdown removes the output directory, so a
+	// late span record write cannot recreate files in it. Guarded by mu.
+	outputRemoved bool
 	// subtitleOriginMu serializes observations of a span's origin, so
 	// concurrent subtitle requests share one ffprobe run.
 	subtitleOriginMu sync.Mutex
@@ -303,7 +312,6 @@ func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
 type SegmentProgress struct {
 	ProducedHead    int
-	ProducedCount   int
 	LastProducedAt  time.Time
 	ManifestModTime time.Time
 	// GenerationStartedAt is when the ffmpeg process that currently owns the
@@ -453,8 +461,13 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// context. Once it succeeds, keep the established behavior where the
 	// transcode process outlives a disconnected manifest request.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// Read before ffmpeg starts, while the playlist on disk is still the
+	// earlier session's.
+	var subtitleSpans []subtitleCueSpan
+	var subtitleCueBase uint64
 	if subtitleRenditionActive(opts) {
-		opts.subtitleCueFile = subtitleCueFileName(0)
+		subtitleSpans, subtitleCueBase = loadSubtitleSpans(opts)
+		opts.subtitleCueFile = subtitleCueFileName(subtitleCueBase)
 	}
 	s := &TranscodeSession{
 		cancel:               cancel,
@@ -470,6 +483,8 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
+		subtitleSpans:        subtitleSpans,
+		subtitleCueBase:      subtitleCueBase,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -508,6 +523,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
 	s.startSubtitleSpanLocked(opts)
+	s.saveSubtitleSpans()
 	s.logFFmpegEvent(ctx, "ffmpeg process started", "")
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
@@ -1622,11 +1638,7 @@ func vaapiOpenCLToneMap(opts TranscodeOpts) bool {
 // Intel or VAAPI device before invoking the selected hardware tone-map graph.
 func softwareToneMapUploadFilter(opts TranscodeOpts) string {
 	if opts.SoftwareVideoDecode && (opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI) {
-		format := "nv12"
-		if !tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			format = "p010le"
-		}
-		return "format=" + format + ",hwupload,"
+		return tonemap.SoftwareUploadFilter(opts.ToneMapSourceKind)
 	}
 	return ""
 }
@@ -2812,19 +2824,21 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 
-	for _, entry := range timeline.entries {
-		segmentPath := filepath.Join(s.outputDir, segmentFilename(entry.number, opts))
-		info, err := os.Stat(segmentPath)
+	// FFmpeg numbers segments in order, renames each finished segment into
+	// place (-hls_flags temp_file) before rewriting the playlist to list it,
+	// and lists only its own segments because append_list is not set. The last
+	// listed segment still on disk is therefore both the highest and the most
+	// recently written, so the walk stops there instead of statting every
+	// entry of a playlist that can list 50,000 segments.
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		number := timeline.entries[i].number
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(number, opts)))
 		if err != nil || info.Size() <= 0 {
 			continue
 		}
-		progress.ProducedCount++
-		if entry.number > progress.ProducedHead {
-			progress.ProducedHead = entry.number
-		}
-		if info.ModTime().After(progress.LastProducedAt) {
-			progress.LastProducedAt = info.ModTime()
-		}
+		progress.ProducedHead = max(progress.ProducedHead, number)
+		progress.LastProducedAt = info.ModTime()
+		break
 	}
 
 	return progress
@@ -3079,6 +3093,12 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 		<-s.done
 	}
 
+	if removeOutput {
+		// A span record write still in flight (an origin probe can outlive
+		// the request) must finish before the directory goes away.
+		s.subtitleRecordMu.Lock()
+		defer s.subtitleRecordMu.Unlock()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -3088,6 +3108,7 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 
 	// Clean up temporary directory.
 	if removeOutput && s.outputDir != "" {
+		s.outputRemoved = true
 		if err := os.RemoveAll(s.outputDir); err != nil {
 			return fmt.Errorf("remove output dir: %w", err)
 		}
@@ -3376,7 +3397,7 @@ func (s *TranscodeSession) restart(
 	opts.FastStart = false // seek-restarts use veryfast for better quality
 	if subtitleRenditionActive(opts) {
 		s.mu.Lock()
-		opts.subtitleCueFile = subtitleCueFileName(s.segmentGeneration)
+		opts.subtitleCueFile = subtitleCueFileName(s.subtitleCueBase + s.segmentGeneration)
 		s.mu.Unlock()
 	}
 
@@ -3459,6 +3480,7 @@ func (s *TranscodeSession) restart(
 	s.done = make(chan struct{})
 	hook := s.restartHook
 	s.mu.Unlock()
+	s.saveSubtitleSpans()
 	close(flight.done)
 
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)

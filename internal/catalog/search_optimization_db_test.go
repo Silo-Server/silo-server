@@ -368,3 +368,158 @@ func TestSearchSparseProbeReusePostgres(t *testing.T) {
 		}
 	}
 }
+
+// TestFoldSearchDiacriticsMigrationPostgres runs the diacritic-folding
+// migration over rows written by the previous normalization, in a scratch
+// schema, and checks that every stored search field is refreshed and that
+// aliases colliding on the unique index collapse to one row.
+func TestFoldSearchDiacriticsMigrationPostgres(t *testing.T) {
+	pool := searchOptimizationPool(t, nil)
+	ctx := t.Context()
+	q := pgx.Identifier{fmt.Sprintf("fold_migration_%d", time.Now().UnixNano())}.Sanitize()
+	local := func(sql string) string { return strings.ReplaceAll(sql, "public.", q+".") }
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%v\n%s", err, sql)
+		}
+	}
+	migration, err := os.ReadFile("../../migrations/sql/20261023173138_fold_search_diacritics.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, down, _ := strings.Cut(string(migration), "-- +goose Down")
+	exec("CREATE SCHEMA " + q)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP SCHEMA "+q+" CASCADE") })
+	for _, function := range []string{"normalize_search_number_token", "set_media_item_search_fields", "set_episode_catalog_entry_search_fields"} {
+		var definition string
+		if err := pool.QueryRow(ctx, "SELECT pg_get_functiondef(('public.'||$1)::regproc)", function).Scan(&definition); err != nil {
+			t.Fatal(err)
+		}
+		exec(local(definition))
+	}
+	// The Down section's first statement restores the pre-fold normalization.
+	exec(local(migrationStatements(down)[0]))
+	exec(local(`CREATE TABLE public.episodes (content_id text PRIMARY KEY, overview text);
+		CREATE TABLE public.media_items (
+			content_id text PRIMARY KEY, title text NOT NULL, original_title text, sort_title text, overview text,
+			title_normalized text GENERATED ALWAYS AS (public.normalize_search_text(title)) STORED,
+			original_title_normalized text, sort_title_normalized text,
+			search_title_vector tsvector, search_overview_vector tsvector);
+		CREATE TRIGGER search_fields BEFORE INSERT OR UPDATE OF content_id, title, original_title, sort_title, overview
+			ON public.media_items FOR EACH ROW EXECUTE FUNCTION public.set_media_item_search_fields();
+		CREATE TABLE public.media_item_aliases (
+			id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, content_id text NOT NULL, title text NOT NULL,
+			normalized_title text GENERATED ALWAYS AS (public.normalize_search_text(title)) STORED,
+			language text NOT NULL DEFAULT '', kind text NOT NULL, provider text NOT NULL, snapshot_language text);
+		CREATE UNIQUE INDEX ON public.media_item_aliases (content_id, normalized_title, language, kind, provider, snapshot_language);
+		CREATE TABLE public.episode_catalog_entries (
+			media_folder_id integer, episode_id text, title text NOT NULL,
+			search_title_normalized text, search_title_vector tsvector, search_overview_vector tsvector,
+			PRIMARY KEY (media_folder_id, episode_id));
+		CREATE TRIGGER search_fields BEFORE INSERT OR UPDATE OF episode_id, title
+			ON public.episode_catalog_entries FOR EACH ROW EXECUTE FUNCTION public.set_episode_catalog_entry_search_fields();
+		INSERT INTO public.media_items (content_id, title, original_title, sort_title) VALUES
+			('shogun', 'Shōgun', 'Shōgun', 'Shogun'), ('heat', 'Heat', NULL, NULL);
+		INSERT INTO public.episode_catalog_entries (media_folder_id, episode_id, title) VALUES (1, 'episode', 'Pokémon');`))
+	// Each content ID is one collision group, in insertion (id) order.
+	for _, alias := range [][2]string{
+		{"ascii-kept", "Café"}, {"ascii-kept", "Cafe"},
+		// The trailing combining mark already normalized to "cafe".
+		{"current-kept", "Café"}, {"current-kept", "Café"},
+		{"oldest-kept", "Ōtsu"}, {"oldest-kept", "Ŏtsu"},
+	} {
+		exec(local(`INSERT INTO public.media_item_aliases (content_id, title, kind, provider, snapshot_language)
+			VALUES ($1, $2, 'alternate', 'tmdb', 'en')`), alias[0], alias[1])
+	}
+
+	for _, statement := range migrationStatements(up) {
+		exec(local(statement))
+	}
+
+	var item, episode string
+	if err := pool.QueryRow(ctx, local(`SELECT concat_ws('|', title_normalized, original_title_normalized, sort_title_normalized, search_title_vector::text)
+		FROM public.media_items WHERE content_id = 'shogun'`)).Scan(&item); err != nil {
+		t.Fatal(err)
+	}
+	if want := "shogun|shogun|shogun|'shogun':1A,2A,3B"; item != want {
+		t.Errorf("refreshed item = %q, want %q", item, want)
+	}
+	if err := pool.QueryRow(ctx, local(`SELECT concat_ws('|', search_title_normalized, search_title_vector::text)
+		FROM public.episode_catalog_entries`)).Scan(&episode); err != nil {
+		t.Fatal(err)
+	}
+	if want := "pokemon|'pokemon':1A"; episode != want {
+		t.Errorf("refreshed episode = %q, want %q", episode, want)
+	}
+	rows, err := pool.Query(ctx, local(`SELECT content_id || ':' || title || ':' || normalized_title FROM public.media_item_aliases ORDER BY id`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ascii-kept:Cafe:cafe", "current-kept:Café:cafe", "oldest-kept:Ōtsu:otsu"}; !slices.Equal(aliases, want) {
+		t.Errorf("aliases = %q, want %q", aliases, want)
+	}
+
+	checkFoldMigrationRollback(t, pool, local, exec, down)
+}
+
+// checkFoldMigrationRollback runs the Down section over a table the Up section
+// refreshed. Rolling back collides too: the restored normalization turns a
+// decomposed accent into a word break, so "Poke\u0301mon" and "Poke Mon" both
+// become "poke mon" again, and the alias already current under it is kept.
+func checkFoldMigrationRollback(t *testing.T, pool *pgxpool.Pool, local func(string) string, exec func(string, ...any), down string) {
+	t.Helper()
+	for _, title := range []string{"Poke\u0301mon", "Poke Mon"} {
+		exec(local(`INSERT INTO public.media_item_aliases (content_id, title, kind, provider, snapshot_language)
+			VALUES ('down-collides', $1, 'alternate', 'tmdb', 'en')`), title)
+	}
+	for _, statement := range migrationStatements(down) {
+		exec(local(statement))
+	}
+	rows, err := pool.Query(t.Context(), local(`SELECT title || ':' || normalized_title FROM public.media_item_aliases
+		WHERE content_id = 'down-collides' ORDER BY id`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Poke Mon:poke mon"}; !slices.Equal(rolledBack, want) {
+		t.Errorf("rolled-back aliases = %q, want %q", rolledBack, want)
+	}
+}
+
+// migrationStatements splits a Goose SQL section into its statements: each
+// StatementBegin/StatementEnd block, and each other statement ending a line
+// with a semicolon.
+func migrationStatements(section string) []string {
+	var statements []string
+	var current strings.Builder
+	inBlock := false
+	for line := range strings.Lines(section) {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "-- +goose StatementBegin":
+			inBlock = true
+		case trimmed == "-- +goose StatementEnd":
+			inBlock = false
+			statements = append(statements, current.String())
+			current.Reset()
+		case inBlock:
+			current.WriteString(line)
+		case trimmed == "" || strings.HasPrefix(trimmed, "--"):
+		default:
+			current.WriteString(line)
+			if strings.HasSuffix(trimmed, ";") {
+				statements = append(statements, current.String())
+				current.Reset()
+			}
+		}
+	}
+	return statements
+}

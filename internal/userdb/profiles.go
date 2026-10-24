@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -153,8 +151,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 }
 
 // UpdateProfile applies partial updates to a profile. Only non-nil fields
-// in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
-// before storage.
+// in the UpdateProfileInput are changed.
 func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -180,19 +177,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 		setClauses = append(setClauses, "avatar = ?")
 		args = append(args, *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, "")
-		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, string(hash))
-		}
+	if u.PINHash != nil {
+		setClauses = append(setClauses, "pin_hash = ?")
+		args = append(args, *u.PINHash)
 		// The profiles_pin_revision trigger advances pin_revision whenever
 		// pin_hash changes, which invalidates every token minted for the old
 		// PIN, and only this profile's.
@@ -394,30 +381,4 @@ func DeleteProfile(db *sql.DB, id string) error {
 	}
 
 	return tx.Commit()
-}
-
-// VerifyPIN checks a plaintext PIN against the bcrypt hash stored for a
-// profile. Returns true if the PIN matches, false otherwise. Returns an
-// error if the profile is not found or has no PIN set.
-func VerifyPIN(db *sql.DB, profileID string, pin string) (bool, error) {
-	var pinHash string
-	err := db.QueryRow("SELECT pin_hash FROM profiles WHERE id = ?", profileID).Scan(&pinHash)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }

@@ -207,8 +207,14 @@ func isCompatHEVCV1Route(r *http.Request) bool {
 	return marked
 }
 
-func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatHEVCV1Route(r) == required {
+// validateCompatHLSRoute checks that the request arrived on the one versioned
+// route compatHLSRoutePathSegment names for source.
+func validateCompatHLSRoute(w http.ResponseWriter, r *http.Request, source PlaybackMediaSource) bool {
+	if isCompatHEVCV1Route(r) == compatHLSUsesHEVCV1Route(source) &&
+		isCompatAudioV2Route(r) == compatHLSUsesAudioV2Route(source) &&
+		isCompatRemuxV1Route(r) == compatHLSUsesRemuxV1Route(source) &&
+		isCompatRemuxDVV1Route(r) == compatHLSUsesRemuxDVV1Route(source) &&
+		isCompatRemuxTSV1Route(r) == compatHLSUsesRemuxTSV1Route(source) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -217,30 +223,6 @@ func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required 
 
 func validateCompatAudioV2Route(w http.ResponseWriter, r *http.Request, required bool) bool {
 	if isCompatAudioV2Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxTSV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxTSV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxDVV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxDVV1Route(r) == required {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -290,7 +272,7 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 	if compatHLSUsesRemuxDVV1Route(source) {
 		return compatRemuxDVV1PathSegment
 	}
-	if source.HLSRemuxMPEGTS {
+	if compatHLSUsesRemuxTSV1Route(source) {
 		return compatRemuxTSV1PathSegment
 	}
 	if compatHLSUsesRemuxV1Route(source) {
@@ -304,6 +286,10 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 
 func compatHLSUsesAudioV2Route(source PlaybackMediaSource) bool {
 	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && !compatHLSUsesHEVCV1Route(source) && compatHLSRequiresAudioV2(source)
+}
+
+func compatHLSUsesRemuxTSV1Route(source PlaybackMediaSource) bool {
+	return source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source)
 }
 
 // HEVC encoding uses a route older API binaries cannot serve. Those binaries
@@ -346,6 +332,26 @@ func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
 	}
 	video := compatPrimaryVideoTrack(source.Version)
 	return playback.VideoSampleEntryForDVCopy(video.DVProfile) == playback.VideoSampleEntryDVH1
+}
+
+// compatContainerTS is the MPEG-TS container name in device profiles.
+const compatContainerTS = "ts"
+
+// compatRokuMPEGTS packages a Roku's video-copy HLS stream as MPEG-TS. Roku
+// players can play the audio of an fMP4 copy silently (JellyRock issue #573),
+// and Roku clients list their MPEG-TS transcoding profile first, as Jellyfin
+// would use it. The copy was negotiated for fMP4, so the profile's MPEG-TS
+// rules must accept the same video and audio. The Dolby Vision strip keeps
+// fMP4, which its hvc1 output needs.
+func compatRokuMPEGTS(userAgent string, profile DeviceProfile, source PlaybackMediaSource) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(userAgent)), "roku/") ||
+		!compatHLSCopiesVideo(source) || source.DVStripToHDR10 {
+		return false
+	}
+	if source.TranscodeAudio {
+		return profile.supportsHLSRemuxWithAudioTranscodeIn(source.Version, source.SelectedAudioStreamIndex, source.TargetAudioChannels, compatContainerTS)
+	}
+	return profile.supportsHLSRemuxIn(source.Version, source.SelectedAudioStreamIndex, compatContainerTS)
 }
 
 func compatHLSTranscodesAudio(source PlaybackMediaSource) bool {
@@ -534,13 +540,13 @@ func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) 
 }
 
 type sessionReportRequest struct {
-	ItemID              string          `json:"ItemId"`
-	MediaSourceID       string          `json:"MediaSourceId"`
-	PlaySessionID       string          `json:"PlaySessionId"`
-	PositionTicks       *int64          `json:"PositionTicks,omitempty"`
-	IsPaused            bool            `json:"IsPaused"`
-	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	ItemID              string         `json:"ItemId"`
+	MediaSourceID       string         `json:"MediaSourceId"`
+	PlaySessionID       string         `json:"PlaySessionId"`
+	PositionTicks       *int64         `json:"PositionTicks,omitempty"`
+	IsPaused            bool           `json:"IsPaused"`
+	AudioStreamIndex    compatIntValue `json:"AudioStreamIndex"`
+	SubtitleStreamIndex compatIntValue `json:"SubtitleStreamIndex"`
 }
 
 // HandleVideoStream serves Jellyfin-style progressive stream URLs.
@@ -711,14 +717,18 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
 		sourceAudioChannels := 0
+		copyAudioCodec := ""
 		if source.TranscodeAudio {
 			sourceAudioChannels = compatSourceAudioChannels(*source)
+		} else {
+			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
+			CopyAudioCodec:      copyAudioCodec,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
@@ -755,19 +765,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
@@ -1038,19 +1036,7 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1112,19 +1098,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1547,7 +1521,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 				return
 			}
-			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
+			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub, h.FFmpegPath)
 			if subErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
@@ -1952,6 +1926,11 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
 }
 
+// compatTargetAudioProfile is the profile FFmpeg's native aac encoder writes;
+// clients such as Roku require AudioProfile != Main, so leaving it unknown
+// would fail that rule closed.
+const compatTargetAudioProfile = "LC"
+
 // The compat transcode ladder always lands on H.264/AAC; these name the
 // target codecs the Jellyfin-compat pipeline hands to ffmpeg.
 const (
@@ -1967,6 +1946,7 @@ const (
 	compatVideoCodecHEVC       = "hevc"
 	compatVideoCodecH265       = "h265"
 	compatVideoCodecAV1        = "av1"
+	compatVideoCodecVP9        = "vp9"
 	compatRangeDOVI            = "DOVI"
 	compatRangeDOVIWithHLG     = "DOVIWithHLG"
 	compatRangeDOVIWithHDR     = "DOVIWithHDR10"
@@ -2356,37 +2336,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
-	audioTrackIndex := 0
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
-	if (!stop || !unidentified) && req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
-		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
-		updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
-			r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds,
-		)
-		if updatedPlaySession != nil {
-			playSession = updatedPlaySession
-		}
-		if selectionErr != nil {
-			slog.WarnContext(r.Context(), "jellycompat audio selection update failed", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"error", selectionErr,
-			)
-		} else if updatedSource != nil {
-			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
-				audioTrackIndex = resolvedAudioTrackIndex
-			}
-			slog.InfoContext(r.Context(), "jellycompat audio selection updated", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"media_source_id", updatedSource.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"audio_track_index", audioTrackIndex,
-				"transcode_restarted", restarted,
-			)
-		}
+	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
+		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -2434,14 +2389,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			// Find the duration from the media source
-			var duration float64
-			for _, src := range playSession.MediaSources {
-				if src.Version.Duration > 0 {
-					duration = float64(src.Version.Duration)
-					break
-				}
-			}
+			duration := playedSourceDuration(playSession, req.MediaSourceID)
 			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
 			if err == nil && completed {
 				refreshTasteProfile = true
@@ -2528,7 +2476,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	if playSession.UpstreamPlayMethod == "" {
 		return nil
 	}
-	source := findMediaSource(playSession, mediaSourceID)
+	source := playedMediaSource(playSession, mediaSourceID)
 	if source == nil {
 		source = firstMediaSource(playSession)
 	}
@@ -2729,8 +2677,13 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
 			// continuing on a session with mismatched transcode bookkeeping.
+			// A winner attached on another replica has no native session here,
+			// and rebuilding one before its recipe is committed would start a
+			// second transcode under its id, so the client retries instead.
 			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method {
-				return winner, nil
+				if _, err := h.sessionMgr.GetSession(winner.UpstreamSessionID); err == nil {
+					return winner, nil
+				}
 			}
 			return nil, errUpstreamReplaced
 		}
@@ -3308,6 +3261,37 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 	return h.requireLocalAudioDownmixCapability(ctx, compatHLSRecipeSourceAudioChannels(source))
 }
 
+// applyReportedAudioSelection switches a playback session to the audio stream a
+// progress report names and returns the session to continue with.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+	audioTrackIndex := 0
+	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
+		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
+	)
+	if updatedPlaySession != nil {
+		playSession = updatedPlaySession
+	}
+	if selectionErr != nil {
+		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"error", selectionErr,
+		)
+	} else if updatedSource != nil {
+		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
+			audioTrackIndex = resolvedAudioTrackIndex
+		}
+		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"media_source_id", updatedSource.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"audio_track_index", audioTrackIndex,
+			"transcode_restarted", restarted,
+		)
+	}
+	return playSession
+}
+
 func (h *PlaybackHandler) applyCompatAudioSelection(
 	ctx context.Context,
 	playSession *PlaybackSession,
@@ -3681,6 +3665,48 @@ func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {
 	return &source
 }
 
+// playedMediaSource returns the version a play is streaming: the source the
+// report's MediaSourceId names, or else the one whose file the upstream session
+// streams. A play negotiated without a MediaSourceId (PlaybackInfo without
+// one, or Static=true direct play) lists every version, so the first one
+// listed can be another cut. Nil when neither identifies a source.
+func playedMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {
+	if source := findMediaSource(session, mediaSourceID); source != nil {
+		return source
+	}
+	if session == nil || session.UpstreamMediaFileID == 0 {
+		return nil
+	}
+	return mediaSourceByFileID(session, session.UpstreamMediaFileID)
+}
+
+// mediaSourceByFileID returns a copy of the play's source for fileID, or nil.
+func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSource {
+	for _, source := range session.MediaSources {
+		if source.FileID == fileID {
+			copy := source
+			return &copy
+		}
+	}
+	return nil
+}
+
+// playedSourceDuration returns the runtime in seconds that a progress report
+// is judged against: the played version's (see playedMediaSource), which is 0
+// when that version has none, or the first listed runtime when no version can
+// be identified.
+func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
+	if source := playedMediaSource(session, mediaSourceID); source != nil {
+		return float64(source.Version.Duration)
+	}
+	for _, source := range session.MediaSources {
+		if source.Version.Duration > 0 {
+			return float64(source.Version.Duration)
+		}
+	}
+	return 0
+}
+
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {
 	if session == nil {
 		return nil
@@ -3779,11 +3805,11 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 	if videoRange := compatMasterVideoRange(video, source.Version.HDR); videoRange != "" {
 		attributes = append(attributes, "VIDEO-RANGE="+videoRange)
 	}
-	if codecs := compatMasterCodecs(source, video, audio); codecs != "" {
+	if codecs := compatMasterCodecs(compatMasterVideoCodec(video), source, audio); codecs != "" {
 		attributes = append(attributes, fmt.Sprintf("CODECS=%q", codecs))
-	}
-	if supplemental := compatMasterSupplementalCodec(video); supplemental != "" {
-		attributes = append(attributes, fmt.Sprintf("SUPPLEMENTAL-CODECS=%q", supplemental))
+		if supplemental := compatMasterSupplementalCodec(video); supplemental != "" {
+			attributes = append(attributes, fmt.Sprintf("SUPPLEMENTAL-CODECS=%q", supplemental))
+		}
 	}
 	shape := compatMasterShapeAttributes(video)
 	attributes = append(attributes, shape...)
@@ -3792,18 +3818,17 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 	if source.DOVIVariant && !source.HLSRemuxMPEGTS {
 		// Jellyfin 12 lists the spec-compliant Dolby Vision variant first so
 		// DV-capable players pick it over the hvc1 fallback at equal bandwidth.
-		dovi := []string{
-			fmt.Sprintf("BANDWIDTH=%d", bandwidth),
-			fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
-			"VIDEO-RANGE=PQ",
+		// Only its CODECS sets it apart, so it needs a complete list.
+		if codecs := compatMasterCodecs(compatDOVICodecString(video), source, audio); codecs != "" {
+			dovi := []string{
+				fmt.Sprintf("BANDWIDTH=%d", bandwidth),
+				fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
+				"VIDEO-RANGE=PQ",
+				fmt.Sprintf("CODECS=%q", codecs),
+			}
+			dovi = append(dovi, shape...)
+			manifest += "#EXT-X-STREAM-INF:" + strings.Join(dovi, ",") + "\n" + variantURL + "\n"
 		}
-		codecs := compatDOVICodecString(video)
-		if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
-			codecs += "," + audioCodec
-		}
-		dovi = append(dovi, fmt.Sprintf("CODECS=%q", codecs))
-		dovi = append(dovi, shape...)
-		manifest += "#EXT-X-STREAM-INF:" + strings.Join(dovi, ",") + "\n" + variantURL + "\n"
 	}
 	return []byte(manifest + "#EXT-X-STREAM-INF:" + strings.Join(attributes, ",") + "\n" + variantURL + "\n")
 }
@@ -3846,8 +3871,30 @@ func compatMasterVideoRange(video models.VideoTrack, versionHDR bool) string {
 	}
 }
 
-func compatMasterCodecs(source PlaybackMediaSource, video models.VideoTrack, audio models.AudioTrack) string {
-	codecs := make([]string, 0, 2)
+// compatMasterCodecs returns a copy variant's CODECS value: the video entry,
+// then the audio entry when the variant carries audio. RFC 8216 requires the
+// list to name every format, and Media3 and AVPlayer build their tracks from
+// it, so a partial list is worse than none: it returns "" when either entry
+// is unknown.
+func compatMasterCodecs(videoCodec string, source PlaybackMediaSource, audio models.AudioTrack) string {
+	if videoCodec == "" {
+		return ""
+	}
+	audioCodec := compatMasterAudioCodec(source, audio)
+	switch {
+	case audioCodec != "":
+		return videoCodec + "," + audioCodec
+	case len(source.Version.AudioTracks) == 0 && strings.TrimSpace(audio.Codec) == "":
+		return videoCodec
+	default:
+		return ""
+	}
+}
+
+// compatMasterVideoCodec returns the RFC 6381 CODECS entry for the copied
+// video, or "" when the probe lacks the level or another fact the entry
+// needs.
+func compatMasterVideoCodec(video models.VideoTrack) string {
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
 	case compatVideoCodecHEVC, "h265":
 		if video.Level > 0 {
@@ -3855,7 +3902,7 @@ func compatMasterCodecs(source PlaybackMediaSource, video models.VideoTrack, aud
 			if strings.EqualFold(strings.ReplaceAll(video.Profile, " ", ""), "main10") {
 				profile = "2.4"
 			}
-			codecs = append(codecs, fmt.Sprintf("hvc1.%s.L%d.B0", profile, video.Level))
+			return fmt.Sprintf("hvc1.%s.L%d.B0", profile, video.Level)
 		}
 	case compatTargetVideoCodec, "avc":
 		if video.Level > 0 {
@@ -3868,14 +3915,92 @@ func compatMasterCodecs(source PlaybackMediaSource, video models.VideoTrack, aud
 			case "baseline":
 				profile = "42E0"
 			}
-			codecs = append(codecs, fmt.Sprintf("avc1.%s%02X", profile, video.Level))
+			return fmt.Sprintf("avc1.%s%02X", profile, video.Level)
+		}
+	case compatVideoCodecAV1:
+		return compatAV1CodecString(video)
+	case compatVideoCodecVP9:
+		return compatVP9CodecString(video)
+	}
+	return ""
+}
+
+// compatAV1CodecString builds the short form av01.0.LLM.DD (AV1 ISOBMFF,
+// codecs parameter) for Main profile, the 4:2:0 profile the short form
+// implies. FFprobe reports the level as seq_level_idx; level 2.0 is 0, which
+// the catalog cannot tell apart from an unknown level, so it is left out. It
+// does not report seq_tier, so the entry claims Main tier as Jellyfin does:
+// the AV1 spec fixes Main tier up to seq_level_idx 7, and encoders write Main
+// above it unless told otherwise.
+func compatAV1CodecString(video models.VideoTrack) string {
+	bitDepth := models.NormalizeVideoBitDepth(video.BitDepth, video.PixelFormat, video.Profile)
+	if !strings.EqualFold(strings.TrimSpace(video.Profile), "main") ||
+		video.Level <= 0 || video.Level > 31 || (bitDepth != 8 && bitDepth != 10) ||
+		!compatShortCodecStringColor(video) {
+		return ""
+	}
+	return fmt.Sprintf("av01.0.%02dM.%02d", video.Level, bitDepth)
+}
+
+// compatVP9CodecString builds the short form vp09.PP.LL.DD (VP codec ISO media
+// file format binding) for profiles 0 and 2, the 4:2:0 profiles the short form
+// implies. The level is the one FFmpeg's MP4 muxer writes into the init
+// segment's vpcC box: the probed level when known (FFprobe reports none today),
+// else the lowest level whose maximum luma picture size holds the frame,
+// whatever the frame rate.
+func compatVP9CodecString(video models.VideoTrack) string {
+	var profile int
+	switch strings.ToLower(strings.TrimSpace(video.Profile)) {
+	case "profile 0":
+		profile = 0
+	case "profile 2":
+		profile = 2
+	default:
+		return ""
+	}
+	bitDepth := models.NormalizeVideoBitDepth(video.BitDepth, video.PixelFormat, video.Profile)
+	if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) || !compatShortCodecStringColor(video) {
+		return ""
+	}
+	if video.Level > 0 {
+		return fmt.Sprintf("vp09.%02d.%02d.%02d", profile, video.Level, bitDepth)
+	}
+	pictureSize := video.Width * video.Height
+	if pictureSize <= 0 {
+		return ""
+	}
+	for _, l := range compatVP9Levels {
+		if pictureSize <= l.maxPictureSize {
+			return fmt.Sprintf("vp09.%02d.%02d.%02d", profile, l.level, bitDepth)
 		}
 	}
+	return ""
+}
 
-	if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
-		codecs = append(codecs, audioCodec)
+// compatShortCodecStringColor reports whether the track has the color the
+// short av01 and vp09 forms imply when their optional fields are left out:
+// not monochrome, limited range, and BT.709 or untagged primaries, transfer
+// and matrix. HDR, full-range and monochrome streams get no CODECS entry
+// rather than one that declares BT.709 SDR.
+func compatShortCodecStringColor(video models.VideoTrack) bool {
+	if strings.HasPrefix(strings.ToLower(video.PixelFormat), "gray") || strings.EqualFold(strings.TrimSpace(video.ColorRange), "pc") {
+		return false
 	}
-	return strings.Join(codecs, ",")
+	for _, value := range []string{video.ColorPrimaries, video.ColorTransfer, video.ColorSpace} {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "", "unknown", "bt709": //nolint:goconst // ffprobe color names
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// compatVP9Levels lists each VP9 level, coded as vpcC writes it, with its
+// maximum luma picture size.
+var compatVP9Levels = []struct{ level, maxPictureSize int }{
+	{10, 36864}, {11, 73728}, {20, 122880}, {21, 245760}, {30, 552960},
+	{31, 983040}, {40, 2228224}, {50, 8912896}, {60, 35651584},
 }
 
 // compatMasterAudioCodec returns the RFC 6381 CODECS entry for the audio a

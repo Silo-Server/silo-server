@@ -1539,7 +1539,7 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 	case "last_air_date":
 		return fmt.Sprintf(
 			"ORDER BY %s %s%s, mi.content_id ASC",
-			effectiveLastAirDateExpr("mi"),
+			latestAvailableAirDateSortExpr("mi"),
 			direction,
 			nullsClause,
 		), nil

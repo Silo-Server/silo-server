@@ -47,15 +47,25 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 // in $1. Audit 2026-05-01 §2.1 hot path #1: the last-air-date sort reads a
 // column instead of a per-row correlated subquery.
 //
-// Both values depend on the current date, so an episode write is not the only
-// thing that can make them stale: a known future episode airing does too.
+// It also maintains latest_available_episode_air_date_at, the newest aired
+// episode with a file in a library (episode_libraries). The "Latest Episode
+// Air Date" sort and rule read it, so a series ranks by the newest episode a
+// viewer can play, not by one the provider lists but no library has
+// (issue #2741). last_air_date_at keeps naming the show's newest aired
+// episode for the series' last_air_date field. Because the available value
+// depends on files, membership changes recompute it through
+// RecomputeSeriesEpisodeMembershipDenorms.
+//
+// All three values depend on the current date, so an episode write is not the
+// only thing that can make them stale: a known future episode airing does too.
 // Upsert, BulkUpsert, and air-date edits through UpdateMetadata run this for
 // the written series, and RefreshDueSeriesAirDates runs it for series whose
-// next_air_date_at has passed.
+// next_air_date_at has passed. next_air_date_at counts every known episode, so
+// the sweep also revisits a series whose file arrived before its air date.
 //
 // Drive the subquery from UNNEST($1) with a LEFT JOIN so every input
 // series_id produces exactly one row in `sub` — including series without a
-// dated episode, where both aggregates are NULL. Without this, GROUP BY over
+// dated episode, where every aggregate is NULL. Without this, GROUP BY over
 // a filtered `episodes` scan would drop those series and leave stale values
 // from an earlier sync (e.g., a series whose air dates were corrected to NULL
 // would never reset). The IS DISTINCT FROM guards handle NULL vs non-NULL
@@ -68,10 +78,15 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 const refreshSeriesAirDatesSQL = `
 	UPDATE media_items mi
 	SET last_air_date_at = sub.last_aired,
+		latest_available_episode_air_date_at = sub.last_available,
 		next_air_date_at = sub.next_airing
 	FROM (
 		SELECT s.series_id,
 			MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE) AS last_aired,
+			MAX(e.air_date) FILTER (
+				WHERE e.air_date <= CURRENT_DATE
+				  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)
+			) AS last_available,
 			MIN(e.air_date) FILTER (WHERE e.air_date > CURRENT_DATE) AS next_airing
 		FROM unnest($1::text[]) AS s(series_id)
 		LEFT JOIN episodes e
@@ -82,7 +97,38 @@ const refreshSeriesAirDatesSQL = `
 	WHERE mi.content_id = sub.series_id
 	  AND mi.type = 'series'
 	  AND (mi.last_air_date_at IS DISTINCT FROM sub.last_aired
+		   OR mi.latest_available_episode_air_date_at IS DISTINCT FROM sub.last_available
 		   OR mi.next_air_date_at IS DISTINCT FROM sub.next_airing)`
+
+// lockSeriesAirDatesSQL locks the series rows in $1 before
+// refreshSeriesAirDatesSQL runs as its own statement, so the recompute's
+// snapshot includes every episode and membership write that committed for
+// them. A recompute that instead waited on a row a concurrent write held would
+// apply its older aggregate over that write's result, so writers that add
+// episode library memberships recompute through this lock too rather than
+// bumping the column in their insert statement. NO KEY UPDATE is the
+// lock the UPDATE itself takes: FOR UPDATE would conflict with the KEY SHARE
+// lock a transaction's own episode or file inserts hold on the series row,
+// and two imports into one series would deadlock.
+const lockSeriesAirDatesSQL = `
+	SELECT 1 FROM media_items
+	WHERE content_id = ANY($1::text[])
+	  AND type = 'series'
+	ORDER BY content_id
+	FOR NO KEY UPDATE`
+
+// refreshSeriesAirDates locks the series in seriesIDs, then recomputes their
+// air-date columns. Call it inside the transaction that wrote their episodes
+// or episode library memberships.
+func refreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []string) error {
+	if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, seriesIDs); err != nil {
+		return fmt.Errorf("lock series for air date refresh: %w", err)
+	}
+	if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, seriesIDs); err != nil {
+		return fmt.Errorf("refresh series air dates: %w", err)
+	}
+	return nil
+}
 
 // dueSeriesAirDatesSQL claims up to $1 series whose next known episode has
 // aired since their air-date columns were last computed. It reads the partial
@@ -412,7 +458,9 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if _, err := r.pool.Exec(ctx, refreshSeriesAirDatesSQL, []string{ep.SeriesID}); err != nil {
+	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		return refreshSeriesAirDates(ctx, tx, []string{ep.SeriesID})
+	}); err != nil {
 		return fmt.Errorf("update series air dates: %w", err)
 	}
 
@@ -627,7 +675,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
+	if err := refreshSeriesAirDates(ctx, tx, []string{seriesID}); err != nil {
 		return fmt.Errorf("batch update series air dates: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1169,7 +1217,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 		return fmt.Errorf("updating episode metadata: %w", err)
 	}
 	if upd.AirDate != nil || upd.clears(columnAirDate) {
-		if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
+		if err := refreshSeriesAirDates(ctx, tx, []string{seriesID}); err != nil {
 			return fmt.Errorf("update series air dates: %w", err)
 		}
 	}

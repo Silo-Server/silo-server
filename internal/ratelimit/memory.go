@@ -11,6 +11,7 @@ import (
 )
 
 type memoryEntry struct {
+	mu        sync.Mutex // makes checking and taking tokens one step
 	perSecond *rate.Limiter
 	perMinute *rate.Limiter
 	lastUsed  atomic.Int64 // UnixNano timestamp
@@ -45,62 +46,27 @@ func (ml *MemoryLimiter) allowAt(key string, limit Rate, now time.Time) AllowRes
 	entry := ml.getOrCreate(key, limit)
 	entry.touch()
 
-	// Check per-second limiter via Reserve
-	secRes := entry.perSecond.ReserveN(now, 1)
-	if !secRes.OK() {
-		return AllowResult{
-			Allowed:    false,
-			RetryAfter: time.Second,
-			Limit:      int(limit.RequestsPerSecond),
-			Remaining:  0,
-			ResetAt:    now.Add(time.Second).Truncate(time.Second),
-		}
-	}
-	if delay := secRes.DelayFrom(now); delay > 0 {
-		secRes.CancelAt(now)
-		resetAt := now.Add(time.Second).Truncate(time.Second)
-		// An empty per-minute bucket would refuse the retry too, so wait for both.
-		if minDelay := tokenDelay(entry.perMinute, now); minDelay > delay {
-			delay = minDelay
-			// Round up: X-RateLimit-Reset carries whole seconds. Rounding the
-			// time, not the delay, keeps a saturated delay from overflowing.
-			resetAt = now.Add(delay)
-			if whole := resetAt.Truncate(time.Second); whole.Before(resetAt) {
-				resetAt = whole.Add(time.Second)
-			}
-		}
+	// Check both buckets before taking from either, under the entry's lock so
+	// the check and the take see the same tokens. Reserving and canceling
+	// instead loses tokens when refusals on one key overlap: CancelAt returns
+	// only what no later reservation has counted on.
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// A refusal reports the longer wait, so the retry finds both buckets ready.
+	if delay := max(tokenDelay(entry.perSecond, now), tokenDelay(entry.perMinute, now)); delay > 0 {
 		return AllowResult{
 			Allowed:    false,
 			RetryAfter: delay,
 			Limit:      int(limit.RequestsPerSecond),
 			Remaining:  0,
-			ResetAt:    resetAt,
+			ResetAt:    roundUpToSecond(now.Add(delay)),
 		}
 	}
 
-	// Check per-minute limiter via Reserve
-	minRes := entry.perMinute.ReserveN(now, 1)
-	if !minRes.OK() {
-		secRes.CancelAt(now) // return the per-second token
-		return AllowResult{
-			Allowed:    false,
-			RetryAfter: time.Minute,
-			Limit:      int(limit.RequestsPerSecond),
-			Remaining:  0,
-			ResetAt:    now.Add(time.Minute).Truncate(time.Minute),
-		}
-	}
-	if delay := minRes.DelayFrom(now); delay > 0 {
-		secRes.CancelAt(now) // return the per-second token
-		minRes.CancelAt(now) // return the per-minute token
-		return AllowResult{
-			Allowed:    false,
-			RetryAfter: delay,
-			Limit:      int(limit.RequestsPerSecond),
-			Remaining:  0,
-			ResetAt:    now.Add(delay),
-		}
-	}
+	// Both buckets hold a token, so neither take can fail.
+	entry.perSecond.AllowN(now, 1)
+	entry.perMinute.AllowN(now, 1)
 
 	remaining := int(math.Max(0, math.Floor(entry.perSecond.TokensAt(now))))
 	return AllowResult{
@@ -112,18 +78,31 @@ func (ml *MemoryLimiter) allowAt(key string, limit Rate, now time.Time) AllowRes
 }
 
 // tokenDelay returns how long lim needs to hold a whole token at t, without
-// taking one.
+// taking one. A bucket that can never hold one reports rate.InfDuration.
 func tokenDelay(lim *rate.Limiter, t time.Time) time.Duration {
 	missing := 1 - lim.TokensAt(t)
-	perSecond := float64(lim.Limit())
-	if missing <= 0 || perSecond <= 0 {
+	if missing <= 0 {
 		return 0
+	}
+	perSecond := float64(lim.Limit())
+	if perSecond <= 0 || lim.Burst() < 1 {
+		return rate.InfDuration
 	}
 	delay := math.Ceil(missing / perSecond * float64(time.Second))
 	if delay >= float64(math.MaxInt64) {
 		return rate.InfDuration
 	}
 	return time.Duration(delay)
+}
+
+// roundUpToSecond rounds t up to a whole second. X-RateLimit-Reset carries
+// whole seconds, and a floored value would send a client back early. Rounding
+// the time, not the delay, keeps a saturated delay from overflowing.
+func roundUpToSecond(t time.Time) time.Time {
+	if whole := t.Truncate(time.Second); whole.Before(t) {
+		return whole.Add(time.Second)
+	}
+	return t
 }
 
 func (ml *MemoryLimiter) getOrCreate(key string, limit Rate) *memoryEntry {

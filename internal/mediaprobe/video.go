@@ -75,6 +75,13 @@ type Stream struct {
 	Disposition        Disposition       `json:"disposition"`
 	Tags               map[string]string `json:"tags"`
 	SideDataList       []SideData        `json:"side_data_list"`
+	// FrameSideDataList holds side data read from the stream's first decoded
+	// frame. FFmpeg reports HDR10+ dynamic metadata only per frame, never in
+	// the stream's own side data, so a stream-only probe cannot see it.
+	FrameSideDataList []SideData `json:"-"`
+	// FrameSideDataRead reports that the first frame was read, so an empty
+	// FrameSideDataList means the frame carries no side data.
+	FrameSideDataRead bool `json:"-"`
 }
 
 // Disposition is the subset of FFprobe disposition flags used by scans.
@@ -166,6 +173,18 @@ func IsPrimaryVideoStream(stream Stream) bool {
 	return stream.CodecType == "video" && stream.Disposition.AttachedPic == 0
 }
 
+// NeedsFrameSideData reports whether a stream's HDR10+ status depends on
+// frame side data. HDR10+ is defined only for PQ video, so other streams skip
+// the frame decode.
+func NeedsFrameSideData(stream Stream) bool {
+	return IsPrimaryVideoStream(stream) && IsPQTransfer(stream.ColorTransfer)
+}
+
+// IsPQTransfer reports whether colorTransfer is SMPTE ST 2084 (PQ).
+func IsPQTransfer(colorTransfer string) bool {
+	return strings.Contains(strings.ToLower(colorTransfer), "smpte2084")
+}
+
 // NormalizeVideoTrack converts FFprobe's raw video facts into the catalog's
 // authoritative normalized representation.
 func NormalizeVideoTrack(stream Stream) models.VideoTrack {
@@ -174,7 +193,7 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 	dvLevel := positive(dvConfig.DVLevel)
 	dvELPresent := dvConfig.DVElPresent > 0 || dvConfig.DVElPresentLegacy > 0
 	colorRange := firstNonEmpty(stream.ColorRange, "unknown")
-	hdr10Plus := hasHDR10Plus(stream.SideDataList)
+	hdr10Plus := hasHDR10Plus(stream.SideDataList) || hasHDR10Plus(stream.FrameSideDataList)
 	return models.VideoTrack{
 		Title:               firstNonEmpty(stream.Tags["title"], stream.CodecLongName, strings.ToUpper(stream.CodecName)),
 		Codec:               stream.CodecName,
@@ -189,6 +208,7 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		DVELPresent:         dvELPresent,
 		DVEnhancementLayer:  enhancementLayer(dvELPresent),
 		HDR10Plus:           hdr10Plus,
+		HDR10PlusUnchecked:  !hdr10Plus && NeedsFrameSideData(stream) && !stream.FrameSideDataRead,
 		Profile:             stream.Profile,
 		Level:               stream.Level,
 		Width:               stream.Width,
@@ -239,6 +259,36 @@ func enhancementLayer(present bool) string {
 	return "none"
 }
 
+// HasHDR10Plus reports whether side data, from a stream or a decoded frame,
+// carries HDR10+ dynamic metadata.
+func HasHDR10Plus(sideData []SideData) bool {
+	return hasHDR10Plus(sideData)
+}
+
+// Dolby Vision range types whose base layer also carries HDR10+ metadata.
+const (
+	rangeTypeDOVIWithHDR10Plus   = "DOVIWithHDR10Plus"
+	rangeTypeDOVIWithELHDR10Plus = "DOVIWithELHDR10Plus"
+)
+
+// RangeTypeWithHDR10Plus returns the video range type of a stored track
+// whose primary stream has been found to carry HDR10+ metadata. A track that
+// names Dolby Vision only in its range type, as older probes and seeded rows
+// can, keeps it.
+func RangeTypeWithHDR10Plus(track models.VideoTrack) string {
+	if track.DVProfile <= 0 {
+		switch rangeType := strings.TrimSpace(track.VideoRangeType); {
+		case strings.EqualFold(rangeType, "DOVIWithHDR10"), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
+			return rangeTypeDOVIWithHDR10Plus
+		case strings.EqualFold(rangeType, "DOVIWithEL"), strings.EqualFold(rangeType, rangeTypeDOVIWithELHDR10Plus):
+			return rangeTypeDOVIWithELHDR10Plus
+		case strings.HasPrefix(strings.ToLower(rangeType), "dovi"):
+			return rangeType
+		}
+	}
+	return videoRangeType(Stream{ColorTransfer: track.ColorTransfer}, track.DVProfile, track.DVBLCompatID, true)
+}
+
 func hasHDR10Plus(sideData []SideData) bool {
 	for _, data := range sideData {
 		typ := strings.ToLower(data.SideDataType)
@@ -266,12 +316,12 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 			return "DOVI"
 		case 7:
 			if hdr10Plus {
-				return "DOVIWithELHDR10Plus"
+				return rangeTypeDOVIWithELHDR10Plus
 			}
 			return "DOVIWithEL"
 		case 8:
 			if hdr10Plus {
-				return "DOVIWithHDR10Plus"
+				return rangeTypeDOVIWithHDR10Plus
 			}
 			switch compatID {
 			case 1:

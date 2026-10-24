@@ -692,6 +692,20 @@ func (h *Handler) accessFilterFromRequest(r *http.Request) (catalog.AccessFilter
 	return filter, true, err
 }
 
+// requireAccess resolves the caller's access filter for a handler that reads
+// catalog data. When resolution fails it logs, writes 403, and returns false;
+// the caller must stop before any read or write, because an empty filter means
+// "no restriction" and would widen the response past the profile's scope.
+func (h *Handler) requireAccess(w http.ResponseWriter, r *http.Request, a ctxAuth) (catalog.AccessFilter, bool) {
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		slog.WarnContext(r.Context(), "abs resolve access failed", "component", "audiobooks", "user", a.UserID, "profile", a.ProfileID, "path", r.URL.Path, "err", err)
+		http.Error(w, "resolve access failed", http.StatusForbidden)
+		return catalog.AccessFilter{}, false
+	}
+	return access, true
+}
+
 func emptyAccessFilter() catalog.AccessFilter {
 	return catalog.AccessFilter{}
 }

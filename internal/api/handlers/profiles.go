@@ -17,8 +17,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -43,6 +45,9 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// Connections, when set, deletes the playback connection rows of the
+	// deleted profile's devices that no other profile registers.
+	Connections *connectionstore.Store
 	// DroppedSeriesPurger removes a deleted profile's dropped series, which
 	// live in Postgres whichever store holds the profile.
 	DroppedSeriesPurger interface {
@@ -227,9 +232,9 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 // This is a check-then-write guard with no store-level uniqueness constraint
 // (the userstore's dual Postgres/SQLite backends carry no unique index on
 // name), so two concurrent requests can both pass and insert duplicates —
-// the same window the profile_limit_reached check accepts. Good enough for
-// interactive profile management; a functional unique index is the fix if
-// that ever stops being true.
+// unlike the profile limit, which is re-counted inside the creating
+// transaction. Good enough for interactive profile management; a functional
+// unique index is the fix if that ever stops being true.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
@@ -241,6 +246,12 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 		}
 	}
 	return false
+}
+
+// profileLimitReached is the 409 for a household already at its limit.
+func profileLimitReached(limit int) *APIError {
+	return apiError(http.StatusConflict, "profile_limit_reached",
+		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
@@ -413,6 +424,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// profileLimit is the account's household limit (0 = unlimited). This
+	// early check answers a full household before the name check, as it always
+	// has; the guarantee under concurrency is the re-count inside the creating
+	// transaction (createProfileWithSettingsSync).
+	profileLimit := 0
 	if h.UserRepo != nil {
 		user, err := h.UserRepo.GetByID(ctx, userID)
 		if err != nil {
@@ -423,9 +439,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			if err != nil {
 				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
 			}
-			if limit := effective.MaxProfiles; limit >= 1 && len(existingProfiles) >= limit {
-				return none, apiError(http.StatusConflict, "profile_limit_reached",
-					fmt.Sprintf("This account has reached its profile limit (%d)", limit))
+			if effective.MaxProfiles >= 1 {
+				profileLimit = effective.MaxProfiles
+			}
+			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+				return none, profileLimitReached(profileLimit)
 			}
 		}
 	}
@@ -443,7 +461,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// failed hash must not leave behind a profile that can be used without proof.
 	var pinHash string
 	if req.PIN != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
+		hash, err := passwordhash.Generate(ctx, []byte(req.PIN), bcrypt.DefaultCost)
+		if apiErr := busyError(err); apiErr != nil {
+			return none, apiErr
+		}
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
 		}
@@ -477,7 +498,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync); err != nil {
+		if errors.Is(err, errProfileLimitReached) {
+			return none, profileLimitReached(profileLimit)
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -638,10 +662,15 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
+	pinHash, err := hashProfilePIN(ctx, req.PIN)
+	if err != nil {
+		return none, err
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
-		PIN:                        req.PIN,
+		PINHash:                    pinHash,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
@@ -788,6 +817,20 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
 	}
 
+	// The profile's devices, read before the delete takes their registrations.
+	registry, _ := store.(userstore.DeviceRegistry)
+	var devices []string
+	if registry != nil && h.Connections != nil {
+		entries, err := registry.ListDevices(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "listing profile devices before delete failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		}
+		for _, entry := range entries {
+			if entry.ProfileID == profileID {
+				devices = append(devices, entry.DeviceID)
+			}
+		}
+	}
 	if err := store.DeleteProfile(ctx, profileID); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
@@ -810,6 +853,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 			slog.WarnContext(ctx, "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
+	forgetPlaybackConnections(ctx, h.Connections, registry, userID, devices)
 	if h.DroppedSeriesPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
@@ -945,12 +989,18 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 
 	// The attempt is counted before the PIN is checked, so concurrent
 	// guesses cannot overrun the limit, and while the profile is locked even
-	// the right PIN is refused.
+	// the right PIN is refused. The check then waits for a hashing turn ahead
+	// of sign-ins, and compares against the hash read with the revision above.
 	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
 	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
 		return none, PINLockedError(retryAfter)
 	}
-	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if apiErr := busyError(err); apiErr != nil {
+		return none, apiErr
+	}
+	valid, err := permit.Matches([]byte(profile.PINHash), []byte(cmd.PIN))
+	permit.Release()
 	if err != nil {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}
@@ -973,6 +1023,24 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
 	}
 	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
+}
+
+// hashProfilePIN prepares a requested PIN for storage before the profile
+// transaction opens, as creation does, so the transaction never waits for a
+// hashing turn: its bcrypt hash, "" to remove the PIN, or nil to keep it.
+func hashProfilePIN(ctx context.Context, pin *string) (*string, error) {
+	if pin == nil || *pin == "" {
+		return pin, nil
+	}
+	raw, err := passwordhash.Generate(ctx, []byte(*pin), bcrypt.DefaultCost)
+	if apiErr := busyError(err); apiErr != nil {
+		return nil, apiErr
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+	}
+	hash := string(raw)
+	return &hash, nil
 }
 
 // PINLockedError is the 429 a PIN check answers while the profile is locked

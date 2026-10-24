@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -440,6 +442,20 @@ func TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession(t *testing.T) {
 	h.HandleItemImage(rec, req)
 
 	assertImageRedirect(t, rec, upstreamURL)
+
+	// Roku probes artwork with HEAD and shows it only on a 200. Following a
+	// redirect would send the HEAD to a URL presigned for GET. Locally served
+	// artwork resolves to Silo's own signed artwork route.
+	for _, imageURL := range []string{upstreamURL, "/api/v2/artwork/poster-token"} {
+		h.images.RememberSized(routeID, "Primary", imageURL, compatCardImageSize)
+		req = httptest.NewRequest(http.MethodHead, "/Items/"+routeID+"/Images/Primary", nil)
+		req = withImageRouteParams(req, routeID, "Primary")
+		rec = httptest.NewRecorder()
+		h.HandleItemImage(rec, req)
+		if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || rec.Body.Len() != 0 {
+			t.Fatalf("HEAD %s = %d, Location %q, %d body bytes; want 200 with no redirect or body", imageURL, rec.Code, rec.Header().Get("Location"), rec.Body.Len())
+		}
+	}
 }
 
 // serveUserImage issues an avatar request for pathID with the chi "id" route
@@ -810,5 +826,64 @@ func TestSearchHintImageTagResolvesThroughTagCache(t *testing.T) {
 
 			assertImageRedirect(t, rec, tt.posterURL)
 		})
+	}
+}
+
+// TestHandleItemImageInfosListsAdvertisedArtwork covers the Roku details
+// screen, which picks its poster from /Items/{id}/Images: every entry names an
+// image type and tag the item's ImageTags already advertise.
+func TestHandleItemImageInfosListsAdvertisedArtwork(t *testing.T) {
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}),
+		images:   NewImageCache(time.Hour, time.Now),
+		userData: &mockUserDataService{},
+		content: &stubContentService{detail: &upstreamItemDetail{
+			ContentID: "movie-1", Type: "movie", Title: "Movie",
+			PosterURL: "https://cdn.example.test/poster.jpg", PosterPath: "metadb://poster/movie-1",
+			BackdropURL: "https://cdn.example.test/backdrop.jpg", BackdropPath: "metadb://backdrop/movie-1",
+			LogoURL: "https://cdn.example.test/logo.png", LogoPath: "metadb://logo/movie-1",
+		}},
+	}
+	routeID := codec.EncodeStringID(EncodedIDItem, "movie-1")
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token"}))
+	rec := httptest.NewRecorder()
+	h.HandleItemImageInfos(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var infos []imageInfoDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &infos); err != nil {
+		t.Fatal(err)
+	}
+	item := h.mapper.itemFromDetail(*h.content.(*stubContentService).detail, false, nil)
+	want := map[string]string{"Backdrop/0": item.BackdropImageTags[0], "Logo": item.ImageTags["Logo"], "Primary": item.ImageTags["Primary"]}
+	got := map[string]string{}
+	for _, info := range infos {
+		key := info.ImageType
+		if info.ImageIndex != nil {
+			key += "/" + strconv.Itoa(*info.ImageIndex)
+		}
+		got[key] = info.ImageTag
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("image infos = %v, want %v", got, want)
+	}
+
+	// An id /Items/{id} cannot resolve answers the same way here.
+	req = httptest.NewRequest(http.MethodGet, "/Items/not-an-id/Images", nil)
+	routeCtx = chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "not-an-id")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token"}))
+	rec = httptest.NewRecorder()
+	h.HandleItemImageInfos(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown id status = %d, want 404", rec.Code)
 	}
 }

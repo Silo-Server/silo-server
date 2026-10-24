@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -207,6 +208,52 @@ func TestRecommendationSectionReadErrorFailsTheSection(t *testing.T) {
 	}
 }
 
+// watchedSetReader reads the profile's watched set before answering a For You
+// or Because You Watched row, as the Reader does to filter them.
+type watchedSetReader struct {
+	poolReader
+	signals *recommendations.SignalReader
+}
+
+func (r *watchedSetReader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, err
+	}
+	return r.poolReader.SectionForYouMain(ctx, userID, profileID, filter)
+}
+
+func (r *watchedSetReader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, "", err
+	}
+	return r.poolReader.SectionBecauseYouWatched(ctx, userID, profileID, sourceItemID, libraryIDs, filter)
+}
+
+// countingWatchedRepo counts watched set reads. No other repo read is reached.
+type countingWatchedRepo struct {
+	*recommendations.Repo
+	reads atomic.Int32
+}
+
+func (r *countingWatchedRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.reads.Add(1)
+	return map[string]struct{}{}, nil
+}
+
+// One FetchAll reads the profile's watched set once for its For You and
+// Because You Watched sections, which run in parallel.
+func TestFetchAllReadsTheWatchedSetOnce(t *testing.T) {
+	repo := &countingWatchedRepo{}
+	fetcher := &Fetcher{RecommendationReader: &watchedSetReader{signals: recommendations.NewSignalReader(repo, nil)}}
+	fetcher.FetchAll(t.Context(), []ResolvedSection{
+		{ID: "for-you", SectionType: SectionRecommendedForYou, ItemLimit: 20},
+		{ID: "because", SectionType: SectionBecauseYouWatched, ItemLimit: 20},
+	}, nil, nil, 7, "p1", catalog.AccessFilter{})
+	if got := repo.reads.Load(); got != 1 {
+		t.Fatalf("watched set reads = %d, want 1", got)
+	}
+}
+
 // FetchOne titles a For You or taste-match section after the row it serves
 // when that row is not the profile's own, and keeps an admin's heading; a
 // row filtered empty leaves the heading alone.
@@ -223,9 +270,19 @@ func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	id := "recs-title-" + uuid.NewString()[:8]
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id) })
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, id+"-lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
 		t.Fatalf("seed item: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+		t.Fatalf("seed membership: %v", err)
 	}
 	fetcher := NewFetcher(pool)
 	for _, tc := range []struct {

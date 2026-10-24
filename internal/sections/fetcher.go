@@ -1193,8 +1193,11 @@ func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profil
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.
+// The sections share one read of the profile's watched set, which For You and
+// Because You Watched would otherwise each make.
 func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) []SectionWithItems {
 	start := time.Now()
+	ctx = recommendations.WithWatchedSetMemo(ctx)
 	results := fetchAllWithRunner(ctx, resolved, fetchAllMaxConcurrency, func(ctx context.Context, sec ResolvedSection) (SectionWithItems, error) {
 		return f.FetchOne(ctx, sec, libraryID, libraryIDs, userID, profileID, filter)
 	})
@@ -1253,7 +1256,7 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result, err := runner(ctx, sec)
+			result, err := runSectionFetch(ctx, sec, runner)
 			if err != nil {
 				LogFetchError(ctx, "sections", sec, err)
 				result = SectionWithItems{
@@ -1267,6 +1270,20 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 
 	wg.Wait()
 	return results
+}
+
+// runSectionFetch runs runner for one section of fetchAllWithRunner. It runs
+// on its own goroutine, out of reach of the request's panic recovery, so a
+// panic becomes the section's error.
+func runSectionFetch(ctx context.Context, sec ResolvedSection, runner sectionFetchRunner) (result SectionWithItems, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.ErrorContext(ctx, "section fetch panicked", "component", "sections", "section_id", sec.ID, "type", sec.SectionType,
+				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+			result, err = SectionWithItems{}, errors.New("section fetch panicked")
+		}
+	}()
+	return runner(ctx, sec)
 }
 
 // FetchItemsByContentIDs resolves content IDs to full MediaItem objects,
@@ -3013,17 +3030,11 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 		return []*models.MediaItem{}, nil
 	}
 
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	placeholders := make([]string, len(contentIDs))
-	for i, contentID := range contentIDs {
-		placeholders[i] = fmt.Sprintf("$%d", argIdx)
-		args = append(args, contentID)
-		argIdx++
-	}
-	conditions = append(conditions, fmt.Sprintf("mi.content_id IN (%s)", strings.Join(placeholders, ", ")))
+	// One array parameter keeps one statement shape for every list size; a
+	// placeholder per ID made each count new SQL to prepare.
+	conditions := []string{"mi.content_id = ANY($1::text[])"}
+	args := []any{contentIDs}
+	argIdx := 2
 
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
 
@@ -3061,17 +3072,10 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
 	}
 
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	placeholders := make([]string, len(contentIDs))
-	for i, contentID := range contentIDs {
-		placeholders[i] = fmt.Sprintf("$%d", argIdx)
-		args = append(args, contentID)
-		argIdx++
-	}
-	conditions = append(conditions, fmt.Sprintf("e.content_id IN (%s)", strings.Join(placeholders, ", ")))
+	// One array parameter for every list size, as fetchItemsByContentIDsFiltered.
+	conditions := []string{"e.content_id = ANY($1::text[])"}
+	args := []any{contentIDs}
+	argIdx := 2
 
 	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id LEFT JOIN seasons s ON s.content_id = e.season_id"
 	if !applyEpisodeTargetLibraryAccess(filter, libraryID, libraryIDs, &conditions, &args, &argIdx) {
@@ -3727,7 +3731,10 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 // slots), and the deny check must be item-level — with a row join, an item
 // linked to both an allowed and a disabled library passes via the allowed
 // membership row (see catalog audit 2026-05-01 §3 Pattern D, the same reason
-// catalog's buildLibraryScopeJoin uses semi-joins).
+// catalog's buildLibraryScopeJoin uses semi-joins). With no library named, the
+// item must still belong to some library, so a stale or provisional
+// media_items row left without memberships (its files removed) never shows on
+// Home while its library pages already leave it out.
 func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int, disabledLibraryIDs []int, argIdx int) (string, []string, []any, int) {
 	fromClause := "media_items mi"
 	var conditions []string
@@ -3758,16 +3765,13 @@ func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int,
 		memberOfAny(libraryIDs)
 	}
 
+	if libraryID == nil && libraryIDs == nil && len(configLibraryIDs) == 0 {
+		conditions = append(conditions,
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
+		)
+	}
+
 	if len(disabledLibraryIDs) > 0 {
-		if libraryID == nil && libraryIDs == nil && len(configLibraryIDs) == 0 {
-			// Deny-only mode: still require at least one library membership so
-			// stale or provisional media_items rows with no membership don't
-			// become visible through a vacuous NOT EXISTS (mirrors
-			// appendDiscoveryLibraryScope in package catalog).
-			conditions = append(conditions,
-				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-			)
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
 			argIdx,

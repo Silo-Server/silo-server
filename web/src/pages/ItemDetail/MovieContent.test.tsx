@@ -229,7 +229,8 @@ describe("MovieContent", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
   });
 
-  it("updates hero metadata when the selected version changes", () => {
+  // A pick is pinned at start (S3); the default version may still be swapped.
+  it("updates hero metadata and marks the version picked when the viewer selects one", () => {
     const standard = movieVersion({
       file_id: 1,
       resolution: "2160p",
@@ -256,6 +257,7 @@ describe("MovieContent", () => {
     );
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "2h 43m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: false });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 163,
@@ -273,6 +275,7 @@ describe("MovieContent", () => {
     });
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "3h 16m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: true });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 196,
@@ -280,6 +283,30 @@ describe("MovieContent", () => {
         videoRangeLabel: "",
         audioLabel: "DTS",
       },
+    });
+  });
+
+  it("opens on the remembered version when the movie has no resume point", () => {
+    const uhd = movieVersion({ file_id: 1, resolution: "2160p", codec_audio: "truehd", hdr: true });
+    const hd = movieVersion({ file_id: 2, resolution: "1080p", codec_audio: "dts", hdr: false });
+
+    // The server omits a zero position, so the remembered version arrives on
+    // its own beside the counts every user_data carries.
+    renderMovie(
+      makeMovieItem({
+        versions: [uhd, hd],
+        user_data: {
+          played: false,
+          watched_count: 0,
+          unplayed_count: 0,
+          in_progress_count: 0,
+          last_file_id: 2,
+        } as ItemDetail["user_data"],
+      }),
+    );
+
+    expect(mocks.capturedQualityBadgesProps.value).toMatchObject({
+      summary: { resolution: "1080p" },
     });
   });
 

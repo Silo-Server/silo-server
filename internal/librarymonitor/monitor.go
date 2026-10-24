@@ -59,7 +59,7 @@ type FolderLister interface {
 // *scantrigger.Resolver the monitor uses.
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
-	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
 }
 

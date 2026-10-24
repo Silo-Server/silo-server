@@ -638,3 +638,48 @@ func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
 		t.Fatalf("expected status 404 for unknown SeasonId; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// Jellyfin SDK getMediaFolders() (Maintainerr's library discovery) reads the
+// caller's libraries from /Library/MediaFolders as a QueryResult of
+// CollectionFolder items whose Ids match /UserViews.
+func TestMediaFoldersListsVisibleLibrariesAsCollectionFolders(t *testing.T) {
+	collections := &fakeCollectionSource{collections: []*models.LibraryCollection{{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 1}}}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+		{ID: 2, Name: "Shows", Type: "series"},
+	}, nil)
+	req := httptest.NewRequest("GET", "/Library/MediaFolders", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	rec := httptest.NewRecorder()
+	h.HandleMediaFolders(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("MediaFolders: %d %s", rec.Code, rec.Body.String())
+	}
+	var result queryResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ id, name, collectionType string }{
+		{h.codec.EncodeIntID(EncodedIDLibrary, 1), "Movies", "movies"},
+		{h.codec.EncodeIntID(EncodedIDLibrary, 2), "Shows", "tvshows"},
+	}
+	if result.TotalRecordCount != len(want) || len(result.Items) != len(want) {
+		t.Fatalf("got %d items (total %d), want %d: %s", len(result.Items), result.TotalRecordCount, len(want), rec.Body.String())
+	}
+	for i, w := range want {
+		got := result.Items[i]
+		if got.ID != w.id || got.Name != w.name || got.CollectionType != w.collectionType || got.Type != "CollectionFolder" || !got.IsFolder {
+			t.Fatalf("item %d = %+v, want Id %s Name %s CollectionType %s CollectionFolder", i, got, w.id, w.name, w.collectionType)
+		}
+	}
+
+	// Silo has no hidden media folders: isHidden=true lists none.
+	req = httptest.NewRequest("GET", "/Library/MediaFolders?isHidden=true", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	rec = httptest.NewRecorder()
+	h.HandleMediaFolders(rec, req)
+	var hidden queryResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &hidden); err != nil || rec.Code != 200 || hidden.Items == nil || len(hidden.Items) != 0 || hidden.TotalRecordCount != 0 {
+		t.Fatalf("MediaFolders?isHidden=true: %d %s", rec.Code, rec.Body.String())
+	}
+}

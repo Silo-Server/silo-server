@@ -150,6 +150,7 @@ function WatchPagePlayer({
   year,
   playbackRequestKey,
   fileId,
+  versionPicked = false,
   libraryId,
   versions,
   playbackVariants = [],
@@ -167,6 +168,7 @@ function WatchPagePlayer({
   showForcedSubtitles,
   profileLanguage,
   introSkipMode,
+  bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
   canEditMarkers,
@@ -219,6 +221,8 @@ function WatchPagePlayer({
     initialSubtitleTrackIndexByFileId,
     initialBitmapSubtitleTrackIndexByFileId,
     !watchTogetherRoomId,
+    bufferingMode,
+    versionPicked,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);
@@ -296,8 +300,8 @@ function WatchPagePlayer({
   );
 
   const handleSwitchVersion = useCallback(
-    (newFileId: number, currentPosition: number) => {
-      session.switchVersion(newFileId, currentPosition);
+    (newFileId: number, currentPosition: number, onAdopt?: (planRevision?: number) => void) => {
+      session.switchVersion(newFileId, currentPosition, onAdopt);
     },
     [session],
   );
@@ -354,6 +358,7 @@ function WatchPagePlayer({
     refresh();
   }, [refetchTrickplay, session.mediaFileId, trickplayQuery.isError]);
 
+  const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
@@ -363,8 +368,9 @@ function WatchPagePlayer({
       lastHDR: activePlaybackVersion?.hdr,
       lastCodecVideo: activePlaybackVersion?.codec_video,
       lastEditionKey: activePlaybackVersion?.edition_key,
+      versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId]);
+  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
 
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {
@@ -398,7 +404,6 @@ function WatchPagePlayer({
         index,
         tracks: playableSubtitles,
         inventoryTrack,
-        showForcedSubtitles,
       });
       for (const request of requests) {
         void sendSubtitleChoiceRequest(config, request).catch(() => {
@@ -406,7 +411,7 @@ function WatchPagePlayer({
         });
       }
     },
-    [config, seriesContext, contentId, playableSubtitles, showForcedSubtitles],
+    [config, seriesContext, contentId, playableSubtitles],
   );
 
   useEffect(() => {
@@ -710,6 +715,18 @@ function WatchPagePlayer({
       profileLanguage={profileLanguage}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      bufferingMode={bufferingMode}
+      bandwidthCapKbps={maxBitrateKbps}
+      bufferingTitleId={contentId}
+      playbackAttemptId={session.playbackAttemptId}
+      onKeptEstimate={session.setKeptEstimate}
+      onBufferingSummary={(plan, summary, pageEnding) =>
+        session.reportEvent("plan_summary", {
+          adoptionId: plan.adoption_id,
+          diagnostics: { ...summary },
+          keepalive: pageEnding,
+        })
+      }
       credits={activeMarkers.credits}
       recap={activeMarkers.recap}
       autoSkipRecap={autoSkipRecap}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 34
+const schemaVersion = 35
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -353,6 +353,25 @@ WHERE COALESCE(section_id, '') = ''
 			return fmt.Errorf("migration v34 failed: %w", err)
 		}
 		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 34"); err != nil {
+			return err
+		}
+	}
+	if version < 35 {
+		// A fresh series_playback_preferences table already has the columns.
+		// The Postgres store adds the same columns in
+		// 20261023003343_add_item_version_choice.sql.
+		for _, c := range []struct{ name, ddl string }{
+			{"file_id", "ALTER TABLE series_playback_preferences ADD COLUMN file_id INTEGER"},
+			{"edition_key", "ALTER TABLE series_playback_preferences ADD COLUMN edition_key TEXT"},
+		} {
+			if columnExists(tx, "series_playback_preferences", c.name) {
+				continue
+			}
+			if _, err := tx.ExecContext(context.Background(), c.ddl); err != nil {
+				return fmt.Errorf("migration v35 failed: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 35"); err != nil {
 			return err
 		}
 	}

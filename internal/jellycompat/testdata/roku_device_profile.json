@@ -1,0 +1,31 @@
+{
+ "MaxStreamingBitrate": 120000000, "MaxStaticBitrate": 100000000, "MusicStreamingTranscodingBitrate": 192000,
+ "DirectPlayProfiles": [
+  {"Container":"mp4,mov,m4v","Type":"Video","VideoCodec":"h264,mpeg4 avc,vp9,hevc,h265,av1","AudioCodec":"mp3,pcm,lpcm,wav,ac3,eac3,flac,alac,aac"},
+  {"Container":"hls","Type":"Video","VideoCodec":"h264,mpeg4 avc,hevc,h265,av1","AudioCodec":"mp3,ac3,eac3,aac"},
+  {"Container":"mkv,webm","Type":"Video","VideoCodec":"h264,mpeg4 avc,vp8,vp9,hevc,h265,av1","AudioCodec":"mp3,pcm,lpcm,wav,ac3,eac3,flac,alac,aac,opus,vorbis"},
+  {"Container":"ts","Type":"Video","VideoCodec":"h264,mpeg4 avc,hevc,h265","AudioCodec":"mp3,mp2,ac3,eac3,aac"},
+  {"Container":"mp3,mp2,pcm,lpcm,wav,ac3,eac3,flac,alac,aac","Type":"Audio"}
+ ],
+ "TranscodingProfiles": [
+  {"Container":"aac","Type":"Audio","AudioCodec":"aac","Context":"Streaming","Protocol":"http","MaxAudioChannels":"2"},
+  {"Container":"aac","Type":"Audio","AudioCodec":"aac","Context":"Static","Protocol":"http","MaxAudioChannels":"2"},
+  {"Container":"mp3","Type":"Audio","AudioCodec":"mp3","Context":"Streaming","Protocol":"http","MaxAudioChannels":"2"},
+  {"Container":"mp3","Type":"Audio","AudioCodec":"mp3","Context":"Static","Protocol":"http","MaxAudioChannels":"2"},
+  {"Container":"ts","Context":"Streaming","Protocol":"hls","Type":"Video","AudioCodec":"AC3,eac3,ac3,mp3","VideoCodec":"hevc,h265,h264,mpeg4 avc","MaxAudioChannels":"2","MinSegments":1,"SegmentLength":6,"BreakOnNonKeyFrames":false},
+  {"Container":"mp4","Context":"Streaming","Protocol":"hls","Type":"Video","AudioCodec":"AC3,eac3,ac3,mp3,flac,alac","VideoCodec":"hevc,h265,h264,mpeg4 avc,vp9,av1","MaxAudioChannels":"2","MinSegments":1,"SegmentLength":6,"BreakOnNonKeyFrames":false}
+ ],
+ "ContainerProfiles": [],
+ "CodecProfiles": [
+  {"Type":"VideoAudio","Codec":"aac","Conditions":[{"Condition":"LessThanEqual","Property":"AudioChannels","Value":2,"IsRequired":true},{"Condition":"NotEquals","Property":"AudioProfile","Value":"Main","IsRequired":true}]},
+  {"Type":"VideoAudio","Codec":"ac3","Conditions":[{"Condition":"LessThanEqual","Property":"AudioChannels","Value":2,"IsRequired":true}]},
+  {"Type":"VideoAudio","Codec":"eac3","Conditions":[{"Condition":"LessThanEqual","Property":"AudioChannels","Value":2,"IsRequired":true}]},
+  {"Type":"Video","Codec":"h264","Conditions":[
+    {"Condition":"NotEquals","Property":"IsAnamorphic","Value":"true","IsRequired":false},
+    {"Condition":"LessThanEqual","Property":"VideoBitDepth","Value":"8","IsRequired":false},
+    {"Condition":"EqualsAny","Property":"VideoProfile","Value":"main|high","IsRequired":false},
+    {"Condition":"EqualsAny","Property":"VideoRangeType","Value":"SDR|DOVIWithSDR","IsRequired":false},
+    {"Condition":"LessThanEqual","Property":"VideoLevel","Value":"42","IsRequired":false}]}
+ ],
+ "SubtitleProfiles": [{"Format":"vtt","Method":"External"},{"Format":"srt","Method":"External"}]
+}

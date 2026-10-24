@@ -18,8 +18,8 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 	expectedFragments := []string{
 		"eligible_series AS (",
 		"uwp_ip.position_seconds > 0",
-		"e_ip.series_id = ce.series_id",
-		"uwp_ip.updated_at > ce.updated_at",
+		"e_ip.series_id = a.series_id",
+		"THEN a.anchored_at ELSE a.updated_at END",
 		"FROM user_history_hidden_items hhi",
 		"uwp.updated_at <= hhi.hidden_before",
 		"AND (uwp2.completed = TRUE OR uwp2.position_seconds > 0)",
@@ -63,8 +63,9 @@ func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
 			t.Fatalf("expected global anchor walk to contain %q, got:\n%s", fragment, query)
 		}
 	}
-	// Seed step, recursive step, and the anchor lateral attached to each.
-	if got := strings.Count(query, "FROM user_history_hidden_items hhi"); got != 4 {
+	// Seed step, recursive step, the anchor lateral attached to each, and the
+	// regular-episode lookup that moves a special anchor.
+	if got := strings.Count(query, "FROM user_history_hidden_items hhi"); got != 5 {
 		t.Fatalf("expected hidden-items filter in every walk step and anchor, got %d occurrences:\n%s", got, query)
 	}
 	seed := strings.SplitN(query, "UNION ALL", 2)[0]

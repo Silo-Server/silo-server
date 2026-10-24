@@ -93,7 +93,12 @@ type QueryOf<Op> =
       : Q
     : never;
 
-type SessionHeader = "authorization" | "x-profile-id" | "x-profile-token" | "x-device-id";
+type SessionHeader =
+  | "authorization"
+  | "x-profile-id"
+  | "x-profile-token"
+  | "x-device-id"
+  | "x-silo-device-id";
 type CallerHeaders<H extends object> = {
   [Key in keyof H as Key extends string
     ? Lowercase<Key> extends SessionHeader

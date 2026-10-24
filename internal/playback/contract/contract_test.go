@@ -134,6 +134,9 @@ var (
 	// plan_v3.go and internal/api/handlers/playback_v3.go.
 	subtitleFidelityPoliciesV3 = []string{"require_authored_fidelity", "allow_simplified_rendering"}
 	seekRestorationsV3         = []string{"player_position", "source_position"}
+
+	bandwidthEstimateSourcesV3 = []string{playback.BandwidthEstimateProbeV3, playback.BandwidthEstimateObservedRebufferV3}
+	learnedLimitControlsV3     = []string{playback.LearnedLimitIgnoreV3, playback.LearnedLimitClearV3}
 )
 
 func TestValidFixtures(t *testing.T) {
@@ -295,6 +298,8 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "start.progress_persistence.enum", schemaStrings(t, start, "properties", "progress_persistence", "enum"), progressPersistenceV3)
 	assertStringsEqual(t, "start.capability_evidence.enum", schemaStrings(t, start, "$defs", "capability_evidence", "enum"), evidenceV3)
 	assertStringsEqual(t, "start.transformation_capability.executor.enum", schemaStrings(t, start, "$defs", "transformation_capability", "properties", "executor", "enum"), executorsV3)
+	assertStringsEqual(t, "start.bandwidth_estimate_source.enum", schemaStrings(t, start, "properties", "bandwidth_estimate_source", "enum"), bandwidthEstimateSourcesV3)
+	assertStringsEqual(t, "start.learned_limit.enum", schemaStrings(t, start, "properties", "learned_limit", "enum"), learnedLimitControlsV3)
 
 	replan := mustReadObject(t, filepath.Join(schemaRootV3, "v3", "replan-request.schema.json"))
 	assertConstInt(t, "replan.protocol_version.const", schemaValue(t, replan, "properties", "protocol_version", "const"), playback.ProtocolV3)
@@ -302,6 +307,8 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "replan.operation.enum", schemaStrings(t, replan, "properties", "operation", "enum"), replanOperationsV3)
 	assertStringsEqual(t, "replan.capability_evidence.enum", schemaStrings(t, replan, "$defs", "capability_evidence", "enum"), evidenceV3)
 	assertStringsEqual(t, "replan.transformation_capability.executor.enum", schemaStrings(t, replan, "$defs", "transformation_capability", "properties", "executor", "enum"), executorsV3)
+	assertStringsEqual(t, "replan.bandwidth_estimate_source.enum", schemaStrings(t, replan, "properties", "bandwidth_estimate_source", "enum"), bandwidthEstimateSourcesV3)
+	assertStringsEqual(t, "replan.learned_limit.enum", schemaStrings(t, replan, "properties", "learned_limit", "enum"), learnedLimitControlsV3)
 	assertStringsEqual(t, "replan.classification-required operations", schemaStrings(t, replan, "allOf", "0", "if", "anyOf", "1", "properties", "operation", "enum"), classificationRequiredOperationsV3)
 	if got := schemaValue(t, replan, "allOf", "1", "if", "properties", "operation", "const"); got != string(playback.ReplanOperationQualityChangeV3) {
 		t.Fatalf("replan quality-change conditional = %v, want %q", got, playback.ReplanOperationQualityChangeV3)
@@ -314,6 +321,9 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "decision.transformation.executor.enum", schemaStrings(t, decision, "$defs", "transformation", "properties", "executor", "enum"), executorsV3)
 	assertStringsEqual(t, "decision.plan.delivery.enum", schemaStrings(t, decision, "$defs", "plan", "properties", "delivery", "enum"), deliveriesV3)
 	assertStringsEqual(t, "decision.plan.subtitle_fidelity_policy.enum", schemaStrings(t, decision, "$defs", "plan", "properties", "subtitle_fidelity_policy", "enum"), subtitleFidelityPoliciesV3)
+	if got := schemaValue(t, decision, "$defs", "plan", "properties", "bandwidth_limit", "properties", "source", "const"); got != playback.BandwidthEstimateObservedRebufferV3 {
+		t.Fatalf("decision.plan.bandwidth_limit.source.const = %v, want %q", got, playback.BandwidthEstimateObservedRebufferV3)
+	}
 	assertStringsEqual(t, "decision.stream.protocol.enum", schemaStrings(t, decision, "$defs", "stream", "properties", "protocol", "enum"), streamProtocolsV3)
 	assertStringsEqual(t, "decision.stream.header_refresh.enum", schemaStrings(t, decision, "$defs", "stream", "properties", "header_refresh", "enum"), headerRefreshModesV3)
 	assertStringsEqual(t, "decision.timeline.seek_restoration.enum", schemaStrings(t, decision, "$defs", "timeline", "properties", "seek_restoration", "enum"), seekRestorationsV3)
@@ -378,6 +388,7 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 		{"decision-response.schema.json", []string{"$defs", "track_identity"}, playback.TrackIdentityV3{}},
 		{"decision-response.schema.json", []string{"$defs", "transformation"}, playback.TransformationV3{}},
 		{"decision-response.schema.json", []string{"$defs", "plan"}, playback.PlanV3{}},
+		{"decision-response.schema.json", []string{"$defs", "plan", "properties", "bandwidth_limit"}, playback.BandwidthLimitV3{}},
 		{"decision-response.schema.json", []string{"$defs", "plan", "properties", "selected_tracks"}, playback.SelectedTracksV3{}},
 		{"decision-response.schema.json", []string{"$defs", "stream"}, playback.StreamV3{}},
 		{"decision-response.schema.json", []string{"$defs", "timeline"}, playback.TimelineV3{}},

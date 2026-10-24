@@ -19,7 +19,7 @@ const (
 	// change covers everything in it. Resolved with Resolve.
 	changeDir
 	// changeVanishedFile: a file was deleted or moved out; resolved with
-	// ResolveVanishedPath.
+	// ResolveVanishedFile.
 	changeVanishedFile
 	// changeVanishedDir: a directory was deleted or moved out; resolved with
 	// ResolveMissingSubtree.

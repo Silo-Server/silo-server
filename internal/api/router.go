@@ -63,6 +63,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -200,7 +201,11 @@ type Dependencies struct {
 	// codes each account tries, shared with the Jellyfin-compatible API's
 	// Authorize route. Nil gets a process-local limiter.
 	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
-	ClientIPResolver         *clientip.Resolver
+	// SignInAttempts bounds password sign-ins per sign-in name, shared with
+	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
+	// one budget. Nil gets a process-local limiter.
+	SignInAttempts   *ratelimit.AttemptLimiter
+	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -276,6 +281,9 @@ type Dependencies struct {
 	v2Wiring               func(apiv2.Dependencies)
 	v2RouteSnapshot        func([]streamtelemetry.WalkedRoute)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
+	// BeforeServerSettingCommit runs inside an admin settings save's
+	// transaction for each changed setting; an error rolls the save back.
+	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
 	// AdminDefaults is the node's shared snapshot of the administrator's
 	// setting defaults. Without it the router builds one from its settings
 	// repo, which then refreshes only on its own admin writes and its TTL.
@@ -643,6 +651,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.AuthProviderRecheck != nil {
 			authService.SetProviderRecheck(deps.AuthProviderRecheck)
 		}
+		signInAttempts := deps.SignInAttempts
+		if signInAttempts == nil {
+			signInAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.SignInNamePolicy)
+		}
+		authService.SetSignInAttempts(signInAttempts)
 		if settingsRepo != nil {
 			invitationService = invitations.NewService(
 				invitations.NewRepository(deps.DB),
@@ -1146,7 +1159,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// collage of their titles; it needs artwork storage and poster signing.
 	var personalCollages *catalog.PersonalCollectionCollages
 	if deps.DB != nil && detailSvc != nil {
-		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, nil); gen != nil {
+		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
 			personalCollages = deps.PersonalCollectionCollages
 			if personalCollages == nil {
 				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
@@ -1177,6 +1190,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
 			// Ebook reading data lives there too.
 			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
+			profileHandler.Connections = &connectionstore.Store{Pool: deps.DB}
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
@@ -1281,6 +1295,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
 		deviceHandler.ProfileTokens = profileTokenService
+		if deps.DB != nil {
+			deviceHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {
@@ -1360,6 +1377,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
+			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+			playbackHandler.SourceBitrates = &catalog.SourceBitrates{Pool: deps.DB}
 			// The v2 playback contract binds every mutation to this server's
 			// installation identity; a client that read capabilities from a
 			// different installation is refused. Nothing else depends on it, so a
@@ -1683,6 +1702,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				deps.OnServerSettingUpdated(ctx, key, value)
 			}
 		}
+		adminHandler.BeforeServerSettingCommit = deps.BeforeServerSettingCommit
 		if deps.RecWorker != nil {
 			adminHandler.RecWorker = deps.RecWorker
 		}
@@ -2151,6 +2171,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		)
 		libraryCollectionHandler.ArtworkStore = deps.Blobs.Assets
 		libraryCollectionHandler.ArtworkResolver = deps.ArtworkResolver
+		libraryCollectionHandler.ArtworkSigner = deps.ArtworkSigner
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
@@ -2219,7 +2240,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			recsRepo = recommendations.NewRepo(deps.DB)
 			recsReader = deps.recommendationReader(recsRepo, ratingsRepo)
 		}
-		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil)
+		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil).
+			WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite")
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
@@ -2797,7 +2819,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.NotificationDestinationTests = inbox
 		v2deps.NotificationDestinationCreate = inbox
 		v2deps.OrderedAndroidPush = inbox
+		v2deps.AndroidPushRetirement = deps.Notifications.PushDevices
 		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, actingAdmin)
+		v2deps.ApplePushRetirement = deps.Notifications.PushDevices
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications

@@ -258,6 +258,8 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
+  /** The viewer chose selectedVersion rather than playing the default version. */
+  versionPicked?: boolean;
   onSelectVersion?: (version: FileVersion) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
@@ -326,6 +328,7 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  versionPicked = false,
   onSelectVersion,
   onDownload,
   onSearchSubtitles,
@@ -421,8 +424,15 @@ export default function ActionBar({
       prePlaySubtitleMode,
       prePlaySubtitleSelection:
         prePlaySubtitleMode === "explicit" ? explicitSubtitleSelection : null,
+      versionPicked,
     }),
-    [audioSelectionMode, explicitAudioTrackIndex, explicitSubtitleSelection, prePlaySubtitleMode],
+    [
+      audioSelectionMode,
+      explicitAudioTrackIndex,
+      explicitSubtitleSelection,
+      prePlaySubtitleMode,
+      versionPicked,
+    ],
   );
   const startPlaybackFromHref = useCallback(
     (href: string, restartOverride?: boolean) => {

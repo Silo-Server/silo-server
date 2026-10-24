@@ -92,7 +92,8 @@ resolving the hardware backend, which can run probes, and holds it for the
 whole run, software attempts included, so an admin re-probe is refused until
 the run ends. Failures use `trickplay.ExtractError` JSON;
 a `422` carries the sampling cause and whether it is `permanent` (a cause in
-the file itself). Nodes advertise the endpoint as the
+the file itself), or `input_unreadable` when the node's ffmpeg cannot open
+the input. Nodes advertise the endpoint as the
 `trickplay_extract_v1` transport feature, and as `trickplay_extract_v2` once
 they convert HDR with the tone-map source signal a request names
 (`sheets.tone_map.source`), decode on CUDA, and repair missing and repeated
@@ -252,8 +253,15 @@ modification time the token recorded. Video tokens remain limited to the
 media-file catalog.
 
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
-lifecycle lock as start and reconstruction. For legacy progressive remux,
-cancellation installs a process-local fence lasting the maximum token lifetime.
+lifecycle lock as start and reconstruction. Every stop installs a
+process-local fence lasting the maximum token lifetime: reconstruction from a
+stream token or stored recipe answers 410 for that ID, so a segment request
+still in flight when the stop lands cannot restart the encode. A fresh
+`POST /transcode/start` for the same ID lifts the HLS fence; the idle reaper
+installs none, and neither does a stop sent with `fence=0`. The API sends that
+when it releases a transport it is moving to another node, since the ID lives
+on and a replica whose copy still names the old node may rebuild it there. Legacy progressive remux keeps its own fence against a new
+`/remux` request.
 Configured recipe deletion must succeed and progressive shutdown must finish
 before 204; either can return 503 after local teardown has already occurred.
 Session-close and file-removal errors are logged. A missing session and recipe
@@ -386,9 +394,10 @@ Proxy token remux routes keep the legacy and audio-v2 suffixes distinct. The
 legacy route refuses boosted recipes; the versioned route requires the exact
 stereo AAC shape. Both enforce signed recipe/egress authority. Local execution
 streams video or audio MP4; query seek parse failures retain the legacy zero
-fallback and there is no byte-range resume promise. Local proxy HEAD still
-starts and drains remux work. A transcode-node remux HEAD instead validates
-authority without starting an encoder or checking actual file existence. Node
+fallback and there is no byte-range resume promise. Local proxy HEAD checks
+that the file exists and answers with the stream headers without starting
+remux work. A transcode-node remux HEAD validates authority without starting
+an encoder or checking actual file existence. Node
 progressive execution requires its independently verified recipe, exact
 transport/node route and approved input. Stopped authority returns 410 and
 concurrent requests return 409. Cancellation and reload fences remain

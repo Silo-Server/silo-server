@@ -54,11 +54,15 @@ const (
 
 // handleAllMethods is what chi registers for Handle/HandleFunc (its mALL set),
 // reported as "*" when walking the tree. The inventory enumerates the variants
-// instead of hiding nine operations behind one wildcard row.
+// instead of hiding ten operations behind one wildcard row.
 var handleAllMethods = []string{
 	http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
-	http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace,
+	http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, methodQuery, http.MethodTrace,
 }
+
+// methodQuery is the HTTP QUERY method (RFC 10008), which chi includes in mALL.
+// net/http has no constant for it yet.
+const methodQuery = "QUERY"
 
 // verbMethods maps chi's per-verb registration helpers to their HTTP method.
 var verbMethods = map[string]string{
@@ -70,6 +74,7 @@ var verbMethods = map[string]string{
 	"Patch":   http.MethodPatch,
 	"Post":    http.MethodPost,
 	"Put":     http.MethodPut,
+	"Query":   methodQuery,
 	"Trace":   http.MethodTrace,
 }
 

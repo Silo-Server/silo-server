@@ -558,6 +558,32 @@ output supports HDR10, and the plan carries the `hdr_range_assumed_hdr10`
 degradation warning. Refusing to play those outright would be worse than an
 assumption the client is told about.
 
+An `hdr10_plus` source is HDR10 with dynamic metadata that HDR10-only displays
+ignore, so an output that claims HDR10 but not HDR10+ takes it as HDR10, within
+its HDR10 ceilings, and the plan claims HDR10. The jellycompat device profile
+checks follow Jellyfin 10.11: each HDR10+ range type (`HDR10Plus`,
+`DOVIWithHDR10Plus`, `DOVIWithELHDR10Plus`) satisfies a positive
+`VideoRangeType` condition that its form without HDR10+ (`HDR10`,
+`DOVIWithHDR10`, `DOVIWithEL`) satisfies, any condition for an HLS copy, and
+is excluded by a negative condition that excludes that form. A file therefore
+keeps the routes it had before its HDR10+ metadata was detected, with one
+change Jellyfin makes too: a client that excludes the HDR10+ range type while
+accepting its form, such as Jellyfin Android TV on a display without HDR10+,
+gets an HLS copy of the same stream instead of direct play.
+
+FFmpeg reports HDR10+ only as frame side data, so the scanner decodes the first
+frame of the primary video stream when it is PQ. A stored first video track
+carries `hdr10_plus`, `false` included, only once that frame has been read. A
+PQ track without the key was probed before this check, or the read failed, or
+playback's probe repair rewrote it; the repair skips the frame read to stay
+within its budget and keeps a recorded status only when the reprobed stream
+is unchanged. A failed read is never recorded as "not HDR10+", so a
+misbehaving ffprobe cannot mark the library that way. The
+`backfill_hdr10_plus` task, at startup and daily, reads the first frame of the
+unchecked files and sets only `hdr10_plus` and, for an HDR10+ file,
+`video_range_type`, writing only while the file and the track still match the
+row it read.
+
 A client may additionally report the raw display probe in `output.display`
 with an evidence tier:
 
@@ -787,6 +813,16 @@ past zero and its FFmpeg's `noise` filter takes the `drop` expression (probed
 once per binary). It is not a plan transformation or a required capability: an
 executor without the filter, or one that predates the claim, serves the plain
 copy, so it never narrows where the route may run.
+
+**Copied AAC framing.** MPEG-TS carries AAC as ADTS, which fragmented MP4
+cannot hold, and FFmpeg does not insert `aac_adtstoasc` on its own under
+`delay_moov`. A progressive remux that copies audio therefore records the copied
+track's codec in the remux recipe card and the stream token (`cac`), and the
+executor adds `-bsf:a aac_adtstoasc` only when that codec is AAC; the filter
+rejects every other codec. The claim is empty when audio is transcoded. A token
+without it, or an executor that predates it, serves the plain copy, so an
+MPEG-TS AAC remux still fails there until both the API and that executor carry
+the claim. The HLS copy path does not apply the filter yet (#2840).
 
 **Theme audio.** Detail-page theme songs use the same routing policy without
 becoming playback sessions (`internal/themedelivery`). Original theme audio
@@ -1348,13 +1384,18 @@ The last two come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
-it right now and is always retryable.
+it right now and is always retryable. When every route that ran rejected the
+file in the tone-map source preflight, the start ends in a non-retryable
+`transcode_start_failed` whose message says the file failed the conversion
+check. A route skipped only because its executor cannot run the recipe does
+not change that answer; a route that failed in a way a retry could clear keeps
+the start retryable, with that route's message.
 
 ### 7.4 Route event names
 
 `plan_selected`, `plan_invalidated`, `plan_failed`, `first_frame`, `terminal`,
 `stopped`, `runtime_correction_applied`, `runtime_correction_succeeded`,
-`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`.
+`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`, `plan_summary`.
 
 ### 7.5 Diagnostics allowlist
 
@@ -1372,7 +1413,9 @@ every value is truncated to 256 characters.
 `effective_media_file_id`, `audio_output_mode`, `audio_mime`, `audio_channels`,
 `audio_decoder_name`, `correction_id`, `correction_stage`, `network_transport`,
 `network_metered`, `network_validated`, `bandwidth_estimate_kbps`,
-`link_downstream_kbps`, `target_source_position_seconds`, `reason`.
+`link_downstream_kbps`, `target_source_position_seconds`, `reason`,
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode`, `buffering_action`, `throughput_kbps`.
 
 On a `first_frame` event, `first_frame_ms` is the whole milliseconds from the
 viewer's request to play (the tap, or the in-player action that started the
@@ -1520,7 +1563,11 @@ It is then answered as a valid WebVTT document with no cues, which a player
 keeps, so the longer wait is what keeps cues after a slow seek restart.
 Subtitle segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
-produced keeps its cues. Bitmap tracks keep their sidecar or burn-in routes.
+produced keeps its cues. The output directory records each generation's cue
+file and the segments it finished (`subtitle_spans.json`), so a session
+rebuilt from its recipe on the same directory serves the cues of every video
+segment it serves from disk, and names its own cue files after the recorded
+ones. Bitmap tracks keep their sidecar or burn-in routes.
 
 The rendition is part of the transcode recipe. Turning subtitles on or
 choosing another track therefore starts a new HLS generation at the current
@@ -1640,7 +1687,10 @@ remux without video encoding.
 
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
-version fallback. The menu then lists the
+version fallback. With 4K transcoding allowed, the same holds while
+`playback.prefer_lower_version_transcode` is on (the default), except that the
+4K rungs above the lower version's class stay on the menu and transcode the 4K
+version. The menu then lists the
 first non-4K version in fallback order at its plain resolution class (`1080p`
 or `720p`, with that version's height and bitrate; omitted when the version is
 taller than its class or the requested version is not taller than it), and the
@@ -1650,9 +1700,13 @@ the fallback adopts a later non-4K version, the plan it returns describes the
 version it adopted.
 Choosing any of them refuses the 4K source, so the fallback plays the lower
 version: unchanged for its plain label or a rung it fits, transcoded for a lower
-rung. `auto` returns to the 4K version. The menu stays the same while the
-lower version plays. It needs HLS and transcoding enabled, because the 4K
-refusal under any other policy is not one the fallback acts on.
+rung. `auto` returns to the 4K version unless a bandwidth estimate, cap or
+device limit needs a lower quality; that reduction also comes from the lower
+version, transcoded to fit, rather than the 4K source at original quality.
+When no version can play the reduction, the 4K version plans as though it had
+no lower version. The menu stays the same while the lower version plays. It
+needs HLS and transcoding enabled, because the 4K refusal under any other
+policy is not one the fallback acts on.
 
 | label | display_name | height | kbps |
 | --- | --- | --- | --- |
@@ -1666,6 +1720,11 @@ refusal under any other policy is not one the fallback acts on.
 | `720p-medium` | 720p Medium | 720 | 2000 |
 | `720p-low` | 720p Low | 720 | 1500 |
 | `480p` | 480p | 480 | 1500 |
+| `480p-low` | 480p Low | 480 | 800 |
+| `360p` | 360p | 360 | 300 |
+
+`480p-low` and `360p` let Auto lowering reach a 500 kbps link. The frozen
+`/api/v1` menus omit them.
 
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
@@ -1682,7 +1741,14 @@ scale it down to 2160 lines.
 Compound rungs are strict resolution/bitrate selections. A bandwidth cap can
 clamp their bitrate but does not silently demote their resolution. Plain labels
 remain accepted for stored/default preferences and size their output like
-`auto` below.
+`auto` below, except under a cap: a plain label keeps its resolution while
+`bandwidth_cap_kbps` reaches the lowest rung of that resolution and lowers only
+the bitrate to the cap, so `1080p` under a 3000 kbps cap encodes a 1920x1080
+source the same way as `1080p-low`. The plain label still fits a cropped source
+into its class's box as `auto` does (a 3840x1600 source is 1920x800), where the
+compound rung keeps 1080 lines. Below every rung of its resolution it steps down
+to the tallest resolution whose lowest rung the cap reaches, or to 480p at the
+cap when none does.
 
 `auto` is best-effort direct play. It sends the source as-is unless the device
 rules it out, through a `max_resolution` below the source or decode
@@ -1696,24 +1762,39 @@ fixed rung or plain resolution never reads the estimate, so a viewer who wants
 the source whatever the estimate says picks a resolution. `original` used to be
 that choice; it is now an alias of `auto`.
 
-A source over the estimate's budget, or over `bandwidth_cap_kbps`, is
-re-encoded at the class that 80% of the estimate or cap earns on the shared
-bitrate ladder ([quality-ladder.md](quality-ladder.md)) for the source's frame
-rate. A source of unknown bitrate counts as needing its class's full bitrate
-against an estimate, and is always re-encoded under a cap, since it cannot be
-shown to fit. A source whose height already fits the earned class keeps its own
-size, even when it is wider than the 16:9 box (a 2560x1080 film at the 1080p
-class). Otherwise automatic and plain-label targets fit the source into that
-class's 16:9 box, so a 3840x1600 film at the 1080p class streams at 1920x800,
-and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
+A source over the estimate's budget is re-encoded at the class that 80% of the
+estimate earns on the shared bitrate ladder ([quality-ladder.md](quality-ladder.md))
+for the source's frame rate. Under `auto`, a source over `bandwidth_cap_kbps` is
+re-encoded at the tallest class whose class bitrate (below) fits within the cap,
+with no headroom and whatever the frame rate: a 6000 kbps cap earns 1080p at 6000 kbps,
+and a cap between two classes earns the lower one. A source of unknown bitrate
+counts as needing its class's full bitrate against an estimate, and is always
+re-encoded under a cap, since it cannot be shown to fit. A source whose bitrate
+the estimate and cap allow is sent as-is, even when it is wider than the 16:9
+box (a 2560x1080 film). Otherwise automatic and plain-label targets fit the
+source into the earned class's 16:9 box, so a 3840x1600 film at the 1080p class
+streams at 1920x800 and a 2560x1080 film at 1920x810, and encode at the class
+bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
 720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
-the cap. A transcode also never targets more than the source's own bitrate,
+the cap. Under an estimate, `auto` instead uses its 80% budget, up to the
+bitrate of the class's highest menu rung (40000 for 2160p, 10000 for 1080p,
+4000 for 720p, 1500 for 480p, and the class bitrate for 540p), and fits the AAC
+track and container inside that budget too: 95% of it for both tracks, a quarter
+of that for AAC (at least 64 and at most its usual bitrate) and the rest, at
+least 64, for video. When a budget or cap leaves AAC less than 192 kbps, the
+usual stereo bitrate, a surround source is encoded as stereo. Every automatic
+encode, with an estimate or without, stays within its class's highest menu rung,
+a conversion at the source's own size included, except on the local network with
+no estimate and no cap, where a conversion or burn-in keeps the source's bitrate.
+A transcode also never targets more than the source's own bitrate,
 counted in the output codec (H.264 for a scaled encode, or HEVC for any encode
 when the planner chooses HEVC).
 
 `bandwidth_estimate_kbps` is optional and is the client's belief about its
-link, not a promise. An absent estimate removes the bandwidth term entirely, so
-`auto` plans from the device and the source alone; a client should omit the
+link, not a promise. An absent estimate removes the bandwidth term, so `auto`
+plans from the device and the source alone, except that on `/api/v2` the
+server puts the connection's stored reading in for a `buffering_quality_v1`
+client (see [Buffering quality](#buffering-quality-native-v2)); a client should omit the
 field rather than send a hint it knows is clamped, such as a browser's
 `navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
 can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
@@ -1721,21 +1802,32 @@ can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api
 A transcode is a single HLS rendition, so the player cannot step down on its
 own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
-`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
-re-runs `auto` against the lower estimate. The web player does this after two
-stalls of at least a second within two minutes, or one stall of six seconds.
-Stall time in the first ten seconds of a plan does not count, and buffering
-caused by a seek, pause or source reload is not a stall. It sends 70% of the
-delivered bitrate, so the next stream targets about 56% of the one that
-stalled. It keeps that lower estimate for the next 30 minutes. When the plan
-that follows is no lower, it leaves that plan alone for five minutes rather than
-replan in a loop. On a metered link it uses the estimate only if
-the stall was observed on the same kind of metered link, by the browser's
-connection type and Data Saver setting, since probe results and observations
-from other links do not describe it; back on an unmetered link it ignores a
-limit recorded on a metered one. Buffering while media requests fail (load
-errors, not timeouts) or while the browser is offline is an outage for the
-reconnect path and never counts toward a downshift.
+`bandwidth_estimate_kbps` below the bitrate that stalled, with
+`bandwidth_estimate_source: "observed_rebuffer"`; the planner then re-runs
+`auto` against the lower estimate, and the server records a learned limit
+(see [Buffering quality](#buffering-quality-native-v2)). The
+[buffering-quality design](../design/2026-10-17-buffering-quality.md) defines
+when every client does this: after two stalls of at least a second within two
+minutes, or one stall of six seconds. Stall time in the first ten seconds of a
+plan does not count, and buffering caused by a seek, pause or source reload is
+not a stall. A replacement adopted before the attempt has played is not a
+reload: it is part of the start, under the start's ten seconds. Until a plan of
+the attempt has played, a client lowers only when it measured the plan's media
+arriving more slowly than its delivered bitrate; otherwise the start runs on to
+its deadline and the failure path, so a version that cannot start for another
+reason does not drive Auto and the learned limit down. Clients send
+70% of the delivered bitrate, so the next stream
+targets about 56% of the one that stalled, with the throughput the stalled plan
+measured as `observed_throughput_kbps` when they have it (the server takes the
+lower figure), and repeat that estimate on their own later Auto replans for the
+rest of the playback attempt. When the plan that
+follows is no lower, they leave that plan alone for five minutes rather than
+replan in a loop. Buffering while media requests fail or while the device is
+offline is an outage for the reconnect path and never counts toward a
+downshift, and so does a wait in which no media request has received data for
+4 seconds on progressive delivery, or 15 seconds on HLS, where the server holds
+a segment request silent while it produces the segment. A media request is failing when it errors or cannot connect; a
+request that keeps receiving data is never failing, however slow.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
@@ -1748,7 +1840,7 @@ Audio-only sources publish no rungs on `/api/v2` (a single `original` entry on
 `quality_preference` accepts `auto`, the legacy `original` (aliases `source`,
 `max`), which means `auto`, the
 plain `2160p` / `1080p` / `720p` / `480p` values with their obvious aliases
-(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the compound labels in the table above.
+(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the labels in the table above.
 An unrecognized value normalizes to `auto` and the response carries the
 `quality_preference_normalized` warning rather than an error.
 
@@ -1994,3 +2086,83 @@ Three artifacts, in decreasing order of authority:
 
 A client that decodes the golden fixtures, echoes attempt keys byte-for-byte,
 and round-trips a replan without computing an identity is conforming.
+
+## Buffering quality (native v2)
+
+`buffering_quality_v1` gates three optional start and replan fields. A client
+lists the feature in `client_features` before it sends
+`bandwidth_estimate_source` (`probe` or `observed_rebuffer`, which requires
+`bandwidth_estimate_kbps`), `observed_throughput_kbps` (100 to 1,000,000, only
+with `observed_rebuffer`) or `learned_limit` (`ignore` or `clear`). A request
+without the feature neither records nor applies learned limits. The frozen v1
+bridge does not negotiate the feature and ignores these fields, as it ignores
+any unknown field.
+
+A learned limit is kept for the authenticated account, `X-Silo-Device-Id` and
+connection. A request without a device ID neither records nor applies one. The
+connection is the trusted network-access provider, `local` for a private or
+loopback client, or an HMAC of the public IPv4 address or IPv6 /64 keyed by
+the server secret. Raw public addresses are never stored. Rows are deleted 30
+days after their last update and when the device's last registration on the
+account is deleted, in either user store: forgetting the device and deleting a
+profile check the account's registry after their delete commits.
+
+Only a start or replan that the client sent with
+`bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
+recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
+the plan that kept buffering received, measured as `plan_summary`
+`throughput_kbps`; the server plans with, and records, the lower of it and
+`bandwidth_estimate_kbps`. An estimate without a source, which is how a
+client repeats its kept step-down estimate on later replans, records nothing.
+A seek reanchor reuses the playing recipe and a seek failure recovery replays
+the stored start request; neither records nor clears a limit.
+
+An Auto start or replan without `bandwidth_estimate_kbps` plans with the
+connection's current reading, the one `GET /api/v2/playback/connection`
+reports, as a `probe` estimate, so a client that starts before it has read its
+reading still plans under it. A seek replay keeps the stored request, a
+request with `learned_limit: "ignore"` gets no reading (a Cast start sends
+`ignore` and no estimate, and the sender's reading is not the receiver's
+link), and the reading is never recorded. Auto plans with the lower of the
+request estimate and the unexpired limit, or the limit alone when the request
+has none. Fixed qualities ignore the limit.
+`ignore` plans without the limit, records nothing and leaves the limit
+stored; `clear` deletes it before planning. The 80% margin and the
+administrator and client caps still apply. When any estimate or learned limit
+puts the source over budget and alternate versions are allowed, Auto first
+tries versions of the same edition that fit and play without video encoding,
+those that keep the source's dynamic range first, then the highest bitrate,
+then a transcode; an unchanged source carries `quality_reduction_unavailable`.
+This buffering search runs on a start, a `quality_change` or `output_change`
+replan, and a `failure_recovery` that changes intent: `quality_changed` changes
+the normalized quality or carries `learned_limit: "clear"`;
+`output_route_changed` changes `output_context_id`; or `audio_track_changed`
+or `subtitle_track_changed` changes the corresponding selected track. Explicit
+`track_change` replans, seeks and recoveries without an intent change do not run
+this search. A plan that the stored limit actually lowered adds
+`bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`. The server
+plans the same start or replan again without the limit, and without an
+`observed_rebuffer` estimate the request carries, with the connection's reading
+in its place and the same version search, and keeps the field only when that
+plan sends more, so a version that compatibility or the reading alone picks
+carries no field. A replan that starts from the version playing and stays on it keeps the
+field when the plan it replaces had it.
+
+`playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode`, `buffering_action` and `throughput_kbps`
+to the diagnostics allowlist; the existing `bandwidth_estimate_kbps` key
+reports the requested estimate. `throughput_kbps`, the rate the plan's media
+arrived at, becomes the connection's `playback_sample` when it is higher than
+the kept one or the kept one has outlived the reading lifetime; a **Test
+speed** result (`manual: true`) clears it. Clients send a summary when a plan stops playing, whether it was
+replaced, stopped or failed. A newly inserted summary becomes its connection's
+latest and feeds `silo_playback_stall_ratio{client,delivery}` and
+`silo_playback_buffering_actions_total{mode,action}`; a retried event counts
+once. The delivery is the reported plan's, read from the stored start or replan
+response, not its replacement's; an unresolvable plan reports `unknown`.
+
+The connection endpoints, probe results and the admin view are in the
+[Playback API](../playback-api.md#buffering-quality-native-v2). The
+[buffering-quality design](../design/2026-10-17-buffering-quality.md) and its
+shared conformance vectors define the client controller.

@@ -26,6 +26,8 @@ export interface WatchRouteRequest {
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  /** The viewer chose fileId, so Auto must not swap in another version. */
+  versionPicked?: boolean;
   returnHref?: string;
   requestKey: string;
 }
@@ -41,6 +43,7 @@ export interface WatchPlaybackStartInput {
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  versionPicked?: boolean;
   returnHref?: string;
 }
 
@@ -62,6 +65,7 @@ function buildWatchRouteRequestKey(
   audioTrackIndex: number | undefined,
   prePlaySubtitleMode: "auto" | "off" | "explicit" | undefined,
   prePlaySubtitleSelection: PrePlaySubtitleSelection | null | undefined,
+  versionPicked: boolean,
 ): string {
   return JSON.stringify([
     contentId,
@@ -74,6 +78,7 @@ function buildWatchRouteRequestKey(
     audioTrackIndex ?? null,
     prePlaySubtitleMode ?? null,
     prePlaySubtitleSelection ?? null,
+    versionPicked,
   ]);
 }
 
@@ -88,6 +93,7 @@ export function createWatchRouteRequest({
   audioTrackIndex,
   prePlaySubtitleMode,
   prePlaySubtitleSelection,
+  versionPicked = false,
   returnHref,
 }: WatchPlaybackStartInput): WatchRouteRequest {
   return {
@@ -101,6 +107,7 @@ export function createWatchRouteRequest({
     audioTrackIndex,
     prePlaySubtitleMode,
     prePlaySubtitleSelection,
+    versionPicked,
     returnHref,
     requestKey: buildWatchRouteRequestKey(
       contentId,
@@ -113,6 +120,7 @@ export function createWatchRouteRequest({
       audioTrackIndex,
       prePlaySubtitleMode,
       prePlaySubtitleSelection,
+      versionPicked,
     ),
   };
 }
@@ -404,6 +412,7 @@ export function buildWatchPageProps({
     title: item.title,
     year: item.year,
     fileId: request.fileId,
+    versionPicked: request.versionPicked,
     libraryId: request.libraryId,
     versions: item.versions,
     playbackVariants: item.playback_variants ?? [],

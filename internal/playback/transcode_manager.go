@@ -15,8 +15,10 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -320,7 +322,7 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
-	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
 }
@@ -341,7 +343,20 @@ func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeN
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
 func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL)
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true)
+}
+
+// TranscodeStopFenceQueryParam set to "0" on a node stop asks the node not to
+// fence the transport against reconstruction.
+const TranscodeStopFenceQueryParam = "fence"
+
+// ReleaseRemoteTranscode stops a remote job whose transport id lives on: the
+// API is moving it between nodes. The node does not fence the id, so a replica
+// or a stream token whose route still names that node can rebuild it there,
+// and a release that lands late cannot lock out a successor started under the
+// same id.
+func (m *TranscodeManager) ReleaseRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -785,6 +800,9 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		ClientChannel:    normalizeClientMetadataValue(card.ClientChannel, 32),
 		ClientUserAgent:  normalizeClientMetadataValue(card.ClientUserAgent, 512),
 		IsJellyfinCompat: card.IsJellyfinCompat,
+		// The card carries no address; the media request rebuilding the
+		// session comes from the viewer's player.
+		ClientIP: clientip.FromContext(ctx),
 		// Preserve the byte-affecting recipe so an audio switch after a restart
 		// rebuilds the same stream (subtitles/cadence) instead of dropping them.
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
@@ -1125,10 +1143,8 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // Under token-carried reconstruction there is no durable card to drop: a stopped
 // session simply stops being served, and its segment dir is reaped by the
 // in-memory-liveness + age cleanup once no live token could still reconstruct it
-// (see CleanupOrphanedTranscodes). A sub-TTL hard cut of an abusive stream
-// before the token expires depends on a node-side revocation mechanism that is
-// deferred to a future PR; today a stopped session can be reconstructed by a
-// still-valid token until it expires.
+// (see CleanupOrphanedTranscodes). A remote node fences the stopped transport
+// for the token lifetime, so its still-valid tokens cannot rebuild it there.
 func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string) {
 	// Clean up local session if one exists (defensive).
 	m.transcodeMu.Lock()
@@ -1219,7 +1235,7 @@ var remoteTranscodeControlClient = func() *http.Client {
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
-func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, fence bool) error {
 	if transcodeNodeURL == "" {
 		return nil
 	}
@@ -1230,6 +1246,9 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	defer cancel()
 
 	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
+	if !fence {
+		deleteURL += "?" + TranscodeStopFenceQueryParam + "=0"
+	}
 	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
@@ -1238,7 +1257,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 
-	resp, err := remoteTranscodeControlClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "transcode_stop")
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}

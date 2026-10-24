@@ -87,6 +87,23 @@
     },
     "client_playback_context": {
       "$ref": "#/$defs/client_playback_context"
+    },
+    "bandwidth_estimate_source": {
+      "type": "string",
+      "enum": [
+        "probe",
+        "observed_rebuffer"
+      ]
+    },
+    "observed_throughput_kbps": {
+      "$ref": "#/$defs/bandwidth_kbps"
+    },
+    "learned_limit": {
+      "type": "string",
+      "enum": [
+        "ignore",
+        "clear"
+      ]
     }
   },
   "allOf": [
@@ -105,6 +122,63 @@
         "required": [
           "start_position"
         ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "bandwidth_estimate_source"
+        ]
+      },
+      "then": {
+        "required": [
+          "bandwidth_estimate_kbps"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "observed_throughput_kbps"
+        ]
+      },
+      "then": {
+        "required": [
+          "bandwidth_estimate_source"
+        ],
+        "properties": {
+          "bandwidth_estimate_source": {
+            "const": "observed_rebuffer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "bandwidth_estimate_source"
+            ]
+          },
+          {
+            "required": [
+              "learned_limit"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "client_features"
+        ],
+        "properties": {
+          "client_features": {
+            "contains": {
+              "const": "buffering_quality_v1"
+            }
+          }
+        }
       }
     }
   ],

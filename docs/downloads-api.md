@@ -521,9 +521,12 @@ event:
 ```
 
 Capture `updated_at` when local state changes, and retain both the timestamp and the
-revision when retrying. `status` is `downloading` or `completed`; future timestamps
-are rejected. The response is `200` with the current `DownloadEntry`, whose optional
-`status_event_at` names the latest accepted event for the current revision.
+revision when retrying. `status` is `downloading` or `completed`. The server keeps
+`updated_at` as reported when it is at most two minutes ahead of its own clock, the
+same skew progress sync allows, so device clock drift does not refuse a report; a
+later timestamp returns `400 malformed_request`. The response is `200` with the
+current `DownloadEntry`, whose optional `status_event_at` names the latest accepted
+event for the current revision.
 
 An older or equal event returns the current entry without changing it. A different
 revision returns `409`: reload the registry and reconcile the new bytes instead of
@@ -990,8 +993,8 @@ Notes:
 - `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
   external (`external:{index}`) subtitles; an external subtitle that cannot be
   read has none. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change: a timing correction, or an external file edited
-  on disk. When a refreshed manifest shows a different value than the one
+  delivered bytes can change: a timing correction, an external file edited
+  on disk, or a change in how the server decodes subtitle text to UTF-8. When a refreshed manifest shows a different value than the one
   stored with the cached file, re-fetch that subtitle. An external subtitle's
   `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as

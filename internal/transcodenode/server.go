@@ -327,7 +327,19 @@ type Server struct {
 	sessions                  map[string]*playback.TranscodeSession
 	progressiveRemuxes        map[string]progressiveRemuxRequest
 	stoppedProgressiveRemuxes map[string]time.Time
-	progressiveRemuxSequence  atomic.Uint64
+	// stoppedTranscodes records, per HLS transport id, until when a stream
+	// token may still ask this process to rebuild a transport the API stopped.
+	// Reconstruction refuses those ids, so a segment request still in flight
+	// when the stop lands, or a stale token for a retired transport, cannot
+	// restart an encode nobody is watching. Only a fresh start clears an entry;
+	// the idle reaper and a release (fence=0) record none, because a client may
+	// return to a reaped job and a released id lives on.
+	// Guarded by mu.
+	stoppedTranscodes map[string]time.Time
+	// lastStopFencePrune is when the stop-fence maps were last swept; pruning
+	// runs at most once per stopFencePruneInterval. Guarded by mu.
+	lastStopFencePrune       time.Time
+	progressiveRemuxSequence atomic.Uint64
 	// lastAccess records, per registered session id, when a manifest or segment
 	// request last touched the job (registration counts as the first access).
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
@@ -588,6 +600,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		sessions:                  make(map[string]*playback.TranscodeSession),
 		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
+		stoppedTranscodes:         make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
 	}
 	if watcher != nil {
@@ -1864,6 +1877,9 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
+	// A start is the API choosing this transport again (a Jellyfin retry or
+	// audio switch reuses the id after stopping it), so it lifts the stop fence.
+	delete(s.stoppedTranscodes, req.SessionID)
 	published = true
 	s.noteSessionAccessLocked(req.SessionID)
 	s.noteStartedAsLocked(req.SessionID, executor)
@@ -1976,6 +1992,10 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	// no store wired there is nothing to rebuild from, so 404.
 	if !tokenComplete && s.recipeStore == nil {
 		return nil, nil
+	}
+	// Cheap early refusal; spawnReconstruct re-checks under the lifecycle lock.
+	if s.transcodeStopped(sessionID) {
+		return nil, errTranscodeStopped
 	}
 
 	v, err, _ := s.reconstructGroup.Do(sessionID, func() (interface{}, error) {
@@ -2113,6 +2133,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	s.mu.RUnlock()
 	if ok {
 		return existing, nil
+	}
+	// A stop records its fence under this lock, so a request that found no job
+	// because the stop was tearing it down sees the fence here.
+	if s.transcodeStopped(sessionID) {
+		return nil, errTranscodeStopped
 	}
 
 	// Pace the cold-start burst only after this session owns its lifecycle lock.
@@ -2424,7 +2449,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	unlock := s.lockSessionLifecycle(transportID)
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	if s.stoppedProgressiveRemuxes[transportID].After(now) {
 		s.mu.Unlock()
 		unlock()
@@ -2489,8 +2514,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
 		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
-		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
-		Abort:                  abort,
+		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps, CopyAudioCodec: claims.CopyAudioCodec,
+		Abort: abort,
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
 			"session", transportID, "playback_session_id", claims.SessionID)
@@ -2560,12 +2585,38 @@ func (s *Server) progressiveRemuxAuthorityActive(ctx context.Context, transportI
 		stored.RoutingEgressNodeID == claims.RoutingEgressNodeID
 }
 
-func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
+// stopFencePruneInterval bounds how often a stop or remux registration sweeps
+// the fence maps under mu. Every fence lookup compares its expiry with the
+// current time, so an expired entry left until the next sweep is inert.
+const stopFencePruneInterval = time.Minute
+
+func (s *Server) pruneStopFencesLocked(now time.Time) {
+	if now.Sub(s.lastStopFencePrune) < stopFencePruneInterval {
+		return
+	}
+	s.lastStopFencePrune = now
 	for id, expiresAt := range s.stoppedProgressiveRemuxes {
 		if !expiresAt.After(now) {
 			delete(s.stoppedProgressiveRemuxes, id)
 		}
 	}
+	for id, expiresAt := range s.stoppedTranscodes {
+		if !expiresAt.After(now) {
+			delete(s.stoppedTranscodes, id)
+		}
+	}
+}
+
+// errTranscodeStopped is reconstructFromToken refusing a transport the API
+// stopped on this node; callers answer it like a denied session.
+var errTranscodeStopped = errors.New("transcode transport stopped")
+
+// transcodeStopped reports whether the API stopped transportID on this node
+// within the last stream-token lifetime and no start has reused it since.
+func (s *Server) transcodeStopped(transportID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stoppedTranscodes[transportID].After(time.Now())
 }
 
 // recipeExecutor names this node to the recipe store, so a teardown can tell
@@ -2631,7 +2682,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
 	if progressiveFound && progressive.playbackSessionID != "" {
 		playbackSessionID = progressive.playbackSessionID
@@ -2641,6 +2692,16 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 			s.stoppedProgressiveRemuxes = make(map[string]time.Time)
 		}
 		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
+	}
+	// Fence every stopped transport, found or not: a segment request already in
+	// flight, or one carrying a retired transport's token, would otherwise rebuild
+	// the job from its stream token after this stop returns. A release (the API
+	// moving the transport to another node) keeps the id rebuildable here.
+	if r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0" {
+		if s.stoppedTranscodes == nil {
+			s.stoppedTranscodes = make(map[string]time.Time)
+		}
+		s.stoppedTranscodes[sessionID] = now.Add(playback.MaxTokenTTL)
 	}
 	session, ok := s.sessions[sessionID]
 	startedAs := s.startedAs[sessionID]
@@ -2724,6 +2785,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, -1)
 		if session == nil {
+			if errors.Is(reconstructErr, errTranscodeStopped) {
+				writeStreamDenied(w)
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -2782,6 +2847,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
 		if session == nil {
+			if errors.Is(reconstructErr, errTranscodeStopped) {
+				writeStreamDenied(w)
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -3109,7 +3178,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	if s.stoppedProgressiveRemuxes == nil {
 		s.stoppedProgressiveRemuxes = make(map[string]time.Time)
 	}

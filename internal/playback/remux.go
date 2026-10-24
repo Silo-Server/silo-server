@@ -205,14 +205,15 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 }
 
 func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int) []string {
-	return buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, false)
+	return buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, false, "")
 }
 
 // buildRemuxArgsWithLeadingPictureDropV3 adds the resume leading-picture drop
 // to the video bitstream filters. It applies only to a seeked copy with video:
 // a start at zero begins on the stream's first keyframe and has no leading
-// pictures to drop.
-func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool) []string {
+// pictures to drop. copyAudioCodec is the codec of the source audio track a
+// copy remux carries over.
+func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool, copyAudioCodec string) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -313,6 +314,16 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 		args = appendAACEncodeFilterArgs(args, sourceAudioChannels, "aac", targetAudioChannels, channels)
 	} else {
 		args = append(args, "-c", "copy")
+		if strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac") {
+			// AAC in MPEG-TS (and raw .aac) is ADTS-framed; MP4 needs the
+			// ADTS headers stripped into a config record. FFmpeg normally
+			// inserts this filter on its own, but not under delay_moov: the
+			// muxer rejects the first ADTS packet ("Malformed AAC bitstream")
+			// and the response ends after the header. The filter passes
+			// already-raw AAC from MKV/MP4 through unchanged, but it refuses
+			// any other codec, so it is only added for a copied AAC track.
+			args = append(args, "-bsf:a", "aac_adtstoasc")
+		}
 	}
 
 	args = append(args,
@@ -344,10 +355,10 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 // v3 callers must pass the configured playback path so the strip capability
 // promised by the planner's probe holds for the binary that actually runs.
 func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
-	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0, 0, false)
+	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0, 0, false, "")
 }
 
-func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool) (*RemuxSession, error) {
+func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool, copyAudioCodec string) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ResolveFFmpegPath(ffmpegPath)
@@ -406,7 +417,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	// expression serves the plain copy rather than failing the route. Only
 	// probe when the filter would actually run.
 	dropLeadingPictures = dropLeadingPictures && seekSeconds > 0 && !audioOnly && supportsLeadingPictureDropFilter(bin)
-	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures)
+	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures, copyAudioCodec)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -503,6 +514,10 @@ type RemuxServeOptions struct {
 	SourceAudioChannels    int
 	TargetAudioChannels    int
 	TargetAudioBitrateKbps int
+	// CopyAudioCodec is the codec of the source audio track the remux copies;
+	// a copied AAC track gets aac_adtstoasc. Empty (older tokens) keeps the
+	// plain copy. It is ignored when audio is transcoded.
+	CopyAudioCodec string
 	// DropResumeLeadingPictures removes open-GOP leading pictures from a
 	// seeked video copy when this executor's FFmpeg supports it. It is a
 	// best-effort client workaround frozen into the session, so an executor
@@ -559,7 +574,24 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
-	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps, opts.DropResumeLeadingPictures)
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = containerMIME(outputFormat)
+	}
+	setStreamHeaders := func() {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Transfer-Encoding", "chunked")
+	}
+	// net/http discards a HEAD response's body, so a remux started for one
+	// would run ffmpeg over the whole file for nothing. Answer with the
+	// headers a GET sends instead.
+	if r.Method == http.MethodHead {
+		setStreamHeaders()
+		w.WriteHeader(http.StatusOK)
+		return nil
+	}
+
+	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps, opts.DropResumeLeadingPictures, opts.CopyAudioCodec)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err
@@ -586,12 +618,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		}()
 	}
 
-	contentType := opts.ContentType
-	if contentType == "" {
-		contentType = containerMIME(outputFormat)
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Transfer-Encoding", "chunked")
+	setStreamHeaders()
 	w.WriteHeader(http.StatusOK)
 
 	// Stream ffmpeg output to the HTTP response.

@@ -794,17 +794,18 @@ function PlaybackCapabilityPrewarmer() {
 }
 
 /**
- * Measures throughput to the server in the background so Auto quality can
- * tell a 4K-capable link from a slow one. Signed-out screens stay quiet and a
- * fresh cached measurement skips the probe. There is deliberately no
- * re-measure on `connection` change events: Chromium fires them whenever its
- * rounded estimate moves, which would spend a probe every few minutes.
+ * Keeps a connection speed reading for Auto quality, so it can tell a
+ * 4K-capable link from a slow one. Signed-out screens stay quiet; once a
+ * profile is active, the app reads what the server keeps for this connection
+ * and runs the quick test only when no reading proves the link (see
+ * bandwidth-probe.ts). The reads are profile-scoped, and the test's target
+ * follows the profile's libraries, so a profile switch starts over.
  */
-function BandwidthProbePrewarmer() {
-  const { user } = useAuth();
-  const isAuthenticated = Boolean(user);
+export function BandwidthProbePrewarmer() {
+  const { user, profile } = useAuth();
+  const profileId = user ? profile?.id : undefined;
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!profileId) return;
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void import("@/player/bandwidth-probe")
@@ -818,7 +819,7 @@ function BandwidthProbePrewarmer() {
       cancelled = true;
       cleanup?.();
     };
-  }, [isAuthenticated]);
+  }, [profileId]);
   return null;
 }
 

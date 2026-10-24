@@ -17,7 +17,22 @@ func goldenHLSSubtitleRenditionDecisionResponse() playback.DecisionResponseV3 {
 	request.QualityPreference = playback.QualityRung720pMediumV3
 	request.SubtitleTrackIndex = new(0)
 	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
-	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = goldenHLSDelivery()
+	response := goldenDecisionForSourceWith(file, request, nil, func(input *playback.PlannerInputV3) {
+		input.SubtitleRenditionExecutable = func() bool { return true }
+	})
+	if plan := response.PlaybackPlan; plan.Delivery != playback.DeliveryTranscodeHLSV3 || plan.Subtitle.HLSRendition == nil {
+		failf("golden subtitle rendition plan is %s without a rendition", plan.Delivery)
+	}
+	response.PlaybackPlan.Stream.URL = "/playback/transcode/" + goldenSessionID + "/master.m3u8"
+	response.ServerFeatures = playback.NativeServerFeaturesV3()
+	return response
+}
+
+// goldenHLSDelivery is a client that can play the server's H.264 HLS
+// transcode with sidecar text subtitles.
+func goldenHLSDelivery() playback.DeliveryCapabilityV3 {
+	return playback.DeliveryCapabilityV3{
 		Enabled:                true,
 		SupportedOnDevice:      true,
 		Containers:             []string{"hls"},
@@ -30,13 +45,4 @@ func goldenHLSSubtitleRenditionDecisionResponse() playback.DecisionResponseV3 {
 		ValidatedClaims:        []string{},
 		Transformations:        []playback.TransformationV3{},
 	}
-	response := goldenDecisionForSourceWith(file, request, nil, func(input *playback.PlannerInputV3) {
-		input.SubtitleRenditionExecutable = func() bool { return true }
-	})
-	if plan := response.PlaybackPlan; plan.Delivery != playback.DeliveryTranscodeHLSV3 || plan.Subtitle.HLSRendition == nil {
-		failf("golden subtitle rendition plan is %s without a rendition", plan.Delivery)
-	}
-	response.PlaybackPlan.Stream.URL = "/playback/transcode/" + goldenSessionID + "/master.m3u8"
-	response.ServerFeatures = playback.NativeServerFeaturesV3()
-	return response
 }

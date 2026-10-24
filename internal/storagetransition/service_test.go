@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
@@ -2044,4 +2045,153 @@ func TestSourceHealthReportsConfiguredS3Stores(t *testing.T) {
 	if health.Message != "Current public S3 storage is unreachable." {
 		t.Fatalf("message = %q", health.Message)
 	}
+}
+
+// throttlingStore rejects its first throttled writes the way the S3 client
+// reports a rate limit that outlasted its own retries.
+type throttlingStore struct {
+	*memoryStore
+	mu        sync.Mutex
+	throttled int
+	// readsThrottled rate limits this many reads, such as the read-back that
+	// verifies a write.
+	readsThrottled int
+	puts           int
+}
+
+func (s *throttlingStore) Get(ctx context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	s.mu.Lock()
+	throttle := s.readsThrottled > 0
+	if throttle {
+		s.readsThrottled--
+	}
+	s.mu.Unlock()
+	if throttle {
+		return nil, blobstore.ObjectInfo{}, fmt.Errorf("s3 GetObject %s: %w", key, blobstore.ErrThrottled)
+	}
+	return s.memoryStore.Get(ctx, key)
+}
+
+func (s *throttlingStore) Put(ctx context.Context, key string, data []byte) error {
+	s.mu.Lock()
+	s.puts++
+	throttle := s.throttled > 0
+	if throttle {
+		s.throttled--
+	}
+	s.mu.Unlock()
+	if throttle {
+		return fmt.Errorf("s3 PutObject %s: %w", key, blobstore.ErrThrottled)
+	}
+	return s.memoryStore.Put(ctx, key, data)
+}
+
+func throttleSource() *memoryStore {
+	return &memoryStore{identity: "local|source|", objects: map[string][]byte{
+		"tmdb/01.webp": []byte("one"), "tmdb/02.webp": []byte("two"), "tmdb/03.webp": []byte("three"),
+	}}
+}
+
+func TestCopyPassWaitsOutAProviderThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := throttleSource()
+		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 4}
+		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
+		var messages []string
+		start := time.Now()
+		copied, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(_, _ int, message string) {
+			messages = append(messages, message)
+		}, 0, "run", nil, false)
+		if err != nil {
+			t.Fatalf("copy during a throttle that clears = %v, want success", err)
+		}
+		if copied != 3 || len(target.objects) != 3 {
+			t.Fatalf("copied=%d target=%v, want all 3 objects", copied, target.objects)
+		}
+		// Each of the four retries waits at least half the base delay.
+		if elapsed := time.Since(start); elapsed < 4*throttleBaseDelay/2 {
+			t.Fatalf("copy resumed after %s, want a backoff before each retry", elapsed)
+		}
+		if !containsMessage(messages, "rate limiting") {
+			t.Fatalf("progress messages %q do not report the throttle", messages)
+		}
+	})
+}
+
+func TestCopyPassVerifiesAgainWithoutUploadingAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := throttleSource()
+		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, readsThrottled: 2}
+		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
+		copied, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, false)
+		if err != nil {
+			t.Fatalf("copy with a throttled verification read = %v, want success", err)
+		}
+		if copied != 3 || len(target.objects) != 3 {
+			t.Fatalf("copied=%d target=%v, want all 3 objects", copied, target.objects)
+		}
+		if target.puts != 3 {
+			t.Fatalf("target writes = %d, want 3: a throttled read-back must not upload the object again", target.puts)
+		}
+	})
+}
+
+func TestFencedPassFailsFastOnAProviderThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := throttleSource()
+		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 1}
+		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
+		start := time.Now()
+		_, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, true)
+		if !errors.Is(err, blobstore.ErrThrottled) {
+			t.Fatalf("fenced copy error = %v, want ErrThrottled", err)
+		}
+		// Storage writes are blocked during the fenced pass, so it must not wait.
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("fenced pass waited %s on a throttle while writes were blocked", elapsed)
+		}
+	})
+}
+
+func TestCopyPassGivesUpOnAThrottleThatNeverClears(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := throttleSource()
+		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 1 << 20}
+		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
+		start := time.Now()
+		_, _, _, err := service.copyPrefixPass(t.Context(), "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, false)
+		if !errors.Is(err, blobstore.ErrThrottled) {
+			t.Fatalf("copy error = %v, want ErrThrottled", err)
+		}
+		if elapsed := time.Since(start); elapsed < throttleRetries*throttleBaseDelay/2 {
+			t.Fatalf("gave up after %s, want a backoff before each retry", elapsed)
+		}
+	})
+}
+
+func TestCopyPassCancellationInterruptsThrottleWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := throttleSource()
+		target := &throttlingStore{memoryStore: &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, throttled: 1 << 20}
+		service := sequential(New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil))
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(10*time.Second, cancel)
+		start := time.Now()
+		_, _, _, err := service.copyPrefixPass(ctx, "throttled", "public:", source, target, "", func(int, int, string) {}, 0, "run", nil, false)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("copy error = %v, want context.Canceled", err)
+		}
+		if elapsed := time.Since(start); elapsed != 10*time.Second {
+			t.Fatalf("cancellation returned after %s, want it to end the 30s wait at 10s", elapsed)
+		}
+	})
+}
+
+func containsMessage(messages []string, part string) bool {
+	for _, message := range messages {
+		if strings.Contains(message, part) {
+			return true
+		}
+	}
+	return false
 }

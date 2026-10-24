@@ -96,7 +96,9 @@ func TestSessionStoreFailureLogsOmitFullToken(t *testing.T) {
 			message: "jellycompat session store delete failed",
 			run: func(t *testing.T, repo *failingSessionRepo, store *SessionStore, _ func(time.Duration)) {
 				repo.failDelete = true
-				store.Delete(token)
+				if err := store.Delete(token); err == nil {
+					t.Fatal("Delete did not return the storage failure")
+				}
 			},
 		},
 	}

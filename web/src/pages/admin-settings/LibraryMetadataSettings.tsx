@@ -11,6 +11,7 @@ import {
   useAdminRatingSources,
 } from "@/hooks/queries/admin/ratingSources";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
+import { LANGUAGES } from "@/player/utils/languageNames";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import {
@@ -33,7 +34,16 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 
 // Skip markers are on Playback, search on its own Search page, and saving
 // provider artwork on Storage; none of their keys are loaded here.
-const GENERAL_KEYS = ["catalog.scope_versions_to_library"];
+const GENERAL_KEYS = ["catalog.scope_versions_to_library", "metadata.fallback_language"];
+
+// The server takes two-letter codes; regional variants such as pt-BR are left out.
+const FALLBACK_LANGUAGE_OPTIONS = [
+  ...LANGUAGES.filter((lang) => !lang.code.includes("-")).map((lang) => ({
+    value: lang.code,
+    label: lang.label,
+  })),
+  { value: "original", label: "Original language" },
+];
 
 // Not a browsing preference: a rule about what a profile with a maximum
 // content rating may see at all.
@@ -169,6 +179,15 @@ export default function LibraryMetadataSettings() {
               )
             }
             restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+          <SettingField
+            label="Fallback metadata language"
+            type="select"
+            description="Used for titles, descriptions, and posters a library's metadata language has no text for, before the original language. Existing items change on their next manual refresh."
+            value={form.getValue("metadata.fallback_language") || "en"}
+            onChange={(value) => form.setValue("metadata.fallback_language", value)}
+            options={FALLBACK_LANGUAGE_OPTIONS}
+            restartRequired={restartKeys.has("metadata.fallback_language")}
           />
         </FieldGroup>
 

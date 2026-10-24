@@ -43,9 +43,14 @@ func TestAdminPluginRepositoryUpdate(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"7"`) || len(f.inputs) != 1 || f.ids[0] != 7 || f.inputs[0].URL != nil || f.inputs[0].DisplayName != nil || f.inputs[0].Enabled == nil || *f.inputs[0].Enabled || f.reads != 1 {
 		t.Fatal(rec.Code, rec.Body.String(), f.inputs)
 	}
-	rec = do(t, h, "PUT", path, `{"url":" https://example.invalid/new ","display_name":" New "}`, bearer(adminToken))
-	if rec.Code != 200 || *f.inputs[1].URL != " https://example.invalid/new " || *f.inputs[1].DisplayName != " New " || f.inputs[1].Enabled != nil {
+	rec = do(t, h, "PUT", path, `{"url":"https://example.invalid/new","display_name":" New "}`, bearer(adminToken))
+	if rec.Code != 200 || *f.inputs[1].URL != "https://example.invalid/new" || *f.inputs[1].DisplayName != " New " || f.inputs[1].Enabled != nil {
 		t.Fatal(rec.Code, f.inputs)
+	}
+	// A URL that does not parse is refused at the member without echoing it.
+	p := requireProblem(t, do(t, h, "PUT", path, `{"url":" https://secret-token@example.invalid/x"}`, bearer(adminToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.url" || strings.Contains(p.Errors[0].Detail, "secret-token") || len(f.inputs) != 2 {
+		t.Fatalf("errors = %+v inputs = %d", p.Errors, len(f.inputs))
 	}
 	for _, test := range []struct {
 		err    error

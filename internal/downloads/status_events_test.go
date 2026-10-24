@@ -65,16 +65,36 @@ func statusEventTestRepo(t *testing.T) *Repository {
 }
 
 func TestDownloadStatusEventValidation(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		event StatusEvent
+		valid bool
+	}{
+		{"missing time", StatusEvent{Status: StatusCompleted, Revision: 1}, false},
+		{"missing revision", StatusEvent{Status: StatusCompleted, UpdatedAt: now.Add(-time.Minute)}, false},
+		{"past event", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(-time.Minute)}, true},
+		// A device clock slightly ahead of the server's still reports.
+		{"one second ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(time.Second)}, true},
+		{"two minutes ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(2 * time.Minute)}, true},
+		{"past the skew window", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(2*time.Minute + time.Second)}, false},
+		{"an hour ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(time.Hour)}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.event.validate(now)
+			if tc.valid && err != nil {
+				t.Fatalf("valid event refused: %v", err)
+			}
+			if !tc.valid && !errors.Is(err, ErrInvalidStatusEvent) {
+				t.Fatalf("invalid event: err = %v, want ErrInvalidStatusEvent", err)
+			}
+		})
+	}
+
 	service := &Service{}
-	for _, event := range []StatusEvent{
-		{Status: StatusCompleted, Revision: 1},
-		{Status: StatusCompleted, Revision: 1, UpdatedAt: time.Now().Add(time.Hour)},
-		{Status: StatusCompleted, UpdatedAt: time.Now().Add(-time.Minute)},
-		{Status: StatusReady, Revision: 1, UpdatedAt: time.Now().Add(-time.Minute)},
-	} {
-		if _, err := service.ReportStatus(t.Context(), 1, "one", "device", "id", event); err == nil {
-			t.Fatal("invalid event accepted")
-		}
+	if _, err := service.ReportStatus(t.Context(), 1, "one", "device", "id", StatusEvent{Status: StatusReady, Revision: 1, UpdatedAt: time.Now().Add(-time.Minute)}); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatal(err)
 	}
 	if _, err := service.ReportStatus(t.Context(), 1, "one", "", "id", StatusEvent{}); !errors.Is(err, ErrProfileRequired) {
 		t.Fatal(err)

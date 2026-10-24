@@ -129,6 +129,17 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 	return h
 }
 
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the handler. Its signal reads then ask the store instead of the
+// Postgres tables.
+func (h *RecommendationsHandler) WithUserStoreOutsidePostgres(outside bool) *RecommendationsHandler {
+	if h != nil {
+		h.signals.WithUserStoreOutsidePostgres(outside)
+	}
+	return h
+}
+
 // --- Response types ---
 
 type scoredItemsResponse struct {

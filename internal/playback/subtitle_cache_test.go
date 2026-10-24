@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -66,48 +67,119 @@ func TestServeExtractTextWindowDoesNotPoisonFullTrack(t *testing.T) {
 	}
 }
 
-func TestServeExtractTextConcurrentViewerDoesNotWaitForFill(t *testing.T) {
-	c, source := newTestCache(t)
-	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
-	started, release := make(chan struct{}), make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, func(ctx context.Context, opts StreamExtractOpts) error {
-			close(started)
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
+func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
+	for _, tc := range []struct {
+		codec, format string
+		failTemp      bool
+	}{
+		{codec: "subrip", format: "vtt"},
+		{codec: "hdmv_pgs_subtitle", format: "sup"},
+		// The temp file fails after the second viewer has the first cues: it
+		// extracts the rest itself without repeating them.
+		{codec: "subrip", format: "vtt", failTemp: true},
+	} {
+		t.Run(fmt.Sprintf("%s/failTemp=%v", tc.codec, tc.failTemp), func(t *testing.T) {
+			c, source := newTestCache(t)
+			opts := StreamExtractOpts{InputPath: source, SourceCodec: tc.codec}
+			const track = "first cues, rest of the track"
+			started, secondGotCues := make(chan struct{}), make(chan struct{})
+			var calls atomic.Int32
+			extract := func(ctx context.Context, opts StreamExtractOpts) error {
+				if calls.Add(1) > 1 {
+					_, err := io.WriteString(opts.Writer, track)
+					return err
+				}
+				fill := inflightFill(c)
+				close(started)
+				if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
+					return err
+				}
+				select {
+				case <-secondGotCues:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if tc.failTemp {
+					fill.mu.Lock()
+					_ = fill.tmp.Close()
+					fill.mu.Unlock()
+				}
+				_, err := io.WriteString(opts.Writer, "rest of the track")
+				return err
 			}
-			_, err := io.WriteString(opts.Writer, "complete owner track")
-			return err
+			// The first viewer's client stops reading.
+			stalled := &stalledResponse{ResponseRecorder: httptest.NewRecorder(), release: make(chan struct{})}
+			firstCtx, leave := context.WithCancel(t.Context())
+			firstDone := make(chan error, 1)
+			go func() {
+				firstDone <- c.ServeExtract(stalled, httptest.NewRequestWithContext(firstCtx, http.MethodGet, "/subtitle", nil), opts, extract)
+			}()
+			defer func() {
+				leave()
+				close(stalled.release)
+				<-firstDone
+			}()
+			<-started
+
+			second := &signalingResponse{ResponseRecorder: httptest.NewRecorder(), wrote: secondGotCues}
+			if err := c.ServeExtract(second, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, extract); err != nil {
+				t.Fatal(err)
+			}
+			if got := second.Body.String(); got != track {
+				t.Fatalf("second viewer body = %q, want %q", got, track)
+			}
+			wantCalls := int32(1)
+			if tc.failTemp {
+				wantCalls = 2
+			}
+			if got := calls.Load(); got != wantCalls {
+				t.Fatalf("extract ran %d times, want %d", got, wantCalls)
+			}
+			f, _, ok := c.lookup(source, 0, tc.format)
+			if ok == tc.failTemp {
+				t.Fatalf("cached=%v with failed temp file=%v", ok, tc.failTemp)
+			}
+			if ok {
+				if got := readAllAndClose(t, f); got != track {
+					t.Fatalf("cached track = %q", got)
+				}
+			}
 		})
-	}()
-	<-started
-	defer func() {
-		close(release)
-		if err := <-firstDone; err != nil {
-			t.Error(err)
-		}
-	}()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	rec := httptest.NewRecorder()
-	err := c.ServeExtract(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
-		_, err := io.WriteString(opts.Writer, "independent viewer track")
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	if rec.Body.String() != "independent viewer track" {
-		t.Fatalf("body = %q", rec.Body.String())
+}
+
+// inflightFill returns the one fill in flight.
+func inflightFill(c *SubtitleCache) *SubtitleCacheFill {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, fill := range c.inflight {
+		return fill
 	}
-	// The second viewer must not publish or discard the first viewer's fill.
-	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
-		_ = f.Close()
-		t.Fatal("concurrent viewer published another viewer's fill")
-	}
+	return nil
+}
+
+// stalledResponse blocks every write until release is closed, then fails it.
+type stalledResponse struct {
+	*httptest.ResponseRecorder
+	release chan struct{}
+}
+
+func (s *stalledResponse) Write([]byte) (int, error) {
+	<-s.release
+	return 0, errors.New("client stopped reading")
+}
+
+// signalingResponse closes wrote after its first write.
+type signalingResponse struct {
+	*httptest.ResponseRecorder
+	wrote chan struct{}
+	once  sync.Once
+}
+
+func (s *signalingResponse) Write(p []byte) (int, error) {
+	n, err := s.ResponseRecorder.Write(p)
+	s.once.Do(func() { close(s.wrote) })
+	return n, err
 }
 
 func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
@@ -137,6 +209,62 @@ func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
 		t.Fatal("canceled viewer discarded the active fill")
 	}
 	_ = f.Close()
+}
+
+func TestServeExtractFillOutlivesViewerWhenWarmSlotFree(t *testing.T) {
+	for _, slotsBusy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("slotsBusy=%v", slotsBusy), func(t *testing.T) {
+			c, source := newTestCache(t)
+			if slotsBusy {
+				for range cap(c.warmSem) {
+					c.warmSem <- struct{}{}
+				}
+			}
+			ctx, leave := context.WithCancel(t.Context())
+			var fill *SubtitleCacheFill
+			err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil),
+				StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(ctx context.Context, opts StreamExtractOpts) error {
+					fill = inflightFill(c)
+					if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
+						return err
+					}
+					leave()
+					if slotsBusy {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(5 * time.Second):
+							t.Error("extract kept running without a warm slot")
+						}
+					}
+					for len(c.warmSem) == 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(time.Millisecond):
+						}
+					}
+					_, err := io.WriteString(opts.Writer, "rest of the track")
+					return err
+				})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want the viewer's cancellation", err)
+			}
+			<-fill.done
+			f, _, ok := c.lookup(source, 0, "vtt")
+			if ok == slotsBusy {
+				t.Fatalf("cached=%v with slots busy=%v", ok, slotsBusy)
+			}
+			if ok {
+				if got := readAllAndClose(t, f); got != "first cues, rest of the track" {
+					t.Fatalf("cached track = %q", got)
+				}
+			}
+			if !slotsBusy && len(c.warmSem) != 0 {
+				t.Fatalf("fill kept %d warm slots after finishing", len(c.warmSem))
+			}
+		})
+	}
 }
 
 func TestServeExtractOutlivesServerWriteTimeout(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"math/rand/v2"
 )
 
-// MaxSize is the largest probe a client may request. It is large enough to
-// time a fast link for a couple of seconds and small enough that a probe stays
-// cheap next to the media the same viewer could download.
-const MaxSize = 100_000_000
+// MaxSize is the largest probe a client may request: the accurate speed test,
+// which times up to 10 seconds of a fast link. The quick automatic test asks
+// for a tenth of it and usually stops after about a second.
+const MaxSize = 1_000_000_000
 
 // Write sends size random bytes to w. The bytes are random rather than
 // constant so a compressing proxy cannot shrink the payload and inflate the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -189,12 +190,7 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	if err != nil {
 		return nil, fmt.Errorf("list progress: %w", err)
 	}
-
-	result := make([]upstreamProgress, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, toUpstreamProgress(entry))
-	}
-	return result, nil
+	return completedProgressWithPlayDates(ctx, store, session.ProfileID, status, entries)
 }
 
 func (s *directUserDataService) ListProgressFiltered(ctx context.Context, session *Session, status string, types []string, libraryID *int, limit, offset int) ([]upstreamProgress, error) {
@@ -207,10 +203,32 @@ func (s *directUserDataService) ListProgressFiltered(ctx context.Context, sessio
 	if err != nil {
 		return nil, fmt.Errorf("list filtered progress: %w", err)
 	}
+	return completedProgressWithPlayDates(ctx, store, session.ProfileID, status, entries)
+}
 
+// completedProgressWithPlayDates converts a progress page and, for completed
+// pages, reports each row's play date instead of its write time, matching
+// GetProgress and ListProgressByMediaItems. In-progress pages keep the write
+// time: FilterResumeProgress matches dismissals against it.
+func completedProgressWithPlayDates(ctx context.Context, store userstore.UserStore, profileID, status string, entries []userstore.WatchProgress) ([]upstreamProgress, error) {
+	var dates map[string]string
+	if status == "completed" && len(entries) > 0 {
+		ids := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			ids = append(ids, entry.MediaItemID)
+		}
+		var err error
+		if dates, err = jellycompatProgressDates(ctx, store, profileID, ids); err != nil {
+			return nil, err
+		}
+	}
 	result := make([]upstreamProgress, 0, len(entries))
 	for _, entry := range entries {
-		result = append(result, toUpstreamProgress(entry))
+		progress := toUpstreamProgress(entry)
+		if date := dates[entry.MediaItemID]; date != "" {
+			progress.UpdatedAt = date
+		}
+		result = append(result, progress)
 	}
 	return result, nil
 }
@@ -254,6 +272,44 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 	result := make([]upstreamProgress, 0, len(progress))
 	for _, entry := range progress {
 		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
+func (s *directUserDataService) ListResumableProgress(ctx context.Context, session *Session, mediaItemIDs []string) ([]upstreamProgress, error) {
+	mediaItemIDs = normalizeContentIDs(mediaItemIDs)
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	// Chunked like chunkedProgressByMediaItems: a long series expands to
+	// thousands of episode ids.
+	const chunkSize = 500
+	var rows []userstore.WatchProgress
+	for start := 0; start < len(mediaItemIDs); start += chunkSize {
+		chunk, err := store.ListProgressByMediaItems(ctx, session.ProfileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		if err != nil {
+			return nil, fmt.Errorf("list progress by media items: %w", err)
+		}
+		for _, row := range chunk {
+			// The in_progress predicate of ListProgress.
+			if row.PositionSeconds > 0 {
+				rows = append(rows, row)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].UpdatedAt != rows[j].UpdatedAt {
+			return rows[i].UpdatedAt > rows[j].UpdatedAt
+		}
+		return rows[i].MediaItemID > rows[j].MediaItemID
+	})
+	result := make([]upstreamProgress, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, toUpstreamProgress(row))
 	}
 	return result, nil
 }

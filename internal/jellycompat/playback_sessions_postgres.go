@@ -33,6 +33,18 @@ type pendingCompatPlaybackUpdate struct {
 	apply       func(*PlaybackSession) error
 }
 
+// compatUpdateRejectedError reports that an Update callback rejected the
+// DB-authoritative row, typically because another replica committed first. It
+// carries that row, with this process's still-pending updates applied, so the
+// cache can be brought back in line with it.
+type compatUpdateRejectedError struct {
+	current *PlaybackSession
+	err     error
+}
+
+func (e *compatUpdateRejectedError) Error() string { return e.err.Error() }
+func (e *compatUpdateRejectedError) Unwrap() error { return e.err }
+
 type compatCacheGeneration struct {
 	epoch uint64
 	value uint64
@@ -168,13 +180,13 @@ func NewDurableCompatPlaybackStore(pool *pgxpool.Pool, ttl time.Duration, now fu
 	if now == nil {
 		now = time.Now
 	}
-	if ttl <= 0 {
-		ttl = 6 * time.Hour
-	}
+	mem := NewPlaybackSessionStore(ttl, now)
 	return &DurableCompatPlaybackStore{
-		mem:              NewPlaybackSessionStore(ttl, now),
-		pool:             pool,
-		ttl:              ttl,
+		mem:  mem,
+		pool: pool,
+		// Rows expire with the lifetime the cache resolved, including its
+		// default for a non-positive ttl.
+		ttl:              mem.ttl,
 		now:              now,
 		validatedIDs:     make(map[string]time.Time),
 		validatedTokens:  make(map[string]time.Time),
@@ -802,9 +814,12 @@ func (d *DurableCompatPlaybackStore) GetFinalizable(id, compatToken string) (*Pl
 // fn to that row, and upserts the result before committing. This stops two
 // processes (or a cache-evicted writer racing another) from clobbering each
 // other's JSON with a blind whole-document upsert — e.g. a transcode-recipe
-// write being lost to a concurrent upstream-session write. The DB step is still
-// best-effort for availability: a DB failure is logged and the in-memory mutation
-// stands, but a successful DB read-modify-write is never silently lost.
+// write being lost to a concurrent upstream-session write. When fn rejects that
+// row, Update returns fn's error and refreshes the cache from the row, so a
+// compare-and-swap that won against a stale cache still loses to another
+// replica's commit. The DB step is still best-effort for availability: a DB
+// failure is logged and the in-memory mutation stands, but a successful DB
+// read-modify-write is never silently lost.
 func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession) error) error {
 	if d.pool == nil {
 		return d.mem.Update(id, fn)
@@ -825,14 +840,17 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		return err
 	}
 	pending := d.pendingUpdatesSnapshot(id)
-	committed, err := d.updateDB(id, func(session *PlaybackSession) error {
-		for _, update := range pending {
-			if err := update.apply(session); err != nil {
-				return err
-			}
-		}
-		return fn(session)
-	})
+	committed, err := d.updateDB(id, pending, fn)
+	var rejected *compatUpdateRejectedError
+	if errors.As(err, &rejected) {
+		// Another writer (usually another replica) changed the row so fn no
+		// longer applies, though it passed against this cache. The row wins:
+		// replace the cache copy fn already mutated and return fn's error, as the
+		// in-memory store would, so compare-and-swap callers learn they lost.
+		d.mem.Put(*rejected.current)
+		d.markIDValidated(id)
+		return rejected.err
+	}
 	if committed != nil {
 		// Refresh the cache from the DB-authoritative committed row so the cache
 		// reflects any concurrent writer's fields that fn merged on top of.
@@ -856,16 +874,21 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 	return nil
 }
 
-// updateDB applies fn to the DB-authoritative row inside a transaction using
-// SELECT ... FOR UPDATE, then upserts and commits. It returns the committed
-// session when the round-trip succeeded. A nil pool or a genuinely
-// missing/expired row returns (nil, nil): there is no durable row to update, so
-// this is treated as best-effort (the caller keeps the in-memory mutation), not a
-// durability failure. A real DB round-trip error returns (nil, err) so the caller
-// can learn the session was not durably persisted. fn is expected to be
-// idempotent — it is applied to the cache copy and again to the DB-authoritative
-// copy.
-func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSession) error) (*PlaybackSession, error) {
+// updateDB replays pending, then applies fn, to the DB-authoritative row inside
+// a transaction using SELECT ... FOR UPDATE, then upserts and commits. It
+// returns the committed session when the round-trip succeeded. A nil pool or a
+// genuinely missing/expired row returns (nil, nil): there is no durable row to
+// update, so this is treated as best-effort (the caller keeps the in-memory
+// mutation), not a durability failure. When fn rejects the row it returns a
+// *compatUpdateRejectedError and writes nothing. A real DB round-trip error
+// returns (nil, err) so the caller can learn the session was not durably
+// persisted. fn is expected to be idempotent — it is applied to the cache copy
+// and again to the DB-authoritative copy.
+func (d *DurableCompatPlaybackStore) updateDB(
+	id string,
+	pending []pendingCompatPlaybackUpdate,
+	fn func(*PlaybackSession) error,
+) (*PlaybackSession, error) {
 	if d.pool == nil {
 		return nil, nil
 	}
@@ -899,13 +922,24 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", id)
 		return nil, err
 	}
-	if err := fn(&session); err != nil {
-		// The mutation itself rejected the authoritative row; the cache mutation
-		// (already applied) stands. This is a fn/data condition, not an
-		// infrastructure failure, so it is not surfaced as a durability error.
-		slog.Warn("apply compat playback session update failed", "error", err, "play_session_id", id)
-		return nil, nil
+	for _, update := range pending {
+		candidate := session
+		if err := update.apply(&candidate); err != nil {
+			// A write queued after an earlier DB failure no longer applies to the
+			// row, e.g. its compare-and-swap lost to another replica meanwhile.
+			// Drop it; committing consumes it with the rest of the queue.
+			slog.Warn("drop pending compat playback session update", "error", err, "play_session_id", id)
+			continue
+		}
+		session = candidate
 	}
+	// Like the in-memory store, fn mutates a copy so a rejection leaves session
+	// as the row the caller must adopt.
+	candidate := session
+	if err := fn(&candidate); err != nil {
+		return nil, &compatUpdateRejectedError{current: &session, err: err}
+	}
+	session = candidate
 	session.UpdatedAt = d.now()
 
 	data, err := marshalPlaybackSession(session)

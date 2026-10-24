@@ -56,7 +56,7 @@ type DownloadRegistryInput struct {
 }
 type DownloadStatusBody struct {
 	Status    string  `json:"status" enum:"downloading,completed"`
-	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Future times are rejected."`
+	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Times more than two minutes ahead of the server clock are rejected."`
 	Revision  int     `json:"revision" minimum:"1" doc:"Registry revision whose bytes this event describes; retain on retry."`
 }
 type DownloadStatusInput struct {
