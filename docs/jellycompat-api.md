@@ -791,7 +791,7 @@ whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 `remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
 keeps fMP4. Other clients are unchanged.
 
-## AC-3 and MP3 audio encoding
+## AAC encodes
 
 Compatibility audio encodes are AAC, which FFmpeg's encoder writes as AAC-LC;
 the negotiated output states that profile, so codec-profile rules on
@@ -801,15 +801,3 @@ profiles although every Roku decodes stereo AAC (JellyRock fixed the same bug
 by always listing it first), so a transcoding profile without AAC still admits
 the stereo AAC encode when the profile declares AAC decode in a video
 direct-play or `VideoAudio` codec profile.
-
-A profile that leaves AAC out and declares no AAC decode gets an AC-3 or MP3
-encode instead, if it lists one: AC-3 at the same channel target capped at 5.1
-and 448 kb/s, or MP3 at stereo and 192 kb/s. The one the profile also declares
-it decodes is preferred, since Roku clients list AC-3 first on every device,
-expecting a receiver to decode it. Each needs an executor allowed by routing
-policy that advertises its recipe (`audio_to_ac3` or `audio_to_mp3`, recipe
-1); without one, PlaybackInfo answers as it would with no compatible encode.
-The codec is frozen in the playback source as `TargetAudioCodec`, and its
-playlists and segments use `/Videos/{id}/audio-codec-v1/...`, which takes
-precedence over the other HLS route versions, so older API instances reject
-them instead of encoding AAC.

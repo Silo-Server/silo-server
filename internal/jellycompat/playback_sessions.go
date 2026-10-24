@@ -120,20 +120,7 @@ type PlaybackMediaSource struct {
 	TargetAudioChannels      int
 	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
 	// Empty values are legacy H.264 sessions.
-	TargetVideoCodec string
-	// TargetAudioCodec fixes the encoded audio codec the same way. Empty values
-	// are legacy AAC sessions.
-	TargetAudioCodec string
-	// encodeAudioCodec is the full encode's audio codec, which a subtitle
-	// burn-in switches an audio-encoding remux to. It is only read while
-	// PlaybackInfo builds the source, so it is not stored.
-	encodeAudioCodec string
-	// h264TargetBitrateKbps and h264TargetResolution are the H.264 encode
-	// target, which PlaybackInfo restores when it falls back from an HEVC
-	// encode no executor can run. Like encodeAudioCodec, they are not stored.
-	h264TargetBitrateKbps int
-	h264TargetResolution  string
-
+	TargetVideoCodec     string
 	ID                   string
 	FileID               int
 	Version              catalog.FileVersion
@@ -170,6 +157,13 @@ type PlaybackMediaSource struct {
 	// may be enabled later. The scalar fields above retain the selected track's
 	// delivery for sessions read by older binaries during a rolling update.
 	SubtitleDeliveries map[int]PlaybackSubtitleDelivery
+
+	// h264TargetBitrateKbps and h264TargetResolution are the H.264 encode
+	// target, which PlaybackInfo restores when it falls back from an HEVC
+	// encode no executor can run. They are only read while PlaybackInfo
+	// builds the source, so they are not stored.
+	h264TargetBitrateKbps int
+	h264TargetResolution  string
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
