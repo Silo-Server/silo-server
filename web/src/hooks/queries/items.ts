@@ -358,6 +358,9 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
         ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
         : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
+      // Marking watched no longer always flips the flag (a rewatch stays
+      // watched), so remember what to restore.
+      const previousPlayed = item.user_data?.played ?? !nextPlayed;
       await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
@@ -369,16 +372,18 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
+      return { previousPlayed };
     },
     // Revert only this mutation's own field. Restoring a whole snapshot would
     // discard a concurrent favorite/watchlist toggle's optimistic state.
-    onError: (err, nextPlayed) => {
+    onError: (err, nextPlayed, context) => {
+      const previousPlayed = context?.previousPlayed ?? !nextPlayed;
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
-        user_data: { ...detail.user_data, played: !nextPlayed },
+        user_data: { ...detail.user_data, played: previousPlayed },
         user_state: {
           ...detail.user_state,
-          played: !nextPlayed,
+          played: previousPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },

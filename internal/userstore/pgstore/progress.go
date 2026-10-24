@@ -510,7 +510,7 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 			completed = TRUE,
 			updated_at = EXCLUDED.updated_at,
 			event_at = EXCLUDED.event_at
- WHERE NOT user_watch_progress.completed OR EXISTS (
+ WHERE NOT user_watch_progress.completed OR user_watch_progress.position_seconds > 0 OR EXISTS (
   SELECT 1 FROM user_history_hidden_items hhi
   WHERE hhi.user_id = user_watch_progress.user_id AND hhi.profile_id = user_watch_progress.profile_id
   AND hhi.media_item_id = user_watch_progress.media_item_id AND user_watch_progress.updated_at <= hhi.hidden_before

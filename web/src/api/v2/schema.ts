@@ -12256,7 +12256,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op. */
+    /** Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, unless it has a resume position from a rewatch: that records another play and clears the position. */
     post: operations["markWatched"];
     /** Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs. */
     delete: operations["unmarkWatched"];
@@ -29140,6 +29140,11 @@ export interface components {
        * @example true
        */
       clear_resume_position: boolean;
+      /**
+       * @description Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op
+       * @example true
+       */
+      mark_watched_records_rewatch: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**

@@ -116,6 +116,9 @@ type ResumePositionInput struct {
 type ProgressCapabilities struct {
 	Capability
 	ClearResumePosition bool `json:"clear_resume_position" doc:"Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history" example:"true"`
+	// Older servers answer markWatched on a rewatch in progress with a 204 that
+	// records nothing, so a client checks this before offering Mark Watched there.
+	MarkWatchedRecordsRewatch bool `json:"mark_watched_records_rewatch" doc:"Whether markWatched on a watched movie or episode that has a resume position (a rewatch in progress) records another play and clears the position; otherwise that mark is a no-op" example:"true"`
 }
 
 // ProgressCapabilitiesOutput is the getProgressCapabilities response.
@@ -162,7 +165,7 @@ func (reg *Registry) getProgressCapabilities(_ context.Context, _ *CapabilityInp
 	if reg.deps.Watch == nil {
 		return &ProgressCapabilitiesOutput{Body: ProgressCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
 	}
-	return &ProgressCapabilitiesOutput{Body: ProgressCapabilities{Capability: Capability{State: StateAvailable}, ClearResumePosition: true}}, nil
+	return &ProgressCapabilitiesOutput{Body: ProgressCapabilities{Capability: Capability{State: StateAvailable}, ClearResumePosition: true, MarkWatchedRecordsRewatch: true}}, nil
 }
 
 // clearResumePosition resets a movie or episode to no resume position for the
