@@ -95,10 +95,12 @@ Watch history is untouched. `unmarkWatched` is different: it removes the item's
 history, including unfinished plays.
 
 `markWatched` on such an item records a play. On a rewatch in progress (a
-watched item with a resume position) it records another completed play and
-clears the position, where it used to be a no-op. A repeated mark records
-nothing until playback sets a new position, so it is not exactly once: a retry
-that lands after a new progress report records another play.
+watched movie or episode with a resume position) it records another completed
+play and clears the position, where it used to be a no-op. A season or series
+mark leaves those episodes alone, as do the frozen v1 operation and the
+Jellyfin played endpoints. A repeated mark records nothing until playback sets
+a new position, so it is not exactly once: a retry that lands after a new
+progress report records another play.
 
 The write is stamped with the server time. It advances the delta-sync cursor, so
 other devices receive the cleared position, and an older provider resume point
