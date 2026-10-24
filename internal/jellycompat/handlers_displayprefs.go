@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,7 +69,15 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	val, err := store.GetJellycompatDisplayPrefs(r.Context(), profilePreferencesID(session.ProfileID, id), client)
+	// Older servers rewrote an ID that reads like a route word ("items" became
+	// "Items") before storing it, so read that key when the exact one is unset.
+	ids := []string{id}
+	if legacy := canonicalizeCompatSegment(id); legacy != id {
+		ids = append(ids, legacy)
+	}
+	val, err := firstDisplayPrefs(r.Context(), store, client, ids, func(id string) string {
+		return profilePreferencesID(session.ProfileID, id)
+	})
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -82,7 +91,7 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 		// Older servers stored one document for the account. Keep that
 		// customization available to its primary profile after scoping reads.
 		if profile != nil && profile.IsPrimary {
-			val, err = store.GetJellycompatDisplayPrefs(r.Context(), id, client)
+			val, err = firstDisplayPrefs(r.Context(), store, client, ids, func(id string) string { return id })
 			if err != nil {
 				writeCompatUpstreamError(w, err)
 				return
@@ -95,6 +104,9 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 			writeCompatUpstreamError(w, err)
 			return
 		}
+		// A document read under the rewritten legacy key stored that key as
+		// its Id; answer with the ID the client asked for.
+		dto.ID, dto.Client = id, client
 	} else if err := h.seedFromProfile(r, session, &dto); err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -104,6 +116,18 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 	}
 	fillReadCustomPrefs(dto.CustomPrefs)
 	writeJSON(w, http.StatusOK, dto)
+}
+
+// firstDisplayPrefs returns the first stored document among ids, mapped to
+// their storage keys by key, or "" when none is stored.
+func firstDisplayPrefs(ctx context.Context, store userstore.UserStore, client string, ids []string, key func(string) string) (string, error) {
+	for _, id := range ids {
+		val, err := store.GetJellycompatDisplayPrefs(ctx, key(id), client)
+		if err != nil || val != "" {
+			return val, err
+		}
+	}
+	return "", nil
 }
 
 // HandleUpdateDisplayPreferences serves POST /DisplayPreferences/{displayPreferencesId}.

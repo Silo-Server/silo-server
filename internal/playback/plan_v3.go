@@ -12,11 +12,15 @@ import (
 )
 
 type PlannerSettingsV3 struct {
-	TranscodeEnabled       bool
-	Allow4KTranscode       bool
-	AllowHEVCEncoding      bool
-	HardwareToneMapEnabled bool
-	SoftwareToneMapEnabled bool
+	TranscodeEnabled  bool
+	Allow4KTranscode  bool
+	AllowHEVCEncoding bool
+	// PreferLowerVersionTranscode lets a lower-resolution version serve the
+	// qualities it reaches when 4K transcoding is allowed too; with 4K
+	// transcoding off the lower version serves them regardless.
+	PreferLowerVersionTranscode bool
+	HardwareToneMapEnabled      bool
+	SoftwareToneMapEnabled      bool
 	// ViewerTranscodeDisabled reflects the viewer's account policy. Session
 	// admission enforces it; the planner only uses it to stop advertising
 	// quality rungs the viewer cannot start.
@@ -25,6 +29,7 @@ type PlannerSettingsV3 struct {
 
 const (
 	TerminalMessage4KTranscodeDisabledV3   = "A lower-resolution source is required because 4K transcoding is disabled."
+	terminalMessageLowerVersionServesV3    = "A lower-resolution version serves this quality."
 	containerMP4V3                         = "mp4"
 	containerMKVV3                         = "mkv"
 	containerHLSV3                         = "hls"
@@ -448,10 +453,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// validated reduced-quality recipe yet, or the client/server lacks the
 	// transcode route entirely), deliver the source at original quality with a
 	// degradation warning instead of refusing playback. Explicit user-selected
-	// rungs keep the existing terminals.
+	// rungs keep the existing terminals. A lower version that serves lower
+	// qualities can carry the reduction, so the planner refuses the source and
+	// the handler's alternate-version fallback transcodes that version instead.
 	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
 		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
-		!videoTranscodeExecutableV3(input, source) {
+		!videoTranscodeExecutableV3(input, source) && !lowerVersionServesQualitiesV3(input) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
 			Code:    "quality_reduction_unavailable",
 			Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality.",
@@ -903,17 +910,42 @@ type LowerVersionV3 struct {
 // quality is lower still. Without HLS or transcoding the 4K source is refused
 // for a reason the fallback does not act on, so the menu stays as it was.
 func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
-	return input.LowerVersion != nil && !input.Settings.Allow4KTranscode && input.Settings.TranscodeEnabled &&
-		deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+	return input.LowerVersion != nil && (!input.Settings.Allow4KTranscode || input.Settings.PreferLowerVersionTranscode) &&
+		input.Settings.TranscodeEnabled && deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+}
+
+// lowerVersionTakesTranscodeV3 reports whether a transcode of a 4K source to
+// quality, which 4K transcoding allows, belongs to its lower version instead:
+// the lower version serves lower qualities and reaches quality's resolution
+// class. A quality above the lower version's class still transcodes the 4K
+// source.
+func lowerVersionTakesTranscodeV3(input PlannerInputV3, source SourceDescriptorV3, quality QualityResultV3) bool {
+	if !input.Settings.Allow4KTranscode || !lowerVersionServesQualitiesV3(input) || !is4KSourceV3(input.EffectiveFile, source) {
+		return false
+	}
+	class := quality.Class
+	if class == 0 {
+		class = ladderClassForSize(quality.Width, quality.Height)
+	}
+	return class > 0 && class <= sourceLadderHeightV3(input.LowerVersion.Lower)
 }
 
 // lowerVersionQualitiesV3 is the menu of a 4K version whose lower qualities
-// come from its lower-resolution version: original, the lower version at its
-// resolution class (for example "1080p"), which plays it unchanged, and the
-// transcode rungs below that version.
+// come from its lower-resolution version: original, the 4K rungs above the
+// lower version's class when 4K transcoding is allowed, the lower version at
+// its resolution class (for example "1080p"), which plays it unchanged, and
+// the transcode rungs below that version.
 func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
 	lower := input.LowerVersion.Lower
 	qualities := []AvailableQualityV3{originalQualityEntryV3(input.LowerVersion.Requested)}
+	if input.Settings.Allow4KTranscode {
+		lowerClass := sourceLadderHeightV3(lower)
+		for _, quality := range transcodeRungsV3(input, nil, input.LowerVersion.Requested) {
+			if quality.Height > lowerClass {
+				qualities = append(qualities, quality)
+			}
+		}
+	}
 	if label, ok := lowerVersionLabelV3(input.LowerVersion.Requested, lower); ok {
 		qualities = append(qualities, AvailableQualityV3{
 			Label:       label,
@@ -1217,6 +1249,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		hlsRegistry = input.hlsVideoRegistry()
 	}
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
+		// The lower version can still play a quality it serves at its own
+		// size, so a refusal it acts on beats one it does not.
+		if lowerVersionTakesTranscodeV3(input, source, quality) {
+			return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
+		}
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
 	// An automatic encode never spends more than the best menu rung of its
@@ -1270,7 +1307,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if top := bitrateLadder[0]; quality.Height > top.Height {
 		width, height := FitLadderBox(source.Width, source.Height, top.Height)
 		width, height = encodedFrame(source.Width, source.Height, width, height)
-		quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+		quality.Label, quality.Width, quality.Height, quality.Class = heightLabel(height), width, height, top.Height
 		quality.PreservesSource = false
 	}
 	targetVideoCodec := transcodeCodecH264
@@ -1291,6 +1328,13 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {
 			targetVideoCodec, quality = transcodeCodecHEVC, hevcQuality
 		}
+	}
+	// Decided on the encode the device takes, which an H.264 decoder can hold
+	// below the quality asked for. The handler's alternate-version fallback
+	// transcodes the lower version instead, and replans this source without
+	// it if that fails.
+	if lowerVersionTakesTranscodeV3(input, source, quality) {
+		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesV3(input, source)
@@ -1433,7 +1477,7 @@ func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, sourc
 				width = class.Width
 			}
 			if anyTakes(width, height, class.Height) || i == len(classes)-1 {
-				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+				quality.Label, quality.Width, quality.Height, quality.Class = heightLabel(height), width, height, class.Height
 				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
 				quality.PreservesSource = false
 				break
@@ -1689,6 +1733,11 @@ type QualityResultV3 struct {
 	// ExplicitRung marks a user-selected fixed rung, as opposed to an
 	// automatic reduction from device limits, bandwidth evidence, or caps.
 	ExplicitRung bool
+	// Class is the resolution class a reduction encodes at, which its frame
+	// alone does not give: a 2.67:1 film's 720p High rung and its 1080p class
+	// fitted to the box are both 1920x720. 0 when the quality keeps the
+	// source's frame.
+	Class int
 	// BudgetKbps is the share of a bandwidth estimate an automatic encode's
 	// video and audio fit within together; 0 when no estimate bounds it.
 	BudgetKbps int
@@ -1844,7 +1893,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, Class: class.Height, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }
@@ -1919,6 +1968,7 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 		Label:             targetLabel,
 		Width:             width,
 		Height:            height,
+		Class:             rung.Height,
 		BitrateKbps:       bitrate,
 		RequiresTranscode: true,
 		ExplicitRung:      true,

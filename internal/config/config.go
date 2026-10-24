@@ -413,6 +413,10 @@ type MetadataConfig struct {
 	// PersonRefreshPerMinute caps background person metadata lookups per API
 	// node (metadata.person_refresh_per_minute).
 	PersonRefreshPerMinute int `yaml:"-"`
+	// FallbackLanguage is the language refreshes fall back to before the
+	// original language (metadata.fallback_language). Empty means none: the
+	// setting's "original" value. An empty stored setting is the default, en.
+	FallbackLanguage string `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.
