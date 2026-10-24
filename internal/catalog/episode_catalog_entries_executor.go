@@ -164,6 +164,9 @@ func (e *QueryExecutor) episodeCatalogSeek(ctx context.Context, def QueryDefinit
 	sql := fmt.Sprintf("%sSELECT ece.episode_id %s%s %s %s LIMIT 1 OFFSET $%d", withClause, q.from, q.sortJoin, q.where, q.orderBy, len(args))
 	var episodeID string
 	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(&episodeID); err != nil {
+		if episodeCatalogEntriesUnavailable(err) {
+			return nil, false, nil
+		}
 		return nil, true, err
 	}
 	key, err := e.queryTupleFor(ctx, plan, episodeID)
