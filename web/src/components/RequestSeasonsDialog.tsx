@@ -33,6 +33,12 @@ interface RequestSeasonsDialogProps {
   title: string;
   /** The series' request detail when the caller has it; otherwise the dialog loads it when opened. */
   detail?: RequestMediaDetail;
+  /**
+   * Seasons to start picked instead of the default, such as the one the
+   * viewer asked for from a missing season. Ones that cannot be requested
+   * are dropped; when none is left the default pick applies.
+   */
+  initialSeasons?: number[];
 }
 
 /**
@@ -48,6 +54,7 @@ export function RequestSeasonsDialog({
   tmdbID,
   title,
   detail: givenDetail,
+  initialSeasons,
 }: RequestSeasonsDialogProps) {
   const loaded = useRequestMediaDetail("series", tmdbID, { enabled: open && !givenDetail });
   const detail = givenDetail ?? loaded.data;
@@ -62,7 +69,10 @@ export function RequestSeasonsDialog({
   const seasons = detail?.seasons ?? [];
   const requestable = detail?.request.requestable ?? false;
   const choices = requestable ? seasons.filter(seasonRequestable) : [];
-  const defaults = defaultRequestSeasons(choices);
+  const preferred = (initialSeasons ?? []).filter((number) =>
+    choices.some((season) => season.season_number === number),
+  );
+  const defaults = preferred.length > 0 ? preferred : defaultRequestSeasons(choices);
   const selected = (picked ?? defaults).filter((number) =>
     choices.some((season) => season.season_number === number),
   );
@@ -71,8 +81,11 @@ export function RequestSeasonsDialog({
   // needs something for it to pick: an aired season still missing, or a
   // series outside the library (requested whole). A series in the library
   // with only upcoming seasons left needs them picked.
+  // A preferred pick names its seasons, so the server does not choose.
   const serverChooses =
-    picked === null && (seasons.length === 0 || defaults.length > 0 || !inLibrary);
+    picked === null &&
+    preferred.length === 0 &&
+    (seasons.length === 0 || defaults.length > 0 || !inLibrary);
   const allPicked = choices.length > 0 && choices.every((s) => selected.includes(s.season_number));
   const latest = requestable ? latestRequestSeason(seasons) : null;
   const upcoming = upcomingRequestSeasons(choices);

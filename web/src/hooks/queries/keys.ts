@@ -58,6 +58,9 @@ export const itemKeys = {
   filters: () => ["items", "filters"] as const,
 };
 
+/** Which episodes the library lacks a season or episode list includes. */
+type MissingScope = "none" | "aired" | "all";
+
 export const catalogKeys = {
   all: ["catalog"] as const,
   list: (params: CatalogParams) => ["catalog", "list", params] as const,
@@ -70,10 +73,16 @@ export const catalogKeys = {
   itemVersions: (id: string) => ["catalog", "items", id, "versions"] as const,
   audiobookGroups: (libraryId: number, groupBy: string, sort: string, search: string) =>
     ["catalog", "audiobookGroups", libraryId, groupBy, sort, search] as const,
-  itemEpisodes: (id: string, libraryId?: number) =>
-    ["catalog", "items", id, "episodes", libraryId ?? "default"] as const,
-  seriesSeasons: (seriesId: string, libraryId?: number) =>
-    ["catalog", "series", seriesId, "seasons", libraryId ?? "default"] as const,
+  // A missing-episodes scope appends to the key, so invalidating the plain
+  // key (a prefix) refreshes every scope.
+  itemEpisodes: (id: string, libraryId?: number, missing: MissingScope = "none") =>
+    missing === "none"
+      ? (["catalog", "items", id, "episodes", libraryId ?? "default"] as const)
+      : (["catalog", "items", id, "episodes", libraryId ?? "default", missing] as const),
+  seriesSeasons: (seriesId: string, libraryId?: number, missing: MissingScope = "none") =>
+    missing === "none"
+      ? (["catalog", "series", seriesId, "seasons", libraryId ?? "default"] as const)
+      : (["catalog", "series", seriesId, "seasons", libraryId ?? "default", missing] as const),
   seasonDetail: (seriesId: string, seasonNum: number, libraryId?: number) =>
     [
       "catalog",

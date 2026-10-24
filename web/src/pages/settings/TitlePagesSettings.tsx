@@ -40,14 +40,19 @@ export default function TitlePagesSettings() {
     capabilities.data,
     SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
   );
+  const supportsMissingEpisodes = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.CATALOG_SHOW_MISSING_EPISODES,
+  );
   const keys = useMemo<SettingKey[]>(
     () => [
       SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE,
+      ...(supportsMissingEpisodes ? [SETTING_KEYS.CATALOG_SHOW_MISSING_EPISODES] : []),
       ...(supportsThemeMusic ? [SETTING_KEYS.UI_THEME_MUSIC_ENABLED] : []),
       ...(supportsThemeMusicLoop ? [SETTING_KEYS.UI_THEME_MUSIC_LOOP] : []),
       ...(supportsEpisodeSpoilers ? EPISODE_SPOILER_KEYS : []),
     ],
-    [supportsEpisodeSpoilers, supportsThemeMusic, supportsThemeMusicLoop],
+    [supportsEpisodeSpoilers, supportsMissingEpisodes, supportsThemeMusic, supportsThemeMusicLoop],
   );
   const { data: effective, isPending, isError } = useEffectiveSettings({ keys });
   // Saves at profile scope and clears any device override shadowing it, the
@@ -90,6 +95,18 @@ export default function TitlePagesSettings() {
         <SettingsGroup title="Sound" description="Plays while a title's page is open.">
           {switchRow(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
           {supportsThemeMusicLoop ? switchRow(SETTING_KEYS.UI_THEME_MUSIC_LOOP) : null}
+        </SettingsGroup>
+      ) : null}
+
+      {supportsMissingEpisodes ? (
+        <SettingsGroup
+          title="Seasons"
+          description="Applies to series pages, on every device that uses this profile."
+        >
+          {switchRow(
+            SETTING_KEYS.CATALOG_SHOW_MISSING_EPISODES,
+            "Show the seasons and episodes the library does not have, dimmed, with a button to request them. Episodes still to air show only while a series request server, such as Sonarr or Seerr, is connected, since it can tell whether they are already coming. Specials are left out.",
+          )}
         </SettingsGroup>
       ) : null}
 

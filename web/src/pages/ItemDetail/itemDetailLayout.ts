@@ -68,7 +68,15 @@ export function formatEpisodeCount(count: number): string {
   return `${count} ${count === 1 ? "episode" : "episodes"}`;
 }
 
-export function formatSeasonMeta(season: Season): string {
+export function formatSeasonMeta(season: Season, now = new Date()): string {
+  const missing = season.missing_episode_count ?? 0;
+  if (missing > 0) {
+    if (season.episode_count === 0) {
+      const upcoming = season.air_date !== null && new Date(season.air_date) > now;
+      return `${upcoming ? "Upcoming" : "Not in library"} · ${formatEpisodeCount(missing)}`;
+    }
+    return `${season.episode_count} of ${formatEpisodeCount(season.episode_count + missing)}`;
+  }
   return formatEpisodeCount(season.episode_count);
 }
 

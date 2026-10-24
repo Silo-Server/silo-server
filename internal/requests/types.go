@@ -222,6 +222,9 @@ type FeatureStatus struct {
 	// MissingSeasonsRequestable reports whether a series already in the
 	// library can be requested for its missing seasons (v2 only).
 	MissingSeasonsRequestable bool `json:"-"`
+	// SeriesServerConnected reports that an enabled download server
+	// connection takes series requests (v2 only).
+	SeriesServerConnected bool `json:"-"`
 	// WatchlistRequests reports that adding a title that is not in the
 	// library to the viewer's watchlist also requests it: the server and
 	// profile settings are on. The caller adds the account's permission

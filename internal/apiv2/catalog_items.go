@@ -157,16 +157,31 @@ type CatalogSeriesInput struct {
 	LibraryID ID `query:"library_id" doc:"The library the series is being viewed in"`
 }
 
+// MissingQuery asks a season or episode list to include what the library
+// lacks.
+type MissingQuery struct {
+	IncludeMissing  bool `query:"include_missing" doc:"Include the seasons and episodes the library lacks, outside specials, marked by availability and missing_episode_count"`
+	IncludeUpcoming bool `query:"include_upcoming" doc:"With include_missing, also include the regular episodes still to air, marked unaired, and the seasons that hold only those"`
+}
+
 // CatalogSeasonsInput selects artwork for a season list.
 type CatalogSeasonsInput struct {
 	CatalogSeriesInput
 	IncludeArtwork bool `query:"include_artwork" default:"true" doc:"Include poster URLs and thumbhashes; false skips poster preparation"`
+	MissingQuery
 }
 
 // CatalogSeasonInput names one season of a series by number.
 type CatalogSeasonInput struct {
 	CatalogSeriesInput
 	Number int `path:"num" minimum:"0" doc:"Season number; 0 is specials" example:"1"`
+	MissingQuery
+}
+
+// CatalogItemEpisodesInput names one season item whose episodes to list.
+type CatalogItemEpisodesInput struct {
+	CatalogItemInput
+	MissingQuery
 }
 
 // --- outputs ---
@@ -572,6 +587,7 @@ type Episode struct {
 	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
 	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language (BCP 47 tag, such as en or pt-BR) this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
+	Availability               string              `json:"availability,omitempty" enum:"missing,unaired" doc:"Set only on lists asked to include what the library lacks: missing has aired with no file, unaired has not aired or has no air date. Absent when the episode is in the library."`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -598,6 +614,7 @@ type Season struct {
 	PosterThumbhash         string       `json:"poster_thumbhash,omitempty"`
 	UserData                *WatchRollup `json:"user_data,omitempty"`
 	MachineTranslatedFields []string     `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	MissingEpisodeCount     int          `json:"missing_episode_count,omitempty" doc:"Episodes of the season the library lacks; set only when the list was asked to include them. episode_count stays the episodes in the library."`
 }
 
 // SeasonCollection is the seasons of a series.
@@ -1268,7 +1285,7 @@ func (reg *Registry) listCatalogItemMangaFiles(ctx context.Context, in *CatalogI
 	return &MangaFilesOutput{Body: MangaFiles{Collection: NewCollection(items), FolderPaths: files.FolderPaths}}, nil
 }
 
-func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogItemInput) (*EpisodeCollectionOutput, error) {
+func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogItemEpisodesInput) (*EpisodeCollectionOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
@@ -1277,6 +1294,8 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
+	viewer.IncludeMissing = in.IncludeMissing
+	viewer.IncludeUpcoming = in.IncludeMissing && in.IncludeUpcoming
 	episodes, err := svc.ItemEpisodes(ctx, viewer, in.ID)
 	if err != nil {
 		return nil, serviceProblem(err)
@@ -1293,6 +1312,8 @@ func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsIn
 	if p != nil {
 		return nil, p
 	}
+	viewer.IncludeMissing = in.IncludeMissing
+	viewer.IncludeUpcoming = in.IncludeMissing && in.IncludeUpcoming
 	seasons, err := svc.SeriesSeasons(ctx, viewer, in.ID, in.IncludeArtwork)
 	if err != nil {
 		return nil, serviceProblem(err)
@@ -1313,6 +1334,8 @@ func (reg *Registry) getSeriesSeason(ctx context.Context, in *CatalogSeasonInput
 	if p != nil {
 		return nil, p
 	}
+	viewer.IncludeMissing = in.IncludeMissing
+	viewer.IncludeUpcoming = in.IncludeMissing && in.IncludeUpcoming
 	season, err := svc.SeriesSeason(ctx, viewer, in.ID, in.Number)
 	if err != nil {
 		return nil, serviceProblem(err)
@@ -1329,6 +1352,8 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if p != nil {
 		return nil, p
 	}
+	viewer.IncludeMissing = in.IncludeMissing
+	viewer.IncludeUpcoming = in.IncludeMissing && in.IncludeUpcoming
 	episodes, err := svc.SeasonEpisodes(ctx, viewer, in.ID, in.Number)
 	if err != nil {
 		return nil, serviceProblem(err)
@@ -1483,7 +1508,8 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
 			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
-			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields, PendingTranslationLanguage: e.PendingTranslationLanguage}
+			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields, PendingTranslationLanguage: e.PendingTranslationLanguage,
+			Availability: e.Availability}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
 				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
@@ -1496,5 +1522,5 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 func seasonOf(s handlers.SeasonView) Season {
 	return Season{ContentID: s.ContentID, PlayContentID: s.PlayContentID, SeasonNumber: s.SeasonNumber, IsSpecials: s.IsSpecials, Title: s.Title,
 		Overview: s.Overview, AirDate: datePtr(s.AirDate), EpisodeCount: s.EpisodeCount, PosterURL: s.PosterURL, PosterThumbhash: s.PosterThumbhash,
-		UserData: watchRollupOf(s.UserData), MachineTranslatedFields: s.MachineTranslatedFields}
+		UserData: watchRollupOf(s.UserData), MachineTranslatedFields: s.MachineTranslatedFields, MissingEpisodeCount: s.MissingEpisodeCount}
 }

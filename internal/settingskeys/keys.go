@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 23
+const Revision = 24
 
 // Setting keys, one constant per definition.
 const (
@@ -23,6 +23,8 @@ const (
 	CatalogMetadataLanguageOverrides = "catalog.metadata_language_overrides"
 	// Show advisory age
 	CatalogShowAdvisoryAge = "catalog.show_advisory_age"
+	// Show missing episodes
+	CatalogShowMissingEpisodes = "catalog.show_missing_episodes"
 	// Download quality
 	DownloadsDefaultQuality = "downloads.default_quality"
 	// Keep watched downloads
@@ -168,6 +170,7 @@ var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
 	CatalogShowAdvisoryAge,
+	CatalogShowMissingEpisodes,
 	HomeHideWatchedItems,
 	NavPrimaryMenu,
 	NavShortcuts,

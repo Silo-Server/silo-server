@@ -3,6 +3,9 @@ import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useItemEpisodes } from "@/hooks/queries/episodes";
+import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useShowMissingEpisodes } from "@/hooks/useShowMissingEpisodes";
+import { useMissingSeasonRequest } from "./useMissingSeasonRequest";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,6 +23,7 @@ import MetadataBadges from "./components/MetadataBadges";
 import WatchedActionBar from "./components/WatchedActionBar";
 import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
+import SeasonRequestAction from "./components/SeasonRequestAction";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { hasMachineTranslation } from "./components/machineTranslation";
@@ -44,13 +48,27 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   const [editOpen, setEditOpen] = useState(false);
   const refreshMetadataMutation = useRefreshItemMetadata();
 
+  const showMissing = useShowMissingEpisodes();
   const {
     data: episodesData,
     isLoading: episodesLoading,
     error: episodesError,
-  } = useItemEpisodes(item.content_id);
+  } = useItemEpisodes(item.content_id, showMissing);
 
-  const episodes = episodesData?.episodes ?? [];
+  // The grid also lists the episodes the library lacks when the profile asked
+  // for them; everything else here works on the ones in the library.
+  const listedEpisodes = episodesData?.episodes ?? [];
+  const episodes = listedEpisodes.filter((episode) => !episode.availability);
+  // A request names the series, which the season page knows only by id; the
+  // series page the viewer came from usually has its detail cached.
+  const seriesDetail = useCatalogItemDetail(
+    listedEpisodes.length > episodes.length ? item.series_id : undefined,
+  );
+  const missingRequest = useMissingSeasonRequest(
+    Number(seriesDetail.data?.tmdb_id) || 0,
+    item.series_title ?? "",
+    listedEpisodes.length > episodes.length,
+  );
   // The season's pending language also covers its episodes. While an episode
   // is the thing missing, or the season has no overview of its own, the
   // translation status and action sit with the episode list; otherwise the
@@ -190,15 +208,25 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
                   />
                 )}
                 <span className="text-muted-foreground text-sm">
-                  {item.episode_count ?? episodes.length} total
+                  {listedEpisodes.length > episodes.length
+                    ? `${episodes.length} of ${listedEpisodes.length} in library`
+                    : `${item.episode_count ?? episodes.length} total`}
                 </span>
+                {listedEpisodes.length > episodes.length && (
+                  <SeasonRequestAction
+                    seasonNumber={seasonNumber}
+                    onRequestSeason={missingRequest.onRequestSeason}
+                    requested={missingRequest.requestedSeasons.has(seasonNumber)}
+                  />
+                )}
               </div>
             </div>
 
             <SeasonEpisodeGrid
-              episodes={episodes}
+              episodes={listedEpisodes}
               isLoading={episodesLoading}
               episodeLinkState={episodeLinkState}
+              requestedSeasons={missingRequest.requestedSeasons}
             />
           </section>
         </div>
@@ -221,6 +249,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
         <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
       )}
       {watchTogether.sheet}
+      {missingRequest.dialog}
     </div>
   );
 }

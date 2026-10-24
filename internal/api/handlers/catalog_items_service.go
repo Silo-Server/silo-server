@@ -450,24 +450,24 @@ func (h *CatalogResourceHandler) ItemEpisodes(ctx context.Context, v ItemViewer,
 		if err := h.ensureSeriesVisible(ctx, v, seriesID, failed); err != nil {
 			return nil, err
 		}
-		episodes, err := h.items.episodeRepo.ListBySeason(ctx, seriesID, seasonNum)
+		episodes, err := h.seasonEpisodesByNumber(ctx, v, seriesID, seasonNum)
 		if err != nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 		}
 		if len(episodes) == 0 {
 			return nil, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
-		return h.items.buildEpisodeResponses(ctx, v, episodes), nil
+		return h.items.episodeResponsesWithAvailability(ctx, v, episodes), nil
 	}
 	if err := h.ensureSeriesVisible(ctx, v, season.SeriesID, failed); err != nil {
 		return nil, err
 	}
-	episodes, err := h.items.episodeRepo.ListBySeasonID(ctx, season.ContentID)
+	episodes, err := h.seasonEpisodesByID(ctx, v, season.ContentID)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 	}
-	h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
-	return h.items.buildEpisodeResponses(ctx, v, episodes), nil
+	h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, catalog.InLibrary(episodes))
+	return h.items.episodeResponsesWithAvailability(ctx, v, episodes), nil
 }
 
 // ensureSeriesVisible is the access and presentation-library check every
@@ -518,6 +518,10 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 			if err != nil {
 				return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 			}
+			missingCounts, err := h.missingEpisodeCounts(ctx, v, id)
+			if err != nil {
+				return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
+			}
 
 			// Sign every season poster in one batch instead of resolving each
 			// season again; a text-only selector skips the batch entirely.
@@ -525,7 +529,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 			if includeArtwork && h.items.detailSvc != nil {
 				paths := make([]string, 0, len(seasons))
 				for _, season := range seasons {
-					if episodeCounts[season.SeasonNumber] > 0 && season.PosterPath != "" {
+					if episodeCounts[season.SeasonNumber]+missingCounts[season.SeasonNumber] > 0 && season.PosterPath != "" {
 						paths = append(paths, sizedPosterPath(season.PosterPath, filter.ImageSizeFor(imagesize.SlotPoster)))
 					}
 				}
@@ -534,7 +538,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 			resp := make([]seasonResponse, 0, len(seasons))
 			for _, s := range seasons {
 				episodeCount := episodeCounts[s.SeasonNumber]
-				if episodeCount == 0 {
+				if episodeCount+missingCounts[s.SeasonNumber] == 0 {
 					continue
 				}
 				// Construct metadata without resolving each season again.
@@ -545,6 +549,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 				}
 				sr := h.items.localizedSeasonResponse(ctx, v, &season, episodeCount, userData[s.SeasonNumber], filter.ImageSizeFor(imagesize.SlotPoster))
 				sr.PosterURL = posterURLs[sizedPosterPath(s.PosterPath, filter.ImageSizeFor(imagesize.SlotPoster))].URL
+				sr.MissingEpisodeCount = missingCounts[s.SeasonNumber]
 				resp = append(resp, sr)
 			}
 			h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
@@ -607,6 +612,11 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 			}
 			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
 			resp := h.items.toSeasonResponseFromEpisodes(ctx, v, id, season, episodes, userData, v.Access.ImageSizeFor(imagesize.SlotPoster))
+			missingCounts, err := h.missingEpisodeCounts(ctx, v, id)
+			if err != nil {
+				return SeasonView{}, apiError(http.StatusInternalServerError, "internal_error", failed)
+			}
+			resp.MissingEpisodeCount = missingCounts[season.SeasonNumber]
 			h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
 			return resp, nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
@@ -642,16 +652,16 @@ func (h *CatalogResourceHandler) SeasonEpisodes(ctx context.Context, v ItemViewe
 	if err := h.ensureSeriesVisible(ctx, v, id, failed); err != nil {
 		return nil, err
 	}
-	episodes, err := h.items.episodeRepo.ListBySeason(ctx, id, num)
+	episodes, err := h.seasonEpisodesByNumber(ctx, v, id, num)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 	}
 	if h.items.seasonRepo != nil {
 		if season, seasonErr := h.items.seasonRepo.GetBySeriesAndNumber(ctx, id, num); seasonErr == nil && season != nil {
-			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
+			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, catalog.InLibrary(episodes))
 		}
 	}
-	return h.items.buildEpisodeResponses(ctx, v, episodes), nil
+	return h.items.episodeResponsesWithAvailability(ctx, v, episodes), nil
 }
 
 func (h *CatalogHandler) SearchContinuationCapabilities(ctx context.Context) (catalog.SearchContinuationCapabilities, error) {

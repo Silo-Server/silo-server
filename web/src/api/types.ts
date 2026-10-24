@@ -762,6 +762,8 @@ export interface Season {
   user_data?: SeasonUserData;
   /** Localized fields whose text was machine-translated by AI. */
   machine_translated_fields?: string[];
+  /** Episodes the library lacks; set only when the list included them. */
+  missing_episode_count?: number;
 }
 
 export interface SeasonsResponse {
@@ -1356,6 +1358,8 @@ export interface EpisodeListItem {
   machine_translated_fields?: string[];
   /** This profile's language when the episode's description is not in it yet. */
   pending_translation_language?: string;
+  /** Set when the list included what the library lacks and this is one of those. */
+  availability?: "missing" | "unaired";
 }
 
 export interface EpisodesResponse {
@@ -1980,7 +1984,7 @@ export interface RequestMediaSeason {
   poster_path?: string;
   /** Whether every aired episode is in the library. */
   availability: "missing" | "partial" | "available";
-  /** The title's active request covers this season. */
+  /** The title's active request covers this season, or Sonarr already monitors it. */
   requested: boolean;
 }
 

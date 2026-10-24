@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 23;
+export const SETTINGS_REVISION = 24;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -190,6 +190,8 @@ export const SETTING_KEYS = {
   CATALOG_METADATA_LANGUAGE_OVERRIDES: "catalog.metadata_language_overrides",
   /** Show advisory age */
   CATALOG_SHOW_ADVISORY_AGE: "catalog.show_advisory_age",
+  /** Show missing episodes */
+  CATALOG_SHOW_MISSING_EPISODES: "catalog.show_missing_episodes",
   /** Download quality */
   DOWNLOADS_DEFAULT_QUALITY: "downloads.default_quality",
   /** Keep watched downloads */
@@ -464,6 +466,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       "Show a recommended minimum viewer age from an advisory service, such as Common Sense Media, on item detail.",
     category: "catalog",
     control: "switch",
+  },
+  "catalog.show_missing_episodes": {
+    key: "catalog.show_missing_episodes",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile"],
+    scopeIntroducedIn: [24],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Show missing episodes",
+    description: "Show seasons and episodes the library lacks, with a way to request them.",
+    category: "catalog",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "downloads.default_quality": {
     key: "downloads.default_quality",

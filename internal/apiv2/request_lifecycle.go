@@ -48,6 +48,8 @@ type FeatureStatus struct {
 	// MissingSeasonsRequestable reports whether a series already in the
 	// library can be requested for its missing seasons.
 	MissingSeasonsRequestable bool `json:"missing_seasons_requestable" doc:"Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available."`
+	// SeriesServerConnected reports an enabled series download server.
+	SeriesServerConnected bool `json:"series_server_connected,omitempty" doc:"Whether an enabled download server connection takes series requests, so a request for missing seasons has somewhere to go. Absent when none does."`
 	// DownloadProgressSupported advertises download on requests, their
 	// targets, and the title detail's request state.
 	DownloadProgressSupported bool `json:"download_progress_supported" doc:"Whether the server reports download progress (download on requests, their targets, the title detail's request state, and watchlist titles). Whether a given request has any depends on its download server's request plugin."`
@@ -225,7 +227,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 				return nil, requestProblem(err)
 			}
 		}
-		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true,
+		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, SeriesServerConnected: status.SeriesServerConnected, DownloadProgressSupported: true,
 			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {

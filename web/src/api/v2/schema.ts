@@ -23874,6 +23874,11 @@ export interface components {
        * @description Calendar date, YYYY-MM-DD
        */
       air_date?: string;
+      /**
+       * @description Set only on lists asked to include what the library lacks: missing has aired with no file, unaired has not aired or has no air date. Absent when the episode is in the library.
+       * @enum {string}
+       */
+      availability?: "missing" | "unaired";
       /** @example episode:severance-s01e01 */
       content_id: string;
       /** Format: int64 */
@@ -24090,6 +24095,8 @@ export interface components {
       /** @description Opaque revision of this document */
       revision: string;
       season_requests_supported: boolean;
+      /** @description Whether an enabled download server connection takes series requests, so a request for missing seasons has somewhere to go. Absent when none does. */
+      series_server_connected?: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -29911,7 +29918,7 @@ export interface components {
       name?: string;
       /** @description TMDB image path */
       poster_path?: string;
-      /** @description The title's active request covers this season */
+      /** @description The title's active request covers this season, or a Sonarr server monitors it or Seerr already has it requested */
       requested: boolean;
       /**
        * Format: int64
@@ -30147,6 +30154,11 @@ export interface components {
       is_specials?: boolean;
       /** @description Localized fields whose text was machine-translated by AI; absent when none were */
       machine_translated_fields?: "overview"[];
+      /**
+       * Format: int64
+       * @description Episodes of the season the library lacks; set only when the list was asked to include them. episode_count stays the episodes in the library.
+       */
+      missing_episode_count?: number;
       overview?: string;
       /** @description The episode to play next */
       play_content_id?: string;
@@ -91103,6 +91115,10 @@ export interface operations {
         file_id?: string;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Include the seasons and episodes the library lacks, outside specials, marked by availability and missing_episode_count */
+        include_missing?: boolean;
+        /** @description With include_missing, also include the regular episodes still to air, marked unaired, and the seasons that hold only those */
+        include_upcoming?: boolean;
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
@@ -92921,6 +92937,10 @@ export interface operations {
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Include poster URLs and thumbhashes; false skips poster preparation */
         include_artwork?: boolean;
+        /** @description Include the seasons and episodes the library lacks, outside specials, marked by availability and missing_episode_count */
+        include_missing?: boolean;
+        /** @description With include_missing, also include the regular episodes still to air, marked unaired, and the seasons that hold only those */
+        include_upcoming?: boolean;
         /** @description The library the series is being viewed in */
         library_id?: string;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
@@ -93045,6 +93065,10 @@ export interface operations {
         backdrop_width?: number;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Include the seasons and episodes the library lacks, outside specials, marked by availability and missing_episode_count */
+        include_missing?: boolean;
+        /** @description With include_missing, also include the regular episodes still to air, marked unaired, and the seasons that hold only those */
+        include_upcoming?: boolean;
         /** @description The library the series is being viewed in */
         library_id?: string;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
@@ -93171,6 +93195,10 @@ export interface operations {
         backdrop_width?: number;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Include the seasons and episodes the library lacks, outside specials, marked by availability and missing_episode_count */
+        include_missing?: boolean;
+        /** @description With include_missing, also include the regular episodes still to air, marked unaired, and the seasons that hold only those */
+        include_upcoming?: boolean;
         /** @description The library the series is being viewed in */
         library_id?: string;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */

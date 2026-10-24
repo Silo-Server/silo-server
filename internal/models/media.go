@@ -834,7 +834,19 @@ type Episode struct {
 	// batch localization: the viewer's language this episode's description is
 	// missing, so an episode list can start on-view translation.
 	PendingTranslationLanguage string `json:"-"`
+	// Availability is transient: set only on lists that include episodes the
+	// library lacks, to EpisodeMissing or EpisodeUnaired for those. Empty
+	// means the episode is in the library.
+	Availability string `json:"-"`
 }
+
+// Episode availabilities for lists that include episodes the library lacks.
+const (
+	// EpisodeMissing has aired but has no file in any library.
+	EpisodeMissing = "missing"
+	// EpisodeUnaired has no file and has not aired, or has no air date yet.
+	EpisodeUnaired = "unaired"
+)
 
 // MediaItemRoot represents a row in the media_item_roots table.
 // It records which content_id owns a given canonical root path within a library folder.

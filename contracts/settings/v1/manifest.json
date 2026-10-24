@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 23,
+  "revision": 24,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -775,6 +775,21 @@
       "description": "Hide an episode's description until you start watching it.",
       "recommended_control": "switch",
       "notes": "Clients apply this with the same unwatched rule as catalog.hide_unwatched_episode_images: neither played nor in progress. Covers episode overviews in episode lists, on episode detail, and on the next-episode screen in the player. Series and season overviews are not affected. Separate from the image setting because some viewers want to hide only one of the two."
+    },
+    {
+      "key": "catalog.show_missing_episodes",
+      "introduced_in": 24,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "catalog",
+      "label": "Show missing episodes",
+      "description": "Show seasons and episodes the library lacks, with a way to request them.",
+      "recommended_control": "switch",
+      "notes": "Clients apply this by passing include_missing=true to the season and episode lists, which then add the metadata episodes no library holds, outside specials, marked missing or unaired, and the seasons that hold only those. Rollups, counts and play targets stay those of the library. Profile scope so the choice follows the viewer; default false so a series page shows only what can be played."
     },
     {
       "key": "player.hdr_enabled",

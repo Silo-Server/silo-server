@@ -154,18 +154,25 @@ func (s *Service) missingSeasonsDeliverable(ctx context.Context, fc *fulfillCont
 			}
 		}
 	} else {
-		for _, route := range routes {
-			if route.MediaType != MediaTypeSeries || !route.Enabled {
-				continue
-			}
-			for _, id := range []string{route.HD.IntegrationID, route.UHD.IntegrationID} {
-				if id != "" {
-					ids = append(ids, id)
-				}
+		ids = seriesRouteTargets(routes)
+	}
+	return s.allTakeSeasons(ctx, fc, integrationsByID(fc, ids))
+}
+
+// seriesRouteTargets returns every server an enabled series rule sends to.
+func seriesRouteTargets(routes []Route) []string {
+	var ids []string
+	for _, route := range routes {
+		if route.MediaType != MediaTypeSeries || !route.Enabled {
+			continue
+		}
+		for _, id := range []string{route.HD.IntegrationID, route.UHD.IntegrationID} {
+			if id != "" {
+				ids = append(ids, id)
 			}
 		}
 	}
-	return s.allTakeSeasons(ctx, fc, integrationsByID(fc, ids))
+	return ids
 }
 
 // errMissingSeasonsUnsupported is a submission error for a request for the

@@ -408,6 +408,9 @@ type seasonResponse struct {
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
 	// MachineTranslatedFields reaches the v2 season row only; v1 is frozen.
 	MachineTranslatedFields []string `json:"-"`
+	// MissingEpisodeCount reaches the v2 season row only, and only for a
+	// viewer who asked to include what the library lacks.
+	MissingEpisodeCount int `json:"-"`
 }
 
 // seasonsResponse wraps the seasons list for JSON serialization.
@@ -465,6 +468,9 @@ type episodeResponse struct {
 	MachineTranslatedFields []string `json:"-"`
 	// PendingTranslationLanguage reaches the v2 episode row only; v1 is frozen.
 	PendingTranslationLanguage string `json:"-"`
+	// Availability reaches the v2 episode row only: models.EpisodeMissing or
+	// models.EpisodeUnaired for an episode the library lacks.
+	Availability string `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -2421,6 +2427,12 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 type ItemViewer struct {
 	Access    catalog.AccessFilter
 	ProfileID string
+	// IncludeMissing adds the aired episodes and seasons the library lacks
+	// to season and episode lists, outside specials.
+	IncludeMissing bool
+	// IncludeUpcoming, with IncludeMissing, also adds the regular episodes
+	// still to air.
+	IncludeUpcoming bool
 }
 
 // viewerFromRequest pairs an already-resolved access filter with the

@@ -18,6 +18,7 @@ import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/ove
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import EpisodeCardCaption from "./EpisodeCardCaption";
+import MissingEpisodeCard from "./MissingEpisodeCard";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
@@ -35,12 +36,15 @@ interface SeasonEpisodeGridProps {
   episodes: EpisodeListItem[];
   isLoading: boolean;
   episodeLinkState?: EpisodeNavigationState;
+  /** Seasons a request already covers, for episodes the library lacks. */
+  requestedSeasons?: ReadonlySet<number>;
 }
 
 export default function SeasonEpisodeGrid({
   episodes,
   isLoading,
   episodeLinkState,
+  requestedSeasons,
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
@@ -66,17 +70,26 @@ export default function SeasonEpisodeGrid({
       // scrollport clips both axes, and the cap adds this padding back.
       className="overlay-scroll -mt-1 grid grid-cols-2 gap-4 overflow-y-auto pt-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
     >
-      {episodes.map((episode) => (
-        <SeasonEpisodeCard
-          key={episode.content_id}
-          episode={episode}
-          episodeLinkState={episodeLinkState}
-          overlayPrefs={overlayPrefs}
-          quickActionMode={quickActionMode}
-          spoilerPrefs={spoilerPrefs}
-          onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
-        />
-      ))}
+      {episodes.map((episode) =>
+        episode.availability ? (
+          <MissingEpisodeCard
+            key={episode.content_id}
+            episode={episode}
+            requested={requestedSeasons?.has(episode.season_number) ?? false}
+            spoilerPrefs={spoilerPrefs}
+          />
+        ) : (
+          <SeasonEpisodeCard
+            key={episode.content_id}
+            episode={episode}
+            episodeLinkState={episodeLinkState}
+            overlayPrefs={overlayPrefs}
+            quickActionMode={quickActionMode}
+            spoilerPrefs={spoilerPrefs}
+            onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
+          />
+        ),
+      )}
     </div>
   );
 }

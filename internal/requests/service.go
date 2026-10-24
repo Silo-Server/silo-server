@@ -574,8 +574,11 @@ func (s *Service) unusableRouterMessage(ctx context.Context, fc *fulfillContext,
 // any other plugin would add the whole series again, refused by a download
 // server that has it and every season downloaded by one that does not. So it
 // is offered when every download server that takes series is bound to a
-// plugin that takes seasons. A request made before a server that cannot was
-// set up waits for the library (see submitApprovedRequest).
+// plugin that takes seasons. With routing rules only the servers the series
+// rules send to count, as at submission (see missingSeasonsDeliverable): a
+// connection no rule reaches never receives a request. A request made before
+// a server that cannot was set up waits for the library (see
+// submitApprovedRequest).
 func (s *Service) moreSeasonsRequestable(ctx context.Context) (bool, error) {
 	if s.router == nil {
 		return true, nil
@@ -583,6 +586,9 @@ func (s *Service) moreSeasonsRequestable(ctx context.Context) (bool, error) {
 	fc, err := s.newFulfillContext(ctx)
 	if err != nil {
 		return false, err
+	}
+	if routes := fc.routesFor(MediaTypeSeries); len(routes) > 0 {
+		return s.allTakeSeasons(ctx, fc, integrationsByID(fc, seriesRouteTargets(routes)))
 	}
 	return s.allTakeSeasons(ctx, fc, seriesRouterConnections(fc))
 }
@@ -810,6 +816,9 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 			return nil, err
 		}
 		seasons = requestSeasons(raw, counts, primaryRequests[raw.ID])
+		if hasOpenRequestSeason(seasons) {
+			markMonitoredSeasons(seasons, s.monitoredSeasons(ctx, raw.ID, raw.TVDBID))
+		}
 		if active := primaryRequests[raw.ID]; active != nil && len(active.Seasons) > 0 && counts != nil {
 			// Attach the season progress the request lists attach, so the
 			// state can read partially available or available.
@@ -1413,6 +1422,9 @@ func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureS
 	}
 	if settings.RequestsEnabled {
 		if status.MissingSeasonsRequestable, err = s.moreSeasonsRequestable(ctx); err != nil {
+			return FeatureStatus{}, err
+		}
+		if status.SeriesServerConnected, err = s.seriesServerConnected(ctx); err != nil {
 			return FeatureStatus{}, err
 		}
 		// The account's own permission is left to the caller, which reads

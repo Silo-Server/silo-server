@@ -119,7 +119,7 @@ type RequestMediaSeason struct {
 	AirDate      string `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	Availability string `json:"availability" enum:"missing,partial,available" doc:"Whether every aired episode is in the library" example:"partial"`
-	Requested    bool   `json:"requested" doc:"The title's active request covers this season"`
+	Requested    bool   `json:"requested" doc:"The title's active request covers this season, or a Sonarr server monitors it or Seerr already has it requested"`
 }
 
 // RequestSeasonProgress is how far one requested season is.

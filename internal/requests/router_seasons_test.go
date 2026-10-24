@@ -78,6 +78,37 @@ func TestMissingSeasonsNotRequestableWithAnOldSeriesRouter(t *testing.T) {
 	}
 }
 
+// With routing rules, a connection no series rule sends to, such as one kept
+// only to read what another app has requested, does not hide missing seasons.
+func TestMissingSeasonsRequestableIgnoresUnroutedServers(t *testing.T) {
+	store := newFakeStore()
+	unrouted := seriesRouterInst("seerr", 2) // an old plugin, every media type
+	unrouted.SupportedMediaTypes = nil
+	store.integrations = []Integration{seriesRouterInst("sonarr", 1), unrouted}
+	store.routes = []Route{{ID: "fallback", MediaType: MediaTypeSeries, Position: 1000, Name: "Everything else",
+		Enabled: true, IsFallback: true, HD: RouteDestination{IntegrationID: "sonarr"}}}
+	svc := seasonService(store, severanceInLibrary())
+	svc.SetRouterProvider(&fakeRouterProvider{seasonCapable: map[int]bool{1: true}})
+
+	status, err := svc.GetFeatureStatus(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.MissingSeasonsRequestable {
+		t.Fatal("status hides missing seasons over a server no series rule sends to")
+	}
+
+	// A rule that sends to the old plugin hides them again.
+	store.routes[0].UHD = RouteDestination{IntegrationID: "seerr"}
+	status, err = svc.GetFeatureStatus(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.MissingSeasonsRequestable {
+		t.Fatal("status offers missing seasons with a routed server that would add the whole series")
+	}
+}
+
 func approvedSeasonRequest(store *fakeStore, id string, tmdbID int, seasons []int) {
 	req := &Request{ID: id, MediaType: MediaTypeSeries, TMDBID: tmdbID, Title: "Severance", Status: StatusApproved,
 		Outcome: OutcomeActive, RequestedByUserID: 7, Seasons: seasons}

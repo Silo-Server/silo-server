@@ -59,7 +59,8 @@ type RequestSeason struct {
 	AirDate      string       `json:"-"`
 	PosterPath   string       `json:"-"`
 	Availability Availability `json:"-"`
-	// Requested reports that the title's active request covers the season.
+	// Requested reports that the title's active request covers the season,
+	// or that an enabled Sonarr server monitors it or Seerr has it requested.
 	Requested bool `json:"-"`
 }
 
