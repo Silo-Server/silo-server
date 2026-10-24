@@ -184,7 +184,7 @@ func (s *Service) providerForClaim(ctx context.Context, run *Run, claim RunClaim
 	if source.Revision != claim.SourceRevision {
 		return nil, ErrRunConfigurationChanged
 	}
-	provider, err := s.buildAdminProvider(source, token, claim.ExternalUserID)
+	provider, err := s.buildAdminProvider(source, token, claim.ExternalUserID, run.PlayedSince)
 	if err != nil {
 		return nil, err
 	}
