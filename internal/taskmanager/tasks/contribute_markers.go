@@ -159,6 +159,9 @@ type contributionState struct {
 	rateLimitWaits int
 	// errorStreak counts the files in a row whose submissions all failed.
 	errorStreak int
+	// backoffDue is set by a failed file and cleared by the wait before the
+	// next one, so the files a provider never sees (skips) don't each wait.
+	backoffDue bool
 }
 
 // contributeCandidates runs opts for every candidate file next pages through.
@@ -199,7 +202,7 @@ func (t *ContributeMarkersTask) contributeCandidates(
 			if file == nil {
 				continue
 			}
-			if state.errorStreak > 0 {
+			if state.backoffDue {
 				if state.errorStreak > contributionMaxErrorWaits {
 					counts.write(progress, 0)
 					progress.Report(100, fmt.Sprintf("Contribution unavailable after %d failed files in a row; the next scheduled run retries", state.errorStreak))
@@ -210,6 +213,7 @@ func (t *ContributeMarkersTask) contributeCandidates(
 				if err := t.wait(ctx, backoff); err != nil {
 					return false, err
 				}
+				state.backoffDue = false
 			}
 			// A retry after a rate limit runs every provider again; the ones
 			// that already finished report skips that must not be counted twice.
@@ -249,9 +253,9 @@ func (t *ContributeMarkersTask) contributeCandidates(
 // noteFile updates the error streak with one file's result: failed reports
 // that ContributeFile itself returned an error, and tallied holds the file's
 // final status for each provider and segment. A file with an error and no
-// provider answer extends the streak. Any answer, a refusal included, shows
-// the provider is up and resets it. A skip never reached a provider and
-// leaves it as it is.
+// provider answer extends the streak and makes a wait due before the next
+// file. Any answer, a refusal included, shows the provider is up and resets
+// it. A skip never reached a provider and leaves it as it is.
 func (s *contributionState) noteFile(failed bool, tallied map[string]string) {
 	answered := false
 	for _, status := range tallied {
@@ -268,6 +272,7 @@ func (s *contributionState) noteFile(failed bool, tallied map[string]string) {
 		s.errorStreak = 0
 	case failed:
 		s.errorStreak++
+		s.backoffDue = true
 	}
 }
 

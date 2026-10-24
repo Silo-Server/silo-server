@@ -271,8 +271,19 @@ func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
 			sequence:   [][]markers.ContributionOutcome{skipped, append(slices.Clone(failed), markers.ContributionOutcome{Provider: "other", Status: markers.OutcomeStatusSkipped})},
 			fallback:   pending,
 			wantCalls:  []int{1, 2, 3, 4, 100},
-			wantWaits:  []time.Duration{30 * time.Second, 30 * time.Second, time.Minute},
+			wantWaits:  []time.Duration{30 * time.Second, time.Minute},
 			wantFailed: 2,
+		},
+		{
+			// The files after one failure that a provider never sees wait once
+			// between them, not once each.
+			name:       "skips after a failure wait once",
+			ids:        []int{1, 2, 3, 4},
+			sequence:   [][]markers.ContributionOutcome{failed, skipped, skipped, skipped},
+			fallback:   pending,
+			wantCalls:  []int{1, 2, 3, 4, 100},
+			wantWaits:  []time.Duration{30 * time.Second},
+			wantFailed: 1,
 		},
 	}
 	for _, tc := range cases {
