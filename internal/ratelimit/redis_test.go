@@ -206,6 +206,21 @@ func TestRedisLimiterCountsLocallyWhileRedisIsDown(t *testing.T) {
 	}
 }
 
+// While Redis is down, the local count applies the windows Redis would, so a
+// batch Redis allows, such as 50 import webhooks over 10 s on a 60/minute,
+// burst 30 budget, is not refused.
+func TestRedisLimiterLocalCountKeepsRedisWindows(t *testing.T) {
+	rate := Rate{RequestsPerSecond: 1, RequestsPerMinute: 60, Burst: 30}
+	rl := hookedRedisLimiter(t, refusingRedisAddr(t), &commandHook{})
+	now := time.Now()
+	for i := range 50 {
+		at := now.Add(time.Duration(i) * 200 * time.Millisecond)
+		if got := rl.allowAt(t.Context(), "autoscan:1", rate, at); !got.Allowed {
+			t.Fatalf("check %d during the outage = %+v, want allowed as Redis would", i+1, got)
+		}
+	}
+}
+
 // Once a pause runs out, checks still do not wait on Redis: one request is
 // counted in the background, and the limiter counts requests in Redis again as
 // soon as Redis answers. If the pause never ended, every node would keep its

@@ -478,8 +478,8 @@ its checks in its own memory, so the limits keep holding per process instead of
 switching off. A check that fails, or gets no answer within a second, is counted
 locally, and that process then stops waiting on Redis: its checks count locally at
 once, and every five seconds one request is also counted in Redis in the background
-to find out whether Redis answers again. The local counters carry over between
-outages and are cleared when the limits are reloaded. The failure that stops the
+to find out whether Redis answers again. The local counters carry over from one
+pause to the next and are cleared when the limits are reloaded. The failure that stops the
 waiting and each failed background count are logged. Checks that start before the
 first failure is noticed, up to a second after Redis stops answering, each wait up
 to a second. A check that fails only because its own request ended early does not

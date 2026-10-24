@@ -123,7 +123,7 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 	secLimit, minLimit, effectiveLimit := redisWindowLimits(limit)
 
 	if rl.paused(ctx, key, secLimit, minLimit, now) {
-		return rl.local.allowAt(key, limit, now)
+		return rl.allowLocal(key, secLimit, minLimit, now)
 	}
 
 	result, err := rl.count(ctx, key, secLimit, minLimit, now)
@@ -138,7 +138,7 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 		} else if rl.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
 			logRedisPause(ctx, err, key)
 		}
-		return rl.local.allowAt(key, limit, now)
+		return rl.allowLocal(key, secLimit, minLimit, now)
 	}
 
 	allowed := result[0] == 1
@@ -171,6 +171,17 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 		Remaining: remaining,
 		ResetAt:   now.Add(time.Second).Truncate(time.Second),
 	}
+}
+
+// allowLocal counts a check Redis cannot on this node, with the second and
+// minute windows Redis would apply, so a batch the Redis windows allow is
+// not refused because Redis is down.
+func (rl *RedisLimiter) allowLocal(key string, secLimit, minLimit int, now time.Time) AllowResult {
+	return rl.local.allowAt(key, Rate{
+		RequestsPerSecond: float64(secLimit),
+		RequestsPerMinute: float64(minLimit),
+		Burst:             secLimit,
+	}, now)
 }
 
 // count runs the window script for key, giving up after the call timeout.
