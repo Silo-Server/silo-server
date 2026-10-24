@@ -1529,15 +1529,19 @@ export function usePlaybackSession(
             pendingReplan.options.operation !== "seek_failure_recovery"
               ? true
               : pendingReplan.planId === planRef.current?.plan_id;
-          // An audio pick names its track by its index in the file it was
-          // made on. Once a replan has moved to another file (a quality change
-          // to another version), that index means some other track there, so
-          // the pick is dropped rather than replayed; the saved series choice
-          // still applies from the next start.
-          const audioPickAppliesToCurrentFile =
-            pendingReplan.options.audio === undefined ||
-            pendingReplan.mediaFileId === planRef.current?.effective_media_file_id;
-          if (recoveryAppliesToCurrentPlan && audioPickAppliesToCurrentFile) {
+          // An audio or subtitle pick names its track by its index in the file
+          // it was made on. Once a replan has moved to another file (a quality
+          // change to another version), that index means some other track
+          // there, so the pick is dropped rather than replayed; the saved
+          // series choice still applies from the next start. Subtitles off
+          // (null) names no track and still applies.
+          const namesTrack =
+            pendingReplan.options.audio !== undefined ||
+            (pendingReplan.options.subtitle !== undefined &&
+              pendingReplan.options.subtitle !== null);
+          const trackPickAppliesToCurrentFile =
+            !namesTrack || pendingReplan.mediaFileId === planRef.current?.effective_media_file_id;
+          if (recoveryAppliesToCurrentPlan && trackPickAppliesToCurrentFile) {
             // A capability change can queue behind a replan created by an older
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.

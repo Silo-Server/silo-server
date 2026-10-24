@@ -529,6 +529,24 @@ describe("EpisodeContent", () => {
       );
     });
 
+    it("keeps a saved pick when a quicker later pick fails", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+    });
+
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {
       stubWrites(async () =>
         jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),

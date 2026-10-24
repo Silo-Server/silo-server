@@ -78,14 +78,18 @@ export function usePrePlayAudioSelection(
     const callbacks = track("explicit", trackIndex);
     show("explicit", trackIndex);
     if (!prefId || !audioTrack) return;
-    setAudioPreference.mutate({ prefId, trackIndex, track: audioTrack }, callbacks);
+    // mutateAsync, not mutate: per-call mutate callbacks only run for the
+    // latest call, so an overlapping pick would lose the earlier one's result.
+    setAudioPreference
+      .mutateAsync({ prefId, trackIndex, track: audioTrack })
+      .then(callbacks.onSuccess, callbacks.onError);
   };
 
   const reset = () => {
     const callbacks = track("auto", null);
     show("auto", null);
     if (!prefId) return;
-    deleteAudioPreference.mutate(prefId, callbacks);
+    deleteAudioPreference.mutateAsync(prefId).then(callbacks.onSuccess, callbacks.onError);
   };
 
   const clear = useCallback(() => {

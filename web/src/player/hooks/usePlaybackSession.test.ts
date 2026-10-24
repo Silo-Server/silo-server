@@ -1162,9 +1162,16 @@ describe("usePlaybackSession output capability changes", () => {
   });
 
   it.each([
-    ["replays a queued audio pick when the quality change keeps the file", 7, true],
-    ["drops a queued audio pick once the quality change moves to another file", 8, false],
-  ])("%s", async (_name, nextFileId, replayed) => {
+    ["replays a queued audio pick when the quality change keeps the file", "audio", 7, true],
+    ["drops a queued audio pick once the quality change moves to another file", "audio", 8, false],
+    [
+      "drops a queued subtitle pick once the quality change moves to another file",
+      "subtitle",
+      8,
+      false,
+    ],
+    ["replays queued subtitles off on another file", "off", 8, true],
+  ] as const)("%s", async (_name, pick, nextFileId, replayed) => {
     let resolveQualityReplan: ((response: Response) => void) | undefined;
     const qualityReplanResponse = new Promise<Response>((resolve) => {
       resolveQualityReplan = resolve;
@@ -1174,7 +1181,17 @@ describe("usePlaybackSession output capability changes", () => {
       const body = JSON.parse(String(init?.body)) as { operation: string };
       operations.push(body.operation);
       if (operations.length === 1) return qualityReplanResponse;
-      return jsonResponse(playable("session-1"));
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            session_id: "session-1",
+            plan_id: "plan:replayedpick0001",
+            plan_attempt_key: "v3:replayedpick0001",
+            effective_media_file_id: nextFileId,
+          }),
+        ),
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1183,8 +1200,12 @@ describe("usePlaybackSession output capability changes", () => {
 
     act(() => result.current.changeQuality("1080p", 30));
     await waitFor(() => expect(operations).toEqual(["quality_change"]));
-    // Index 2 of file 7's audio tracks, picked while the quality change runs.
-    act(() => result.current.switchAudioTrack(2, 31));
+    // Index 2 of file 7's tracks (or subtitles off), picked while the quality
+    // change runs.
+    act(() => {
+      if (pick === "audio") result.current.switchAudioTrack(2, 31);
+      else result.current.changeSubtitleTrack(pick === "subtitle" ? 2 : null, 31);
+    });
     await act(async () => {
       resolveQualityReplan?.(
         jsonResponse(
