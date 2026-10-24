@@ -462,20 +462,25 @@ kind with source `manual` and algorithm `manual:withheld:v1` instead of
 `manual:v1`, and no contribution path sends it: not the save's own run, the
 daily task, an admin contribution, or an amend resend, to any provider,
 including the one whose marker it kept. A save that keeps an earlier withheld
-marker stays withheld. The comparison uses the markers shown before the save
-(`PopulationService.ShownMarkers`): the stored row, or with
-`markers.online_storage` set to `on_demand`, the stored row with the
-on-demand lookup laid over it, as `GetMarkers` returns it. That lookup leaves
-out, without an error, a provider in cooldown or error backoff, one whose
-fetch lease another pass holds, and one a short read skips. When it fails or
-leaves any provider out, every kind the save sets is withheld, except a kind
-the file already held as manual (a marker or a clear): no provider marker
-replaces one, so the stored row is what the player showed. Provenance is
+marker stays withheld. The comparison uses the stored row, which is what a
+player is shown unless online lookups run with `markers.online_storage` set to
+`on_demand` (`PopulationService.ShowsStoredMarkers`). In that mode a player is
+shown provider answers that each replica caches in its own memory for a
+while and never stores, and a provider's answer can change between playback
+and the save, so no lookup at save time can say which marker the user saw.
+Every kind such a save sets is withheld, except a kind the file already held
+as manual (a marker or a clear): no provider marker replaces one, so the
+stored row is what the player showed. Provenance is
 written with the marker in one statement, so it survives restarts, races
 between saves, and changes to the item's metadata. Everywhere else,
 including write priority, local detection, the API, and jellycompat,
 `manual:withheld:v1` is a manual marker like `manual:v1`. `/api/v2` reports
 the stored algorithm; the frozen `/api/v1` reports `manual:v1` for both.
+
+Builds from before this rule do not know `manual:withheld:v1`. During a
+rolling upgrade from one, an older replica can still send a withheld marker
+when an admin contribution of that file reaches it, as it sends its own saves
+that keep a provider's marker, until the last older replica is replaced.
 
 The rule exists because TheIntroDB's terms forbid using its data to seed other
 databases, so Silo must not pass a provider's marker on as if a person had

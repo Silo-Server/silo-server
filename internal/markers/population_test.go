@@ -65,16 +65,10 @@ type populationRecorder struct {
 	cached      map[string]Result
 	released    []string
 	claimed     int
-	// refused names providers whose claim is not won, as during a cooldown,
-	// an error backoff, or another pass's lease.
-	refused map[string]bool
 }
 
 func (s *populationRecorder) Eligible(context.Context, int) (bool, error) { return true, nil }
 func (s *populationRecorder) Claim(_ context.Context, id int, provider, identity, _ string, _ bool) (FetchClaim, bool, error) {
-	if s.refused[provider] {
-		return FetchClaim{}, false, nil
-	}
 	s.claimed++
 	return FetchClaim{FileID: id, Provider: provider, Identity: identity, Token: "test-token"}, true, nil
 }
@@ -334,31 +328,25 @@ func TestPopulationStoredPlaybackToggleDoesNotBlockExplicitRefresh(t *testing.T)
 	}
 }
 
-// A provider the on-demand lookup could not ask is left out of the view
-// without an error, so ShownMarkers must report the view incomplete: a manual
-// save compared with it could have kept that provider's marker.
-func TestPopulationShownMarkersReportsAProviderLeftOut(t *testing.T) {
-	intro := Result{Markers: []Marker{{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 70 * time.Second}}}
-	asked := &populationProvider{id: "asked", fetch: func() (Result, error) { return intro, nil }}
-	left := &populationProvider{id: "left", fetch: func() (Result, error) { return intro, nil }}
+// Only stored provider markers tell a manual save what a player was shown; in
+// on_demand mode each replica keeps the answers it showed to itself.
+func TestPopulationShowsStoredMarkers(t *testing.T) {
+	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{}, nil }}
 	for _, tc := range []struct {
 		name    string
 		storage OnlineStorage
-		refused map[string]bool
+		mode    string
 		want    bool
 	}{
-		{"stored", OnlineStorageStored, map[string]bool{left.id: true}, true},
-		{"on-demand, every provider asked", OnlineStorageOnDemand, nil, true},
-		{"on-demand, a provider's claim not won", OnlineStorageOnDemand, map[string]bool{left.id: true}, false},
+		{"stored", OnlineStorageStored, "online", true},
+		{"on demand", OnlineStorageOnDemand, "online", false},
+		{"on demand, online lookups off", OnlineStorageOnDemand, "local", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service, store := populationFixture(t, tc.storage, asked)
-			if err := service.opts.Registry.Register(left); err != nil {
-				t.Fatal(err)
-			}
-			store.refused = tc.refused
-			if _, complete, err := service.ShownMarkers(t.Context(), &models.MediaFile{ID: 1, Duration: 1800}); err != nil || complete != tc.want {
-				t.Fatalf("ShownMarkers: complete=%v err=%v, want complete=%v", complete, err, tc.want)
+			service, _ := populationFixture(t, tc.storage, provider)
+			service.opts.Settings.(populationSettings)[SettingMode] = tc.mode
+			if got, err := service.ShowsStoredMarkers(t.Context()); err != nil || got != tc.want {
+				t.Fatalf("ShowsStoredMarkers = %v, %v; want %v", got, err, tc.want)
 			}
 		})
 	}

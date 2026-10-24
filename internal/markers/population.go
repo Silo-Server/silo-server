@@ -172,51 +172,35 @@ func (s *PopulationService) Populate(ctx context.Context, file *models.MediaFile
 			}
 		}
 	}
-	return s.populate(ctx, file, false, true, nil)
+	return s.populate(ctx, file, false, true)
 }
 
-// ShownMarkers returns file as a player is shown it, and whether that view is
-// known to hold every provider's marker. Stored mode keeps provider markers on
-// the file itself. In on-demand mode it runs the lookup Populate runs, and the
-// view is complete only when every registered provider answered or had a
-// cached answer: the lookup leaves out a provider in cooldown or error
-// backoff, one another pass holds the lease for, and one a short read skips,
-// all without an error.
-func (s *PopulationService) ShownMarkers(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+// ShowsStoredMarkers reports whether a player is shown a file's stored markers
+// and nothing else: online lookups are off, or their results are stored on
+// the file. In on_demand mode a player is shown provider answers each replica
+// caches in its own memory and drops, so no replica can tell later which
+// provider marker a player was shown.
+func (s *PopulationService) ShowsStoredMarkers(ctx context.Context) (bool, error) {
+	enabled, err := s.enabled(ctx)
+	if err != nil || !enabled {
+		return err == nil, err
+	}
 	storage, err := s.OnlineStorage(ctx)
-	if err != nil {
-		return file, false, err
-	}
-	if storage != OnlineStorageOnDemand {
-		return file, true, nil
-	}
-	complete := false
-	shown, _, err := s.populate(ctx, file, false, true, &complete)
-	return shown, complete && err == nil, err
+	return err == nil && storage == OnlineStorageStored, err
 }
 
 // Refresh bypasses successful cached results for an explicit refresh.
 // Active leases, provider cooldowns and failed-request backoff still apply.
 func (s *PopulationService) Refresh(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
-	return s.populate(ctx, file, true, true, nil)
+	return s.populate(ctx, file, true, true)
 }
 
-// populate runs one pass. When complete is set, it reports whether the
-// returned file holds every provider's answer: none apply to the file, or
-// each one answered or had a cached answer.
-//
-//nolint:funlen,gocyclo // one pass shares its leases, deferred release and save deadline; splitting it is separate work
-func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile, refresh, waitForLease bool, complete *bool) (*models.MediaFile, bool, error) {
-	if complete == nil {
-		complete = new(bool)
-	}
-	*complete = false
+func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile, refresh, waitForLease bool) (*models.MediaFile, bool, error) {
 	if file == nil || file.ID <= 0 {
 		return file, false, nil
 	}
 	enabled, err := s.enabled(ctx)
 	if err != nil || !enabled {
-		*complete = err == nil
 		return file, false, err
 	}
 	storage, err := s.OnlineStorage(ctx)
@@ -230,7 +214,6 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	}
 	entries := s.opts.Registry.fetchEntries()
 	if len(entries) == 0 {
-		*complete = true
 		return file, false, nil
 	}
 	short := shortRead(ctx)
@@ -266,7 +249,6 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	}
 	eligible, err := s.opts.Store.Eligible(ctx, file.ID)
 	if err != nil || !eligible {
-		*complete = err == nil
 		return file, false, err
 	}
 	ids, err := s.opts.Resolver.ResolveForFile(ctx, file)
@@ -274,7 +256,6 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		return file, false, err
 	}
 	if !ids.HasAnyID() || (ids.Kind == ItemKindEpisode && (ids.SeasonNumber < 0 || ids.EpisodeNumber <= 0)) {
-		*complete = true
 		return file, false, nil
 	}
 	identity := populationIdentity(file, ids, entries)
@@ -427,7 +408,6 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		if s.opts.Notify != nil {
 			s.opts.Notify(saveCtx, effective)
 		}
-		*complete = len(results) == len(entries)
 		return effective, true, errors.Join(failures...)
 	}
 	var wrote bool
@@ -753,7 +733,7 @@ func (s *PopulationService) syncFile(ctx context.Context, id int) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	_, changed, err := s.populate(ctx, file, false, false, nil)
+	_, changed, err := s.populate(ctx, file, false, false)
 	return changed, err
 }
 

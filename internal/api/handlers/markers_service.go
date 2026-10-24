@@ -161,34 +161,29 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	return h.fileMarkersView(ctx, refreshed), nil
 }
 
-// markerShownReader reads the markers a player is shown for a file
-// (satisfied by *markers.PopulationService).
-type markerShownReader interface {
-	ShownMarkers(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error)
+// markerStorageReader reports whether a player is shown only a file's stored
+// markers (satisfied by *markers.PopulationService).
+type markerStorageReader interface {
+	ShowsStoredMarkers(ctx context.Context) (bool, error)
 }
 
-var _ markerShownReader = (*markers.PopulationService)(nil)
+var _ markerStorageReader = (*markers.PopulationService)(nil)
 
 // withholdKeptProviderMarkers stores markers.ManualWithheldAlgorithm on each
 // kind update sets that keeps a provider's marker (markers.KeepsProviderMarker),
-// so that no contribution ever sends it. It compares the save with the markers
-// a player was shown before it, which in on_demand mode means running the
-// lookup GetMarkers runs. When that lookup fails or leaves a provider out,
-// every kind is withheld, since the save may keep a marker the lookup could
-// not show, except a kind the file already holds as manual, which no
-// provider marker replaces (markers.HoldsManualMarker).
+// so that no contribution ever sends it. It compares the save with the file's
+// stored markers, which are what a player is shown unless online lookups run
+// in on_demand mode. There a player is shown provider answers that each
+// replica caches for itself and drops, so no lookup at save time can tell
+// which one the user saw, and every kind is withheld, except a kind the file
+// already holds as manual, which no provider marker replaces
+// (markers.HoldsManualMarker).
 func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate) {
-	shown, known := file, true
-	if reader, ok := h.MarkerPopulation.(markerShownReader); ok {
-		lookupCtx, cancel := context.WithTimeout(ctx, markerReadTimeout)
-		view, complete, err := reader.ShownMarkers(lookupCtx, file)
-		cancel()
-		switch {
-		case !complete:
-			known = false
-			h.logger.InfoContext(ctx, "markers: manual save withheld from contribution; the provider markers it may keep could not all be read", "file_id", file.ID, "error", err)
-		case view != nil:
-			shown = view
+	known := true
+	if reader, ok := h.MarkerPopulation.(markerStorageReader); ok {
+		stored, err := reader.ShowsStoredMarkers(ctx)
+		if known = stored && err == nil; !known {
+			h.logger.InfoContext(ctx, "markers: manual save withheld from contribution; the provider markers a player was shown are not stored", "file_id", file.ID, "error", err)
 		}
 	}
 	for _, seg := range []struct {
@@ -204,7 +199,7 @@ func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *
 		if seg.start == nil || seg.end == nil {
 			continue
 		}
-		if (!known && !markers.HoldsManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(shown, seg.kind, *seg.start, *seg.end) {
+		if (!known && !markers.HoldsManualMarker(file, seg.kind)) || markers.KeepsProviderMarker(file, seg.kind, *seg.start, *seg.end) {
 			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence, Algorithm: markers.ManualWithheldAlgorithm}
 		}
 	}
