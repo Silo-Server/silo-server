@@ -197,7 +197,7 @@ func registerLibraryViews(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/layout", "getLibraryLayout", "libraries",
 		"The library's section layout for the acting profile, without items.")), reg.getLibraryLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections", "listLibrarySections", "libraries",
-		"The library's sections with their cards, as the acting profile sees them.")), reg.listLibrarySections)
+		"The library's sections that have cards for the acting profile, with those cards.")), reg.listLibrarySections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections/{section_id}/items", "getLibrarySectionItems", "libraries",
 		"One section of the library with its cards.")), reg.getLibrarySectionItems)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
