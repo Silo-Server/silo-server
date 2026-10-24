@@ -26,7 +26,13 @@ type fakeContribRunner struct {
 	sequence [][]markers.ContributionOutcome
 }
 
-func (f *fakeContribRunner) AutoContributors() []markers.AutoContributor { return f.auto }
+func (f *fakeContribRunner) AutoContributors(context.Context) ([]markers.AutoContributor, error) {
+	return f.auto, nil
+}
+
+func (f *fakeContribRunner) AmendContributors(context.Context) ([]markers.AmendContributor, error) {
+	return nil, nil
+}
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	f.calls = append(f.calls, file.ID)
@@ -72,6 +78,10 @@ func (f *fakeCandidates) CandidateLocalMarkerFiles(_ context.Context, kind marke
 		out[i] = markers.ContributionCandidate{FileID: id, Confidence: 0.95}
 	}
 	return out, nil
+}
+
+func (f *fakeCandidates) CandidateManualCorrections(context.Context, []markers.AmendContributor, *markers.ContributionCandidate, int) ([]markers.ContributionCandidate, error) {
+	return nil, nil
 }
 
 func noWait(context.Context, time.Duration) error { return nil }

@@ -75,6 +75,30 @@ func TestApplyResultKeepsOccurrencesAndManualEdits(t *testing.T) {
 	}
 }
 
+// An on-demand absent answer hides a local intro, including when laid over a
+// fresh read of the stored row, and goes once its refreshed provider drops it.
+func TestApplyResultProjectsAbsentAnswer(t *testing.T) {
+	stored := &models.MediaFile{ID: 3, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
+		IntroMarkersSource: new(models.MarkerSourceScanner), IntroMarkersAlgorithm: new("chromaprint:v4"), IntroMarkersConfidence: new(0.9)}
+	stored.MarkerSegments = models.EffectiveMarkerSegments(stored)
+	absent := Result{SourceClass: models.MarkerSourcePlugin, ProviderID: "provider", RefreshedProviders: []string{"provider"},
+		Markers: []Marker{{Kind: MarkerKindIntro, Absent: true, Confidence: 0.9}}}
+	tombstone := func(name string, file *models.MediaFile) {
+		t.Helper()
+		if file.IntroStart != nil || file.IntroEnd != nil || len(file.MarkerSegments) != 0 ||
+			file.IntroMarkersSource == nil || *file.IntroMarkersSource != models.MarkerSourcePlugin {
+			t.Fatalf("%s: intro = %v-%v source %v segments %+v, want a plugin tombstone", name, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.MarkerSegments)
+		}
+	}
+	view := ApplyResult(stored, absent)
+	tombstone("projection", view)
+	tombstone("overlay", OverlayOnline(stored, view))
+	withdrawn := ApplyResult(view, Result{RefreshedProviders: []string{"provider"}})
+	if withdrawn.IntroMarkersSource != nil || withdrawn.IntroMarkersProvider != nil {
+		t.Fatalf("withdrawn absent answer kept: source %v provider %v", withdrawn.IntroMarkersSource, withdrawn.IntroMarkersProvider)
+	}
+}
+
 func TestApplyResultDropsCreditsOutsideCreditsWindow(t *testing.T) {
 	// A 40-minute episode, whose credits window opens at 32:30.
 	file := &models.MediaFile{Duration: 2400, EpisodeID: "episode"}
@@ -261,6 +285,12 @@ func TestCanWriteMarkerUpdateRanksScannerAlgorithms(t *testing.T) {
 		return SegmentPayload{Start: new(60.0), End: new(125.0), Source: source, Provider: new("provider"),
 			Confidence: confidence, Algorithm: "provider:v1"}
 	}
+	// absent is a provider's answer that the file has none of the kind.
+	absent := func(confidence float64) SegmentPayload {
+		return SegmentPayload{Source: models.MarkerSourcePlugin, Provider: new("provider"), Confidence: new(confidence), Algorithm: "provider:v1"}
+	}
+	manual := SegmentPayload{Start: new(60.0), End: new(120.0), Source: models.MarkerSourceManual, Confidence: new(1.0), Algorithm: "manual:v1"}
+	manualClear := SegmentPayload{Source: models.MarkerSourceManual, Confidence: new(1.0), Algorithm: "manual:v1"}
 	ranks := []string{"credits-chapter:v1", "credits-version-copy:v1", "credits-audio:video:v1", "credits-audio:v1", "credits-video:v1"}
 	for i := 1; i < len(ranks); i++ {
 		if scannerAlgorithmPriority(ranks[i-1]) <= scannerAlgorithmPriority(ranks[i]) {
@@ -307,6 +337,16 @@ func TestCanWriteMarkerUpdateRanksScannerAlgorithms(t *testing.T) {
 		{"credits chapter replaces provider without confidence", provider(models.MarkerSourceOnline, nil), payload("credits-chapter:v1", 0.95, 1310, 1400), true},
 		{"chapter cannot replace equally confident provider", provider(models.MarkerSourcePlugin, new(0.95)), payload("chapter:v1", 0.95, 60, 120), false},
 		{"chromaprint cannot replace less confident provider", provider(models.MarkerSourceOnline, new(0.1)), payload("chromaprint:v4", 0.9, 60, 120), false},
+		{"absent answer replaces chromaprint", payload("chromaprint:v4", 0.9, 60, 120), absent(0.5), true},
+		{"chromaprint cannot replace an absent answer", absent(0.1), payload("chromaprint:v4", 0.9, 60, 120), false},
+		{"less confident absent answer cannot replace chapter", payload("chapter:v1", 0.95, 60, 120), absent(0.9), false},
+		{"absent answer as confident as chapter replaces it", payload("credits-chapter:v1", 0.95, 1310, 1400), absent(0.95), true},
+		{"chapter replaces less confident absent answer", absent(0.3), payload("chapter:v1", 0.95, 60, 120), true},
+		{"chapter cannot replace equally confident absent answer", absent(0.95), payload("chapter:v1", 0.95, 60, 120), false},
+		{"absent answer cannot replace manual marker", manual, absent(1), false},
+		{"absent answer cannot replace manual clear", manualClear, absent(1), false},
+		{"manual marker replaces absent answer", absent(1), manual, true},
+		{"provider marker replaces absent answer", absent(0.9), provider(models.MarkerSourcePlugin, new(0.3)), true},
 	}
 	for _, tc := range cases {
 		if got := CanWriteMarkerUpdate(tc.existing, tc.incoming); got != tc.want {

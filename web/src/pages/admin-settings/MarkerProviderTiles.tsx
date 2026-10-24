@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 
-import type { MarkerProviderConfig, MarkerUserStats, PluginInstallation } from "@/api/types";
+import type {
+  MarkerProviderConfig,
+  MarkerProviderUpdateRequest,
+  MarkerUserStats,
+  PluginInstallation,
+} from "@/api/types";
 import {
   ProviderPanelActions,
   ProviderTile,
@@ -23,6 +28,7 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 
@@ -219,17 +225,22 @@ function MarkerProviderTile({
       return;
     }
 
-    updateProvider.mutate({
-      provider: provider.provider,
-      patch: {
-        fetch_enabled: fetchEnabled,
-        fetch_priority: parsedFetchPriority,
-        fetch_min_confidence: fetchMinConfidence.value,
-        contribute_enabled: contributeEnabled,
-        contribute_auto_local: contributeEnabled && autoLocal,
-        contribute_min_confidence: minConfidence.value,
-      },
-    });
+    // Send only what the admin changed. The server keeps its stored value for
+    // every other field, so a stale copy of the sharing switches on this page
+    // cannot undo a sharing opt-out saved elsewhere.
+    const patch: MarkerProviderUpdateRequest = {};
+    if (fetchEnabled !== provider.fetch_enabled) patch.fetch_enabled = fetchEnabled;
+    if (parsedFetchPriority !== provider.fetch_priority) patch.fetch_priority = parsedFetchPriority;
+    if (fetchMinConfidence.edited) patch.fetch_min_confidence = fetchMinConfidence.value;
+    if (contributeEnabled !== provider.contribute_enabled) {
+      patch.contribute_enabled = contributeEnabled;
+    }
+    const nextAutoLocal = contributeEnabled && autoLocal;
+    if (nextAutoLocal !== provider.contribute_auto_local) {
+      patch.contribute_auto_local = nextAutoLocal;
+    }
+    if (minConfidence.edited) patch.contribute_min_confidence = minConfidence.value;
+    updateProvider.mutate({ provider: provider.provider, patch });
   }
 
   function validate() {
@@ -328,7 +339,11 @@ function MarkerProviderTile({
         }}
         disabled={!provider.is_submitter}
         description={
-          !provider.is_submitter ? "This provider does not accept shared markers." : undefined
+          !provider.is_submitter
+            ? "This provider does not accept shared markers."
+            : provider.default_contribute_enabled
+              ? MARKER_SHARING_DISCLOSURE
+              : undefined
         }
       />
       <div className="border-border ml-3 border-l pl-4">

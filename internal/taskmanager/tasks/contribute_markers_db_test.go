@@ -50,9 +50,8 @@ func (s *dbSubmitter) count() int {
 
 type dbProviderConfig map[string]markers.ProviderConfig
 
-func (c dbProviderConfig) Get(provider string) (markers.ProviderConfig, bool) {
-	cfg, ok := c[provider]
-	return cfg, ok
+func (c dbProviderConfig) Load(context.Context) (map[string]markers.ProviderConfig, error) {
+	return c, nil
 }
 
 // seededFileLoader loads only the files a test seeded, so candidates other

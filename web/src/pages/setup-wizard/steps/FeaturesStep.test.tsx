@@ -109,7 +109,9 @@ describe("FeaturesStep", () => {
       const { setValue } = mockStep({ "markers.mode": mode, "markers.lazy_playback": "false" });
       render(<FeaturesStep />);
 
-      await userEvent.click(screen.getByRole("switch", { name: "Skip markers from TheIntroDB" }));
+      await userEvent.click(
+        screen.getByRole("switch", { name: "Skip markers from TheIntroDB and Silo" }),
+      );
 
       expect(setValue).toHaveBeenCalledWith("markers.mode", nextMode);
       if (lazy === undefined) {

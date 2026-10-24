@@ -328,6 +328,30 @@ func TestPopulationStoredPlaybackToggleDoesNotBlockExplicitRefresh(t *testing.T)
 	}
 }
 
+// Only stored provider markers tell a manual save what a player was shown; in
+// on_demand mode each replica keeps the answers it showed to itself.
+func TestPopulationShowsStoredMarkers(t *testing.T) {
+	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{}, nil }}
+	for _, tc := range []struct {
+		name    string
+		storage OnlineStorage
+		mode    string
+		want    bool
+	}{
+		{"stored", OnlineStorageStored, "online", true},
+		{"on demand", OnlineStorageOnDemand, "online", false},
+		{"on demand, online lookups off", OnlineStorageOnDemand, "local", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := populationFixture(t, tc.storage, provider)
+			service.opts.Settings.(populationSettings)[SettingMode] = tc.mode
+			if got, err := service.ShowsStoredMarkers(t.Context()); err != nil || got != tc.want {
+				t.Fatalf("ShowsStoredMarkers = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestPopulationOnDemandRefreshBypassesMemoryCache(t *testing.T) {
 	result := Result{Markers: []Marker{{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 30 * time.Second}}}
 	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return result, nil }}

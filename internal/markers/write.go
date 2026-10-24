@@ -26,6 +26,11 @@ type SegmentPayload struct {
 // Present reports whether the segment carries a bound to write.
 func (s SegmentPayload) Present() bool { return len(s.Ranges) > 0 || s.Start != nil || s.End != nil }
 
+// Absent reports whether the segment is a tombstone: a source without bounds,
+// saying the file has no segment of the kind. A manual clear stores one, and so
+// does a provider's absent answer. Neither is a marker to play.
+func (s SegmentPayload) Absent() bool { return !s.Present() && s.Source != "" }
+
 // CanWriteMarkerUpdate applies source precedence and local detector refinement.
 // Online provider selection has already happened in the registry; a refreshed
 // selection is authoritative even when a provider's confidence has not risen.
@@ -39,7 +44,8 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 	if existing.Source == models.MarkerSourceManual && incoming.Source != models.MarkerSourceManual {
 		return false
 	}
-	if !existing.Present() {
+	// A provider's absent answer holds its kind like a provider marker would.
+	if !existing.Present() && !existing.Absent() {
 		return true
 	}
 	// A tie goes to the provider, as source priority would have it.
@@ -276,9 +282,15 @@ type MarkerUpdatePayload struct {
 }
 
 // HasAnySegment reports whether the payload can change marker state, including
-// removing ranges withdrawn by a successfully refreshed provider.
+// absent answers and removing ranges withdrawn by a successfully refreshed
+// provider.
 func (p MarkerUpdatePayload) HasAnySegment() bool {
-	return p.Intro.Present() || p.Credits.Present() || p.Recap.Present() || p.Preview.Present() || len(p.RefreshedProviders) > 0
+	for _, s := range []SegmentPayload{p.Intro, p.Credits, p.Recap, p.Preview} {
+		if s.Present() || s.Absent() {
+			return true
+		}
+	}
+	return len(p.RefreshedProviders) > 0
 }
 
 // SummaryConfidence returns the highest per-segment confidence present, for the
@@ -326,25 +338,27 @@ func (p MarkerUpdatePayload) SummarySource() string {
 // marker maps to its segment with its own provenance: ProviderID/Algorithm fall
 // back to the Result-level values (used for single-provider results), and the
 // algorithm finally falls back to external:<source> so every write carries an
-// algorithm tag.
+// algorithm tag. An absent answer maps to a tombstone, which a range of the
+// same kind replaces.
 func BuildUpdatePayload(result Result) MarkerUpdatePayload {
 	payload := MarkerUpdatePayload{Source: result.SourceClass, RefreshedProviders: result.RefreshedProviders}
 	for _, m := range result.Markers {
 		start := m.Start.Seconds()
 		end := m.End.Seconds()
 		rangeValue := models.MarkerSegment{Kind: markerKindName(m.Kind), StartSeconds: start, EndSeconds: end}
-		if !rangeValue.Valid() {
+		source := markerSource(m, result)
+		if (!m.Absent && !rangeValue.Valid()) || (m.Absent && source == "") {
 			continue
 		}
-		startPtr, endPtr := start, end
-		source := markerSource(m, result)
 		seg := SegmentPayload{
-			Start:     &startPtr,
-			End:       &endPtr,
 			Source:    source,
 			Provider:  markerProvider(m, result),
 			Algorithm: markerAlgorithm(m, result.Algorithm, source),
-			Ranges:    []models.MarkerSegment{rangeValue},
+		}
+		if !m.Absent {
+			startPtr, endPtr := start, end
+			seg.Start, seg.End = &startPtr, &endPtr
+			seg.Ranges = []models.MarkerSegment{rangeValue}
 		}
 		if m.Confidence > 0 {
 			conf := m.Confidence
@@ -361,12 +375,11 @@ func BuildUpdatePayload(result Result) MarkerUpdatePayload {
 		case MarkerKindPreview:
 			target = &payload.Preview
 		}
-		if target == nil {
-			continue
-		}
-		if !target.Present() {
+		switch {
+		case target == nil || (m.Absent && target.Present()):
+		case !target.Present():
 			*target = seg
-		} else {
+		default:
 			target.Ranges = append(target.Ranges, rangeValue)
 		}
 	}
@@ -405,7 +418,7 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 			// the projection is left with.
 			incoming = placedCredits(incoming, &next)
 		}
-		if !incoming.Present() {
+		if !incoming.Present() && !incoming.Absent() {
 			if existing.Source != models.MarkerSourceManual && existing.Provider != nil && slices.Contains(result.RefreshedProviders, *existing.Provider) {
 				delete(byKind, target.kind)
 				target.clear()
@@ -421,7 +434,11 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		if !valid || !CanWriteMarkerUpdate(existing, incoming) {
 			continue
 		}
-		byKind[target.kind] = incoming.Ranges
+		if incoming.Absent() {
+			delete(byKind, target.kind)
+		} else {
+			byKind[target.kind] = incoming.Ranges
+		}
 		*target.start, *target.end = incoming.Start, incoming.End
 		*target.source, *target.provider, *target.algorithm = &incoming.Source, incoming.Provider, &incoming.Algorithm
 		*target.confidence, *target.detectedAt = incoming.Confidence, &now
@@ -436,6 +453,9 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 // refresh that returns only misplaced credits clear the provider's stored ones
 // like any other withdrawn range.
 func placedCredits(incoming SegmentPayload, file *models.MediaFile) SegmentPayload {
+	if incoming.Absent() {
+		return incoming
+	}
 	kept := CreditsLimitsForFile(file).KeepPlaced(incoming.Ranges, float64(file.Duration), file.IntroEnd)
 	if len(kept) == 0 {
 		return SegmentPayload{}

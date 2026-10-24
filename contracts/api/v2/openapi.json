@@ -10034,6 +10034,10 @@
             "minimum": 0,
             "type": "number"
           },
+          "default_contribute_enabled": {
+            "description": "The provider's plugin manifest turns sharing on when the provider is first configured, unless the markers.share_by_default server setting is false. Turning that setting off also turns sharing off for these providers.",
+            "type": "boolean"
+          },
           "display_name": {
             "type": "string"
           },
@@ -10080,7 +10084,8 @@
           "fetch_min_confidence",
           "contribute_enabled",
           "contribute_auto_local",
-          "contribute_min_confidence"
+          "contribute_min_confidence",
+          "default_contribute_enabled"
         ],
         "type": "object"
       },

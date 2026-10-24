@@ -351,6 +351,7 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
+	"markers.share_by_default":             "true",
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
