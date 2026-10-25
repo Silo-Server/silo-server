@@ -8,17 +8,11 @@
  *
  * The plugin-content mount does not accept the app's bearer token, so a report is
  * two requests: mint a short-lived plugin access cookie, then call the route.
- * That cookie is HttpOnly, so the only thing tracked here is when it was minted.
  */
 import { v2 } from "@/api/v2/request";
 
 /** Where the host mounts plugin routes. */
 const PLUGIN_CONTENT_PREFIX = "/api/v2/plugin-content";
-
-/** The launch cookie lives five minutes; refresh a little before it lapses. */
-const LAUNCH_TTL_MS = 4 * 60 * 1000;
-
-let launchedAt = 0;
 
 export interface MarkerReportTarget {
   type: "movie" | "tv";
@@ -105,12 +99,18 @@ function withProviderId(
   }
 }
 
-/** Mint the plugin access cookie when the remembered one is stale or absent. */
-async function ensurePluginAccess(): Promise<boolean> {
-  if (launchedAt > 0 && Date.now() - launchedAt < LAUNCH_TTL_MS) return true;
+/**
+ * Mint the plugin access cookie.
+ *
+ * Minted per report rather than remembered. The cookie is bound to the profile that
+ * asked for it, so a remembered one outlives a profile switch elsewhere in the app and
+ * would send a report under the earlier profile's authority. A report is a deliberate,
+ * occasional action, so one launch for it is cheaper than tracking which profile is
+ * being served.
+ */
+async function mintPluginAccess(): Promise<boolean> {
   try {
     await v2("POST /api/v2/auth/plugin-launch");
-    launchedAt = Date.now();
     return true;
   } catch {
     return false;
@@ -128,7 +128,7 @@ export async function reportMarkerSegment(
   installationId: number,
   target: MarkerReportTarget,
 ): Promise<MarkerReportResult> {
-  if (!(await ensurePluginAccess())) return { status: "unauthorized" };
+  if (!(await mintPluginAccess())) return { status: "unauthorized" };
 
   let response: Response;
   try {
@@ -144,9 +144,8 @@ export async function reportMarkerSegment(
 
   if (response.status === 409) return { status: "already_reported" };
   if (response.status === 401 || response.status === 403) {
-    // The remembered launch is no longer good, so the next attempt re-mints it
-    // rather than trusting the cookie again.
-    launchedAt = 0;
+    // Nothing is remembered to invalidate: the next report mints its own launch, which
+    // is also what re-reads whoever is signed in by then.
     return { status: "unauthorized" };
   }
   if (response.status === 503) {
