@@ -506,7 +506,7 @@ export default function SecurityAccessSettings() {
           <SettingFieldRow
             label="Quota size"
             htmlFor="session-quota-rph"
-            description="Requests the bucket refills per hour, and how many it holds when full."
+            description="Requests the bucket refills per hour, and how many it holds when full. A full bucket must refill within a week."
           >
             <div className="flex flex-wrap items-end justify-end gap-2.5">
               <RateBox

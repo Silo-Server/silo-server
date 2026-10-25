@@ -19,10 +19,19 @@ type QuotaLimiter interface {
 	Take(ctx context.Context, key string, q SessionQuotaConfig) AllowResult
 }
 
-// quotaIdleTTL is how long an untouched bucket is kept. It does not depend on
-// the refill rate, so lowering the rate cannot drop a drained bucket before the
-// new rate would have refilled it; only a bucket idle this long starts over.
-const quotaIdleTTL = 7 * 24 * time.Hour
+// SessionQuotaIdleTTL is how long an untouched bucket is kept. It does not
+// depend on the refill rate, so lowering the rate cannot drop a drained bucket
+// before the new rate would have refilled it; only a bucket idle this long
+// starts over. A quota must refill from empty within it, which the admin
+// settings check, so dropping an idle bucket never grants more than the
+// quota would have refilled.
+const SessionQuotaIdleTTL = 7 * 24 * time.Hour
+
+// SessionQuotaRefillsInTime reports whether q's bucket refills from empty
+// within SessionQuotaIdleTTL.
+func SessionQuotaRefillsInTime(q SessionQuotaConfig) bool {
+	return q.RequestsPerHour > 0 && float64(q.Burst)/q.RequestsPerHour <= SessionQuotaIdleTTL.Hours()
+}
 
 // quotaBucket is one key's bucket.
 type quotaBucket struct {
@@ -76,7 +85,7 @@ func secondsDuration(seconds float64) time.Duration {
 const quotaEvictEvery = time.Minute
 
 // MemoryQuotaLimiter keeps quota buckets in this process. It drops buckets
-// idle for quotaIdleTTL as it goes, at most once a minute, so it needs no
+// idle for SessionQuotaIdleTTL as it goes, at most once a minute, so it needs no
 // goroutine.
 type MemoryQuotaLimiter struct {
 	mu        sync.Mutex
@@ -109,7 +118,7 @@ func (ml *MemoryQuotaLimiter) takeAt(key string, q SessionQuotaConfig, now time.
 func (ml *MemoryQuotaLimiter) evictLocked(now time.Time) {
 	ml.lastEvict = now
 	for key, b := range ml.buckets {
-		if now.Sub(b.updated) >= quotaIdleTTL {
+		if now.Sub(b.updated) >= SessionQuotaIdleTTL {
 			delete(ml.buckets, key)
 		}
 	}
@@ -117,7 +126,7 @@ func (ml *MemoryQuotaLimiter) evictLocked(now time.Time) {
 
 // quotaScript is quotaBucket.take in Redis, timed by the Redis clock so every
 // API server refills a shared bucket at the same rate. The hash expires after
-// quotaIdleTTL without a take.
+// SessionQuotaIdleTTL without a take.
 // KEYS[1] = bucket key; ARGV[1] = refill per second, ARGV[2] = burst,
 // ARGV[3] = idle expiry in seconds.
 // Returns {allowed (0/1), tokens left as a string}.
@@ -173,7 +182,7 @@ func (rl *RedisQuotaLimiter) Take(ctx context.Context, key string, q SessionQuot
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rl.windows.callTimeout)
 	defer cancel()
 	raw, err := quotaScript.Run(callCtx, rl.windows.client, []string{"silo:ratelimit:quota:" + key},
-		strconv.FormatFloat(q.RequestsPerHour/3600, 'g', -1, 64), q.Burst, int(quotaIdleTTL/time.Second)).Slice()
+		strconv.FormatFloat(q.RequestsPerHour/3600, 'g', -1, 64), q.Burst, int(SessionQuotaIdleTTL/time.Second)).Slice()
 	var tokens float64
 	if err == nil {
 		if len(raw) == 2 {

@@ -410,6 +410,9 @@ func validateRateLimitConfig(cfg ratelimit.Config) error {
 	if err := boundedBurst("session_quota.burst", cfg.Session.Burst); err != nil {
 		return err
 	}
+	if !ratelimit.SessionQuotaRefillsInTime(cfg.Session) {
+		return errors.New("session_quota.burst must refill within a week: at most 168 times requests_per_hour")
+	}
 	for name, tier := range cfg.Tiers {
 		if err := boundedRate("tier."+name+".requests_per_second", tier.RequestsPerSecond, ratelimit.MaxRequestsPerWindow); err != nil {
 			return err

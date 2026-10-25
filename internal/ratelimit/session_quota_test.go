@@ -50,13 +50,13 @@ func TestQuotaBucket(t *testing.T) {
 	if got := ml.takeAt("k", slow, last.Add(30*time.Minute)); got.Allowed {
 		t.Fatalf("take after lowering the rate = %+v, want the drained bucket kept", got)
 	}
-	ml.evictLocked(last.Add(30*time.Minute + quotaIdleTTL - time.Second))
+	ml.evictLocked(last.Add(30*time.Minute + SessionQuotaIdleTTL - time.Second))
 	if len(ml.buckets) != 1 {
-		t.Fatal("bucket evicted before it was idle for quotaIdleTTL")
+		t.Fatal("bucket evicted before it was idle for SessionQuotaIdleTTL")
 	}
-	ml.evictLocked(last.Add(30*time.Minute + quotaIdleTTL))
+	ml.evictLocked(last.Add(30*time.Minute + SessionQuotaIdleTTL))
 	if len(ml.buckets) != 0 {
-		t.Fatal("idle bucket kept after quotaIdleTTL")
+		t.Fatal("idle bucket kept after SessionQuotaIdleTTL")
 	}
 }
 

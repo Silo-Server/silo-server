@@ -491,8 +491,9 @@ The per-second and per-minute budgets stop bursts, not volume: a client that sta
 just under them can still send hundreds of thousands of requests a day. Each login
 session therefore also spends a token bucket, keyed `session:<session_id>`, that holds
 `ratelimit.session.burst` requests (default 30000) and refills at
-`ratelimit.session.requests_per_hour` (default 10000). The admin UI labels these
-**Per sign-in session**.
+`ratelimit.session.requests_per_hour` (default 10000). The burst must refill from
+empty within a week, so it can be at most 168 times the hourly rate. The admin UI
+labels these **Per sign-in session**.
 
 `ratelimit.session.mode` decides what happens when a bucket is empty:
 
