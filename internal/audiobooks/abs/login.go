@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
@@ -486,18 +487,32 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 
 // setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
 // does when a client did not opt into body-token delivery. HttpOnly + Lax,
-// Secure only under TLS so plain-HTTP LAN deployments still receive it.
+// Secure only when the client reached the server over HTTPS, so plain-HTTP
+// LAN deployments still receive it.
 func setRefreshCookie(w http.ResponseWriter, r *http.Request, refresh string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    refresh,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   refreshCookieSecure(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(ttl / time.Second),
 	})
 }
+
+// refreshCookieSecure reports whether the client reached the server over
+// HTTPS. A TLS-terminating proxy leaves r.TLS nil, so the scheme comes from
+// clientip.RequestScheme: X-Forwarded-Proto counts only from a trusted proxy,
+// and without clientip.Middleware only the connection's own TLS state does.
+// Login and logout share it so the deleting Set-Cookie carries the same Secure
+// flag as the cookie it replaces; browsers refuse to let a non-Secure cookie
+// overwrite a Secure one.
+func refreshCookieSecure(r *http.Request) bool {
+	return clientip.RequestScheme(r) == schemeHTTPS
+}
+
+const schemeHTTPS = "https"
 
 // handleRefresh — POST /auth/refresh
 //
@@ -671,6 +686,8 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   refreshCookieSecure(r),
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 
