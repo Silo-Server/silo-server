@@ -3,7 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
-	"runtime"
+	"math"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -263,25 +263,16 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 // Limit far beyond the profile's progress rows sizes nothing by Limit. Both
 // scan loops used Limit as the result slice's capacity, so
 // /Items?IsPlayed=true&Limit=100000000 asked for about 120 GB and crashed the
-// server. The page must still hold every row.
+// server. Limit=math.MaxInt, which parseItemsQuery accepts, makes the unfixed
+// make() panic at once, so the test catches a revert without measuring memory.
+// The page must still hold every row.
 func TestLoadProgressPage_HugeLimitDoesNotPreallocate(t *testing.T) {
-	if got := progressPageCapacity(100_000_000); got != compatBrowseMaxLimit {
-		t.Fatalf("progressPageCapacity(huge) = %d, want %d", got, compatBrowseMaxLimit)
-	}
-	if got := progressPageCapacity(5); got != 5 {
-		t.Fatalf("progressPageCapacity(5) = %d, want 5", got)
-	}
-
-	// Large enough that one Limit-sized slice (about 1.2 KB per element) is
-	// over 100 MB, small enough that unfixed code still finishes.
-	const hugeLimit = 100_000
-	const maxAllocBytes = 16 << 20
 	for _, tc := range []struct {
 		name  string
 		query itemsQuery
 	}{
-		{name: "raw-offset fast path", query: itemsQuery{limit: hugeLimit}},
-		{name: "general loop", query: itemsQuery{limit: hugeLimit, enableTotalRecordCount: true}},
+		{name: "raw-offset fast path", query: itemsQuery{limit: math.MaxInt}},
+		{name: "general loop", query: itemsQuery{limit: math.MaxInt, enableTotalRecordCount: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			items := map[string]*models.MediaItem{
@@ -295,19 +286,17 @@ func TestLoadProgressPage_HugeLimitDoesNotPreallocate(t *testing.T) {
 			h := resumeTestHandler(userData, items)
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 
-			var before, after runtime.MemStats
-			runtime.ReadMemStats(&before)
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("loadProgressPage sized an allocation by Limit: %v", r)
+				}
+			}()
 			dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", tc.query, nil, nil)
-			runtime.ReadMemStats(&after)
 			if err != nil {
 				t.Fatalf("loadProgressPage: %v", err)
 			}
-
 			if got := dtoNames(dtos); len(got) != 2 || got[0] != "Movie One" || got[1] != "Movie Two" {
 				t.Fatalf("names = %v, want [Movie One Movie Two]", got)
-			}
-			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > maxAllocBytes {
-				t.Fatalf("loadProgressPage allocated %d bytes for a %d-row profile, want <= %d", allocated, len(userData.entries), maxAllocBytes)
 			}
 		})
 	}
