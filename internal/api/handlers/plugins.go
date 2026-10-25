@@ -955,16 +955,18 @@ func toUserPluginSettingsSummary(
 	}
 }
 
-// configuredGlobalKeys names the installation's stored global config entries,
-// reading only their keys.
+// configuredGlobalKeys names the installation's stored global config entries that hold
+// a usable value, reading only their keys.
 //
-// A read failure reports none rather than failing the request: the answer decides
-// whether a screen may offer a setting, and an unprovable yes is worse than no.
+// A cleared entry still has a row, so presence alone would keep a dependent setting on
+// offer after an operator removed the credential behind it. A read failure reports none
+// rather than failing the request: the answer decides whether a screen may offer a
+// setting, and an unprovable yes is worse than no.
 func (h *PluginHandler) configuredGlobalKeys(ctx context.Context, installationID int) []string {
 	if h.configs == nil {
 		return nil
 	}
-	keys, err := h.configs.ListGlobalConfigKeys(ctx, installationID)
+	keys, err := h.configs.ListConfiguredGlobalConfigKeys(ctx, installationID)
 	if err != nil {
 		slog.WarnContext(ctx, "listing plugin global config keys", "component", "api", "installation_id", installationID, "error", err)
 		return nil
