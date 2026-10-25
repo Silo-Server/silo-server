@@ -2540,6 +2540,73 @@ func TestStartPlaybackV3HLSCopyMPEGTSOnV2Only(t *testing.T) {
 	}
 }
 
+// A fresh remote start of an MPEG-TS copy remux asks the node for MPEG-TS and
+// refuses, and stops, a node that does not attest it, so an fMP4 stream is
+// never published under a plan that promises MPEG-TS.
+func TestPrepareRemoteTransportV3RefusesUnattestedMPEGTSCopy(t *testing.T) {
+	for _, attests := range []bool{true, false} {
+		t.Run(fmt.Sprintf("attests=%t", attests), func(t *testing.T) {
+			var startRequest transcodenode.TranscodeStartRequest
+			stopRequests := 0
+			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+					writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+				case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+					if err := json.NewDecoder(r.Body).Decode(&startRequest); err != nil {
+						t.Errorf("decode remote start: %v", err)
+					}
+					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
+						SessionID: startRequest.SessionID, Status: "started",
+						CopyFMP4RecipeVersion: startRequest.CopyFMP4RecipeVersion,
+						CopyVideoMPEGTS:       attests && startRequest.CopyVideoMPEGTS,
+					})
+				case r.Method == http.MethodDelete:
+					stopRequests++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer remote.Close()
+
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.JWTSecret = "test-secret"
+			handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+			plan := &playback.PlanV3{PlanID: "plan:remote-mpegts-copy", Delivery: playback.DeliveryRemuxHLSV3,
+				EffectiveRecipe: playback.EffectiveRecipeV3{SegmentContainer: playback.SegmentContainerMPEGTSV3}}
+			// Pin the remux to the worker so a refusal cannot fall back to a
+			// local FFmpeg on the test host.
+			policy := config.DefaultPlaybackRoutingPolicy()
+			policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+			transport, transportErr := handler.prepareTransportWithPolicyV3(
+				httptest.NewRequest(http.MethodPost, "/", nil),
+				&playback.Session{ID: "session-remote-mpegts-copy", UserID: 7, ProfileID: "profile-1"},
+				v3HandlerFixtureFile(t),
+				playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", TargetAudioCodec: "copy"},
+				mediaAuthModeV3{}, policy,
+			)
+			if !startRequest.CopyVideoMPEGTS {
+				t.Fatalf("remote start did not request MPEG-TS: %#v", startRequest)
+			}
+			if attests {
+				if transportErr != nil {
+					t.Fatalf("prepare attested MPEG-TS copy: %#v", transportErr)
+				}
+				transport.rollback()
+				return
+			}
+			if transportErr == nil || transportErr.reason != transcodeStartFailedReasonV3 || !errors.Is(transportErr.cause, transcodenode.ErrCopyVideoMPEGTSAttestationMismatch) {
+				transport.rollback()
+				t.Fatalf("transport error = %#v, want the MPEG-TS attestation refusal", transportErr)
+			}
+			if stopRequests != 1 {
+				t.Fatalf("stop requests = %d, want one cleanup for the unattested job", stopRequests)
+			}
+		})
+	}
+}
+
 func TestVideoSampleEntryForPlanV3(t *testing.T) {
 	tests := []struct {
 		name string
