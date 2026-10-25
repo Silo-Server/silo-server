@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -30,9 +31,11 @@ const rehomeTestTransport = "rehome-transport"
 // fakeRehomeNode is a transcode node that accepts a start and then serves the
 // started transport's segments.
 type fakeRehomeNode struct {
-	server  *httptest.Server
-	starts  atomic.Int32
-	release chan struct{} // when non-nil, a start waits for it to close
+	server      *httptest.Server
+	starts      atomic.Int32
+	stops       atomic.Int32
+	legacyAudio bool
+	release     chan struct{} // when non-nil, a start waits for it to close
 
 	mu       sync.Mutex
 	lastSeen transcodenode.TranscodeStartRequest
@@ -63,10 +66,11 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 			w.WriteHeader(http.StatusAccepted)
 			// Like a node from before MPEG-TS copy attestation: it echoes the
 			// copy-fMP4 recipe version but not copy_video_mpegts.
-			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion})
+			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion, RequireAudioTrack: req.RequireAudioTrack && !node.legacyAudio})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
+			node.stops.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -863,5 +867,34 @@ func TestRelayMoveWithoutARecordedPlanAdmitsRenditionNodes(t *testing.T) {
 	}
 	if eligible(&nodepool.Node{URL: older.URL}) {
 		t.Fatal("a node without the rendition feature was admitted")
+	}
+}
+
+func TestRelayMovePreservesMandatoryAudio(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			node := newFakeRehomeNode(t, false)
+			node.legacyAudio = legacy
+			f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, node.server.URL)}, "missing-test-ffmpeg")
+			card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+			if card == nil {
+				t.Fatal("fixture stream token did not contain a recipe")
+			}
+			card.RequireAudioTrack, card.AudioTrackIndex = true, 1
+			f.token = f.handler.signSessionToken(*card, false)
+			response := f.segment("seg_00003.ts")
+			if !node.lastStart().RequireAudioTrack {
+				t.Fatal("rehome discarded mandatory audio selection")
+			}
+			if legacy {
+				if response.Code == http.StatusOK || node.stops.Load() == 0 {
+					t.Fatalf("unconfirmed rehome status=%d, cleanup=%d", response.Code, node.stops.Load())
+				}
+				return
+			}
+			if response.Code != http.StatusOK {
+				t.Fatalf("confirmed rehome status=%d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }

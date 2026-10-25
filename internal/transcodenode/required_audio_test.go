@@ -1,6 +1,7 @@
 package transcodenode
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -14,6 +15,13 @@ func TestHandleStartRetainsRequiredAudio(t *testing.T) {
 	response := postStartRequest(t, server, TranscodeStartRequest{SessionID: "required-audio", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "copy", AudioTrackIndex: 1, RequireAudioTrack: true, SegmentDuration: 2})
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("start status=%d: %s", response.Code, response.Body.String())
+	}
+	var started TranscodeStartResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if !started.RequireAudioTrack {
+		t.Fatal("worker did not confirm mandatory audio mapping")
 	}
 	server.mu.RLock()
 	session := server.sessions["required-audio"]

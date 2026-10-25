@@ -394,7 +394,7 @@ func TestStartRemoteToneMapDelayedSuccessCannotOverwriteLocalSoftwareWinner(t *t
 			arrivedOnce.Do(func() { close(remoteStartArrived) })
 			<-releaseRemoteStart
 			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
-				HWAccel: tonemap.BackendQSV, ToneMapMode: tonemap.ModeHardware,
+				HWAccel: tonemap.BackendQSV, ToneMapMode: tonemap.ModeHardware, RequireAudioTrack: true,
 			})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			remoteDeleted <- struct{}{}
@@ -496,7 +496,7 @@ func TestConcurrentRemoteStartsPublishOneTrackedRoute(t *testing.T) {
 			close(firstArrived)
 			<-releaseFirst
 		}
-		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: tonemap.BackendQSV})
+		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: tonemap.BackendQSV, RequireAudioTrack: true})
 	}))
 	t.Cleanup(node.Close)
 
@@ -842,6 +842,7 @@ func fakeTranscodeNode(t *testing.T, received *transcodenode.TranscodeStartReque
 		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
 			SessionID: request.SessionID, Status: "started",
 			AudioRecipeVersion:    request.AudioRecipeVersion,
+			RequireAudioTrack:     request.RequireAudioTrack,
 			CopyFMP4RecipeVersion: request.CopyFMP4RecipeVersion,
 			ThrottleSeconds:       request.ThrottleSeconds,
 		})
@@ -924,7 +925,7 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusAccepted)
-					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
+					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{RequireAudioTrack: request.RequireAudioTrack, HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -993,7 +994,7 @@ func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) 
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{RequireAudioTrack: request.RequireAudioTrack, HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -1066,7 +1067,7 @@ func TestStartRemoteToneMapTimeoutFallsBackToSoftwareAfterCleanup(t *testing.T) 
 			if !cleaned.Load() {
 				t.Error("software retry started before the indeterminate hardware session was cleaned up")
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{RequireAudioTrack: request.RequireAudioTrack, HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			cleaned.Store(true)
 			w.WriteHeader(http.StatusNoContent)
@@ -1354,5 +1355,67 @@ func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
 	}
 	if received.SessionID == "" {
 		t.Fatal("the planned node received no start request")
+	}
+}
+
+func TestStartRemoteTranscodeRequiresAudioConfirmation(t *testing.T) {
+	for _, test := range []struct {
+		name                          string
+		required, confirmed, rejected bool
+	}{
+		{"required old worker", true, false, true},
+		{"required current worker", true, true, false},
+		{"optional old worker", false, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stops atomic.Int32
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					stops.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				var request transcodenode.TranscodeStartRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				if request.RequireAudioTrack != test.required {
+					t.Errorf("required audio = %v, want %v", request.RequireAudioTrack, test.required)
+				}
+				w.WriteHeader(http.StatusAccepted)
+				if test.confirmed {
+					_, _ = io.WriteString(w, `{"require_audio_track":true}`)
+				}
+			}))
+			defer node.Close()
+			recipes := &stubRecipeNodeStore{}
+			handler, _, sessions := newRemoteTranscodeHandler(t, node.URL, recipes)
+			sessions.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+			source := testRemoteTranscodeSource()
+			if !test.required {
+				source.SelectedAudioStreamIndex, source.DefaultAudioStreamIndex = nil, nil
+			}
+			err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL)
+			if test.rejected {
+				if !errors.Is(err, errRemoteTranscodeStartFailed) || stops.Load() != 1 {
+					t.Fatalf("unconfirmed start = %v, stops = %d; want fallback error and cleanup", err, stops.Load())
+				}
+				stored, _ := sessions.Get("play-1")
+				if stored.TranscodeStarted || stored.Recipe != nil {
+					t.Fatal("unconfirmed worker published playback state")
+				}
+				if _, ok := recipes.Get("upstream-1"); ok {
+					t.Fatal("unconfirmed worker published reconstruction recipe")
+				}
+				return
+			}
+			if err != nil || stops.Load() != 0 {
+				t.Fatalf("accepted start = %v, stops = %d", err, stops.Load())
+			}
+			card, ok := recipes.Get("upstream-1")
+			if !ok || card.RequireAudioTrack != test.required {
+				t.Fatalf("persisted audio requirement = %v, found = %v", card.RequireAudioTrack, ok)
+			}
+		})
 	}
 }
