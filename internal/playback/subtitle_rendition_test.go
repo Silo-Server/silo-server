@@ -1348,6 +1348,9 @@ func TestCopyRemuxSubtitleSegmentsFollowTheVideoSegments(t *testing.T) {
 		// A keyframe plan restarts at 0; this source's video starts at
 		// 39.95 s on the cues' clock, which the mux delayed to 40 s.
 		{"planned fMP4", false, true, "40.000000", 39_950, "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:4500\n"},
+		// After its last read misses the video start, the origin is
+		// observed without a shift rather than retried for good.
+		{"planned fMP4 without a recorded video start", false, true, "40.000000", -1, "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ffmpegPath, fake := fakeSubtitleFFprobe(t, tc.pts, false)
@@ -1366,12 +1369,17 @@ func TestCopyRemuxSubtitleSegmentsFollowTheVideoSegments(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(opts.OutputDir, opts.subtitleCueFile), []byte(cues), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			videoStart := fmt.Sprintf("#tb 0: 1/1000\n0, %d, %d, 42, 12345, 0x12345678\n", tc.videoStartMS-50, tc.videoStartMS)
-			if err := os.WriteFile(filepath.Join(opts.OutputDir, subtitleVideoStartFileName(opts.subtitleCueFile)), []byte(videoStart), 0o644); err != nil {
-				t.Fatal(err)
+			if tc.videoStartMS >= 0 {
+				videoStart := fmt.Sprintf("#tb 0: 1/1000\n0, %d, %d, 42, 12345, 0x12345678\n", tc.videoStartMS-50, tc.videoStartMS)
+				if err := os.WriteFile(filepath.Join(opts.OutputDir, subtitleVideoStartFileName(opts.subtitleCueFile)), []byte(videoStart), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			session.opts = opts
 			session.startSubtitleSpanLocked(opts)
+			if tc.videoStartMS < 0 {
+				session.subtitleSpans[0].videoStartMisses = subtitleVideoStartReads - 1
+			}
 
 			want := [][]string{{"First"}, {"Second", "Across"}, {"Across", "Past the video"}}
 			for i, texts := range want {
@@ -1401,9 +1409,9 @@ func TestCopyRemuxSubtitleSegmentsFollowTheVideoSegments(t *testing.T) {
 }
 
 // A keyframe-planned copy's request for a subtitle segment FFmpeg has not
-// reached waits as its video request does, then fails as it does: an empty
-// answer would be final, so after a long forward seek that window would never
-// show its cues.
+// reached waits as its video request does, counting toward the throttle, then
+// fails as it does: an empty answer would be final, so after a long forward
+// seek that window would never show its cues.
 func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		opts := copyRemuxRenditionOpts(t.TempDir(), false)
@@ -1421,6 +1429,10 @@ func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), 5)
 		if rr.Code != http.StatusNotFound || time.Since(started) < subtitleSegmentProductionWait {
 			t.Fatalf("segment ahead of FFmpeg = %d after %v, want 404 after the planned wait", rr.Code, time.Since(started))
+		}
+		// The throttler would otherwise hold FFmpeg back from it.
+		if got := session.LastRequestedSegment(); got != 5 {
+			t.Fatalf("throttle position = %d, want the requested segment 5", got)
 		}
 	})
 }

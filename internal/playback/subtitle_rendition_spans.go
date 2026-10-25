@@ -29,6 +29,9 @@ type subtitleCueSpan struct {
 	// the cues' clock (copyMuxShiftsVideo), in seconds, observed with origin.
 	// The X-TIMESTAMP-MAP adds it so each cue shows with its own frame.
 	muxShift float64
+	// videoStartMisses counts failed reads of the video start the generation
+	// records for muxShift (noteSubtitleVideoStartMiss).
+	videoStartMisses int
 	// originFailedAt is when the last observation of origin failed.
 	originFailedAt time.Time
 	// startTime is the cue-clock time segment start is taken to begin at while

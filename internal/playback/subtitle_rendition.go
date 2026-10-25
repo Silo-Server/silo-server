@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -69,6 +70,9 @@ const (
 	// origin after one fails, so a missing ffprobe or unreadable segment costs
 	// one subprocess per interval rather than one per subtitle request.
 	subtitleOriginRetryAfter = 5 * time.Second
+	// subtitleVideoStartReads is how many times a copy generation's recorded
+	// video start is looked for before its origin is taken without a shift.
+	subtitleVideoStartReads = 3
 	// subtitleSegmentProductionWait bounds the wait for a segment the live
 	// generation is about to produce, matching what its video segment gets
 	// after a seek restart. An empty answer is final for a VOD player, so a
@@ -283,6 +287,11 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 		if !waitable || !time.Now().Before(deadline) {
 			return subtitleSegmentDocument(opts, segNum, subtitleCueWindow{}, nil), nil
 		}
+		if s.copyPlan != nil {
+			// A player may fetch subtitles ahead of video: the wait counts
+			// toward the throttle as the video segment's does.
+			s.notePlannedSegmentRequest(segNum)
+		}
 		// A long wait backs off so it does not re-read the playlist ten
 		// times a second.
 		timer := time.NewTimer(poll)
@@ -399,6 +408,19 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 	if first < 0 && fallback < 0 {
 		return span
 	}
+	// A copy's mux shift needs the video start its generation recorded. It is
+	// read first, so a missing record costs no ffprobe run, and after
+	// subtitleVideoStartReads misses the origin is taken without a shift:
+	// cues may then show the lead early, but they are placed.
+	videoStart, shiftKnown := 0.0, false
+	if copyMuxShiftsVideo(opts) {
+		var err error
+		videoStart, err = s.generationVideoStart(file)
+		shiftKnown = err == nil
+		if !shiftKnown && !s.noteSubtitleVideoStartMiss(file, span.start, err) {
+			return span
+		}
+	}
 
 	// The observation outlives the request that started it: concurrent
 	// requests wait on it, and its result is kept for the generation.
@@ -414,8 +436,9 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 	}
 	origin := pts - float64(subtitleSegmentPTSOffset90k(opts))/90_000 - s.subtitleSegmentPlacement(span, observed).offset
 	muxShift := 0.0
-	if err == nil && copyMuxShiftsVideo(opts) {
-		muxShift, err = s.copyMuxShift(file, origin)
+	if shiftKnown {
+		// The shift only ever delays; a negative difference is rounding.
+		muxShift = max(0, origin-videoStart)
 		origin -= muxShift
 	}
 	cancel()
@@ -442,12 +465,10 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 	return span
 }
 
-// copyMuxShift is how much later the HLS mux put the video of the generation
-// that writes cueFile than the cues' clock: its first video packet as muxed
-// (muxedStart, observed from its segments) less the same packet on the cues'
-// clock, which the generation records beside its cues. The shift only ever
-// delays; a negative difference is rounding.
-func (s *TranscodeSession) copyMuxShift(cueFile string, muxedStart float64) (float64, error) {
+// generationVideoStart is the cues'-clock time of the first video packet of
+// the generation that writes cueFile, as it recorded it beside its cues. Its
+// muxed time less this is how much later the HLS mux put the video.
+func (s *TranscodeSession) generationVideoStart(cueFile string) (float64, error) {
 	data, err := s.readOutputFile(subtitleVideoStartFileName(cueFile))
 	if err != nil {
 		return 0, fmt.Errorf("read generation video start: %w", err)
@@ -456,7 +477,33 @@ func (s *TranscodeSession) copyMuxShift(cueFile string, muxedStart float64) (flo
 	if !ok {
 		return 0, errors.New("generation video start not recorded")
 	}
-	return max(0, muxedStart-start), nil
+	return start, nil
+}
+
+// noteSubtitleVideoStartMiss counts a failed read of the video start of the
+// span starting at segment start that wrote cueFile. It reports whether the
+// origin should now be observed without a shift; until then the observation
+// waits subtitleOriginRetryAfter like a failed one.
+func (s *TranscodeSession) noteSubtitleVideoStartMiss(cueFile string, start int, err error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.subtitleSpans, func(candidate subtitleCueSpan) bool {
+		return candidate.file == cueFile && candidate.start == start
+	})
+	if i < 0 {
+		return false
+	}
+	span := &s.subtitleSpans[i]
+	span.videoStartMisses++
+	if span.videoStartMisses < subtitleVideoStartReads {
+		span.originFailedAt = time.Now()
+		return false
+	}
+	if span.videoStartMisses == subtitleVideoStartReads {
+		slog.Warn("copy remux subtitle cues placed without the mux shift", "component", "playback",
+			"playback_session_id", s.opts.SessionID, "cue_file", cueFile, "error", err)
+	}
+	return true
 }
 
 // subtitleSegmentRewrittenLocked reports whether a generation after span i

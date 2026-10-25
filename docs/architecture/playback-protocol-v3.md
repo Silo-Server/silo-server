@@ -1619,15 +1619,18 @@ moves with neither: on a default x264 source the lead is two frames. Each
 copy generation therefore also writes its first video packet, unshifted, as
 `framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
 first segment's observed start less that packet's time, read with O, and
-recorded with it. A segment whose cues are not produced yet is waited for
+recorded with it. The packet's record is read before the segment; after three
+reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
 while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
 running or restarting stream is about to reach it, or is a keyframe-planned
 copy, which runs on to every segment; otherwise a few seconds. It is then
 answered as a valid WebVTT document with no cues, which a player keeps, so
 the longer wait is what keeps cues after a slow seek restart. A
 keyframe-planned copy is the exception: like its video segment, a subtitle
-segment FFmpeg has still not reached after the wait answers `404`, which the
-player can retry, rather than an empty document it would keep. Subtitle
+segment FFmpeg has not reached counts as the player's position for the
+throttle while it waits, and if FFmpeg has still not reached it after the
+wait it answers `404`, which the player can retry, rather than an empty
+document it would keep. Subtitle
 segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
 produced keeps its cues. On FFmpeg's own playlist a generation keeps the
