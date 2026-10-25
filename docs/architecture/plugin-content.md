@@ -4,7 +4,8 @@ The configured plugin HTTP proxy is mounted at the narrow common parent
 `/api/v2/plugin-content`. Pages use `/plugins/{installation_id}/*`; static
 assets use `/plugin-assets/{installation_id}/*`. The frozen v1 mounts remain
 unchanged. The ordinary public `GET /api/v2/plugin-content/capabilities`
-reports revision 1 and whether the proxy dependency is configured. Availability
+reports whether the proxy dependency is configured, with the opaque `revision`
+every capability document carries. Availability
 does not promise that a particular installation or route is available.
 
 The generated OpenAPI extension `x-silo-plugin-content` describes the closed

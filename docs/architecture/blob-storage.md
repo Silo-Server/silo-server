@@ -5,15 +5,16 @@ The store owns its filesystem root or S3 bucket; callers use their own logical
 keys.
 
 Every blob Silo owns goes through it: artwork, branding assets, intro/credit
-markers, chapter thumbnails, downloaded subtitles, diagnostic bundles, job
-artifacts, and profile avatars.
+markers, chapter thumbnails, trickplay sprite sheets, downloaded subtitles,
+diagnostic bundles, job artifacts, and profile avatars.
 
 ## The two stores
 
 `blobstore.Open` returns a `Stores` pair:
 
 - **Assets** — artwork, branding assets, intro/credit markers, chapter
-  thumbnails, and downloaded subtitles. Carries the recorded storage identity.
+  thumbnails, trickplay sprite sheets, and downloaded subtitles. Carries the
+  recorded storage identity.
 - **Operational** — diagnostic bundles, job artifacts, and profile avatars.
 
 These are separate because the public bucket can serve browsers directly under
@@ -31,6 +32,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `library-posters/…` | library posters |
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
+| `trickplay/…` | trickplay sprite sheets |
 | `subtitles/…` | downloaded subtitles |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
@@ -215,8 +217,9 @@ endpoint equals the configured one lowercased, with the bucket and key prefix
 matching exactly, and rewrites the row in the exact form.
 The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
-any write that would resolve to a different identity with
-`409 artwork_storage_locked`: a different backend, `artwork.local_path` for a
+any write that would resolve to a different identity with `409` (problem type
+`conflict` in `/api/v2`, error code `artwork_storage_locked` in frozen
+`/api/v1`): a different backend, `artwork.local_path` for a
 local store, or the public endpoint, bucket, or key prefix for an S3 store. When
 only `storage.operational_identity` is recorded, the private location locks and
 the assets location stays free until the first write through Assets. The

@@ -180,9 +180,8 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
   scans keep it. Both match-queue fingerprints include a group override's forced values
   (`matchQueueGroupOverrideHashSQL`, `internal/metadata/match_queue_policy.go`), so the queue sync at
   the end of that scan wakes a match that was parked or backed off without the override.
-  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
-  `TestInferGroupAssignments_FileOverrideBeatsRootOverride`, and
-  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`);
+  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity` and
+  `TestInferGroupAssignments_FileOverrideBeatsRootOverride` (`internal/scanner/group_inference_test.go`);
   `TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem`
   (`internal/metadata/queued_identity_parity_test.go`),
   `TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot`

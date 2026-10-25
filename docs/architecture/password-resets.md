@@ -139,5 +139,5 @@ password without choosing a profile, but must still prove the temporary password
 and cannot reuse it as the new one.
 
 **Surfaces that cannot run the change refuse the login.** Jellyfin and
-Audiobookshelf compatible sign-ins call `auth.Service.CompatLogin`, which refuses an
-account holding a temporary password before opening a session.
+Audiobookshelf compatible sign-ins call `auth.Service.CompatLoginWithLocalFallback`,
+which refuses an account holding a temporary password before opening a session.

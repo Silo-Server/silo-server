@@ -690,13 +690,13 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   its change published, under the content ID its media file names after the
   refresh.
 - **Re-apply.** Local files only, no remote provider call. The item's NFO
-  values merge with `ReplaceUnlocked` through `mergeAndPersist`
+  values merge with `MergeReplaceUnlocked` through `mergeAndPersist`
   (`localReapply`), so field locks win and lists the NFO supplies replace the
   stored ones; credits keep the provider IDs and photos the stored cast
   already has. Local artwork applies as on any refresh, so an image replaced
   under the same name gets a new `?v=` source and is cached again; identity,
   videos and refresh bookkeeping are left alone. Seasons and episodes merge their local
-  results with `ReplaceUnlocked` through `persistSeasonAndEpisodeRows`.
+  results with `MergeReplaceUnlocked` through `persistSeasonAndEpisodeRows`.
 - **Chain order.** A level's local provider always runs ahead of its remote
   ones (see Precedence), so wherever a level has one, its NFO text, artwork
   and identity are tracked and re-applied. A level without one records no
@@ -763,8 +763,9 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 - Seasons have no banner, thumb or extra backdrops (`seasonNN-fanart`,
   `seasonNN-banner`, `seasonNN-landscape` and their season-folder forms are not
   read).
-- NFO `<thumb aspect="banner|landscape|clearart|discart">` and `<fanart>` URLs
-  are not read. A provider that offers banners, thumbs, clear art or disc art
+- NFO `<thumb aspect="banner|landscape|thumb|clearart|discart|disc|keyart">`
+  references are parsed but fill no slot (`nfoArtImageTypes`). A provider that
+  offers banners, thumbs, clear art or disc art
   returns `RemoteImage` entries of type `ImageBanner`, `ImageThumb`,
   `ImageClearArt` or `ImageDisc` (plugin image kinds `banner`, `thumb`,
   `clearart`, `disc`), and `applyBestImages` fills the slot when no sidecar

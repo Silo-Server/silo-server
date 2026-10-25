@@ -17,10 +17,18 @@ does not expose the secrets.
 - **Envelope:** every ciphertext is stored as `enc:v1:<base64url(nonce‖sealed)>`.
   The `enc:v1:` prefix is the version marker (see *Key rotation* below).
 - **Row binding (AAD):** each ciphertext is GCM-bound to its logical row via
-  additional-authenticated data — `table:column:<pk>` for per-row columns,
+  additional-authenticated data: `table:column:<row key>` for most per-row columns,
   `server_settings:<key>` for settings. A DB-write attacker therefore cannot move
   a credential blob from one row/column to another: decrypting under a different
-  binding fails authentication.
+  binding fails authentication. The row key is usually the primary key; a few
+  columns bind a business key instead: watch-sync tokens and device codes bind
+  `provider:user_id:profile_id`, plugin runtime configuration binds
+  `installation:config_key`, and history-import server-list entries bind the
+  session, entry index and server ID. Notification webhook, server channel and
+  email-verification outbox ciphertexts use their own prefixes
+  (`notification_webhook:<id>:…`, `server_channel:<id>:…`,
+  `notification-email-verification:<id>`). Changing a bound key in SQL makes its
+  value undecryptable.
 - **Read path:** an empty value stays empty; a non-`enc:v1:` value is treated as
   legacy plaintext and passed through unchanged (so a not-yet-migrated row keeps
   working); an `enc:v1:` value is decrypted and **any** failure (wrong key,
@@ -125,8 +133,16 @@ data migration of the envelope format.
 ## Scope and known gaps
 
 Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
-`server_settings`, watch-sync tokens, webhook-sync `access_token`,
-history-import admin/session tokens and temporary server-list credentials,
+`server_settings`, watch-sync tokens and device codes
+(`watch_provider_auth_sessions.device_code`), webhook-sync `access_token`,
+Autoscan webhook endpoint secrets (`autoscan_webhook_endpoints.secret_ref`),
+push device APNs and FCM tokens (`push_devices`), notification webhook and
+server channel URLs and signing secrets (`notification_webhooks`,
+`notification_server_channels`), queued email-verification messages
+(`notification_email_verifications.payload_ciphertext`), plugin instance state
+(`plugin_instance_state.state_value`),
+history-import admin/session tokens, temporary server-list credentials and
+personal run credentials (`history_import_run_credentials.payload`),
 subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
 (`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`),

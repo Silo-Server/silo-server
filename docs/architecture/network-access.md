@@ -184,7 +184,7 @@ to them.
   supervisor continues the restart and records the result.
 - The API reaches proxies over their backend URL with
   [signed worker requests](worker-http-protocol.md#authentication):
-  `GET /network-access/status`, `POST /network-access/{provider}/connect`
+  `GET /network-access/{provider}/status`, `POST /network-access/{provider}/connect`
   and `.../disconnect` on the proxy listener, ten seconds each, in parallel,
   like force-reload. Those routes carry `auth_url` and error text because
   they require a signed request; the public `/health` report carries only state,

@@ -31,10 +31,13 @@ JSON output contains the schema version, known table names, row and column count
 and blockers. It excludes paths, profile names, IDs, values, PIN hashes, SQL error
 messages, and unknown table names. Unknown tables are represented with a redacted
 label and block import even when empty. Integrity errors stop inspection. Missing
-tables, schema versions other than the current version 22, and nonempty legacy
-session/download tables are blockers. Old sources are never upgraded in place.
+tables, schema versions other than 22, and nonempty legacy session/download
+tables are blockers. The current SQLite user store (`schemaVersion` in
+`internal/userdb/migrate.go`, 36 today) is newer, so its backups are blocked too.
+Old sources are never upgraded in place.
 
-The manifest covers all 29 current persistent application tables. Schema 21 remains
+The manifest covers the 29 persistent application tables of a schema 22 source.
+Schema 21 remains
 an old source: its missing revision tables and version block import, and inspection
 does not create the tables or upgrade its version. The inventory does not run the account writer described below. Its manifest
 records the following mapping requirements:

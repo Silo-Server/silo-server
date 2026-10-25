@@ -63,7 +63,8 @@ History import and webhook sync share one policy,
   server addresses Emby Connect or plex.tv list for the user's account, since
   the user's own server reports those. It is trusted only when the account is
   an enabled admin, or when an admin turned on
-  `media_servers.allow_private_destinations` (Security & Access > Network).
+  `media_servers.allow_private_destinations` (Sign-in & Security > Security >
+  Local network).
 - The setting is off by default, so a server with only an admin account works
   as before. Turning it on lets every account reach the server's local
   network; the admin page says so.

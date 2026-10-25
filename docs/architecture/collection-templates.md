@@ -38,10 +38,9 @@ behavior is documented in the manual at https://siloserver.org/docs/manage-colle
    truncated gets an explicit override: the IMDb Top 250 templates use 250, and Criterion
    Collection and A24 use 0 (no limit). Add any new override to the table in
    `TestBuiltinTemplateDefaultLimits`.
-4. Put `DefaultSortOrder` in its band. The band orders the collections a bundle creates, and the
-   tests fail on a template outside its band:
+4. Put `DefaultSortOrder` in its band. The band orders the collections a bundle creates:
 
-   | Band | ID prefix | Also enforced |
+   | Band | ID prefix | Also required |
    | --- | --- | --- |
    | 1000–1999 | `mdblist_charts_` | |
    | 2000–2999 | `mdblist_best_of_` | |
@@ -53,11 +52,8 @@ behavior is documented in the manual at https://siloserver.org/docs/manage-colle
    | 8000–8999 | `mdblist_seasonal_` | |
    | 9000–9999 | `mdblist_misc_`, `tmdb_discover_kids_` | kids: `certification_lte` `PG` |
 
-   `TestPhase1MDBListTemplatesHaveSortOrderInExpectedBands`,
-   `TestPhase2DiscoverTemplatesUseExpectedBands`, and
-   `TestPhase3FranchiseTemplatesUseExpectedBands` hold these rules. The last two also pin the
-   template counts (18 popular genres, 18 top-rated genres, 1 kids, 11 franchises including the
-   placeholder); update the count when you add one.
+   Of these rules only the kids `PG` ceiling is tested (`TestBuiltinCatalog`); check the bands
+   and the other rules by hand when you add a template.
 5. Add a `tmdb_discover` or `tmdb_collection` template to a bundle. No import route creates
    those two sources, so the Synced list step can't create them and the v2 admin and personal
    template lists leave them out. `TestBundleOnlyTemplatesAreReachableFromBundles` fails on one
@@ -180,9 +176,9 @@ Commands assume the repository root is the cwd.
 
 ```sh
 go test ./internal/collections/templates/...
-go test ./internal/api/handlers/ -run 'TestBuiltinTemplateTitleSlugsAreUnique|TestCollectionTemplateHandler|TestLibraryCollectionHandlerListsTemplateBundles|TestV1Template'
+go test ./internal/api/handlers/ -run 'TestBuiltinTemplateTitleSlugsAreUnique|TestLibraryCollectionHandlerListsTemplateBundles|TestV1Template'
 go test ./internal/apiv2/ -run 'AdminTemplate|BuiltinBundleOnly|ImportableCollectionTemplates'
 ```
 
 When you change how the web offers templates or Starter packs, also run
-`pnpm --dir web exec vitest run src/lib/collections/synced.test.ts src/pages/CollectionEditorPage.synced.test.tsx src/components/collections/StarterPacksDialog.test.tsx src/lib/collections/starterPacks.test.ts src/lib/collectionTemplates.test.ts`.
+`pnpm --dir web exec vitest run src/lib/collections/synced.test.ts src/pages/CollectionEditorPage.synced.test.tsx src/components/collections/StarterPacksDialog.test.tsx src/lib/collections/starterPacks.test.ts`.

@@ -39,8 +39,8 @@ low):
 | `email.from_address` | — | required |
 | `email.from_name` | `Silo` | |
 
-Admin UI: Admin Settings → Notifications → Email, including a synchronous test
-send (`POST /api/v1/admin/email/test`).
+Admin UI: Integrations > Email, including a synchronous test send
+(`sendAdminTestEmail`, `POST /api/v2/admin/email/test`).
 
 ## Branded layout
 

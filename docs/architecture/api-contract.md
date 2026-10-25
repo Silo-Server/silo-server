@@ -1,6 +1,6 @@
 # Native API contract: Huma and `/api/v2`
 
-**Status: accepted for Silo 1.0; implementation pending.** Tracking issue:
+**Status: accepted for Silo 1.0; implemented, not yet locked.** Tracking issue:
 [#135](https://github.com/Silo-Server/silo-server/issues/135). Commands assume the repository
 root is the cwd.
 
@@ -192,7 +192,7 @@ An entry has two kinds of fields. The first kind is copied from the inventory ro
 projections of `auth_traits`. `make verify-migration-ledger` (the whole `internal/contractledger`
 test package, run in CI) validates the file against `contracts/api/v2/migration.schema.json`,
 reconciles every one of those fields against the inventory, reporting drift per field, and
-enforces the review rules below. The one permitted override is the ten `dynamic_plugin_proxy`
+enforces the review rules below. The one permitted override is the eleven `dynamic_plugin_proxy`
 rows, whose media kinds are recorded as `dynamic_proxy` because a plugin proxy has no static
 request or response shape; the override is anchored to the inventory side, so only a row whose
 inventory handler is one of the two plugin-proxy literals (`/api/v1/plugin-assets/{installation_id}/*`
@@ -356,9 +356,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   to the Huma adapter (`RouterConsumer` in the generator config), and only as the constructor's
   own root router at the constructor's top level — never a router derived by `Group()`,
   `Route()` or `With()`, and never inside a closure, a helper function, or a condition. The
-  operations behind it are described by `contracts/api/v2/openapi.json`. `TestRuntimeReconcile`
-  in `internal/apiv2` asserts the routes the assembled router serves are exactly the set the
-  registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
+  operations behind it are described by `contracts/api/v2/openapi.json`. The wildcard covers
+  `/api/v2/` and everything under it; the namespace root
   `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
   listener like any other unrouted path.
 - **The artifact.** `cmd/apiv2-openapi` renders `contracts/api/v2/openapi.json` from the
@@ -499,11 +498,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
-  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (101
-  `natural_idempotent`, 24 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3
-  `durable_dispatch`, 70 `non_retryable`, 0 `idempotency_key`, counted per distinct
-  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  needs them, and the field is never advertised unimplemented. Inventory answer: every
+  tier-1 ported mutation row is classified (each row's `retry_safety` in `migration.json` is the
+  current record; none is `idempotency_key`) and no residual group justifies a shared
+  generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
@@ -534,38 +532,34 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   replace and reset, device forget and device-settings reset, dashboard-layout reset, web-push
   unsubscribe by endpoint, and root-override deletion whose path can resolve to a different content group), so each stays `non_retryable`
   until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; account and node deletion) name the durable dispatch or cleanup the v2 port must add before
-  their retry is safe. The existing v2 profile creation and deletion operations remain
+  are email-address verification, whose v2 port admits the message into an encrypted outbox,
+  and node deletion, whose note names the durable pool reconciliation the nodes section must
+  add before its retry is safe. The existing v2 profile creation and deletion operations remain
   `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
   settings updates, stale-ID rematch, provider-chain replacement, and taste seeding also remain
   `non_retryable`: their current seams cannot resume dispatch after saving state, or
-  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Thirty-nine rows (38 distinct operations)
+  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Rows
   carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
-  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
-  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
-  invite-code redemption during signup, playback route events,
-  watch-together selection and promotion, metadata-match-queue retry, playback session
-  progress, download status, ebook reader progress, and onboarding progress,
-  whose last-write-wins update lets a delayed retry rewind a newer report, rating add
-  and remove, the taste seed, subtitle download and upload,
-  whose unique key resolves a retry but whose losing insert deletes the winner's S3
-  object, transcode start, which replaces a live session under the same id, and media
-  request creation, whose partial unique index stops covering a request once it reaches a
-  terminal state, node creation, whose cross-replica pool reload runs after the insert
-  without a transaction, push device registration (Apple and FCM), whose update overwrites
-  a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
+  identity implies, or re-runs a side effect a retry should not repeat (trailer refresh,
+  person refresh, stale-id rematch, invite-code redemption during signup,
+  watch-together selection and promotion, metadata-match-queue retry, rating add
+  and remove, the taste seed, transcode start, which replaces a live session under the same
+  id, media request creation, whose partial unique index stops covering a request once it
+  reaches a terminal state, node creation, whose cross-replica pool reload runs after the
+  insert without a transaction, Apple push device registration, whose update overwrites
+  a newer token with a retried older one, web-push subscription, whose stale retry after the
+  endpoint is reassigned deletes the newer profile's pending deliveries, profile update, which
+  bumps the account-wide access-policy revision on
   field presence rather than on an effective change and the profile's PIN revision whenever
-  the request carries a PIN, the provider device-auth poll, whose
-  completion check is a plain read ahead of the plugin call, admin user update, whose
-  password branch re-hashes and revokes every session on each attempt, profile creation,
+  the request carries a PIN, profile creation,
   whose name and limit checks run in application code with no unique index on the
-  account-scoped name, account deletion, whose impersonation-session revocation follows
-  the commit, node deletion, whose pool invalidation follows the commit, subtitle deletion,
-  whose S3 key is lost before cleanup, collection deletion, which never removes uploaded
-  poster variants, and profile deletion, whose object and device cleanup cannot resume after the row disappears,
-  library creation,
-  whose seeding and initial scan run after the insert without a transaction, and the
+  account-scoped name, node deletion, whose pool invalidation follows the commit, subtitle
+  deletion, whose S3 key is lost before cleanup, profile deletion, whose object and device
+  cleanup cannot resume after the row disappears, library creation,
+  whose seeding and initial scan run after the insert without a transaction, library update,
+  which saves settings before dispatching the title sync, metadata refresh and path scan the
+  change triggers, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
   v2 port must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
@@ -775,10 +769,10 @@ contract or ledger; a Huma upgrade must not silently change these behaviors.
 ### Operation and schema ownership
 
 Operation IDs are explicit, globally unique, lower camel case, and action-first, such as
-`listLibraries`, `getLibrary`, `createLibrary`, `startLibraryScan`, and `getSystemInfo`. They name
+`listLibraries`, `createLibrary`, `startLibraryScan`, and `getSystemInfo`. They name
 product behavior, never handlers, database tables, frameworks, Go packages, or the API major.
-Schema component names are explicit PascalCase product names such as `Library`, `LibrarySummary`,
-`CreateLibraryRequest`, `LibraryCollection`, `PageInfo`, and `Problem`. Huma-generated generic
+Schema component names are explicit PascalCase product names such as `Library`, `LibraryCreate`,
+`LibraryCollection`, `PageInfo`, and `Problem`. Huma-generated generic
 names, Go implementation artifacts, and anonymous top-level JSON objects do not enter the
 committed contract. Every top-level request, success response, problem extension, event, and job
 object has a stable name; primitive parameters may remain inline.
@@ -798,7 +792,7 @@ meaningful resource exists.
 
 Operations share a component only when its meaning, authorization visibility, requiredness,
 nullability, and expected evolution are the same. Purpose-specific projections such as
-`MediaItemSummary` and `MediaItem` are preferred over one universal object filled with optional
+`CatalogItem` and `CatalogItemDetail` are preferred over one universal object filled with optional
 fields. Each shared component has one owning API section in the contract ledger. Foundation owns
 the genuinely cross-cutting problem, validation, pagination, and job components. A pull request
 that changes a shared component lists every affected operation, fixture, and first-party client
@@ -1752,8 +1746,9 @@ the ledger rows: the two probes are typed `Capability` documents (`revision`, `s
 fields) with `Cache-Control: private, no-cache`, and the two v1 registrations of
 `/metadata/ai/status` are one operation whose unwired answer is `not_configured`; the three
 background actions keep their v1 `202` with a small body (trailer refresh still answers `200` for
-`cooldown` and `disabled`) and are classified as coalescing actions, not the 202 job-monitor
-contract; an unconfigured action is `409 capability_not_configured` rather than `503`; the trailer
+`cooldown` and `disabled`), not the 202 job-monitor contract; description translation is
+classified `coalescing`, while trailer and person refresh stay `non_retryable` with `DEFECT`
+notes; an unconfigured action is `409 capability_not_configured` rather than `503`; the trailer
 `unsupported_type` refusal is `422` at `path.id`, and a missing `target_language` is `422` at
 `body.target_language`; `translateCatalogItemDescription` answers the job itself rather than
 `{job}`; people and works moved under `/catalog`, the people search is an `{items}` collection
@@ -2177,11 +2172,14 @@ ownership through the shared service, and all connection operations retain accou
 ownership checks. Empty or repeated external mapping IDs fail validation before
 replacement. Mutations are conservatively non-retryable after uncertain responses.
 
-External webhook ingress remains separate from native management and continues on
-its existing v1 paths, including the legacy Plex receiver alias. Those externally
-configured URLs require their own migration decision before any v1 tombstone.
-Plex-only management aliases are proposed removals in the ledger and remain on v1;
-this work does not invent their pending reviewer. No webhook-management consumers
+External webhook ingress remains separate from native management. The
+provider-neutral receiver is ported as `receiveExternalWebhook`
+(`POST /api/v2/webhook-sync/webhooks/{secret}`), and v2 connections hand out that URL.
+The v1 receiver paths, including the legacy Plex receiver alias
+`POST /api/v1/plex-sync/webhooks/{secret}` (a documented exclusion), keep answering through
+the bridge and are retired with the v1 tombstone, so Plex servers still configured with a v1
+URL must be re-pointed at the webhook-sync URL before then. The Plex-only management aliases
+are ratified removals, still served on the bridge until the tombstone. No webhook-management consumers
 were found in the native client inventory. Jellyfin protocol user-state behavior
 continues through the existing shared store paths.
 
