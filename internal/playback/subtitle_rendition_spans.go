@@ -2,6 +2,7 @@ package playback
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -265,9 +266,16 @@ func (s *TranscodeSession) saveSubtitleSpans() {
 }
 
 // writeFileAtomic replaces dir/name through a temporary file and a rename, so
-// a crash never leaves a partial file.
+// a crash never leaves a partial file. Both names resolve inside an os.Root of
+// dir, so neither can leave it.
 func writeFileAtomic(dir, name string, data []byte) error {
-	tmp, err := os.CreateTemp(dir, "."+name+".*.tmp")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	tmpName := "." + name + "." + rand.Text() + ".tmp"
+	tmp, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -276,10 +284,10 @@ func writeFileAtomic(dir, name string, data []byte) error {
 		err = closeErr
 	}
 	if err == nil {
-		err = os.Rename(tmp.Name(), filepath.Join(dir, name))
+		err = root.Rename(tmpName, name)
 	}
 	if err != nil {
-		_ = os.Remove(tmp.Name())
+		_ = root.Remove(tmpName)
 	}
 	return err
 }
