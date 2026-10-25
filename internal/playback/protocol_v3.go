@@ -1640,14 +1640,25 @@ func PinAttemptStickyFeaturesV3(requested, negotiated []string) []string {
 // reused HLS transport keeps serving the form its session was built with, so
 // a replan must not record or plan a different one. Stop/start is the
 // boundary for changing it.
+//
+// The decision is the feature's presence in the hls delivery's list,
+// whether or not that delivery is currently enabled, because a replan's
+// context replaces the durable request's. A replan that omits the hls
+// delivery keeps the opt-in on a disabled placeholder entry, which plans
+// exactly like an absent one, so a later replan that brings HLS back still
+// gets the form the attempt started with.
 func PinHLSVariableSubstitutionV3(requested *ClientPlaybackContextV3, negotiated StartRequestV3) {
+	pinned := HasFeatureV3(negotiated.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3].Features, FeatureHLSVariableSubstitutionV3)
 	delivery, ok := requested.Deliveries[DeliveryClassHLSV3]
-	if !ok {
+	if !ok && !pinned {
 		return
 	}
 	delivery.Features = WithoutFeatureV3(delivery.Features, FeatureHLSVariableSubstitutionV3)
-	if HLSVariableSubstitutionV3(negotiated) {
+	if pinned {
 		delivery.Features = append(delivery.Features, FeatureHLSVariableSubstitutionV3)
+	}
+	if requested.Deliveries == nil {
+		requested.Deliveries = map[string]DeliveryCapabilityV3{}
 	}
 	requested.Deliveries[DeliveryClassHLSV3] = delivery
 }

@@ -1184,7 +1184,10 @@ Changing any of these modes means stopping and starting a new attempt.
 (`client_playback_context.deliveries.hls.features`) rather than a client
 feature, but it is fixed the same way: the server restores its start state in
 the replan's hls delivery, because a reused HLS transport keeps serving the
-playlist form it was built with (§4.2).
+playlist form it was built with (§4.2). The start state is whether the start
+request's hls delivery listed the feature, enabled or not. A replan that
+omits the hls delivery keeps the opt-in on a disabled hls entry, which plans
+like an absent one, so a later replan that offers HLS again still gets it.
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 
