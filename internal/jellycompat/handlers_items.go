@@ -3400,7 +3400,15 @@ func sortedTypeSet(typeSet map[string]bool) []string {
 // holds more than the profile's progress rows, so preallocating by Limit would
 // let one request ask the runtime for an arbitrarily large slice.
 func progressPageCapacity(limit int) int {
-	return min(max(limit, 0), compatBrowseMaxLimit)
+	// An explicit bound check rather than min(): CodeQL's allocation-size
+	// query recognizes comparisons as guards but not builtin calls.
+	if limit < 0 {
+		return 0
+	}
+	if limit > compatBrowseMaxLimit {
+		return compatBrowseMaxLimit
+	}
+	return limit
 }
 
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
