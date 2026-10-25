@@ -9,7 +9,7 @@ does not line up with the audio at all, which usually means it belongs to a
 different release or title.
 
 The code lives in `internal/subtitles/subsync`; the API is described in
-[subtitles-api.md](../subtitles-api.md#stored-subtitle-sync).
+[subtitles-api.md](../subtitles-api.md#subtitle-sync).
 
 ## Timing correction
 
@@ -27,7 +27,10 @@ bytes never change.
   the bytes change behind the same URL. The administrator download returns the
   stored bytes unchanged, and content identity and deduplication use them too.
 - `Retime` rewrites SRT, WebVTT, and ASS/SSA timestamps and leaves every other
-  byte as stored. Under a scale it also scales the event-relative times in ASS
+  byte as stored, except that it drops a cue or event the correction ends at or
+  before zero, clamps a negative start to zero, and removes a WebVTT
+  `X-TIMESTAMP-MAP` header line and any inline WebVTT timestamp that no longer
+  falls inside its cue. Under a scale it also scales the event-relative times in ASS
   override tags (karaoke `\k` syllables, `\t`, `\move`, `\fad`, `\fade`),
   so effects keep pace with their stretched event. Other formats cannot be synced or retimed.
 - A timing change bumps the row's revision like any other update, so
@@ -68,8 +71,8 @@ and the sync job's change check hash the same bytes.
 1. **Speech levels.** For each sampled window, ffmpeg decodes one audio
    stream (the one in the subtitle's language, else the default), band-limits
    it to the speech band, and the runner reduces it to one level per 10 ms
-   (`mediasample` speech output). A 5.1 or 7.1 stream is read from its centre
-   channel, which carries the dialogue; a file whose centre channel cannot be
+   (`mediasample` speech output). A stream with a numbered layout from 3.0 to 7.1
+   (or six or more channels and no recorded layout) is read from its centre channel, which carries the dialogue; a file whose centre channel cannot be
    read falls back to a downmix of every channel.
 2. **Windows.** Files of 45 minutes or more are sampled as 12 windows of
    2 minutes spread over the runtime. ffmpeg's input seek reads only those
