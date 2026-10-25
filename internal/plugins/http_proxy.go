@@ -409,13 +409,15 @@ func isRedirectStatus(status int) bool {
 // redirectLeavesOrigin reports whether location, resolved against r, names
 // another origin than the one r arrived on (clientip.RequestOrigin), a
 // scheme downgrade included. A relative location stays on the origin; one
-// that does not parse is treated as leaving it, and so is one with a
-// backslash: url.Parse reads `/\host` as a path, but browsers and other
-// WHATWG URL parsers read `\` as `/` and go to that host. (url.Parse already
-// refuses the control characters those parsers strip.)
+// that does not parse is treated as leaving it, and so are two spellings
+// that url.Parse reads as a path but browsers and other WHATWG URL parsers
+// read as an authority on another host: a backslash (`/\host`, as WHATWG
+// reads `\` as `/`) and three or more leading slashes (`///host`, as WHATWG
+// skips any number of slashes before the host). (url.Parse already refuses
+// the tab, newline, and other control characters those parsers strip.)
 func redirectLeavesOrigin(r *http.Request, location string) bool {
 	location = strings.TrimSpace(location)
-	if strings.Contains(location, `\`) {
+	if strings.Contains(location, `\`) || strings.HasPrefix(location, "///") {
 		return true
 	}
 	origin := clientip.RequestOrigin(r)

@@ -148,6 +148,11 @@ func TestContentHandlerRefusesOffOriginRedirects(t *testing.T) {
 		{"downgrade", http.StatusPermanentRedirect, "http://silo.test/x", http.StatusBadGateway},
 		{"backslash", http.StatusFound, `/\elsewhere.example/x`, http.StatusBadGateway},
 		{"control character", http.StatusFound, "/\t/elsewhere.example/x", http.StatusBadGateway},
+		{"three slashes", http.StatusTemporaryRedirect, "///elsewhere.example/x", http.StatusBadGateway},
+		{"four slashes", http.StatusFound, "////elsewhere.example/x", http.StatusBadGateway},
+		{"scheme and three slashes", http.StatusFound, "https:///elsewhere.example/x", http.StatusBadGateway},
+		{"leading space before slashes", http.StatusFound, " ///elsewhere.example/x", http.StatusBadGateway},
+		{"newline", http.StatusFound, "/\n/elsewhere.example/x", http.StatusBadGateway},
 		{"not a redirect", http.StatusCreated, "https://elsewhere.example/x", http.StatusCreated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
