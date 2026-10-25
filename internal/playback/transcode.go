@@ -3037,15 +3037,32 @@ func (l *SegmentLease) Close() error {
 
 // OpenSegment opens a completed segment for serving and captures its FFmpeg
 // generation atomically with the open.
+//
+// name must be a single file name inside the output directory. The open goes
+// through os.Root, so a symlink in the directory cannot lead outside it: the
+// subtitle filter alias points at the source media and must never be served as
+// a segment.
 func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
+	if !servableSegmentName(name) {
+		return nil, ErrSegmentNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.restarting != nil {
 		return nil, ErrSegmentNotFound
 	}
 
-	clean := filepath.Base(name)
-	segment, err := os.Open(filepath.Join(s.outputDir, clean))
+	root, err := os.OpenRoot(s.outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrSegmentNotFound
+		}
+		return nil, fmt.Errorf("open segment directory: %w", err)
+	}
+	// Files opened through a Root hold their own descriptor and stay valid
+	// after the Root closes.
+	defer func() { _ = root.Close() }()
+	segment, err := root.Open(name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrSegmentNotFound
@@ -3057,7 +3074,7 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		_ = segment.Close()
 		return nil, fmt.Errorf("stat segment: %w", err)
 	}
-	if info.Size() <= 0 {
+	if !info.Mode().IsRegular() || info.Size() <= 0 {
 		_ = segment.Close()
 		return nil, ErrSegmentNotFound
 	}
@@ -3070,6 +3087,14 @@ func (s *TranscodeSession) OpenSegment(name string) (*SegmentLease, error) {
 		Generation:      s.segmentGeneration,
 		GenerationToken: s.segmentGenerationTokenLocked(),
 	}, nil
+}
+
+// servableSegmentName reports whether name is a plain file name the segment
+// route may open: local, a single path element, and not the subtitle filter
+// alias.
+func servableSegmentName(name string) bool {
+	return filepath.IsLocal(name) && filepath.Base(name) == name && name != "." &&
+		name != subtitleFilterAliasName
 }
 
 // Close terminates the ffmpeg process and removes the temporary output directory.
