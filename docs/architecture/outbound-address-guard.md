@@ -2,8 +2,9 @@
 
 Some features make Silo send HTTP requests to an address a user typed or a
 third party supplied: history import, webhook sync, notification webhooks,
-collection posters set from a URL, artwork URLs from metadata providers, and
-subtitle file links from OpenSubtitles.
+collection posters set from a URL, artwork URLs from metadata providers,
+subtitle file links from OpenSubtitles, catalog seed imports from a URL, and
+plugin repository catalogs and packages.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -167,6 +168,34 @@ client (`newCollectionImageClient` in `internal/api/handlers`):
 
 Blocked addresses stay refused in all three cases, on every dial and redirect.
 
+## Catalog seed imports
+
+An admin can import a catalog seed from a remote `.json.gz` URL, either
+directly or as a queued import job, which checks the URL by downloading it and
+then downloads it again when the job runs. Both downloads go through
+`catalogseed.DownloadRemoteBundle`: a netguard transport, with the request
+trusted with the local network (`netguard.WithPrivateAccess`), since only
+admins reach these routes and a seed is often published by another server on
+the same LAN. Blocked addresses stay refused on every dial and redirect, and
+the API reports a refused address as an invalid remote URL. The download is
+capped at `catalogseed.MaxRemoteBundleBytes` (2 GiB compressed) and keeps its
+ten-minute timeout. A body is refused as soon as it passes the limit, or up
+front when its declared length does, with a message that names the limit, so
+a body without end cannot exhaust the server's memory.
+
+## Plugin repositories
+
+Repository catalog indexes, checksum files and plugin packages are all fetched
+by `fetchPackageResource` in `internal/plugins`, through the client from
+`newPackageFetchClient`. An admin adds the repository, but the catalog JSON is
+published by a third party and chooses the package and checksum addresses.
+The client uses a netguard transport, keeping its per-phase timeouts (dial,
+TLS handshake, response headers, and the body read-idle timeout) and no
+whole-request deadline. Requests are trusted with the local network so
+LAN-hosted repositories keep working. A blocked address, reached directly or by
+redirect, fails as a permanent `PackageError`, not a transient one, because a
+retry cannot change it.
+
 ## Limits
 
 The guard cannot tell a friendly public host from a hostile one: any account
@@ -175,6 +204,10 @@ answer, as it could from its own machine. In a container with bridge
 networking the server cannot see the host's public address, so a request to
 it is not recognized as the server's own. Run the container behind a firewall
 that also applies to traffic from the container if that matters.
+
+Because guarded transports ignore proxy environment variables, a server whose
+only route to the internet is an HTTP proxy cannot download remote catalog
+seeds, plugin repository catalogs, or plugin packages.
 
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork

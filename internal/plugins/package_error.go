@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // PackageError is an install or update refused because of the plugin package
@@ -62,7 +64,10 @@ func fetchPackageResource(ctx context.Context, client *http.Client, rawURL, subj
 func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawURL, subject string, readIdle time.Duration) ([]byte, error) {
 	fetchCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, rawURL, nil)
+	// Only admins add repositories, and a repository on the server's own
+	// network is a supported setup. The netguard transport still refuses
+	// blocked addresses on every dial and redirect.
+	req, err := http.NewRequestWithContext(netguard.WithPrivateAccess(fetchCtx), http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, invalidPackageAddressError(fmt.Errorf("build request for %q: %w", rawURL, err), subject)
 	}
@@ -75,6 +80,10 @@ func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawU
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("fetch %q: %w", rawURL, ctx.Err())
+		}
+		// A refused address stays refused, so retrying can't help.
+		if errors.Is(err, netguard.ErrBlockedDestination) || errors.Is(err, netguard.ErrPrivateDestination) {
+			return nil, refusedPackageAddressError(fmt.Errorf("fetch %q: %w", rawURL, err), subject)
 		}
 		return nil, transientPackageError(fmt.Errorf("fetch %q: %w", rawURL, err),
 			"Silo couldn't reach the host for %s. Check that this server can reach it, then try again.", subject)
@@ -109,4 +118,11 @@ func unsupportedAPIVersionError(version, supported string) error {
 
 func invalidPackageAddressError(err error, subject string) error {
 	return packageError(err, "Silo can't download %s: its address isn't a valid http or https link.", subject)
+}
+
+// refusedPackageAddressError reports an address the netguard transport
+// refused, such as a link-local or cloud metadata address. Like an invalid
+// address it is permanent.
+func refusedPackageAddressError(err error, subject string) error {
+	return packageError(err, "Silo can't download %s: its address is in a range this server never connects to.", subject)
 }
