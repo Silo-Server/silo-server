@@ -176,8 +176,9 @@ then downloads it again when the job runs. Both downloads go through
 `catalogseed.DownloadRemoteBundle`: a netguard transport, with the request
 trusted with the local network (`netguard.WithPrivateAccess`), since only
 admins reach these routes and a seed is often published by another server on
-the same LAN. Blocked addresses stay refused on every dial and redirect, and
-the API reports a refused address as an invalid remote URL. The download is
+the same LAN. Blocked addresses stay refused on every dial and redirect; the
+API answers a refused address with the same 400 as any source it cannot load,
+and a failed import job records the refusal in its error. The download is
 capped at `catalogseed.MaxRemoteBundleBytes` (2 GiB compressed) and keeps its
 ten-minute timeout. A body is refused as soon as it passes the limit, or up
 front when its declared length does, with a message that names the limit, so

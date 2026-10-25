@@ -314,7 +314,6 @@ const defaultLocalImportDir = "/catalog-seeds"
 var (
 	errCatalogSeedImportSourceUnavailable = errors.New("catalog imports from stored artifacts require configured storage")
 	errCatalogSeedImportInvalidLocalPath  = errors.New("Local path must point to an existing .json.gz file")
-	errCatalogSeedImportInvalidRemoteURL  = errors.New("Remote URL must point to an http(s) .json.gz file")
 )
 
 func (h *CatalogSeedHandler) SetLocalImportDir(dir string) {
@@ -365,17 +364,6 @@ func (h *CatalogSeedHandler) readImportDataFromArtifactKey(ctx context.Context, 
 		return nil, errCatalogSeedImportSourceUnavailable
 	}
 	return h.store.GetObject(ctx, h.store.Bucket(), artifactKey)
-}
-
-// readImportDataFromRemoteURL downloads a catalog seed an admin named by URL.
-// A URL of the wrong shape, or one that reaches a refused address (directly
-// or by redirect), wraps errCatalogSeedImportInvalidRemoteURL.
-func readImportDataFromRemoteURL(ctx context.Context, remoteURL string) ([]byte, error) {
-	data, err := catalogseed.DownloadRemoteBundle(ctx, remoteURL)
-	if errors.Is(err, catalogseed.ErrInvalidRemoteURL) || errors.Is(err, catalogseed.ErrRemoteAddressNotAllowed) {
-		return nil, fmt.Errorf("%w: %w", errCatalogSeedImportInvalidRemoteURL, err)
-	}
-	return data, err
 }
 
 func (h *CatalogSeedHandler) resolveExportJobArtifactRef(ctx context.Context, jobID string) (string, string, error) {
