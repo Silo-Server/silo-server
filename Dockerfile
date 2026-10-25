@@ -55,7 +55,11 @@ RUN --network=none go build \
     -o /silo ./cmd/silo/
 
 # Stage 3: Runtime
-FROM debian:trixie-slim
+# CI rebuilds this stage without the layer cache (no-cache-filters: runtime in
+# trusted-linux-build.yml) so every image picks up Debian security updates; the
+# upgrade covers packages already in the base image between Debian's refreshes
+# of the trixie-slim tag.
+FROM debian:trixie-slim AS runtime
 ARG TARGETARCH
 ARG INTEL_GMMLIB_VERSION=22.10.0
 ARG INTEL_IGC_VERSION=2.34.4
@@ -63,6 +67,7 @@ ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
