@@ -2405,7 +2405,12 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 
 	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
 	if rawQuery != "" {
-		gapURI += "?" + rawQuery
+		// Gap URIs take the query form the real segment URIs got.
+		gapQuery := rawQuery
+		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
+			gapQuery = reference
+		}
+		gapURI += "?" + gapQuery
 	}
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
 		timeline, err := parseManifestTimeline(manifest)

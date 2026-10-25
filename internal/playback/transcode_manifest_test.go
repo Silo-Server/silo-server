@@ -599,6 +599,46 @@ func TestBuildSourceAlignedPlaybackManifestAnchorsSeekedRealPlaylist(t *testing.
 	}
 }
 
+// The gap segments a source-aligned playlist prepends use the same query
+// form as the real segments, so a large seek does not bring back a
+// credential-sized query on every gap URI.
+func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
+	tempDir := t.TempDir()
+	writeManifestFixture(t, tempDir, strings.Join([]string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:3",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MEDIA-SEQUENCE:1800",
+		"#EXTINF:2.000000,",
+		"seg_01800.ts",
+		"",
+	}, "\n"))
+	session := &TranscodeSession{
+		outputDir: tempDir,
+		opts: TranscodeOpts{
+			TargetCodecVideo:        "h264",
+			TargetCodecAudio:        "aac",
+			SegmentDuration:         2,
+			TotalDuration:           1_000_000,
+			SeekSeconds:             3600,
+			StartSegmentNumber:      1800,
+			HLSVariableSubstitution: true,
+		},
+	}
+	rawQuery := "source_timeline=1&st=" + strings.Repeat("eyJzaWQiOi", 100)
+	got, err := session.BuildSourceAlignedPlaybackManifest("segment/", rawQuery)
+	if err != nil {
+		t.Fatalf("BuildSourceAlignedPlaybackManifest: %v", err)
+	}
+	if count := strings.Count(string(got), rawQuery); count != 1 {
+		t.Fatalf("query appears %d times, want once in its definition:\n%s", count, got)
+	}
+	uris := resolvePlaylistURIs(t, string(got))
+	if len(uris) < 2 || uris[0] != "segment/source_timeline_gap.ts?"+rawQuery || uris[len(uris)-1] != "segment/seg_01800.ts?"+rawQuery {
+		t.Fatalf("resolved URIs = %q", uris)
+	}
+}
+
 func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
 	if !CanGenerateSyntheticManifest(100_000, 2) {
 		t.Fatal("historical 50,000-segment manifest should remain supported")
