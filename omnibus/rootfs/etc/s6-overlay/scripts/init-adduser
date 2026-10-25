@@ -13,6 +13,14 @@ if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Another account on the same uid would make the kernel report that name for
+# Silo's processes, which breaks PostgreSQL peer authentication.
+other="$(getent passwd "$PUID" | cut -d: -f1 || true)"
+if [[ -n "$other" && "$other" != "silo" ]]; then
+  echo "PUID $PUID is already used by the $other account in this image; choose another uid" >&2
+  exit 1
+fi
+
 [[ "$(id -g silo)" == "$PGID" ]] || groupmod -o -g "$PGID" silo
 [[ "$(id -u silo)" == "$PUID" ]] || usermod -o -u "$PUID" silo
 

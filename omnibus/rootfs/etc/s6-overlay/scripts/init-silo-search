@@ -14,6 +14,8 @@ source /etc/silo-omnibus/lib.sh
 export HOME=/config/silo
 cd /config/silo
 
+meili_url="http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}"
+
 run_sql() {
   s6-setuidgid silo psql -v ON_ERROR_STOP=1 -qAtX "$@" "$DATABASE_URL"
 }
@@ -25,7 +27,7 @@ if enabled meilisearch; then
     exit 0
   fi
   key="$(<"$STATE_DIR/meili-master-key")"
-  if run_sql -v url="http://127.0.0.1:7700" -v key="$key" <<'SQL'
+  if run_sql -v url="$meili_url" -v key="$key" <<'SQL'
 INSERT INTO server_settings (key, value) VALUES
   ('catalog.search.provider', 'meilisearch'),
   ('catalog.search.meilisearch.url', :'url'),
@@ -39,7 +41,7 @@ SQL
   fi
 else
   # Only undo our own setting: a provider that points at the bundled instance.
-  if ! run_sql <<'SQL'
+  if ! run_sql -v url="$meili_url" <<'SQL'
 DO $$
 BEGIN
   IF to_regclass('public.server_settings') IS NOT NULL THEN
@@ -47,7 +49,7 @@ BEGIN
      WHERE key = 'catalog.search.provider' AND value = 'meilisearch'
        AND EXISTS (SELECT 1 FROM server_settings
                     WHERE key = 'catalog.search.meilisearch.url'
-                      AND value = 'http://127.0.0.1:7700');
+                      AND value = :'url');
   END IF;
 END
 $$;
