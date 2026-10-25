@@ -37,7 +37,8 @@ across all servers; a run that finds it held fails without refreshing anything.
 
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
 by default: processed search index events, activity log, task history, autoscan
-events, expired login sessions, policy decision log, and notifications. The log steps also
+events, expired login sessions, device sign-in requests, OAuth sign-in flows, policy
+decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Every server fires
 the same trigger, so a PostgreSQL advisory lock lets one server run the steps;
 the others record a completed run that did nothing. Each step keeps its

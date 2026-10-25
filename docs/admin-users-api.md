@@ -77,7 +77,7 @@ as well. `null` inherits the access group's `max_profiles`, and a value of at le
 1 replaces it. An administrator or an account outside every group inherits 5, and
 an access group created without a value gets 5. `effective_policy.max_profiles` is
 the limit that profile creation enforces: an account at its limit gets
-`409 profile_limit_reached`, and profiles it already has above a lowered limit are
+`409 conflict` (`409 profile_limit_reached` on v1), and profiles it already has above a lowered limit are
 kept. The bridge v1 body has no inherit state for this field, so its
 `max_profiles` reports the limit that applies. A v1 update stores an override,
 except that sending back the inherited limit an account reported leaves it

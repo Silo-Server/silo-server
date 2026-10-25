@@ -21,8 +21,9 @@ problem without database error details. Restart metadata is available without
 settings storage.
 
 The web settings pages use the v2 effective settings, restart metadata, and
-sensitive-status operations. Writes remain on their existing bridge operations
-until the corresponding mutation contracts migrate. The migration inventory lists
+sensitive-status operations, and write through `PUT /api/v2/admin/settings` and
+`PUT /api/v2/admin/settings/{key}` (see
+[general settings writes in v2](admin-api.md#general-settings-writes-in-v2)). The migration inventory lists
 no Apple or Android consumers for these inspection operations. Jellyfin
 compatibility does not expose these administrator settings contracts.
 
