@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";
 
@@ -147,6 +147,9 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
   const endpoints = useAdminApiClientEndpoints(client.session_id, hours);
   const revoke = useRevokeApiClientSession();
   const [confirming, setConfirming] = useState(false);
+  // The dialog's action button closes it on click; while the sign-out is in
+  // flight the close is ignored, so a failure stays on screen with its error.
+  const signingOut = useRef(false);
 
   return (
     <div className="border-border/60 text-muted-foreground mx-2 mt-1 mb-2 space-y-2 border-l pl-3 text-[12px]">
@@ -203,6 +206,7 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
       <ConfirmDialog
         open={confirming}
         onOpenChange={(next) => {
+          if (!next && signingOut.current) return;
           setConfirming(next);
           if (!next) revoke.reset();
         }}
@@ -212,12 +216,19 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
         variant="destructive"
         isPending={revoke.isPending}
         error={revoke.error ? "The session could not be signed out. Try again." : null}
-        onConfirm={() =>
+        onConfirm={() => {
+          if (signingOut.current) return;
+          signingOut.current = true;
           revoke.mutate(
             { userId: client.user_id, sessionId: client.session_id },
-            { onSuccess: () => setConfirming(false) },
-          )
-        }
+            {
+              onSuccess: () => setConfirming(false),
+              onSettled: () => {
+                signingOut.current = false;
+              },
+            },
+          );
+        }}
       />
     </div>
   );

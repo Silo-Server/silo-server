@@ -43,14 +43,20 @@ func TestQuotaBucket(t *testing.T) {
 		t.Fatalf("fourth take after an idle hour = %+v, want the burst of 3 to cap the refill", got)
 	}
 
-	// A bucket is dropped only once it would be full again.
-	ml.evictLocked(start.Add(time.Hour + 2*time.Second))
-	if len(ml.buckets) != 1 {
-		t.Fatalf("bucket evicted before it refilled")
+	// A drained bucket outlives a slower rate's refill: lowering the rate must
+	// not hand it a fresh burst. It is dropped only after a week untouched.
+	slow := SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 1, Burst: 3}
+	last := start.Add(time.Hour)
+	if got := ml.takeAt("k", slow, last.Add(30*time.Minute)); got.Allowed {
+		t.Fatalf("take after lowering the rate = %+v, want the drained bucket kept", got)
 	}
-	ml.evictLocked(start.Add(time.Hour + 3*time.Second))
+	ml.evictLocked(last.Add(30*time.Minute + quotaIdleTTL - time.Second))
+	if len(ml.buckets) != 1 {
+		t.Fatal("bucket evicted before it was idle for quotaIdleTTL")
+	}
+	ml.evictLocked(last.Add(30*time.Minute + quotaIdleTTL))
 	if len(ml.buckets) != 0 {
-		t.Fatalf("refilled bucket kept after eviction")
+		t.Fatal("idle bucket kept after quotaIdleTTL")
 	}
 }
 

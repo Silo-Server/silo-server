@@ -4884,11 +4884,7 @@ export interface RateLimitConfig {
   redis_available?: boolean;
 }
 
-export interface RateLimitSessionQuota {
-  mode: "off" | "log" | "enforce";
-  requests_per_hour: number;
-  burst: number;
-}
+export type RateLimitSessionQuota = V2Components["schemas"]["AdminRateLimitSessionQuota"];
 
 export interface RateLimitUpdateResponse {
   status: string;
