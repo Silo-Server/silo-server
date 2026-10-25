@@ -27,8 +27,10 @@ fails; Silo serves no fallback fonts. The Kodi add-on reads
 serves as External. The key matches case-insensitively; any other key returns
 404.
 
-The route inventory is maintained in
-`internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
+`internal/jellycompat/testdata/media_routes.txt` records the routes of a router
+built from configuration alone, so routes that need further dependencies, such
+as `GET /Persons/{name}` and `POST /Library/Media/Updated`, are not in it.
+`internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.
 
 ## Viewer state and preferences
@@ -291,8 +293,10 @@ change either switch through this surface.
 
 These changes do not implement every advanced query option. Compound sorts,
 full `IsMissing` semantics, multiple person-ID predicates, populated tag facets,
-and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain outside this
-subset.
+and the `Tags` and `HasSubtitles` item filters remain outside this subset.
+`/Items` applies `StudioIds`, keeping items with any named studio; when no value
+names a studio, it returns no items. Season and episode listings do not filter
+by studio.
 
 ## Playback negotiation and media
 
@@ -349,7 +353,11 @@ revoke. Stream bitrate limits apply to playback, not downloads, as on the
 native API. The response carries the same `ETag` as a `Static=true` stream of
 the file, for clients that resume with `If-Range`.
 
-Every playable item reports `CanDownload: true`, and every account's policy
+Playable movies and episodes report `CanDownload: true` wherever the item is
+mapped in full: item detail, `/Items?Ids=` lookups that apply no filter, search
+or sort, and list rows whose `Fields` include `MediaSources` or another field
+that triggers it (`MediaStreams`, `Chapters`, `People`, `ProviderIds`,
+`RemoteTrailers`). Other list rows leave the field out. Every account's policy
 reports `EnableContentDownloading: true`, whatever the account may download.
 Infuse refuses Direct Play of an item it believes it cannot download, so the
 download rules act on the `Download` route alone, and a client may offer a
@@ -426,7 +434,14 @@ ID at capacity returns 429; an existing ID can still update its profile. Expired
 registrations release their slots when the token next registers a profile.
 The quota is enforced across API processes.
 
-Media requests require a login/API token or an unexpired `PlaySessionId` grant.
+Media requests require a login/API token or an unexpired `PlaySessionId` grant,
+with one exception, the address-only static-stream grant. Jellyfin for Android
+TV and Findroid open static direct-play URLs without credentials, so a GET or
+HEAD of `/Videos/{id}/stream` or `/Videos/{id}/stream.{container}` with
+`Static=true` and a `MediaSourceId` is served as the caller of an authenticated
+`PlaybackInfo` that offered that item and source from the same client address
+and connection path, has not stopped or expired, and was active in the last two
+hours, while that caller's login or API key is still valid.
 A grant authorizes GET/HEAD for its negotiated item and source; catalog item and
 source IDs alone are not credentials. An invalid explicit token does not fall
 back to a playback grant. Revoked owner credentials invalidate the grant.
@@ -635,8 +650,9 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native `POST /api/v1/auth/login`. Both routes count
-  against the same per-IP `login` counter. The account name also spends its
+  the global budget, like native sign-in (`POST /api/v2/auth/login`, and
+  `POST /api/v1/auth/login` during the bridge). It shares the per-IP `login`
+  counter with every native operation that spends that budget. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
   locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
@@ -790,6 +806,11 @@ video-copy HLS stream for a client whose user agent starts with `Roku/` and
 whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 `remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
 keeps fMP4. Other clients are unchanged.
+
+The webOS rule: a video-copy HLS stream of a Dolby Vision profile 5 or 8 source
+is packaged as MPEG-TS on the same route when the client's user agent contains
+`webOS` or `Web0S`, in any case, unless the source plays directly or takes the
+Dolby Vision strip. The device profile's MPEG-TS support is not checked.
 
 ## AAC encodes
 

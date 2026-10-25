@@ -14,11 +14,13 @@ returns `success` plus a safe `error` on failure. The draft is not persisted.
 Send this command once; a lost response does not authorize automatic retries or
 authentication replay because the provider may already have processed the search.
 
-Both operations require the acting administrator. The POST test operation honors
-the demo restriction; the GET read does not.
-The web settings and setup wizard use these typed inspection operations. Saving
-provider settings remains on the bridge until guarded configuration updates and
-live application across nodes are implemented. No native provider-administration
+Both operations require the acting administrator. The POST test is declared
+demo-restricted, but demo mode refuses only non-admin accounts, so it never
+blocks an administrator.
+The web settings and setup wizard use these typed inspection operations and save
+through the guarded `PUT` described under
+[Guarded provider configuration transport](#guarded-provider-configuration-transport);
+a save applies only on the server that handled it. No native provider-administration
 consumer or Jellyfin counterpart is changed by these inspection operations.
 
 ## Profile header on media-file operations
@@ -51,7 +53,9 @@ a profile, or when no profile store is configured. The web translation modal rea
 this typed quota operation through its captured player configuration.
 
 These operations read persisted state and do not enqueue or cancel jobs. Job
-creation and cancellation remain separate migration work. Native consumers must
+creation and cancellation are the separate v2 operations described under
+[V2 AI creation and live delivery](#v2-ai-creation-and-live-delivery) and
+[AI job cancellation](#ai-job-cancellation). Native consumers must
 retain string identifiers and the captured account/profile when following jobs.
 
 The v2 subtitle capability probes are always registered. They require an
@@ -70,8 +74,7 @@ service is absent, both AI flags are false. These reads do not search providers,
 start jobs, or contact an external engine.
 
 The web subtitle menu uses the typed v2 AI probe with the player's credentials.
-Apple and Android adoption is coordinated separately. Generation and delivery retain their existing routes until their own
-migration scopes land. Jellyfin compatibility uses its existing subtitle
+Apple and Android adoption is coordinated separately. Jellyfin compatibility uses its existing subtitle
 protocol and needs no equivalent native capability route.
 
 ## OpenRouter transcription configuration
@@ -110,8 +113,8 @@ Generated tracks use the existing subtitle delivery path for Apple, Android,
 and Jellyfin clients. Clients discover configured transcription support through
 GET `/api/v2/subtitles/ai/status`: `transcribe_enabled` reflects the existing
 subtitle service's configuration and engine availability, including OpenRouter.
-The per-file AI probe described above exposes which actions are available for
-that file. These existing capability responses cover this provider configuration;
+`enabled` and `transcribe_enabled` apply server-wide; there is no per-file AI
+probe. These existing capability responses cover this provider configuration;
 Apple, Android, and Jellyfin subtitle delivery require no new fields or operations.
 
 ## Stored tracks and provider search
@@ -185,8 +188,8 @@ specified in [subtitle storage](architecture/subtitle-storage.md).
 
 The bridge download retains its existing request and response contract. This
 operation does not change Jellyfin subtitle delivery. Both native clients must
-adopt the new download operation separately; AI creation/cancellation and user
-multipart uploads remain separate migration scopes.
+adopt the new download operation separately. Multipart uploads and AI job
+creation and cancellation have their own v2 operations, described below.
 
 
 ## Multipart upload and language detection
@@ -269,10 +272,9 @@ return a redacted `500 internal_error`.
 
 The bundled administrator page uses cursor history and authority-scoped read
 caches, discards stale account/profile/PIN replies and preserves string IDs in
-its existing controls. Metadata edits, deletion and byte downloads retain their
-separate bridge transports. This list does not add a native client screen or a
-Jellyfin counterpart. Its ordinary migration row remains proposed until the
-independent review and actual consumer inventory requirements are satisfied.
+its existing controls. Metadata edits, deletion and byte downloads use the v2
+operations described below. This list does not add a native client screen or a
+Jellyfin counterpart.
 
 ### AI job cancellation
 
@@ -296,8 +298,7 @@ No new enqueue or durable request-replay receipt is implied.
 The web player has no existing job-cancellation caller; closing its creation
 modal is a local UI action. Native callers adopt this operation separately,
 retaining the exact job ID and captured account/profile/PIN authority for
-requests and any completion-driven UI updates. Creation and live streaming
-ownership remain separate migration work.
+requests and any completion-driven UI updates.
 
 ### V2 AI creation and live delivery
 
@@ -324,7 +325,9 @@ timing correction applied, an embedded track by its container stream and the med
 file's hash, size and modification time. Editing a sidecar, correcting its timing or
 replacing the media file starts a new translation. The returned job's
 `source_index` is the one the request sent. Deleting the track allows a fresh
-translation. Transcription requests always start a new job.
+translation. A transcription request never reuses a completed job; one with the
+same file, kind, `source_index`, target language and model as an active job
+returns that job.
 Clients should poll the returned job or refresh the file's subtitle inventory.
 
 Creation is `non_retryable`: send once, with no automatic authentication replay
@@ -355,7 +358,7 @@ The player sends the typed request once, rejects stale decoded responses after
 modal/media/session/config/account/profile/PIN changes, checks returned job/file
 identity, and reports background progress when no live notifier was attached.
 Apple and Android must adopt the explicit kind, string file ID, single-send
-semantics and returned job projection before this ordinary row can be ratified.
+semantics and returned job projection.
 There is no Jellyfin AI creation counterpart. Production activation and account
 enrollment are unchanged.
 
@@ -370,7 +373,7 @@ not restart transcription at another position.
 ## V2 administrator subtitle metadata edits
 
 `GET /api/v2/admin/subtitles/{id}` returns canonical metadata and a strong `ETag`.
-It requires acting-admin/demo policy, supports conditional reads, and exposes
+It requires the acting administrator, supports conditional reads, and exposes
 string IDs and canonical instants without storage object keys or content hashes.
 The validator binds the administrator, declared profile, subtitle and durable
 revision. The collection list is not the canonical edit document.
@@ -397,10 +400,9 @@ metadata before editing, and sends only changed fields. It retains the original
 validator through save. A failed or uncertain save leaves the draft visible and
 blocks another submission until the user closes and reopens to review current
 metadata. A late result cannot close a replacement editor or publish across an
-authority change. Delete, provider configuration and byte download transports
-remain separate scopes. Both native clients' actual metadata-edit caller
-inventories remain required before this ordinary row can be ratified; no native
-administration UI or Jellyfin metadata endpoint is introduced here.
+authority change. Deletion, provider configuration and byte downloads have their
+own v2 operations, described below. No native administration UI or Jellyfin
+metadata endpoint is introduced here.
 
 ### Administrator subtitle attachment
 
@@ -410,7 +412,7 @@ Metadata is captured before the object read; this is not a transaction spanning 
 
 ### Administrator subtitle deletion
 
-`DELETE /api/v2/admin/subtitles/{id}` (`deleteAdminStoredSubtitle`) requires acting-admin/demo authorization and `If-Match`. Obtain the strong validator from the canonical administrator metadata GET and retain it through confirmation. Missing validators return 428; a stale validator or revision race returns 412 with the current validator when available. The actual SQL DELETE enforces the captured revision. Explicit `If-Match: *` requests an existence-only deletion; the bundled confirmation always uses its captured strong tag. Missing metadata returns 404.
+`DELETE /api/v2/admin/subtitles/{id}` (`deleteAdminStoredSubtitle`) requires the acting administrator and `If-Match`. Obtain the strong validator from the canonical administrator metadata GET and retain it through confirmation. Missing validators return 428; a stale validator or revision race returns 412 with the current validator when available. The actual SQL DELETE enforces the captured revision. Explicit `If-Match: *` requests an existence-only deletion; the bundled confirmation always uses its captured strong tag. Missing metadata returns 404.
 
 A 204 confirms removal of metadata. Object deletion follows and is best effort; failure can leave an orphaned object. A database error, including a lost successful reply, never triggers object cleanup and does not prove the row survived. No durable deletion receipt, automatic retry, physical-erasure guarantee, or reconciliation worker is supplied. After an uncertain response, explicitly inspect the resource before another attempt. The bundled confirmation reads canonical metadata before enabling Delete, consumes one attempt, retains errors, and requires closing and reopening for a fresh observation. It never rereads on confirmation, rebases, refresh-replays, or falls back to v1. Viewer deletion and Jellyfin remain separate.
 
@@ -439,8 +441,8 @@ A SQL error, including an uncertain successful commit reply, causes no reload an
 `GET /api/v2/admin/subtitle-providers/{provider}` returns only provider name,
 enabled state and credential-presence flags, with a strong `ETag` bound to the
 acting account, declared profile, provider and durable revision. Both this read
-and `PUT` require acting-administrator authorization; only `PUT` enforces the demo
-guard. A missing
+and `PUT` require acting-administrator authorization, so demo mode, which refuses
+only non-admin accounts, blocks neither. A missing
 stored row has a canonical disabled representation; its exact validator permits
 create-if-absent. `If-Match: *` instead requires an existing stored row and never
 creates one. The configuration revision migration must be applied first.
@@ -468,8 +470,7 @@ reload and review, discarding that draft. The editor never adopts a conflict tag
 or the saved-result validator automatically. Reload establishes current durable
 configuration only, not which revision every server is using. Existing provider
 test transport remains separate. There is no Jellyfin provider-administration
-counterpart; native configuration callers require separate exact inventories
-before ordinary ratification.
+counterpart.
 
 ### Viewer stored subtitle deletion
 
@@ -483,9 +484,12 @@ The bundled viewer subtitle search dialogs and track selector have no stored-sub
 
 ## Text encoding
 
-Every text subtitle a client receives is UTF-8, as its `charset=utf-8` content
-type says: the playback subtitle routes, the Jellyfin subtitle stream, offline
-downloads, and the source of an AI translation. Sidecars and stored subtitles
+Text subtitles are decoded to UTF-8, wherever the server can place their code
+page, before a client receives them: the playback subtitle routes, the Jellyfin
+subtitle stream, offline downloads, and the source of an AI translation. SRT, WebVTT and ASS/SSA responses declare `charset=utf-8`
+(original SRT bytes requested with `original=1` declare it only when they are
+valid UTF-8); offline downloads serve a SUB subtitle as
+`application/octet-stream`, with no charset. Sidecars and stored subtitles
 saved in a legacy code page (Windows-1251 Russian, Windows-1250 Polish,
 UTF-16, and so on) are decoded on delivery, with the code page chosen from the
 subtitle's language and, among a language's common code pages, from the bytes
@@ -540,10 +544,11 @@ not have returns `404`.
 ### Jobs
 
 A job (`SubtitleSyncJobState`) has `id`, `status`, `trigger` (`auto` or
-`manual`), `created_at`, and, once finished, `finished_at`, `confidence` (0..1,
-the share of sampled audio windows that agree), and `result` (the correction
-found). While it is active it also has `phase` and `progress` (0..1); a failed
-job has `failure`.
+`manual`), `created_at`, `finished_at` (null until the job finishes) and
+`confidence` (0..1, the share of sampled audio windows that agree; null until
+the alignment finishes). `result` (the correction found) is present once the
+alignment found one. While it is active it also has `phase` and `progress`
+(0..1); a failed job has `failure`.
 
 | Status | Meaning |
 |---|---|
