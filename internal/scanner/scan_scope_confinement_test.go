@@ -69,10 +69,9 @@ func TestScopedScansAcceptPathsInsideLibrary(t *testing.T) {
 }
 
 // TestRequirePathInLibrarySymlinkedRoot covers a library root that is a
-// symlink: the logical paths the scanner records match lexically, and the
-// physical path into the same root matches once both sides are resolved. A
-// symlink inside the root that leads outside it does not widen the library
-// for the physical target path.
+// symlink: the logical paths the scanner records are accepted, while the
+// physical path into the root, an outside alias that resolves into it, and the
+// target of a symlink inside the root are refused.
 func TestRequirePathInLibrarySymlinkedRoot(t *testing.T) {
 	base := t.TempDir()
 	physicalRoot := filepath.Join(base, "real")
@@ -97,6 +96,10 @@ func TestRequirePathInLibrarySymlinkedRoot(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(physicalRoot, "Linked")); err != nil {
 		t.Fatal(err)
 	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(logicalRoot, alias); err != nil {
+		t.Fatal(err)
+	}
 	folder := &models.MediaFolder{ID: 9, Type: "movies", Paths: []string{logicalRoot}}
 
 	for _, path := range []string{
@@ -107,14 +110,16 @@ func TestRequirePathInLibrarySymlinkedRoot(t *testing.T) {
 		filepath.Join(logicalRoot, "Movie (2020)", "Movie (2020).mkv"),
 		// A vanished file under the root still matches lexically.
 		filepath.Join(logicalRoot, "Gone (2019)", "Gone (2019).mkv"),
-		movieDir,
-		physicalFile,
 	} {
 		if err := requirePathInLibrary(path, folder); err != nil {
 			t.Errorf("requirePathInLibrary(%q) = %v, want nil", path, err)
 		}
 	}
-	for _, path := range []string{outsideFile, elsewhere, base} {
+	for _, path := range []string{
+		outsideFile, elsewhere, base,
+		movieDir, physicalFile,
+		filepath.Join(alias, "Movie (2020)", "Movie (2020).mkv"),
+	} {
 		if err := requirePathInLibrary(path, folder); !errors.Is(err, ErrPathOutsideLibrary) {
 			t.Errorf("requirePathInLibrary(%q) = %v, want ErrPathOutsideLibrary", path, err)
 		}

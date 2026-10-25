@@ -2658,36 +2658,17 @@ func pathWithinAnyRoot(path string, roots []string) bool {
 // of the library's configured roots.
 var ErrPathOutsideLibrary = errors.New("path is outside the library")
 
-// requirePathInLibrary returns ErrPathOutsideLibrary unless path lies under
-// one of folder's roots. The lexical match covers every path the scanner
-// records, since walks keep the logical path below a symlinked root. A path
-// that only matches with symlinks resolved on both sides is accepted too, so
-// a caller holding the physical path into a symlinked root still works.
+// requirePathInLibrary returns ErrPathOutsideLibrary unless path lies
+// lexically under one of folder's roots. Walks keep the logical path below a
+// symlinked root, so this covers every path the catalog records. A physical
+// or aliased path that only resolves into a root is refused: scanning it would
+// record a second row for a file the catalog already holds under its logical
+// path.
 func requirePathInLibrary(path string, folder *models.MediaFolder) error {
-	if pathWithinAnyRoot(path, folder.Paths) || resolvedPathWithinAnyRoot(path, folder.Paths) {
+	if pathWithinAnyRoot(path, folder.Paths) {
 		return nil
 	}
 	return fmt.Errorf("%w: library %d, path %s", ErrPathOutsideLibrary, folder.ID, path)
-}
-
-func resolvedPathWithinAnyRoot(path string, roots []string) bool {
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return false
-	}
-	for _, root := range roots {
-		if strings.TrimSpace(root) == "" {
-			continue
-		}
-		resolvedRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			continue
-		}
-		if pathWithinAnyRoot(resolvedPath, []string{resolvedRoot}) {
-			return true
-		}
-	}
-	return false
 }
 
 // ScanFile scans a single file and upserts it into the database. filePath
