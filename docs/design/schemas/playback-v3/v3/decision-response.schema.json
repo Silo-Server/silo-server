@@ -465,6 +465,13 @@
             "dvh1"
           ]
         },
+        "segment_container": {
+          "type": "string",
+          "description": "`mpegts` on a server_remux_hls plan packaged as MPEG-TS because the client's hls delivery listed hls_copy_mpegts_v1; such a plan has no video_sample_entry. Absent means the server's default packaging.",
+          "enum": [
+            "mpegts"
+          ]
+        },
         "audio_codec": {
           "type": "string"
         },

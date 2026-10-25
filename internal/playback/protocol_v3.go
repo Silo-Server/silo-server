@@ -96,6 +96,18 @@ const (
 	// active_quality means "no entry" rather than "a server that predates
 	// the field". It exists only on /api/v2 (see NativeServerFeaturesV3).
 	FeaturePlanActiveQualityV3 = "plan_active_quality_v1"
+	// FeatureHLSCopyMPEGTSV3 is an hls delivery feature: a client lists it in
+	// deliveries.hls.features to have HLS copy remuxes of H.264 or HEVC video
+	// packaged as MPEG-TS segments instead of fragmented MP4. Players such as
+	// Roku's play the audio of a muxed fMP4 copy silently but play the same
+	// remux in MPEG-TS. The plan records the choice in
+	// effective_recipe.segment_container, which is part of its identity.
+	// Encoded video keeps its packaging. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
+	FeatureHLSCopyMPEGTSV3 = "hls_copy_mpegts_v1"
+	// SegmentContainerMPEGTSV3 is effective_recipe.segment_container for an
+	// HLS plan packaged as MPEG-TS because the client asked for it.
+	SegmentContainerMPEGTSV3 = "mpegts"
 	// FailureSubtitleHLSRenditionFailedV3 is the failure_recovery
 	// classification a client sends when the plan's subtitle rendition never
 	// became selectable in its player. The server stops offering renditions
@@ -223,7 +235,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSCopyMPEGTSV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -839,8 +851,13 @@ type TimelineV3 struct {
 }
 
 type EffectiveRecipeV3 struct {
-	VideoCodec       string   `json:"video_codec,omitempty"`
-	VideoSampleEntry string   `json:"video_sample_entry,omitempty"`
+	VideoCodec       string `json:"video_codec,omitempty"`
+	VideoSampleEntry string `json:"video_sample_entry,omitempty"`
+	// SegmentContainer is "mpegts" on an HLS copy remux packaged as MPEG-TS
+	// because the client's hls delivery listed hls_copy_mpegts_v1. Such a
+	// plan has no video_sample_entry, which only fragmented MP4 carries.
+	// Absent means the server's default packaging.
+	SegmentContainer string   `json:"segment_container,omitempty"`
 	AudioCodec       string   `json:"audio_codec,omitempty"`
 	Width            *int     `json:"width,omitempty"`
 	Height           *int     `json:"height,omitempty"`

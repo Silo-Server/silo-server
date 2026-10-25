@@ -31,6 +31,10 @@ func init() {
 	// Register .m4s so http.ServeFile sets the correct Content-Type for
 	// fMP4 HLS segments. Go's default MIME database does not include it.
 	_ = mime.AddExtensionType(".m4s", "video/mp4")
+	// Pin .ts for MPEG-TS HLS segments: the system database Go reads first
+	// (shared-mime-info, as in the server image) lists .ts as Qt Linguist
+	// text before video/mp2t.
+	_ = mime.AddExtensionType(".ts", mimeVideoMPEGTS)
 }
 
 // TranscodeOpts holds configuration for an HLS transcode session.

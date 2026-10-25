@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,12 @@ func TestActivityOutputContainerMatchesFFmpeg(t *testing.T) {
 			args := strings.Join(buildFFmpegArgs(tc.opts), " ")
 			if !strings.Contains(args, "-hls_segment_type "+tc.want) {
 				t.Fatal("activity format does not match the FFmpeg muxer")
+			}
+			// Segments are served by extension. Hosts with shared-mime-info
+			// would otherwise label .ts as Qt Linguist text.
+			wantMIME := map[string]string{OutputContainerFMP4: "video/mp4", OutputContainerMPEGTS: mimeVideoMPEGTS}[tc.want]
+			if got := mime.TypeByExtension(hlsSegmentExtension(tc.opts)); got != wantMIME {
+				t.Fatalf("segment content type = %q, want %q", got, wantMIME)
 			}
 		})
 	}
@@ -1090,6 +1097,18 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			VideoSampleEntry: VideoSampleEntryDVH1, SegmentDuration: 2,
 		},
 		want: []string{"-c:v copy -bsf:v hevc_mp4toannexb -tag:v dvh1 -strict unofficial"},
+	},
+	{
+		// MPEG-TS has no sample entry, but -strict unofficial is what makes the
+		// MPEG-TS muxer write the DOVI video stream descriptor, so a preserved
+		// Dolby Vision copy keeps its configuration in TS as well.
+		name: "MPEG-TS copy video keeps Dolby Vision configuration",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+			VideoSampleEntry: VideoSampleEntryDVH1, CopyVideoMPEGTS: true, SegmentDuration: 2,
+		},
+		want:   []string{"-c:v copy -bsf:v hevc_mp4toannexb", "-strict unofficial", "-hls_segment_type mpegts", "seg_%05d.ts"},
+		forbid: []string{"movflags=+frag_discont", ".m4s"},
 	},
 	{
 		name: "copy video sample entry HDR10",

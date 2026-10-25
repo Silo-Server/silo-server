@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1081,6 +1082,21 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores requested MPEG-TS packaging would publish fMP4 under a
+// plan that promises MPEG-TS.
+func TestValidateCopyVideoMPEGTSAttestation(t *testing.T) {
+	request := TranscodeStartRequest{CopyVideoMPEGTS: true}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{CopyVideoMPEGTS: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrCopyVideoMPEGTSAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrCopyVideoMPEGTSAttestationMismatch)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("fMP4 request rejected a legacy node response: %v", err)
+	}
+}
+
 // Requests the node cannot execute as written are refused with 400 before
 // anything runs.
 func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
@@ -1151,6 +1167,18 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return response.CopyFMP4RecipeVersion },
 			want:    playback.CopyFMP4RecipeVersion,
+		},
+		{
+			// Without the echo the API refuses the node rather than publish
+			// fMP4 under a plan that promises MPEG-TS.
+			name: "copy MPEG-TS",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-ts", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, CopyVideoMPEGTS: true, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return strconv.FormatBool(response.CopyVideoMPEGTS) },
+			want:    "true",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

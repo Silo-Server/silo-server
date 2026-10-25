@@ -49,6 +49,16 @@ Activity reporting uses `encoder_hw_accel`, falling back to `hw_accel` for
 older nodes that omit it. Stored recipe cards preserve both values; execution
 validates the encoder again when reconstructing a session.
 
+## MPEG-TS copy packaging
+
+`copy_video_mpegts: true` on a copy-video `POST /transcode/start` packages the
+HLS copy as MPEG-TS (`seg_NNNNN.ts`, served as `video/mp2t`, no init segment)
+instead of fMP4. The node echoes `copy_video_mpegts: true` in the start
+response; the protocol-v3 API rejects a missing echo and stops the transport,
+so a node that predates the echo never serves fMP4 under a plan that promises
+MPEG-TS. Recipe cards and signed reconstruction claims (`cvts`) carry the flag,
+so reconstruction, seek restarts, and rehoming keep it.
+
 ## Subtitle renditions
 
 A node that advertises the `hls_subtitle_rendition_v1` transport feature

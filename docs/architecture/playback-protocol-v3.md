@@ -108,7 +108,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, and `hls_subtitle_renditions_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, and `hls_copy_mpegts_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -129,6 +129,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 | `subrip_sidecar_v1` | `/api/v2` only. An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 | `hls_subtitle_renditions_v1` | `/api/v2` only. An opted-in client receives a `server_transcode_hls` plan's embedded text subtitle as a WebVTT `SUBTITLES` rendition of the plan's HLS stream (`subtitle.hls_rendition`) instead of a sidecar artifact (§8) |
+| `hls_copy_mpegts_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. The client's `server_remux_hls` plans that copy H.264 or HEVC are packaged as MPEG-TS instead of fragmented MP4, marked by `effective_recipe.segment_container: "mpegts"` (§5) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -973,6 +974,18 @@ For HEVC HDR copy packaging, the frozen plan also controls the sample entry: a
 preserved Dolby Vision Profile 5 or 8 plan emits `dvh1` with FFmpeg's unofficial
 strictness relaxation so the DOVI configuration record is retained, while a
 validated Dolby Vision-to-HDR10 plan emits `hvc1`.
+A client whose `hls` delivery lists `hls_copy_mpegts_v1` gets the same copy of
+H.264 or HEVC video packaged as MPEG-TS segments (`.ts`, `video/mp2t`, no `#EXT-X-MAP`), for
+players that play a muxed fMP4 copy's audio silently. The plan then carries
+`effective_recipe.segment_container: "mpegts"` and no `video_sample_entry`, the
+container is part of the plan id and attempt key, and the frozen executable
+recipe records it at version 5, so a TS plan never reuses or reopens an fMP4
+transport and a binary that predates it refuses the recipe. A preserved Dolby
+Vision copy keeps FFmpeg's unofficial strictness, under which its MPEG-TS
+muxer writes the DOVI video stream descriptor. A transcode node attests the
+packaging in its start response (`copy_video_mpegts`) and is refused without
+it. Other copied codecs and encoded video keep their packaging, and `/api/v1`
+ignores the feature.
 `stream_origin` and `timeline_offset` both equal that resolved source position,
 while `player_start` is the requested position minus the resolved origin so the
 client advances past copied pre-roll. `seek_window_start_seconds` is the resolved

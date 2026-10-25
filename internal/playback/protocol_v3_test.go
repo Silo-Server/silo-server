@@ -25,8 +25,10 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 // /api/v2-only features extend the shared list and never reach /api/v1.
 func TestNativeServerFeaturesV3ExtendTheSharedList(t *testing.T) {
 	shared, native := ServerFeaturesV3(), NativeServerFeaturesV3()
-	if HasFeatureV3(shared, FeatureSubripSidecarV3) || !HasFeatureV3(native, FeatureSubripSidecarV3) {
-		t.Fatalf("subrip_sidecar_v1 must be advertised on /api/v2 only: shared=%v native=%v", shared, native)
+	for _, feature := range []string{FeatureSubripSidecarV3, FeatureHLSCopyMPEGTSV3} {
+		if HasFeatureV3(shared, feature) || !HasFeatureV3(native, feature) {
+			t.Fatalf("%s must be advertised on /api/v2 only: shared=%v native=%v", feature, shared, native)
+		}
 	}
 	for _, feature := range shared {
 		if !HasFeatureV3(native, feature) {
@@ -875,6 +877,133 @@ func TestHLSVideoSampleEntryV3ScopesNativeRecipes(t *testing.T) {
 				t.Fatalf("sample entry = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// An hls delivery that lists hls_copy_mpegts_v1 gets its copy remux packaged
+// as MPEG-TS under a plan identity of its own, so it can never share an fMP4
+// plan's output, attempt key, or frozen recipe. Encoded video is unaffected.
+func TestPlanPlaybackV3PackagesHLSCopyRemuxAsMPEGTSOnRequest(t *testing.T) {
+	dv8 := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1}}}}
+	dvFile := func() *models.MediaFile {
+		file := detailedFixtureFileV3()
+		file.VideoTracks[0].DVProfile = 8
+		file.VideoTracks[0].DVBLCompatID = 1
+		file.VideoTracks[0].DVLevel = 6
+		file.VideoTracks[0].ColorTransfer = "smpte2084"
+		file.VideoTracks[0].VideoRange = "DolbyVision"
+		file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+		return file
+	}
+	sdrFile := func() *models.MediaFile {
+		file := detailedFixtureFileV3()
+		file.Resolution = "1080p"
+		file.VideoTracks[0] = models.VideoTrack{Codec: "hevc", Profile: "Main", Level: 120, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 10_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR", ColorRange: "tv"}
+		return file
+	}
+	request := func(mpegts bool, hlsVideoCodecs ...string) StartRequestV3 {
+		req := validStartRequestV3()
+		req.ClientPlaybackContext.Device.Platform = "roku"
+		req.Capabilities.CodecsVideo = []string{"hevc", "h264", "vp9"}
+		req.Capabilities.VideoDecode = append(hevcMain10DecodeV3(), VideoDecodeCapabilityV3{Codec: "vp9", Profiles: []string{"profile 0"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true})
+		req.Capabilities.VideoDecode[0].Profiles = []string{"main", "main 10"}
+		req.Capabilities.VideoDecode[0].BitDepths = []int{8, 10}
+		req.Capabilities.HDRDetails = dv8
+		req.ClientPlaybackContext.Output.HDRDetails = dv8
+		delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+		delete(req.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.VideoCodecs = hlsVideoCodecs
+		hls.AudioDecodeCodecs = []string{"aac"}
+		hls.HDRDetails = dv8
+		hls.Features = []string{ClientNativeHLSPlaybackV3}
+		if mpegts {
+			hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3)
+		}
+		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		return req
+	}
+	outputContext := request(false).ClientPlaybackContext.Output.OutputContextID
+
+	for _, tc := range []struct {
+		name      string
+		file      *models.MediaFile
+		wantEntry string
+	}{
+		{name: "Dolby Vision Profile 8.1", file: dvFile(), wantEntry: VideoSampleEntryDVH1},
+		{name: "SDR HEVC", file: sdrFile(), wantEntry: VideoSampleEntryHVC1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fmp4 := planFileV3(request(false, "hevc"), tc.file)
+			ts := planFileV3(request(true, "hevc"), tc.file)
+			for _, result := range []PlannerResultV3{fmp4, ts} {
+				if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != codecCopyV3 {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+			}
+			if got := fmp4.Plan.EffectiveRecipe; got.SegmentContainer != "" || got.VideoSampleEntry != tc.wantEntry || PlanCopiesVideoAsMPEGTSV3(*fmp4.Plan) {
+				t.Fatalf("without the feature: segment container %q, sample entry %q", got.SegmentContainer, got.VideoSampleEntry)
+			}
+			if got := ts.Plan.EffectiveRecipe; got.SegmentContainer != SegmentContainerMPEGTSV3 || got.VideoSampleEntry != "" || !PlanCopiesVideoAsMPEGTSV3(*ts.Plan) {
+				t.Fatalf("with the feature: segment container %q, sample entry %q", got.SegmentContainer, got.VideoSampleEntry)
+			}
+			if ts.Plan.Claims.Video != fmp4.Plan.Claims.Video || ts.Plan.EffectiveRecipe.DynamicRange != fmp4.Plan.EffectiveRecipe.DynamicRange {
+				t.Fatalf("MPEG-TS changed the video promise: %+v vs %+v", ts.Plan.Claims.Video, fmp4.Plan.Claims.Video)
+			}
+			if ts.Plan.PlanID == fmp4.Plan.PlanID || ts.Plan.PlanAttemptKey == fmp4.Plan.PlanAttemptKey {
+				t.Fatal("MPEG-TS and fMP4 plans share an identity")
+			}
+			if planAttemptedV3(*ts.Plan, outputContext, []string{fmp4.Plan.PlanAttemptKey}) {
+				t.Fatal("an attempted fMP4 plan counts as the MPEG-TS plan")
+			}
+
+			assertFrozenMPEGTSRecipeV3(t, ts, fmp4)
+		})
+	}
+
+	vp9File := sdrFile()
+	vp9File.VideoTracks[0].Codec, vp9File.VideoTracks[0].Profile, vp9File.VideoTracks[0].Level = "vp9", "Profile 0", 0
+	for _, tc := range []struct {
+		name         string
+		request      StartRequestV3
+		file         *models.MediaFile
+		wantDelivery DeliveryV3
+	}{
+		{name: "encoded video keeps its packaging", request: request(true, "h264"), file: sdrFile(), wantDelivery: DeliveryTranscodeHLSV3},
+		{name: "VP9 copy keeps fMP4", request: request(true, "vp9"), file: vp9File, wantDelivery: DeliveryRemuxHLSV3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := planFileV3(tc.request, tc.file)
+			if result.Plan == nil || result.Plan.Delivery != tc.wantDelivery {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.Plan.EffectiveRecipe.SegmentContainer != "" || FreezeExecutableRecipeV3(result).CopyVideoMPEGTS {
+				t.Fatalf("plan took MPEG-TS copy packaging: %+v", result.Plan.EffectiveRecipe)
+			}
+		})
+	}
+}
+
+// assertFrozenMPEGTSRecipeV3 checks that the executable recipe frozen for an
+// MPEG-TS copy remux records the container and validates only for its plan.
+func assertFrozenMPEGTSRecipeV3(t *testing.T, ts, fmp4 PlannerResultV3) {
+	t.Helper()
+	frozen := FreezeExecutableRecipeV3(ts)
+	if !frozen.CopyVideoMPEGTS || frozen.Version != executableRecipeVersionCopyMPEGTSV3 || !frozen.ValidFor(*ts.Plan) {
+		t.Fatalf("frozen MPEG-TS recipe = %+v", frozen)
+	}
+	relabeled := *ts.Plan
+	relabeled.EffectiveRecipe.SegmentContainer = ""
+	if frozen.ValidFor(relabeled) {
+		t.Fatal("an MPEG-TS recipe validated for an fMP4 plan")
+	}
+	older := frozen
+	older.Version = executableRecipeVersionSubtitleRenditionV3
+	if older.Valid() {
+		t.Fatal("an MPEG-TS recipe validated below its version")
+	}
+	if fmp4Frozen := FreezeExecutableRecipeV3(fmp4); fmp4Frozen.CopyVideoMPEGTS || fmp4Frozen.Version >= executableRecipeVersionCopyMPEGTSV3 {
+		t.Fatalf("frozen fMP4 recipe = %+v", fmp4Frozen)
 	}
 }
 

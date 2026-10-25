@@ -56,6 +56,10 @@ type ExecutableRecipeV3 struct {
 	// subtitle rendition. It needs version 4 so a binary that predates it
 	// rejects the recipe instead of reopening the transport without one.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
+	// CopyVideoMPEGTS mirrors the plan's MPEG-TS segment container. It needs
+	// version 5 so a binary that predates it rejects the recipe instead of
+	// reopening the transport as fMP4.
+	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
 }
 
 const (
@@ -63,13 +67,16 @@ const (
 	executableRecipeVersionV3                  = 2
 	executableRecipeVersionSourceAudioV3       = 3
 	executableRecipeVersionSubtitleRenditionV3 = 4
+	executableRecipeVersionCopyMPEGTSV3        = 5
 )
 
 // FreezeExecutableRecipeV3 captures the byte-affecting facts from a planner result.
 func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 	planID := ""
+	copyVideoMPEGTS := false
 	if result.Plan != nil {
 		planID = result.Plan.PlanID
+		copyVideoMPEGTS = PlanCopiesVideoAsMPEGTSV3(*result.Plan)
 	}
 	sourceMetadata := SourceExecutionMetadataV3{}
 	if result.FrozenSourceMetadata != nil {
@@ -109,6 +116,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		SubtitleCodec:                 result.SubtitleCodec,
 		DownloadedSubtitleID:          result.DownloadedSubtitleID,
 		SubtitleRendition:             result.SubtitleRendition,
+		CopyVideoMPEGTS:               copyVideoMPEGTS,
 	}
 	if recipe.hasVersion2Fields() {
 		recipe.Version = executableRecipeVersionV3
@@ -118,6 +126,9 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 	}
 	if recipe.hasVersion4Fields() {
 		recipe.Version = executableRecipeVersionSubtitleRenditionV3
+	}
+	if recipe.hasVersion5Fields() {
+		recipe.Version = executableRecipeVersionCopyMPEGTSV3
 	}
 	return recipe
 }
@@ -143,14 +154,22 @@ func (r ExecutableRecipeV3) hasVersion4Fields() bool {
 	return r.SubtitleRendition
 }
 
+func (r ExecutableRecipeV3) hasVersion5Fields() bool {
+	return r.CopyVideoMPEGTS
+}
+
 // Valid reports whether an executable recipe is complete and internally consistent.
 func (r ExecutableRecipeV3) Valid() bool {
-	if r.Version < executableRecipeVersionLegacyV3 || r.Version > executableRecipeVersionSubtitleRenditionV3 || r.PlanID == "" || r.SourceAudioChannels < 0 {
+	if r.Version < executableRecipeVersionLegacyV3 || r.Version > executableRecipeVersionCopyMPEGTSV3 || r.PlanID == "" || r.SourceAudioChannels < 0 {
 		return false
 	}
 	if (r.Version == executableRecipeVersionLegacyV3 && r.hasVersion2Fields()) ||
 		(r.Version < executableRecipeVersionSourceAudioV3 && r.hasVersion3Fields()) ||
-		(r.Version < executableRecipeVersionSubtitleRenditionV3 && r.hasVersion4Fields()) {
+		(r.Version < executableRecipeVersionSubtitleRenditionV3 && r.hasVersion4Fields()) ||
+		(r.Version < executableRecipeVersionCopyMPEGTSV3 && r.hasVersion5Fields()) {
+		return false
+	}
+	if r.CopyVideoMPEGTS && (r.PlayMethod != PlayRemux || r.TargetVideoCodec != codecCopyV3) {
 		return false
 	}
 	if r.SubtitleRendition && (r.PlayMethod != PlayTranscode || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0) {
@@ -170,7 +189,13 @@ func (r ExecutableRecipeV3) Valid() bool {
 }
 
 func (r ExecutableRecipeV3) ValidFor(plan PlanV3) bool {
-	return r.Valid() && r.PlanID == plan.PlanID
+	return r.Valid() && r.PlanID == plan.PlanID && r.CopyVideoMPEGTS == PlanCopiesVideoAsMPEGTSV3(plan)
+}
+
+// PlanCopiesVideoAsMPEGTSV3 reports whether an HLS copy-remux plan is packaged
+// as MPEG-TS (TranscodeOpts.CopyVideoMPEGTS) rather than fMP4.
+func PlanCopiesVideoAsMPEGTSV3(plan PlanV3) bool {
+	return plan.Delivery == DeliveryRemuxHLSV3 && plan.EffectiveRecipe.SegmentContainer == SegmentContainerMPEGTSV3
 }
 
 // PlannerResult restores a planner result from the frozen executable recipe.

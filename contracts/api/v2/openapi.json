@@ -29436,6 +29436,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "segment_container": {
+            "type": "string"
+          },
           "video_codec": {
             "type": "string"
           },
@@ -228610,6 +228613,9 @@
           },
           "copy_fmp4_recipe_version": {
             "type": "string"
+          },
+          "copy_video_mpegts": {
+            "type": "boolean"
           },
           "encoder_hw_accel": {
             "type": "string"

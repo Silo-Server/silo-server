@@ -23658,6 +23658,7 @@ export interface components {
       frame_rate?: number;
       /** Format: int64 */
       height?: number;
+      segment_container?: string;
       video_codec?: string;
       video_sample_entry?: string;
       /** Format: int64 */

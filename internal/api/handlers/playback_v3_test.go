@@ -2478,6 +2478,68 @@ func TestPrepareRemoteTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *tes
 	}
 }
 
+// A /api/v2 start whose hls delivery lists hls_copy_mpegts_v1 runs its copy
+// remux as MPEG-TS, and a seek reanchor keeps that packaging. The frozen
+// /api/v1 surface never advertised the feature and ignores it.
+func TestStartPlaybackV3HLSCopyMPEGTSOnV2Only(t *testing.T) {
+	newHandler := func(t *testing.T) *PlaybackHandler {
+		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+		stubCopySeekAnchorV3(handler)
+		handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+		handler.ItemAccess = allowAllPlaybackItemAccess{}
+		return handler
+	}
+	request := v3HandlerStartRequest()
+	request.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassHLSV3: {Enabled: true, SupportedOnDevice: true, Features: []string{playback.FeatureHLSCopyMPEGTSV3}},
+	}
+
+	handler := newHandler(t)
+	v2, err := handler.startPlaybackV2ForTest(t, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2.PlaybackPlan == nil || v2.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 || v2.PlaybackPlan.EffectiveRecipe.SegmentContainer != playback.SegmentContainerMPEGTSV3 {
+		t.Fatalf("v2 plan = %#v, terminal = %#v", v2.PlaybackPlan, v2.Terminal)
+	}
+	if ts := handler.tm.GetTranscodeSession(v2.SessionID); ts == nil || !ts.Opts().CopyVideoMPEGTS {
+		t.Fatal("the v2 MPEG-TS plan started an fMP4 transport")
+	}
+	frozen := *v2.PlaybackPlan
+	reanchored, err := handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}, v2.SessionID, PlaybackReplanCommand{Digest: "mpegts-seek-digest", Request: playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
+		PlaybackAttemptID: request.PlaybackAttemptID,
+		ReplanRequestID:   "mpegts-seek-reanchor-0001", FailedPlanID: frozen.PlanID,
+		PlanAttemptID: "mpegts-seek-plan-0001", PlanAttemptKey: frozen.PlanAttemptKey,
+		AttemptCount: 1, QualityPreference: request.QualityPreference, PositionSeconds: 600,
+		SelectedTracks:        frozen.SelectedTracks,
+		Capabilities:          request.Capabilities,
+		ClientPlaybackContext: request.ClientPlaybackContext,
+	}})
+	if err != nil || reanchored.PlaybackPlan == nil || reanchored.PlaybackPlan.PlanID != frozen.PlanID {
+		t.Fatalf("reanchored = %#v, terminal = %#v, err = %v", reanchored.PlaybackPlan, reanchored.Terminal, err)
+	}
+	if ts := handler.tm.GetTranscodeSession(v2.SessionID); ts == nil || !ts.Opts().CopyVideoMPEGTS || ts.Opts().SeekSeconds == 0 {
+		t.Fatal("the seek reanchor did not reopen the MPEG-TS transport")
+	}
+
+	request.PlaybackAttemptID = "attempt-handler-0002"
+	v1Handler := newHandler(t)
+	rr := httptest.NewRecorder()
+	v1Handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext()))
+	var v1 playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &v1) != nil || v1.PlaybackPlan == nil {
+		t.Fatalf("v1 status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if v1.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 || v1.PlaybackPlan.EffectiveRecipe.SegmentContainer != "" {
+		t.Fatalf("v1 plan = %#v", v1.PlaybackPlan)
+	}
+	if ts := v1Handler.tm.GetTranscodeSession(v1.SessionID); ts == nil || ts.Opts().CopyVideoMPEGTS {
+		t.Fatal("the v1 start honored a /api/v2-only delivery feature")
+	}
+}
+
 func TestVideoSampleEntryForPlanV3(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2489,6 +2551,15 @@ func TestVideoSampleEntryForPlanV3(t *testing.T) {
 			plan: &playback.PlanV3{Delivery: playback.DeliveryRemuxHLSV3,
 				Source:          playback.SourceDescriptorV3{DVProfile: 8},
 				EffectiveRecipe: playback.EffectiveRecipeV3{DynamicRange: playback.DynamicRangeDolbyVisionV3}},
+			want: playback.VideoSampleEntryDVH1,
+		},
+		{
+			// MPEG-TS publishes no sample entry; dvh1 still selects the
+			// strictness that keeps the DOVI descriptor.
+			name: "preserved profile 8 in MPEG-TS",
+			plan: &playback.PlanV3{Delivery: playback.DeliveryRemuxHLSV3,
+				Source:          playback.SourceDescriptorV3{DVProfile: 8},
+				EffectiveRecipe: playback.EffectiveRecipeV3{DynamicRange: playback.DynamicRangeDolbyVisionV3, SegmentContainer: playback.SegmentContainerMPEGTSV3}},
 			want: playback.VideoSampleEntryDVH1,
 		},
 		{
