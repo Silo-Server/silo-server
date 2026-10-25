@@ -44,6 +44,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/apiusage"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
@@ -3068,6 +3069,7 @@ func main() {
 	defer stopActivityLog()
 	deps.ActivityLogWriter = activityWriter
 	deps.ActivityLogRepo = activitylog.NewRepo(pool)
+	deps.APIUsage = apiusage.NewStore(pool)
 	deps.NodeID = nodeID
 
 	// Create refresh worker early so the task manager can use it for FindCandidates.
@@ -3272,6 +3274,7 @@ func main() {
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		taskMgr.Register(tasks.NewSummarizeAPIUsageTask(deps.APIUsage))
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
 			// Wired outside the autoscan service so events left by a disabled

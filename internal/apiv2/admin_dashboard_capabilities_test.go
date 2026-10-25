@@ -19,7 +19,7 @@ func TestAdminDashboardCapabilities(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	expected := map[string]any{"server_layouts": false, "timeseries": true, "playback_activity": true, "top_activity": true, "health": true, "log_level_list": true, "watch_providers": true, "downloads_stats": true, "egress_totals": true, "egress_by_source": true}
+	expected := map[string]any{"server_layouts": false, "timeseries": true, "playback_activity": true, "top_activity": true, "health": true, "log_level_list": true, "watch_providers": true, "downloads_stats": true, "egress_totals": true, "egress_by_source": true, "api_clients": true}
 	if len(got) != len(expected)+3 {
 		t.Fatal(got)
 	}

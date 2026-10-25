@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/apiusage"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -231,6 +232,7 @@ type Dependencies struct {
 	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
+	APIUsage                  *apiusage.Store // per-session API request summaries (nil without a database)
 	OpsLogRepo                *opslog.Repo
 	FFmpegLogSink             playback.FFmpegLogSink
 	RedisClient               *redis.Client              // for session listing (may be nil)
@@ -2910,6 +2912,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	})
 	v2deps.AdminTelemetryParity = &handlers.StreamTelemetryParityHandler{Registry: deps.StreamTelemetry, ViewCache: deps.StreamTelemetryViewCache, Pool: deps.DB, Redis: deps.RedisClient}
 	v2deps.AdminFilesystem = handlers.NewFilesystemHandler()
+	if deps.APIUsage != nil {
+		v2deps.AdminAPIClients = deps.APIUsage
+	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler

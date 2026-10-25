@@ -1049,6 +1049,7 @@ client tells "this deployment is older than my build" from "the request failed".
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
 | `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
+| `api_clients` | `GET /admin/stats/api-clients` and `GET /admin/stats/api-clients/{session_id}/endpoints` serve per-session API request counts. |
 
 ```json
 {
@@ -1425,6 +1426,41 @@ Both lists are `[]` on a server with no history, never `null`.
 }
 ```
 
+## `GET /api/v2/admin/stats/api-clients`
+
+The login sessions with the most API requests in a window, for the dashboard's
+**Busiest API clients** card. Requests are counted the way the session quota
+counts them (see [Session quota](auth-api.md#session-quota)): media transfer
+routes are left out. The hidden `summarize_api_usage` task writes hourly
+summaries from the activity log every 15 minutes, so the newest requests can be
+up to 15 minutes late, and keeps them for 30 days.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `hours` | int | Window in hours, counting the current hour. Default 24, accepted range 1..720. |
+| `limit` | int | Sessions returned. Default 10, accepted range 1..25. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hours`, `from` | int, instant | The window: `from` is the first hour it reads. |
+| `total_requests` | int | Requests of every session in the window, for each client's share. |
+| `clients` | object[] | Sessions by requests, most first; `[]` when there are none. |
+
+Each `clients` entry: `session_id`, `user_id`, `username`, `device_name` and
+`device_platform` (from the login session), `user_agent` (the one the session
+sent most in its latest hour), `requests`, `refused` (429 responses from any
+rate limit), `peak_hour_requests`, `first_hour`, `last_hour`, and
+`session_active` (false once the session was revoked, expired, or deleted).
+`DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}` signs one
+session out without touching the account's other devices.
+
+## `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+
+The ten routes one session called most in the window (`hours`, as above), each
+with `method`, `route` (the matched route pattern), `requests` and `refused`.
+It reads the activity log for that one session. A session with no summarized
+requests in the window is `404 not_found`.
+
 ## `GET /api/v2/admin/stats/downloads`
 
 Offline-download aggregate for the dashboard's downloads widget. Cached
@@ -1754,7 +1790,7 @@ claim, cleanup, and failure boundaries.
 
 ## Dashboard aggregate reads
 
-The dashboard uses four acting-administrator operations under `/api/v2/admin/stats`:
+The dashboard uses these acting-administrator operations under `/api/v2/admin/stats`:
 
 | Path | Operation ID | Query bounds |
 | --- | --- | --- |
@@ -1762,8 +1798,10 @@ The dashboard uses four acting-administrator operations under `/api/v2/admin/sta
 | `/playback-activity` | `getAdminDashboardPlaybackActivity` | `hours`: 1–744, default 24 |
 | `/top-activity` | `getAdminDashboardTopActivity` | `days`: 1–30, default 7; `limit`: 1–25, default 10 |
 | `/downloads` | `getAdminDashboardDownloadsStats` | `limit`: 1–25, default 10 |
+| `/api-clients` | `getAdminDashboardAPIClients` | `hours`: 1–720, default 24; `limit`: 1–25, default 10 |
+| `/api-clients/{session_id}/endpoints` | `getAdminDashboardAPIClientEndpoints` | `hours`: 1–720, default 24 |
 
-All accept `refresh=true` to invalidate the provider cache before reading.
+The first four accept `refresh=true` to invalidate the provider cache before reading.
 Out-of-range inputs return a validation problem; the frozen v1 routes continue
 their existing clamping behavior. Missing data services return 503. The web normalizes
 its window before choosing a query cache key and retains its existing page-owned

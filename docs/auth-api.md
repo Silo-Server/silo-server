@@ -485,6 +485,46 @@ Redis stops answering, each wait up to a second. A check that fails only because
 own request ended early does not count as Redis failing. Disabling rate limiting
 disables the account allowance too.
 
+## Session quota
+
+The per-second and per-minute budgets stop bursts, not volume: a client that stays
+just under them can still send hundreds of thousands of requests a day. Each login
+session therefore also spends a token bucket, keyed `session:<session_id>`, that holds
+`ratelimit.session.burst` requests (default 30000) and refills at
+`ratelimit.session.requests_per_hour` (default 10000). The admin UI labels these
+**Per sign-in session**.
+
+`ratelimit.session.mode` decides what happens when a bucket is empty:
+
+- `off` counts nothing.
+- `log` (the default) serves the request and logs `sign-in session over its hourly
+  request quota` with the account, session and user agent, once per session every ten
+  minutes.
+- `enforce` refuses the request with the usual 429 and a `Retry-After` for the next
+  token, and logs the same line.
+
+The quota counts native API requests made with a login session's access token. It
+does not count media transfer routes (`ratelimit.MediaTransferPathPattern`, which must
+match every route in `internal/api`'s native media route list), API-key requests,
+which have their own tiers, admins, or requests made while impersonating. The
+Jellyfin-compatible listener has its own sessions and is not counted. Buckets share
+the per-key limiter's backend. Redis keeps one bucket per session for every
+instance, timed by the Redis clock, and falls back to a per-process bucket while Redis
+is unavailable, as the window counters do. Settings changes keep every bucket's
+balance; a bucket reads its size and rate on each request.
+
+The defaults come from production traffic. The busiest first-party sessions stayed
+under 20000 requests in any hour and rarely went above 10000, while a polling
+integration ran at about 30000 an hour around the clock. The burst lets a client
+sync a whole library in one sitting; the refill rate caps what it can sustain.
+
+`GET /api/v2/admin/stats/api-clients` lists the sessions with the most counted
+requests in a window, summarized hourly from the activity log by the hidden
+`summarize_api_usage` task and kept for 30 days, with each session's 429 count.
+`GET /api/v2/admin/stats/api-clients/{session_id}/endpoints` lists the routes one
+session called. Both are admin-only; `api_clients` in
+`GET /api/v2/admin/dashboard/capabilities` advertises them.
+
 ## Profile PINs
 
 Profile creation through v1 and v2 stores a requested PIN hash in the same

@@ -5033,6 +5033,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/stats/api-clients": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the sign-in sessions that made the most API requests in a window, from hourly summaries of the activity log. */
+    get: operations["getAdminDashboardAPIClients"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/stats/api-clients/{session_id}/endpoints": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the routes one sign-in session called most in a window. */
+    get: operations["getAdminDashboardAPIClientEndpoints"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/stats/downloads": {
     parameters: {
       query?: never;
@@ -13339,6 +13373,81 @@ export interface components {
       capabilities?: ("chat" | "embeddings" | "speech")[];
       name?: string;
     };
+    AdminAPIClient: {
+      device_name: string;
+      device_platform: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      first_hour: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      last_hour: string;
+      /**
+       * Format: int64
+       * @description Most requests in one clock hour of the window.
+       */
+      peak_hour_requests: number;
+      /**
+       * Format: int64
+       * @description Requests answered 429 Too Many Requests by any rate limit.
+       */
+      refused: number;
+      /** Format: int64 */
+      requests: number;
+      /** @description False once the session was revoked, expired, or deleted. */
+      session_active: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      session_id: string;
+      /** @description The user agent the session sent most in its latest hour. */
+      user_agent: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+    };
+    AdminAPIClientEndpoint: {
+      method: string;
+      /** Format: int64 */
+      refused: number;
+      /** Format: int64 */
+      requests: number;
+      /** @description The matched route pattern, or the path when no pattern was recorded. */
+      route: string;
+    };
+    AdminAPIClientEndpoints: {
+      endpoints: components["schemas"]["AdminAPIClientEndpoint"][];
+      /** Format: int64 */
+      hours: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      session_id: string;
+    };
+    AdminAPIClients: {
+      clients: components["schemas"]["AdminAPIClient"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** Format: int64 */
+      hours: number;
+      /**
+       * Format: int64
+       * @description API requests of every session in the window, for each client's share.
+       */
+      total_requests: number;
+    };
     AdminAPIKey: {
       /**
        * Format: date-time
@@ -14555,6 +14664,7 @@ export interface components {
     AdminDashboardCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      api_clients: boolean;
       downloads_stats: boolean;
       egress_by_source: boolean;
       egress_totals: boolean;
@@ -18668,9 +18778,44 @@ export interface components {
       ip_requests_per_minute: number;
       /** Format: double */
       ip_requests_per_second: number;
+      session_quota: components["schemas"]["AdminRateLimitSessionQuota"];
       tiers: {
         [key: string]: components["schemas"]["AdminRateLimitTier"];
       };
+    };
+    AdminRateLimitSessionQuota: {
+      /**
+       * Format: int64
+       * @description Requests the session's bucket holds when full.
+       */
+      burst: number;
+      /**
+       * @description off counts nothing; log counts and logs sessions over the quota but serves them; enforce refuses them with 429.
+       * @enum {string}
+       */
+      mode: "off" | "log" | "enforce";
+      /**
+       * Format: double
+       * @description Rate the session's bucket refills at.
+       */
+      requests_per_hour: number;
+    };
+    AdminRateLimitSessionQuotaUpdate: {
+      /**
+       * Format: int64
+       * @description Requests the session's bucket holds when full.
+       */
+      burst?: number;
+      /**
+       * @description off counts nothing; log counts and logs sessions over the quota but serves them; enforce refuses them with 429.
+       * @enum {string}
+       */
+      mode?: "off" | "log" | "enforce";
+      /**
+       * Format: double
+       * @description Rate the session's bucket refills at.
+       */
+      requests_per_hour?: number;
     };
     AdminRateLimitStatus: {
       active: boolean;
@@ -18707,6 +18852,7 @@ export interface components {
       ip_requests_per_minute?: number;
       /** Format: double */
       ip_requests_per_second?: number;
+      session_quota?: components["schemas"]["AdminRateLimitSessionQuotaUpdate"];
       tiers?: {
         [key: string]: components["schemas"]["AdminRateLimitTierUpdate"];
       };
@@ -80804,6 +80950,227 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminDashboardStats"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDashboardAPIClients: {
+    parameters: {
+      query?: {
+        /** @description Window in hours, counting the current hour. */
+        hours?: number;
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminAPIClients"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDashboardAPIClientEndpoints: {
+    parameters: {
+      query?: {
+        /** @description Window in hours, counting the current hour. */
+        hours?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminAPIClientEndpoints"];
         };
       };
       /** @description Bad Request */

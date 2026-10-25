@@ -372,6 +372,8 @@ GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
 GET /api/v2/admin/stats	non-media
+GET /api/v2/admin/stats/api-clients	non-media
+GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
 GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
@@ -1682,6 +1684,8 @@ GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
 GET /api/v2/admin/stats	non-media
+GET /api/v2/admin/stats/api-clients	non-media
+GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
 GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media

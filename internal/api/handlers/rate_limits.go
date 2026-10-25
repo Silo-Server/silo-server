@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -42,6 +43,7 @@ type AdminRateLimitConfigView struct {
 	IPReqPerMinute     float64                               `json:"ip_requests_per_minute"`
 	IPBurst            int                                   `json:"ip_burst"`
 	AuthEndpoints      map[string]authEndpointConfigResponse `json:"auth_endpoints"`
+	SessionQuota       AdminRateLimitSessionQuotaView        `json:"session_quota"`
 	// Active reports whether a limiter is running in this process. The
 	// limiter is constructed at startup, so config saved while it is absent
 	// (or a backend change while it is running) needs a restart to apply.
@@ -53,6 +55,13 @@ type AdminRateLimitConfigView struct {
 	// using the same rule the save path enforces. REDIS_URL deployments have
 	// no persisted redis.url row, so admins cannot derive this client-side.
 	RedisAvailable bool `json:"redis_available"`
+}
+
+// AdminRateLimitSessionQuotaView is the hourly quota each sign-in session gets.
+type AdminRateLimitSessionQuotaView struct {
+	Mode            string  `json:"mode"`
+	RequestsPerHour float64 `json:"requests_per_hour"`
+	Burst           int     `json:"burst"`
 }
 
 type tierConfigResponse struct {
@@ -77,6 +86,15 @@ type AdminRateLimitUpdate struct {
 	IPReqPerMinute     *float64                             `json:"ip_requests_per_minute,omitempty"`
 	IPBurst            *int                                 `json:"ip_burst,omitempty"`
 	AuthEndpoints      map[string]authEndpointConfigRequest `json:"auth_endpoints,omitempty"`
+	SessionQuota       *AdminRateLimitSessionQuotaUpdate    `json:"session_quota,omitempty"`
+}
+
+// AdminRateLimitSessionQuotaUpdate merges into the session quota; omitted
+// fields keep their values.
+type AdminRateLimitSessionQuotaUpdate struct {
+	Mode            *string  `json:"mode,omitempty"`
+	RequestsPerHour *float64 `json:"requests_per_hour,omitempty"`
+	Burst           *int     `json:"burst,omitempty"`
 }
 
 type tierConfigRequest = AdminRateLimitTierUpdate
@@ -133,8 +151,11 @@ func (h *RateLimitHandler) adminRateLimitConfigView(values map[string]string) Ad
 		IPReqPerMinute:     cfg.IPReqPerMinute,
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
-		Active:             h.mw != nil,
-		RedisAvailable:     redisConfiguredSettings(values, h.redisBootstrapAvailable),
+		SessionQuota: AdminRateLimitSessionQuotaView{
+			Mode: cfg.Session.Mode, RequestsPerHour: cfg.Session.RequestsPerHour, Burst: cfg.Session.Burst,
+		},
+		Active:         h.mw != nil,
+		RedisAvailable: redisConfiguredSettings(values, h.redisBootstrapAvailable),
 	}
 	if h.mw != nil {
 		resp.ActiveBackend = h.mw.ActiveBackend()
@@ -315,6 +336,17 @@ func mergeRateLimitConfig(existing ratelimit.Config, req rateLimitConfigRequest)
 	if req.IPBurst != nil {
 		cfg.IPBurst = *req.IPBurst
 	}
+	if q := req.SessionQuota; q != nil {
+		if q.Mode != nil {
+			cfg.Session.Mode = strings.TrimSpace(strings.ToLower(*q.Mode))
+		}
+		if q.RequestsPerHour != nil {
+			cfg.Session.RequestsPerHour = *q.RequestsPerHour
+		}
+		if q.Burst != nil {
+			cfg.Session.Burst = *q.Burst
+		}
+	}
 
 	for name, update := range req.Tiers {
 		tier, ok := cfg.Tiers[name]
@@ -364,6 +396,15 @@ func validateRateLimitConfig(cfg ratelimit.Config) error {
 		return err
 	}
 	if err := boundedBurst("ip_burst", cfg.IPBurst); err != nil {
+		return err
+	}
+	if !ratelimit.ValidSessionQuotaMode(cfg.Session.Mode) {
+		return errors.New("session_quota.mode must be off, log or enforce")
+	}
+	if err := boundedRate("session_quota.requests_per_hour", cfg.Session.RequestsPerHour, ratelimit.MaxRequestsPerWindow); err != nil {
+		return err
+	}
+	if err := boundedBurst("session_quota.burst", cfg.Session.Burst); err != nil {
 		return err
 	}
 	for name, tier := range cfg.Tiers {
