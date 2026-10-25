@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,6 +29,7 @@ type ImageService interface {
 	FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int, contentID string) ([]metadata.RemoteImage, map[string]string, error)
 	LocalImagePreview(ctx context.Context, contentID string, sourceURL string) (string, error)
 	ApplyLocalItemImage(ctx context.Context, req metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error)
+	ApplyUploadedItemImage(ctx context.Context, req metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error)
 }
 
 // ImageItemLookup loads media items, seasons, and episodes by content ID.
@@ -325,6 +327,12 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		})
 	}
 
+	// An image an admin uploaded exists only in artwork storage, so the list
+	// offers it with the local choices while the item shows it.
+	if includeLocal {
+		entries = append(entries, h.uploadedImageEntries(ctx, resolved)...)
+	}
+
 	// Include current image paths so the frontend can highlight them.
 	current := currentImages{
 		PosterURL:   resolved.parentItem.PosterPath,
@@ -403,22 +411,89 @@ func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string
 			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
 	}
 	var result *metadata.ApplyItemImageResult
-	if allowLocal && metadata.IsLocalImageSource(req.OriginalURL) {
+	switch {
+	case allowLocal && metadata.IsLocalImageSource(req.OriginalURL):
 		result, err = h.cacheLocalItemImage(ctx, contentID, resolved, imageType, req.OriginalURL)
-	} else {
+	case allowLocal && metadata.IsUploadedImageSource(req.OriginalURL):
+		result, err = currentUploadedImage(resolved, imageType, req.OriginalURL)
+	default:
 		result, err = h.cacheProviderItemImage(ctx, contentID, resolved, imageType, req)
 	}
 	if err != nil {
 		return AdminItemImageResult{}, err
 	}
+	return h.publishItemImage(ctx, contentID, resolved, imageType, result, req.OriginalURL)
+}
 
-	err = h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
+// UploadAdminItemImage caches an image an admin uploaded and applies it like
+// a chosen image, with the images lock: a poster, backdrop or logo of a movie
+// or series, or a season's poster. It is stored beside the item's local
+// sidecar artwork, and the list offers it as a local choice while the item
+// shows it.
+func (h *AdminImageHandler) UploadAdminItemImage(ctx context.Context, contentID, imageTypeName string, data []byte) (AdminItemImageResult, error) {
+	if len(data) == 0 {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Choose an image to upload")
+	}
+	if len(data) > metadata.MaxUploadedImageBytes {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Images can be at most 10 MiB")
+	}
+	resolved, err := h.resolveContentID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return AdminItemImageResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		slog.ErrorContext(ctx, "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve item")
+	}
+	if resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Images can only be uploaded for movies, series and seasons")
+	}
+	// ImageTypeFromString reads an unknown name as a poster.
+	imageType := metadata.ImageTypeFromString(imageTypeName)
+	if metadata.ImageTypeToString(imageType) != imageTypeName || !slices.Contains(uploadableImageTypes, imageType) {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type", "Upload a poster, backdrop or logo")
+	}
+	if err := catalog.ValidateArtworkSelectionTarget(resolved.contentType, metadata.ImageTypeToString(imageType)); err != nil {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type",
+			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
+	}
+	var seasonNumber *int
+	if resolved.season != nil {
+		seasonNumber = new(resolved.season.SeasonNumber)
+	}
+	uploaded, err := h.imageSvc.ApplyUploadedItemImage(ctx, metadata.ApplyUploadedItemImageRequest{
+		ContentID:    resolved.parentItem.ContentID,
+		ContentType:  resolved.parentItem.Type,
+		ImageType:    imageType,
+		SeasonNumber: seasonNumber,
+		Data:         data,
+	})
+	switch {
+	case errors.Is(err, metadata.ErrUnsupportedUploadedImage):
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "The file is not a JPEG, PNG or WebP image")
+	case errors.Is(err, metadata.ErrImageUploadUnavailable):
+		return AdminItemImageResult{}, apiError(http.StatusServiceUnavailable, "service_unavailable", "Uploading images needs artwork storage")
+	case err != nil:
+		slog.ErrorContext(ctx, "admin images: upload failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to upload image")
+	}
+	return h.publishItemImage(ctx, contentID, resolved, imageType, &uploaded.ApplyItemImageResult, uploaded.SourcePath)
+}
+
+// uploadableImageTypes are the image types an admin can upload, the slots the
+// picker offers.
+var uploadableImageTypes = []metadata.ImageType{metadata.ImagePoster, metadata.ImageBackdrop, metadata.ImageLogo}
+
+// publishItemImage publishes a cached image as the target's artwork, records
+// its source and sets the images lock.
+func (h *AdminImageHandler) publishItemImage(ctx context.Context, contentID string, resolved *resolvedItem, imageType metadata.ImageType, result *metadata.ApplyItemImageResult, sourcePath string) (AdminItemImageResult, error) {
+	err := h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
 		TargetType:      resolved.contentType,
 		TargetContentID: contentID,
 		ParentContentID: resolved.parentItem.ContentID,
 		ImageType:       metadata.ImageTypeToString(imageType),
 		StoredPath:      result.StoredPath,
-		SourcePath:      req.OriginalURL,
+		SourcePath:      sourcePath,
 		Thumbhash:       result.Thumbhash,
 		LockField:       int(metadata.FieldImages),
 	})
@@ -530,6 +605,69 @@ func (h *AdminImageHandler) cacheLocalItemImage(ctx context.Context, contentID s
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply image")
 	}
 	return result, nil
+}
+
+// shownArtwork returns the stored path, source and thumbhash of the image of
+// imageType the target shows. Episodes have none here.
+func shownArtwork(resolved *resolvedItem, imageType metadata.ImageType) (storedPath, sourcePath, thumbhash string) {
+	if resolved.season != nil {
+		if imageType == metadata.ImagePoster {
+			return resolved.season.PosterPath, resolved.season.PosterSourcePath, resolved.season.PosterThumbhash
+		}
+		return "", "", ""
+	}
+	if resolved.episode != nil {
+		return "", "", ""
+	}
+	item := resolved.parentItem
+	switch imageType {
+	case metadata.ImagePoster:
+		return item.PosterPath, item.PosterSourcePath, item.PosterThumbhash
+	case metadata.ImageBackdrop:
+		return item.BackdropPath, item.BackdropSourcePath, item.BackdropThumbhash
+	case metadata.ImageLogo:
+		return item.LogoPath, item.LogoSourcePath, ""
+	}
+	return "", "", ""
+}
+
+// uploadedImageEntries lists the uploaded images a movie, series or season
+// shows, as local choices.
+func (h *AdminImageHandler) uploadedImageEntries(ctx context.Context, resolved *resolvedItem) []itemImageEntry {
+	if resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
+		return nil
+	}
+	var entries []itemImageEntry
+	for _, imageType := range uploadableImageTypes {
+		storedPath, sourcePath, _ := shownArtwork(resolved, imageType)
+		if storedPath == "" || !metadata.IsUploadedImageSource(sourcePath) {
+			continue
+		}
+		displayURL := storedPath
+		if h.imageResolver != nil {
+			if resolvedURL := h.imageResolver.ResolveImageURL(ctx, storedPath, "card"); resolvedURL != "" {
+				displayURL = resolvedURL
+			}
+		}
+		entries = append(entries, itemImageEntry{
+			ProviderID:  metadata.LocalImageProviderID,
+			URL:         displayURL,
+			OriginalURL: sourcePath,
+			Type:        metadata.ImageTypeToString(imageType),
+		})
+	}
+	return entries
+}
+
+// currentUploadedImage re-applies the uploaded image the target shows. An
+// upload is stored nowhere else, so any other upload:// source cannot be
+// applied.
+func currentUploadedImage(resolved *resolvedItem, imageType metadata.ImageType, sourceURL string) (*metadata.ApplyItemImageResult, error) {
+	storedPath, sourcePath, thumbhash := shownArtwork(resolved, imageType)
+	if storedPath == "" || sourcePath != sourceURL {
+		return nil, apiError(http.StatusBadRequest, "bad_request", "The image is not one this item shows; upload it again")
+	}
+	return &metadata.ApplyItemImageResult{StoredPath: storedPath, Thumbhash: thumbhash}, nil
 }
 
 // resolveImageFolderID finds the primary library folder for a content ID.

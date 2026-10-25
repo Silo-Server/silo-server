@@ -1038,6 +1038,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"createProgressBootstrapSnapshot":          "V2-only full-replacement snapshot admission; request_id identifies one transactional result through expiry plus 24-hour replay retention. This does not port incremental v1 sync reads or progress uploads.",
 	"uploadAdminCollectionPoster":              "V2 separates administrator poster upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
 	"uploadAdminCollectionBackdrop":            "V2 separates administrator backdrop upload from legacy multipart definition create and update; those legacy operations retain their own mappings.",
+	"uploadAdminItemImage":                     "V2-only upload of a movie, series or season image (v1 is frozen): it stores the image as local artwork and publishes it with the images lock, so a delayed replay would put back an image replaced since; it is non-retryable like apply.",
 	"uploadCollectionPoster":                   "V2 separates poster upload from legacy multipart collection create and update; their legacy rows remain mapped separately.",
 	"restartAdminPluginInstallation":           "V2-only resident plugin restart: v1 had no supervised plugin processes, so no legacy route stops and relaunches one. Repeating the restart converges on one running process.",
 	"connectNetworkAccess":                     "V2-only network access provider command: v1 had no overlay network providers. Repeating the connect converges on one connected instance per host.",

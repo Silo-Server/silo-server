@@ -620,6 +620,19 @@ choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
 
+An admin can also upload a poster, backdrop or logo for a movie or series, or
+a season's poster (`POST .../images/upload`). Silo does not write into library
+folders, which are usually mounted read-only, so the upload is stored only in
+artwork storage: under the same `local/...` keys as cached sidecar art, with
+the image's digest as the key discriminator. It is published with the images
+lock, and its source is `upload://sha256:<hex>`, one of the non-provider
+schemes image caching, artwork reconcile and the ladder backfill never try to
+download. The list offers the upload as a local choice only while the item
+shows it; applying another image replaces it, and revision GC reclaims it
+after the grace period like any displaced revision. Its only record is the
+item's artwork columns, so there is no upload table to keep in step with
+content ID moves or GC references.
+
 The reads open each library root as an `os.Root`, which needs read (list)
 permission on the root directory, not only search permission. The scanner lists
 the roots, so a server that scans a library already has it.

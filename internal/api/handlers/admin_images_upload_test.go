@@ -1,0 +1,222 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/metadata"
+)
+
+const (
+	uploadedPosterPath   = "local/series/series/ab12cd34/poster/original.webp"
+	uploadedPosterSource = "upload://sha256:ab12cd34"
+)
+
+// cardImageResolver resolves every stored path to a display URL that names
+// the path and variant.
+type cardImageResolver struct{}
+
+func (cardImageResolver) ResolveImageURL(_ context.Context, path, variant string) string {
+	return "https://cdn.example/" + path + "?variant=" + variant
+}
+
+func (r cardImageResolver) ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string {
+	out := make(map[string]string, len(paths))
+	for _, path := range paths {
+		out[path] = r.ResolveImageURL(ctx, path, variant)
+	}
+	return out
+}
+
+// newUploadImageHandlerForTest serves a movie, a series that shows an
+// uploaded poster and a provider backdrop, an audiobook, the series' second
+// season with an uploaded poster, and (through curationImageEpisodes) an
+// episode of the series.
+func newUploadImageHandlerForTest(svc *localImageServiceFake) *AdminImageHandler {
+	items := imageItemLookupFake{
+		"movie": {ContentID: "movie", Type: "movie", TmdbID: "7"},
+		"series": {
+			ContentID: "series", Type: "series", TmdbID: "42",
+			PosterPath: uploadedPosterPath, PosterSourcePath: uploadedPosterSource, PosterThumbhash: "th-upload",
+			BackdropPath: "tmdb/series/42/backdrop/original.webp", BackdropSourcePath: "https://image.example/backdrop.jpg",
+		},
+		"book": {ContentID: "book", Type: "audiobook"},
+	}
+	seasons := imageSeasonLookupFake{"season-2": {
+		ContentID: "season-2", SeriesID: "series", SeasonNumber: 2,
+		PosterPath: "local/series/series/seasons/2/ef56/poster/original.webp", PosterSourcePath: "upload://sha256:ef56",
+	}}
+	return NewAdminImageHandler(items, seasons, curationImageEpisodes{}, nil, svc, cardImageResolver{}, nil)
+}
+
+// An upload is cached under the movie or series, scoped to the season for a
+// season poster, before it is published like an applied image. The handler
+// has no catalog here, so publication fails after the cache.
+func TestAdminUploadItemImageCachesForTheTarget(t *testing.T) {
+	cases := []struct {
+		name, id, imageType string
+		want                metadata.ApplyUploadedItemImageRequest
+		season              int
+	}{
+		{"movie poster", "movie", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "movie", ContentType: "movie", ImageType: metadata.ImagePoster}, -1},
+		{"series logo", "series", "logo", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImageLogo}, -1},
+		{"series backdrop", "series", "backdrop", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImageBackdrop}, -1},
+		{"season poster", "season-2", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImagePoster}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &localImageServiceFake{}
+			_, err := newUploadImageHandlerForTest(svc).UploadAdminItemImage(context.Background(), tc.id, tc.imageType, []byte("image-bytes"))
+			if apiErr := requireAPIStatus(t, err, http.StatusInternalServerError); apiErr.Message != "Image cached but failed to update item" {
+				t.Fatalf("message = %q, want the publication failure", apiErr.Message)
+			}
+			if len(svc.uploads) != 1 {
+				t.Fatalf("uploads = %d, want 1", len(svc.uploads))
+			}
+			got := svc.uploads[0]
+			if got.ContentID != tc.want.ContentID || got.ContentType != tc.want.ContentType || got.ImageType != tc.want.ImageType || string(got.Data) != "image-bytes" {
+				t.Fatalf("upload request = %+v, want %+v", got, tc.want)
+			}
+			if (tc.season < 0) != (got.SeasonNumber == nil) || (got.SeasonNumber != nil && *got.SeasonNumber != tc.season) {
+				t.Fatalf("season number = %v, want %d", got.SeasonNumber, tc.season)
+			}
+			if svc.providerCalls != 0 || len(svc.applyLocal) != 0 {
+				t.Fatalf("provider calls %d, local calls %d, want none", svc.providerCalls, len(svc.applyLocal))
+			}
+		})
+	}
+}
+
+func TestAdminUploadItemImageRejectsBeforeCaching(t *testing.T) {
+	cases := []struct {
+		name, id, imageType string
+		data                []byte
+		status              int
+	}{
+		{"empty file", "movie", "poster", nil, http.StatusBadRequest},
+		{"oversized file", "movie", "poster", make([]byte, metadata.MaxUploadedImageBytes+1), http.StatusBadRequest},
+		{"unknown type read as a poster elsewhere", "movie", "cover", []byte("x"), http.StatusBadRequest},
+		{"type the picker does not offer", "movie", "banner", []byte("x"), http.StatusBadRequest},
+		{"still", "movie", "still", []byte("x"), http.StatusBadRequest},
+		{"season backdrop", "season-2", "backdrop", []byte("x"), http.StatusBadRequest},
+		{"episode", "episode", "poster", []byte("x"), http.StatusBadRequest},
+		{"audiobook", "book", "poster", []byte("x"), http.StatusBadRequest},
+		{"missing item", "missing", "poster", []byte("x"), http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &localImageServiceFake{}
+			h := newUploadImageHandlerForTest(svc)
+			if tc.id == "missing" {
+				h.episodes = imageEpisodeLookupFake{}
+			}
+			_, err := h.UploadAdminItemImage(context.Background(), tc.id, tc.imageType, tc.data)
+			requireAPIStatus(t, err, tc.status)
+			if len(svc.uploads) != 0 {
+				t.Fatalf("uploads = %d, want none", len(svc.uploads))
+			}
+		})
+	}
+}
+
+func TestAdminUploadItemImageMapsCacheFailures(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"not an image", metadata.ErrUnsupportedUploadedImage, http.StatusBadRequest},
+		{"wrapped decode failure", errors.Join(metadata.ErrUnsupportedUploadedImage, errors.New("vips: unsupported")), http.StatusBadRequest},
+		{"no artwork storage", metadata.ErrImageUploadUnavailable, http.StatusServiceUnavailable},
+		{"storage failure", errors.New("put local/series/series/poster: access denied"), http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &localImageServiceFake{uploadErr: tc.err}
+			_, err := newUploadImageHandlerForTest(svc).UploadAdminItemImage(context.Background(), "series", "poster", []byte("x"))
+			apiErr := requireAPIStatus(t, err, tc.status)
+			if strings.Contains(apiErr.Message, "access denied") {
+				t.Fatalf("message %q leaks the storage error", apiErr.Message)
+			}
+		})
+	}
+}
+
+// The uploaded image an item shows is listed as a local choice, with a display
+// URL for its stored path. Frozen v1 lists provider choices only.
+func TestAdminItemImagesListsTheShownUpload(t *testing.T) {
+	svc := &localImageServiceFake{}
+	h := newUploadImageHandlerForTest(svc)
+
+	out, err := h.GetAdminItemImages(context.Background(), "series")
+	if err != nil {
+		t.Fatalf("GetAdminItemImages: %v", err)
+	}
+	var uploads []itemImageEntry
+	for _, entry := range out.Images {
+		if metadata.IsUploadedImageSource(entry.OriginalURL) {
+			uploads = append(uploads, entry)
+		}
+	}
+	// The backdrop came from a provider, so only the poster is an upload.
+	if len(uploads) != 1 {
+		t.Fatalf("upload choices = %+v, want the poster", uploads)
+	}
+	want := itemImageEntry{ProviderID: "local", URL: "https://cdn.example/" + uploadedPosterPath + "?variant=card", OriginalURL: uploadedPosterSource, Type: "poster"}
+	if uploads[0] != want {
+		t.Fatalf("upload choice = %+v, want %+v", uploads[0], want)
+	}
+
+	season, err := h.GetAdminItemImages(context.Background(), "season-2")
+	if err != nil {
+		t.Fatalf("GetAdminItemImages season: %v", err)
+	}
+	if len(season.Images) != 1 || season.Images[0].OriginalURL != "upload://sha256:ef56" || season.Images[0].ProviderID != "local" {
+		t.Fatalf("season choices = %+v, want its uploaded poster", season.Images)
+	}
+
+	router := chi.NewRouter()
+	router.Get("/{id}/images", h.HandleGetItemImages)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/series/images", nil))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "upload://") {
+		t.Fatalf("v1 list %d %s, want no upload choice", rec.Code, rec.Body)
+	}
+}
+
+// An upload is stored only in artwork storage, so apply takes back only the
+// upload the target shows, and never downloads an upload:// source.
+func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
+	t.Run("another upload is refused", func(t *testing.T) {
+		svc := &localImageServiceFake{}
+		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: "upload://sha256:other", Type: "poster"})
+		requireAPIStatus(t, err, http.StatusBadRequest)
+		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 {
+			t.Fatalf("provider calls %d, local calls %d, want none", svc.providerCalls, len(svc.applyLocal))
+		}
+	})
+
+	t.Run("the shown upload is published again", func(t *testing.T) {
+		svc := &localImageServiceFake{}
+		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster", ProviderID: "local"})
+		// Publication is the only step left, and it fails without a catalog.
+		if apiErr := requireAPIStatus(t, err, http.StatusInternalServerError); apiErr.Message != "Image cached but failed to update item" {
+			t.Fatalf("message = %q, want the publication failure", apiErr.Message)
+		}
+		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 || len(svc.uploads) != 0 {
+			t.Fatalf("provider %d, local %d, upload %d calls, want none", svc.providerCalls, len(svc.applyLocal), len(svc.uploads))
+		}
+	})
+
+	t.Run("an upload for another slot is refused", func(t *testing.T) {
+		svc := &localImageServiceFake{}
+		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "backdrop"})
+		requireAPIStatus(t, err, http.StatusBadRequest)
+	})
+}
