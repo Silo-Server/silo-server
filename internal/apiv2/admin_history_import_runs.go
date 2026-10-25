@@ -141,7 +141,7 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 	cancel := op(http.MethodPost, "/admin/history-imports/runs/{id}/cancel", "cancelAdminHistoryImportRun", false)
 	cancel.DefaultStatus = http.StatusAccepted
 	cancel.Responses = map[string]*huma.Response{"200": {Description: "The run is already canceled.", Content: map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: "#/components/schemas/AdminHistoryImportRun"}}}}}
-	// A run that can no longer be cancelled is 409 job_not_cancelable.
+	// A run that no longer accepts cancellation is 409 job_not_cancelable.
 	cancel.Errors = append(cancel.Errors, http.StatusConflict)
 	Register(reg, cancel, func(ctx context.Context, in *HistoryImportRunIDInput) (*AdminHistoryImportRunOutput, error) {
 		s, p := reg.adminHistoryImports()

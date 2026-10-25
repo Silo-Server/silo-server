@@ -164,7 +164,8 @@ func registerAdminTasks(reg *Registry) {
 	Register(reg, adminTaskOp("GET", "/{key}/metrics", "getAdminTaskMetrics", "Read bounded refresh-debt metrics."), reg.getAdminTaskMetrics)
 	Register(reg, adminTaskOp("GET", "", "listAdminTasks", "List the finite task registry and process-local runtime state."), reg.listAdminTasks)
 	Register(reg, adminTaskOp("GET", "/{key}", "getAdminTask", "Read task state on this process."), reg.getAdminTask)
-	// Running a task already running here, or cancelling one that is not, is 409.
+	// A run request for a task already running here, or a cancel request for
+	// one that is not, is 409.
 	run := adminTaskOp("POST", "/{key}/run", "runAdminTask", "Start a task on this process. This acknowledgment does not persist work intent.")
 	run.Errors = append(run.Errors, http.StatusConflict)
 	Register(reg, run, reg.runAdminTask)
