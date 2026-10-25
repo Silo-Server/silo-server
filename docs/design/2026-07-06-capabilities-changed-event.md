@@ -10,8 +10,10 @@ connection's account and its bound profile, for administrators too, so an event
 targeted as described below (by `UserID` alone, or with no `UserID`) reaches no one.
 Nor is `user_state` the only user-scoped channel non-admins can subscribe to:
 `notifications`, `history_import` and, since this was written, `user_settings` are
-open to them too. Read [Personal event recipients](../realtime-api.md#personal-event-recipients) before
-building this event.
+open to them too. The channel and targeting described under *Existing
+infrastructure*, *Proposed contract* and *Acceptance checks* are historical; don't
+build them as written. Choose the channel and targeting against
+[Personal event recipients](../realtime-api.md#personal-event-recipients).
 
 ## Problem
 
