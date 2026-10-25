@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -232,7 +233,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 			OriginalLanguage: result.GetOriginalLanguage(),
 			Year:             int(result.GetYear()),
 			ProviderIDs:      mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
-			ImageURL:         result.GetImageUrl(),
+			ImageURL:         p.remoteArtwork(ctx, result.GetImageUrl()),
 			Overview:         result.GetOverview(),
 			Provider:         p.Slug(),
 		})
@@ -306,14 +307,14 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		AdvisorySource:       advisorySource,
 		Ratings:              ratingsFromStruct(response.GetItem().GetRatings(), p.declaredRatingSources),
 		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug(), p.declaredRatingSources),
-		People:               peopleFromRecords(response.GetItem().GetPeople()),
+		People:               p.peopleFromRecords(ctx, response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
-		PosterPath:           response.GetItem().GetPosterPath(),
+		PosterPath:           p.remoteArtwork(ctx, response.GetItem().GetPosterPath()),
 		PosterThumbhash:      response.GetItem().GetPosterThumbhash(),
-		BackdropPath:         response.GetItem().GetBackdropPath(),
+		BackdropPath:         p.remoteArtwork(ctx, response.GetItem().GetBackdropPath()),
 		ShowStatus:           response.GetItem().GetStatus(),
 		BackdropThumbhash:    response.GetItem().GetBackdropThumbhash(),
-		LogoPath:             response.GetItem().GetLogoPath(),
+		LogoPath:             p.remoteArtwork(ctx, response.GetItem().GetLogoPath()),
 		SeasonCount:          int(response.GetItem().GetSeasonCount()),
 		FirstAirDate:         response.GetItem().GetFirstAirDate(),
 		LastAirDate:          response.GetItem().GetLastAirDate(),
@@ -384,7 +385,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 		DeathDate:      response.GetPerson().GetDeathDate(),
 		Birthplace:     response.GetPerson().GetBirthplace(),
 		Homepage:       response.GetPerson().GetHomepage(),
-		PhotoPath:      response.GetPerson().GetPhotoPath(),
+		PhotoPath:      p.remoteArtwork(ctx, response.GetPerson().GetPhotoPath()),
 		PhotoThumbhash: response.GetPerson().GetPhotoThumbhash(),
 		ProviderIDs:    stringMapFromStruct(response.GetPerson().GetProviderIds()),
 	}, nil
@@ -424,6 +425,9 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 
 	images := make([]RemoteImage, 0, len(response.GetImages()))
 	for _, image := range response.GetImages() {
+		if url := image.GetUrl(); p.remoteArtwork(ctx, url) != url {
+			continue
+		}
 		ri := RemoteImage{
 			ProviderID: p.capabilityID,
 			URL:        image.GetUrl(),
@@ -446,6 +450,21 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		images = append(images, ri)
 	}
 	return images, nil
+}
+
+// remoteArtwork returns an artwork path or URL a plugin returned, or "" when
+// it names a local source (a file:// sidecar or an nfo+http(s):// URL, see
+// isLocalImageSourcePath). Local sources take precedence over provider art and
+// a sidecar's path is looked up on this server's disk, so only the built-in
+// NFO provider, which runs in-process rather than as a plugin, may produce
+// them.
+func (p *PluginProvider) remoteArtwork(ctx context.Context, value string) string {
+	if !isLocalImageSourcePath(value) {
+		return value
+	}
+	slog.DebugContext(ctx, "metadata: ignoring local artwork source from a metadata plugin", "component", "metadata",
+		"installation_id", p.installationID, "capability_id", p.capabilityID)
+	return ""
 }
 
 func imageMetadataBool(md *structpb.Struct, key string) *bool {
@@ -499,7 +518,7 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 			Overview:         season.GetOverview(),
 			OverviewLanguage: season.GetOverviewLanguage(),
 			AirDate:          season.GetAirDate(),
-			PosterPath:       season.GetPosterPath(),
+			PosterPath:       p.remoteArtwork(ctx, season.GetPosterPath()),
 		})
 	}
 	return seasons, nil
@@ -546,7 +565,7 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 			AirDate:          episode.GetAirDate(),
 			Runtime:          int(episode.GetRuntime()),
 			Ratings:          ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
-			StillPath:        episode.GetStillPath(),
+			StillPath:        p.remoteArtwork(ctx, episode.GetStillPath()),
 		})
 	}
 	return episodes, nil
@@ -863,7 +882,7 @@ func videosFromRecords(providerSlug string, records []*pluginv1.VideoRecord) []R
 	return videos
 }
 
-func peopleFromRecords(records []*pluginv1.PersonRecord) []models.ItemPerson {
+func (p *PluginProvider) peopleFromRecords(ctx context.Context, records []*pluginv1.PersonRecord) []models.ItemPerson {
 	if len(records) == 0 {
 		return nil
 	}
@@ -880,7 +899,7 @@ func peopleFromRecords(records []*pluginv1.PersonRecord) []models.ItemPerson {
 				TvdbID:         record.GetTvdbId(),
 				ImdbID:         record.GetImdbId(),
 				PlexGUID:       record.GetPlexGuid(),
-				PhotoPath:      record.GetPhotoPath(),
+				PhotoPath:      p.remoteArtwork(ctx, record.GetPhotoPath()),
 				PhotoThumbhash: record.GetPhotoThumbhash(),
 			},
 			Kind:      personKindFromString(record.GetKind()),
