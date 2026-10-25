@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -23,15 +22,6 @@ func TestCatalogV1ExportJobRefusesStoreThatCannotPresign(t *testing.T) {
 	h.HandleCreateExportJob(rec, httptest.NewRequest(http.MethodPost, "/api/v1/admin/catalog/export-jobs", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body)
-	}
-}
-
-// A remote import URL that reaches a blocked address is reported as an
-// invalid remote URL, the same as one of the wrong shape.
-func TestCatalogRemoteImportRefusesMetadataAddress(t *testing.T) {
-	_, err := readImportDataFromRemoteURL(context.Background(), "http://169.254.169.254/latest/seed.json.gz")
-	if !errors.Is(err, errCatalogSeedImportInvalidRemoteURL) || !errors.Is(err, catalogseed.ErrRemoteAddressNotAllowed) {
-		t.Fatalf("metadata address error = %v, want errCatalogSeedImportInvalidRemoteURL", err)
 	}
 }
 

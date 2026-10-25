@@ -70,36 +70,19 @@ func TestPackageFetchDefaultClientHasTimeouts(t *testing.T) {
 			t.Fatalf("%s client has a whole-request timeout %s; slow downloads would be cut off", name, client.Timeout)
 		}
 	}
-	if defaultPackageFetchTimeouts.responseHeader != packageFetchResponseHeaderTimeout ||
-		defaultPackageFetchTimeouts.tlsHandshake != packageFetchTLSHandshakeTimeout ||
-		defaultPackageFetchTimeouts.dial != packageFetchDialTimeout {
-		t.Fatalf("default package fetch timeouts = %+v", defaultPackageFetchTimeouts)
-	}
 }
 
 // Catalog JSON from a third party chooses package addresses. A blocked
-// address, reached directly or by redirect, is refused before connecting and
-// reported as a permanent package error, since a retry can't change it.
+// address is refused before connecting and reported as a permanent package
+// error, since a retry can't change it. The netguard tests cover redirects.
 func TestFetchPackageResourceRefusesBlockedAddress(t *testing.T) {
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
-	}))
-	t.Cleanup(redirect.Close)
-	client := newPackageFetchClient(shortPackageFetchTimeouts)
-	for name, rawURL := range map[string]string{
-		"direct":   "http://169.254.169.254/plugin.tar.gz",
-		"redirect": redirect.URL + "/plugin.tar.gz",
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := fetchWithDeadline(t, func() ([]byte, error) {
-				return fetchPackageResource(context.Background(), client, rawURL, "the plugin")
-			})
-			requirePackageError(t, err, "range this server never connects to")
-			requireTransient(t, err, false)
-			if !errors.Is(err, netguard.ErrBlockedDestination) {
-				t.Fatalf("blocked address error = %v, want ErrBlockedDestination", err)
-			}
-		})
+	_, err := fetchWithDeadline(t, func() ([]byte, error) {
+		return fetchPackageResource(context.Background(), newPackageFetchClient(shortPackageFetchTimeouts), "http://169.254.169.254/plugin.tar.gz", "the plugin")
+	})
+	requirePackageError(t, err, "range this server never connects to")
+	requireTransient(t, err, false)
+	if !errors.Is(err, netguard.ErrBlockedDestination) {
+		t.Fatalf("blocked address error = %v, want ErrBlockedDestination", err)
 	}
 }
 

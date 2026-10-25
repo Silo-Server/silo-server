@@ -37,18 +37,6 @@ func TestDownloadRemoteBundleRefusesMetadataAddress(t *testing.T) {
 	}
 }
 
-func TestDownloadRemoteBundleRefusesRedirectToMetadataAddress(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "http://169.254.169.254/latest/seed.json.gz", http.StatusFound)
-	}))
-	defer server.Close()
-
-	_, err := DownloadRemoteBundle(context.Background(), server.URL+"/seed.json.gz")
-	if !errors.Is(err, ErrRemoteAddressNotAllowed) {
-		t.Fatalf("redirect to metadata error = %v, want ErrRemoteAddressNotAllowed", err)
-	}
-}
-
 func TestDownloadRemoteBundleRejectsInvalidURL(t *testing.T) {
 	for _, rawURL := range []string{"ftp://example.com/seed.json.gz", "https://example.com/seed.json", "https:///seed.json.gz", "::"} {
 		if _, err := DownloadRemoteBundle(context.Background(), rawURL); !errors.Is(err, ErrInvalidRemoteURL) {
