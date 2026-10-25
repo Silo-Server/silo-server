@@ -1,6 +1,10 @@
 # Client Diagnostics: crash reports and debug log upload
 
-Status: Draft (spec + cross-repo plan)
+Status: Server shipped. The upload contract, including the `/api/v2` routes and
+chunked upload, is the [diagnostics upload API](../diagnostics-upload-api.md), and
+the admin routes are in the [admin diagnostics API](../admin-diagnostics-api.md).
+This record keeps the consent model, the bundle format and its schemas, and the
+cross-repo client plan.
 Date: 2026-07-19
 Repos affected: `silo-server`, `silo-android`, `silo-apple`
 

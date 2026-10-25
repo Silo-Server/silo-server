@@ -1,6 +1,9 @@
 # Lowering quality when playback keeps buffering
 
-Status: Proposed
+Status: The server and web parts of phases 1 and 2 shipped in #2699. The server
+contract is now in [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2)
+and the [Playback API](../playback-api.md#buffering-quality-native-v2); this
+document remains the client controller spec.
 Date: 2026-10-17, revised 2026-10-22 after device testing (see *Decisions*)
 Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `silo-apple`
 
@@ -872,7 +875,7 @@ Phase 1 returns `connection` and `learned_limit`; phase 2 adds `probe`,
   "connection": "remote",
   "probe": { "kbps": 48000, "lower_bound": false, "measured_at": "2026-10-17T19:02:11Z", "transport": "wifi" },
   "playback_sample": { "kbps": 51200, "measured_at": "2026-10-18T20:14:03Z" },
-  "learned_limit": { "kbps": 44100, "observed_at": "2026-10-17T16:21:40Z", "expires_at": "2026-10-24T16:21:40Z" },
+  "learned_limit": { "kbps": 44100, "observed_at": "2026-10-18T16:21:40Z", "expires_at": "2026-10-19T16:21:40Z" },
   "auto_budget_kbps": 35280
 }
 ```
