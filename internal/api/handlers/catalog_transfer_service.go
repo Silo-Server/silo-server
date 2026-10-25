@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,6 +119,9 @@ func (h *CatalogSeedHandler) CreateCatalogImportJob(ctx context.Context, userID 
 func catalogImportSourceProblem(err error) error {
 	if errors.Is(err, errCatalogSeedImportSourceUnavailable) {
 		return apiError(http.StatusServiceUnavailable, "service_unavailable", "Catalog import storage is unavailable")
+	}
+	if errors.Is(err, catalogseed.ErrRemoteBundleTooLarge) {
+		return apiError(http.StatusBadRequest, "bad_request", "The remote catalog seed is larger than the "+strconv.FormatInt(catalogseed.MaxRemoteBundleBytes>>30, 10)+" GiB download limit")
 	}
 	return apiError(http.StatusBadRequest, "bad_request", "Cannot load the selected catalog import source")
 }

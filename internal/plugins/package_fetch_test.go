@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // fetchDeadline is how long a test waits for a fetch that should give up on
@@ -61,17 +63,61 @@ func TestPackageFetchDefaultClientHasTimeouts(t *testing.T) {
 		"catalog":   NewCatalogService(nil, CatalogServiceOptions{}).httpClient,
 		"installer": NewInstaller(nil, InstallerOptions{}).httpClient,
 	} {
-		transport, ok := client.Transport.(*http.Transport)
-		if !ok {
-			t.Fatalf("%s client transport = %T, want *http.Transport", name, client.Transport)
-		}
-		if transport.ResponseHeaderTimeout != packageFetchResponseHeaderTimeout ||
-			transport.TLSHandshakeTimeout != packageFetchTLSHandshakeTimeout {
-			t.Fatalf("%s transport timeouts = header %s, tls %s", name, transport.ResponseHeaderTimeout, transport.TLSHandshakeTimeout)
+		if _, ok := client.Transport.(*netguard.Transport); !ok {
+			t.Fatalf("%s client transport = %T, want *netguard.Transport", name, client.Transport)
 		}
 		if client.Timeout != 0 {
 			t.Fatalf("%s client has a whole-request timeout %s; slow downloads would be cut off", name, client.Timeout)
 		}
+	}
+	if defaultPackageFetchTimeouts.responseHeader != packageFetchResponseHeaderTimeout ||
+		defaultPackageFetchTimeouts.tlsHandshake != packageFetchTLSHandshakeTimeout ||
+		defaultPackageFetchTimeouts.dial != packageFetchDialTimeout {
+		t.Fatalf("default package fetch timeouts = %+v", defaultPackageFetchTimeouts)
+	}
+}
+
+// Catalog JSON from a third party chooses package addresses. A blocked
+// address, reached directly or by redirect, is refused before connecting and
+// reported as a permanent package error, since a retry can't change it.
+func TestFetchPackageResourceRefusesBlockedAddress(t *testing.T) {
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+	client := newPackageFetchClient(shortPackageFetchTimeouts)
+	for name, rawURL := range map[string]string{
+		"direct":   "http://169.254.169.254/plugin.tar.gz",
+		"redirect": redirect.URL + "/plugin.tar.gz",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := fetchWithDeadline(t, func() ([]byte, error) {
+				return fetchPackageResource(context.Background(), client, rawURL, "the plugin")
+			})
+			requirePackageError(t, err, "range this server never connects to")
+			requireTransient(t, err, false)
+			if !errors.Is(err, netguard.ErrBlockedDestination) {
+				t.Fatalf("blocked address error = %v, want ErrBlockedDestination", err)
+			}
+		})
+	}
+}
+
+// A repository on the server's own network still works; the httptest server
+// on loopback stands in for one.
+func TestFetchPackageResourceReachesLocalNetwork(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"packages":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	data, err := fetchWithDeadline(t, func() ([]byte, error) {
+		return fetchPackageResource(context.Background(), newPackageFetchClient(defaultPackageFetchTimeouts), server.URL, "the repository catalog")
+	})
+	if err != nil {
+		t.Fatalf("local repository fetch: %v", err)
+	}
+	if string(data) != `{"packages":[]}` {
+		t.Fatalf("local repository fetch = %q", data)
 	}
 }
 

@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,8 +25,6 @@ type ArtifactStore interface {
 	UploadFile(ctx context.Context, bucket, key, path, contentType string) (int64, error)
 	DeleteObject(ctx context.Context, bucket, key string) error
 }
-
-const remoteCatalogImportTimeout = 10 * time.Minute
 
 const (
 	// imageCacheCleanupMaxStalledClaims bounds how long a cleanup keeps
@@ -1101,7 +1096,7 @@ func (r *Runner) executeCatalogImport(job *models.AdminJob) {
 			r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
 		}
 		var err error
-		data, err = downloadRemoteCatalogSeed(ctx, req.RemoteURL)
+		data, err = catalogseed.DownloadRemoteBundle(ctx, req.RemoteURL)
 		if err != nil {
 			r.failJob(job.ID, 0, 0, "Catalog import failed", err.Error())
 			return
@@ -1167,44 +1162,6 @@ func (r *Runner) executeCatalogImport(job *models.AdminJob) {
 		return
 	}
 	r.publishJobByID(completeCtx, notifications.TypeJobCompleted, job.ID)
-}
-
-func downloadRemoteCatalogSeed(ctx context.Context, remoteURL string) ([]byte, error) {
-	parsed, err := url.Parse(remoteURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid remote URL: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("invalid remote URL scheme")
-	}
-	if !strings.HasSuffix(strings.ToLower(parsed.Path), ".json.gz") {
-		return nil, fmt.Errorf("remote URL must point to a .json.gz file")
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, remoteCatalogImportTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, remoteURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("building remote import request: %w", err)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("downloading remote catalog seed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("downloading remote catalog seed: unexpected status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading remote catalog seed: %w", err)
-	}
-
-	return data, nil
 }
 
 func (r *Runner) executeItemRefresh(job *models.AdminJob) {
