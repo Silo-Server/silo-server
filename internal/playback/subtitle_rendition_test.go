@@ -1152,6 +1152,40 @@ func TestPlanPlaybackV3CarriesEmbeddedTextAsRemuxHLSSubtitleRendition(t *testing
 	}
 }
 
+// A client that asks for MPEG-TS copies (hls_copy_mpegts_v1) and remux
+// renditions gets both on one plan: the rendition follows a TS remux's
+// segments as it does an fMP4 remux's, and the frozen recipe keeps both at
+// the MPEG-TS version.
+func TestPlanPlaybackV3CarriesRemuxSubtitleRenditionOnMPEGTSCopy(t *testing.T) {
+	input := subtitleRenditionRemuxInputV3(t, "subrip")
+	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3)
+	input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !PlanCopiesVideoAsMPEGTSV3(*result.Plan) {
+		t.Fatalf("want an MPEG-TS HLS copy remux, got %s", ExplainPlannerResultV3(result))
+	}
+	if !result.SubtitleRendition || result.Plan.Subtitle.HLSRendition == nil || result.Plan.Subtitle.Artifact != nil {
+		t.Fatalf("subtitle decision = %#v (rendition %v)", result.Plan.Subtitle, result.SubtitleRendition)
+	}
+	recipe := FreezeExecutableRecipeV3(result)
+	if !recipe.SubtitleRendition || !recipe.CopyVideoMPEGTS || recipe.Version != executableRecipeVersionCopyMPEGTSV3 || !recipe.ValidFor(*result.Plan) {
+		t.Fatalf("frozen recipe = %#v", recipe)
+	}
+	if !recipe.PlannerResult(result.Plan).SubtitleRendition {
+		t.Fatal("the restored planner result lost the rendition")
+	}
+	opts := TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: result.Plan.Source.VideoCodec, CopyVideoMPEGTS: PlanCopiesVideoAsMPEGTSV3(*result.Plan)}
+	if HLSOutputContainer(opts) != OutputContainerMPEGTS || subtitleSegmentPTSOffset90k(opts) != HLSMPEGTSTimestampOffset90k {
+		t.Fatalf("a TS copy rendition must map cues onto the MPEG-TS offset: container %s", HLSOutputContainer(opts))
+	}
+
+	fmp4 := subtitleRenditionRemuxInputV3(t, "subrip")
+	if got := PlanPlaybackV3(fmp4); got.Plan == nil || got.Plan.PlanID == result.Plan.PlanID || got.Plan.PlanAttemptKey == result.Plan.PlanAttemptKey {
+		t.Fatal("the TS rendition plan must not share an identity with the fMP4 one")
+	}
+}
+
 // A client that negotiated only transcode renditions (the Apple and Android
 // feature sets) gets exactly the remux plan it got before remux renditions:
 // the same plan as a client that negotiated no rendition at all.
