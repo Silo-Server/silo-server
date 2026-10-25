@@ -123,15 +123,17 @@ describe("reportMarkerSegment", () => {
     expect(JSON.stringify(init.headers)).not.toContain("Authorization");
   });
 
-  it("mints the launch cookie once for repeated reports", async () => {
+  it("mints a launch per report, so one never rides an earlier profile's cookie", async () => {
     const { v2, reportMarkerSegment } = await freshModule();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(reply(200, {}));
 
     await reportMarkerSegment(4, { type: "movie", tmdb_id: 1 });
     await reportMarkerSegment(4, { type: "movie", tmdb_id: 1 });
 
-    // The launch is worth one round trip, not one per report.
-    expect(v2).toHaveBeenCalledTimes(1);
+    // The launch cookie is bound to the profile that asked for it, so a remembered one
+    // outlives a profile switch and sends the next report under the earlier profile's
+    // authority. One launch per report is what re-reads whoever is signed in by then.
+    expect(v2).toHaveBeenCalledTimes(2);
   });
 
   it("reports an already-reported segment as settled, not as a failure", async () => {
