@@ -323,7 +323,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	switch inputFormat {
 	case "ssa":
 		inputFormat = "ass"
-	case "sub":
+	case string(subtitles.FormatSUB):
 		if inputFormat = subtitles.SUBDemuxer(input); inputFormat == "" {
 			return nil, errors.New("sub subtitle is neither MicroDVD nor SubViewer text")
 		}
