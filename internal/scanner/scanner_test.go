@@ -366,12 +366,13 @@ func testStringSliceContains(values []string, target string) bool {
 }
 
 func TestScanFileEbookLibraryUsesEbookPipeline(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "book.epub")
+	root := t.TempDir()
+	filePath := filepath.Join(root, "book.epub")
 	if err := os.WriteFile(filePath, []byte("not a real epub"), 0o644); err != nil {
 		t.Fatalf("write fake ebook: %v", err)
 	}
 
-	err := (&Scanner{}).ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 44, Type: "ebooks"})
+	err := (&Scanner{}).ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 44, Type: "ebooks", Paths: []string{root}})
 	if err == nil {
 		t.Fatal("ScanFile returned nil, want ebook parse failure")
 	}

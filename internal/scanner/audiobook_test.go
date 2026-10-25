@@ -464,7 +464,7 @@ func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, bookDir)
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}}, bookDir)
 	if err == nil {
 		t.Fatal("ScanSubtree returned nil, want audiobook parse failure")
 	}
@@ -479,7 +479,9 @@ func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, "")
+	// A relative root lets the scope pass the library check and reach the
+	// audiobook scan-root validation.
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{"."}}, "")
 	if err == nil {
 		t.Fatal("ScanSubtree returned nil, want invalid root error")
 	}
@@ -500,7 +502,7 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
 	if err == nil {
 		t.Fatal("ScanFile returned nil, want audiobook parse failure")
 	}
@@ -515,7 +517,9 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 func TestScanFileAudiobookLibraryRejectsRelativeScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
-	err := s.ScanFile(context.Background(), "chapter.mp3", &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	// A relative root lets the path pass the library check and reach the
+	// audiobook scan-root validation.
+	err := s.ScanFile(context.Background(), "chapter.mp3", &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{"."}})
 	if err == nil {
 		t.Fatal("ScanFile returned nil, want invalid root error")
 	}

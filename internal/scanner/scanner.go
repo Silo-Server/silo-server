@@ -360,9 +360,13 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
-// files that live beneath that subtree.
+// files that live beneath that subtree. subtreePath must lie under one of
+// folder's roots.
 func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	cleanSubtree := filepath.Clean(subtreePath)
+	if err := requirePathInLibrary(cleanSubtree, folder); err != nil {
+		return nil, err
+	}
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
@@ -2650,8 +2654,48 @@ func pathWithinAnyRoot(path string, roots []string) bool {
 	return false
 }
 
-// ScanFile scans a single file and upserts it into the database.
+// ErrPathOutsideLibrary reports a scoped scan of a path that is not under any
+// of the library's configured roots.
+var ErrPathOutsideLibrary = errors.New("path is outside the library")
+
+// requirePathInLibrary returns ErrPathOutsideLibrary unless path lies under
+// one of folder's roots. The lexical match covers every path the scanner
+// records, since walks keep the logical path below a symlinked root. A path
+// that only matches with symlinks resolved on both sides is accepted too, so
+// a caller holding the physical path into a symlinked root still works.
+func requirePathInLibrary(path string, folder *models.MediaFolder) error {
+	if pathWithinAnyRoot(path, folder.Paths) || resolvedPathWithinAnyRoot(path, folder.Paths) {
+		return nil
+	}
+	return fmt.Errorf("%w: library %d, path %s", ErrPathOutsideLibrary, folder.ID, path)
+}
+
+func resolvedPathWithinAnyRoot(path string, roots []string) bool {
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		if pathWithinAnyRoot(resolvedPath, []string{resolvedRoot}) {
+			return true
+		}
+	}
+	return false
+}
+
+// ScanFile scans a single file and upserts it into the database. filePath
+// must lie under one of folder's roots.
 func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error {
+	if err := requirePathInLibrary(filepath.Clean(filePath), folder); err != nil {
+		return err
+	}
 	var stopWatch context.CancelFunc
 	ctx, stopWatch = s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
