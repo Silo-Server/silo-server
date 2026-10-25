@@ -27,17 +27,24 @@ const REPORT_SETTING_KEY = "report";
  */
 export function TheIntroDbReportSettings() {
   const gate = useReportGate();
-  const { data: values } = usePluginSettingsValues(gate.installationId, {
+  const settings = usePluginSettingsValues(gate.installationId, {
     enabled: gate.declaresReport && gate.serverConfigured,
   });
   const update = useUpdatePluginSettings(gate.installationId);
 
   if (!gate.installationId || !gate.declaresReport) return null;
 
+  const values = settings.data;
+  // The write replaces the whole stored set for this account and plugin, so it may only
+  // run once the current set is known. Merging onto an unknown one would send this entry
+  // alone and delete every other entry the account has stored.
+  const loaded = settings.isSuccess && values !== undefined;
+
   const entry = readPluginEntryObject(values, REPORT_SETTING_KEY);
   const showReport = entryBoolean(entry.show_report);
 
   const setShowReport = (checked: boolean) => {
+    if (!loaded) return;
     update.mutate(updatePluginEntryObject(values, REPORT_SETTING_KEY, { show_report: checked }), {
       onSuccess: () => toast.success(checked ? "Report button enabled." : "Report button hidden."),
       onError: () => toast.error("Could not change the reporting setting."),
@@ -52,15 +59,17 @@ export function TheIntroDbReportSettings() {
       <SettingRow
         label="Show a Report button under the skip prompt"
         description={
-          gate.serverConfigured
-            ? "Draws a button under the Skip Intro prompt. It asks for confirmation before sending, because a report cannot be taken back from here."
-            : "Unavailable: this server has no TheIntroDB API key. An administrator can add one under the plugin's settings."
+          settings.isError
+            ? "Could not load this account's plugin settings, so this switch stays off until they load."
+            : gate.serverConfigured
+              ? "Draws a button under the Skip Intro prompt. It asks for confirmation before sending, because a report cannot be taken back from here."
+              : "Unavailable: this server has no TheIntroDB API key. An administrator can add one under the plugin's settings."
         }
         control={(id) => (
           <Switch
             id={id}
             checked={showReport}
-            disabled={!gate.serverConfigured || update.isPending}
+            disabled={!gate.serverConfigured || !loaded || update.isPending}
             onCheckedChange={setShowReport}
           />
         )}
