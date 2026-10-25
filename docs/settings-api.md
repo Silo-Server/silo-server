@@ -3,7 +3,7 @@
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
 > 1.0. The frozen alpha `/api/v1` settings routes are kept in
 > [Bridge: the frozen `/api/v1` settings routes](#bridge-the-frozen-apiv1-settings-routes) at the
-> end of this document and are retired after the pre-1.0 bridge window. See
+> end of this document and are served through the pre-1.0 bridge window. See
 > [the native API contract](architecture/api-contract.md).
 
 The canonical settings API stores typed user preferences from the shared
@@ -195,7 +195,8 @@ contexts in one store read; use it for a grid or list instead of one GET per ite
 and each context is `{context_id, library_id | series_id}` with `library_id` as a string `ID`.
 The response preserves the requested key order, including repeated keys. Each `context_id` is an
 opaque caller token: whitespace is retained, and uniqueness is checked on the exact token. Empty
-or whitespace-only tokens are rejected. v1 retains its existing trimmed, deduplicated behavior.
+or whitespace-only tokens are rejected. v1 trims each `context_id` before the same uniqueness
+check, and trims and deduplicates `keys`.
 
 The batch resolves for the acting profile and declared device, so the operation declares only the
 device and client-family headers: the `profile_id`, `device_id`, `library_ids` and `series_ids`
@@ -359,8 +360,8 @@ over-long value is a `422` where v1 truncated it.
 whose keys the plugin's `user_config_schema` defines; a refusal by the plugin is `422` at
 `body.values`. It answers `200` with the same `{installation, values}` document
 `getPluginSettings` serves (v1: `204`). `values` is `{}` rather than null when the account has
-none. The v1 `admin_form` member of an installation is not carried: it is an administrator-form
-descriptor no user-settings client renders.
+none. The v1 `admin_form` member of each `user_config_schema` entry is not carried: it is an
+administrator-form descriptor no user-settings client renders.
 
 ```http
 PUT /api/v2/settings/plugins/3
@@ -445,7 +446,7 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
 | v1                                                                               | v2                                                                              |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `GET /settings/manifest` or `/settings/contract`                                 | `GET /api/v2/settings/contract` (same bytes and `ETag`; no `If-None-Match` yet) |
-| `GET /settings/capability`                                                       | `GET /api/v2/settings/contract/capabilities` (nine settings members plus the common capability fields)       |
+| `GET /settings/capability`                                                       | `GET /api/v2/settings/contract/capabilities` (settings members plus the common capability fields)       |
 | `?keys=a,b`, `?library_ids=1,2`, `?series_ids=x,y`                               | `?keys=a&keys=b`, `?library_ids=1&library_ids=2`, `?series_ids=x&series_ids=y`  |
 | `{values: [...], revision}`, `{settings: [...], revision}`                       | `{items: [...], revision}`                                                      |
 | `{contexts: [...], revision}` (batch POST)                                       | `{items: [{context_id, settings: [...]}], revision}`                            |
@@ -455,9 +456,9 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
 | `X-Silo-Mutation-Id`, `X-Silo-Idempotent-Replay`, `409 mutation_id_conflict`     | Not declared; retry the plain `PUT`                                             |
 | `PUT /settings/device/subtitle_appearance` → `204`                               | `PUT /api/v2/settings/device/subtitle-appearance` → `200` effective appearance  |
 | `PUT /settings/plugins/{id}` → `204`                                             | `PUT /api/v2/settings/plugins/{id}` → `200 {installation, values}`              |
-| Numeric `library_id`, `profile_id`, installation `id`                            | String `ID`s                                                                    |
+| Numeric `library_id`, installation `id`                                          | String `ID`s (`profile_id` was already a string)                                |
 | `updated_at` as stored text                                                      | RFC 3339 instant                                                                |
-| `admin_form` on a plugin installation                                            | Not carried                                                                     |
+| `admin_form` on a `user_config_schema` entry                                     | Not carried                                                                     |
 | `/settings/`, `/settings/{key}`, `/settings/device/{key}`, `/settings/effective` | Removed; use the typed operations above                                         |
 
 
@@ -699,8 +700,10 @@ onboarding counterpart.
 ## Bridge: the frozen `/api/v1` settings routes
 
 The alpha surface below is frozen. Silo serves it through the pre-1.0 bridge window so
-existing clients keep working; Silo 1.0 then answers the whole `/api/v1` namespace with
-`410 Gone` and the `client_upgrade_required` problem code. No feature work lands here.
+existing clients keep working. After the bridge window, and once a maintainer decides to retire
+it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API listener
+answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem
+code; `/api/v1/health` and `/api/v1/ready` keep answering. No feature work lands here.
 Use [Migrating from v1](#migrating-from-v1) to move a caller to the stable operations.
 
 All paths in this section are relative to `/api/v1`.
@@ -1026,8 +1029,8 @@ restart.
 The first write to the assets store records its storage identity; writes to a
 shared local root count too. At startup, Silo records any configured private
 bucket, even if it is empty. A direct settings write that changes a recorded
-location is rejected with `409` and the problem code
-`artwork_storage_locked`: a change of `artwork.storage_backend`, of
+location is rejected with `409` (problem type `conflict` in `/api/v2`;
+`artwork_storage_locked` in the frozen `/api/v1`): a change of `artwork.storage_backend`, of
 `artwork.local_path` for a local store, of `s3.public_endpoint`,
 `s3.public_bucket`, or `s3.public_key_prefix` for an S3 store, or of
 `s3.private_bucket` on either backend. While a private bucket is configured, its

@@ -3,8 +3,8 @@
 These v2 operations manage bearer-token invitations: emailed invitations bound
 to one address, and link invitations whose invitee enters an address at accept. Ordinary signup
 invite codes use the separate auth/signup contract. Administrator operations
-require an acting administrator. Public lookup and acceptance use the invitation
-rate-limit bucket. Capability responses use `Cache-Control: private, no-cache` and an `ETag`, and support conditional requests. Other responses use `Cache-Control: no-store`, including credentials
+require an acting administrator. Public capability, lookup and acceptance requests spend the
+invitation rate-limit bucket. Capability responses use `Cache-Control: private, no-cache` and an `ETag`, and support conditional requests. Other responses use `Cache-Control: no-store`, including credentials
 and claim links. No raw claim token is retained for response replay.
 
 | Method | Path under `/api/v2` | Behavior |
