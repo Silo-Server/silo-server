@@ -3395,6 +3395,14 @@ func sortedTypeSet(typeSet map[string]bool) []string {
 	return keys
 }
 
+// progressPageCapacity bounds the capacity hint for a progress page. Limit
+// comes straight from the request with no upper bound, while the page never
+// holds more than the profile's progress rows, so preallocating by Limit would
+// let one request ask the runtime for an arbitrarily large slice.
+func progressPageCapacity(limit int) int {
+	return min(max(limit, 0), compatBrowseMaxLimit)
+}
+
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
 	// Resume views hide dismissed and superseded entries, so the visible list
 	// is sparser than the raw store list. The raw-offset fast path below is
@@ -3407,7 +3415,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			batchSize = 48
 		}
 
-		result := make([]progressHydratedItem, 0, query.limit)
+		result := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 		offset := query.startIndex
 		for {
 			progressEntries, err := h.userData.ListProgress(ctx, session, status, batchSize, offset)
@@ -3476,7 +3484,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		return h.userData.ListProgress(ctx, session, status, batchSize, off)
 	}
 
-	items := make([]progressHydratedItem, 0, query.limit)
+	items := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 	matchedCount := 0
 	offset := 0
 
