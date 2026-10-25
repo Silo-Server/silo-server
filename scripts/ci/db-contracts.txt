@@ -280,6 +280,7 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
+./internal/userstore/pgstore TestPostgresProgressHints
 ./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
