@@ -45177,6 +45177,7 @@
               20
             ],
             "format": "int64",
+            "maximum": 500,
             "minimum": 1,
             "type": [
               "integer",

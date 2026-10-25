@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -539,5 +541,37 @@ func TestSaveProfileOverridesLegacyShapeCannotBypassGate(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for legacy-shape bypass, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveProfileOverridesRejectsOversizedItemLimit: the fetchers size their
+// buffers from item_limit, so a profile override above the admin cap is
+// refused before the store is touched. The cap itself reaches the store.
+func TestSaveProfileOverridesRejectsOversizedItemLimit(t *testing.T) {
+	for _, tc := range []struct {
+		limit    int
+		wantCode int
+	}{
+		{sections.MaxItemLimit + 1, http.StatusBadRequest},
+		{1_000_000_000, http.StatusBadRequest},
+		// No store is wired, so a value that passes validation fails there.
+		{sections.MaxItemLimit, http.StatusInternalServerError},
+	} {
+		h := &SectionHandler{}
+		body := []byte(fmt.Sprintf(`{"scope":"home","library_id":"","overrides":[{"id":"o1","section_id":"s1","item_limit":%d}]}`, tc.limit))
+		req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
+		ctx = apimw.SetProfileID(ctx, "p1")
+		rec := httptest.NewRecorder()
+
+		h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
+
+		if rec.Code != tc.wantCode {
+			t.Fatalf("item_limit %d: status = %d, want %d; body=%s", tc.limit, rec.Code, tc.wantCode, rec.Body.String())
+		}
+		if tc.wantCode == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "invalid_item_limit") {
+			t.Fatalf("item_limit %d: body = %s, want invalid_item_limit", tc.limit, rec.Body.String())
+		}
 	}
 }

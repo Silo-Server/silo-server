@@ -930,6 +930,11 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 			}
 			seenIDs[o.ID] = struct{}{}
 		}
+		// The fetchers size their buffers from item_limit, so an unbounded
+		// value lets one profile exhaust server memory on every home load.
+		if o.ItemLimit != nil && *o.ItemLimit > sections.MaxItemLimit {
+			return apiError(http.StatusBadRequest, "invalid_item_limit", fmt.Sprintf("item_limit must be at most %d", sections.MaxItemLimit))
+		}
 		// SectionID is the authoritative shape discriminator used by the resolver
 		// and scheduled-demand scan. Canonicalize IsUserAdded to match it so a
 		// contradictory payload cannot validate one config and execute another.
