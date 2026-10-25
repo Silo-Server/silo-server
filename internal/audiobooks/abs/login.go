@@ -505,11 +505,20 @@ func setRefreshCookie(w http.ResponseWriter, r *http.Request, refresh string, tt
 // HTTPS. A TLS-terminating proxy leaves r.TLS nil, so the scheme comes from
 // clientip.RequestScheme: X-Forwarded-Proto counts only from a trusted proxy,
 // and without clientip.Middleware only the connection's own TLS state does.
+// Ambiguous proxy metadata (an empty scheme) falls back to the connection's
+// TLS state, so a TLS connection always gets a Secure cookie.
 // Login and logout share it so the deleting Set-Cookie carries the same Secure
 // flag as the cookie it replaces; browsers refuse to let a non-Secure cookie
 // overwrite a Secure one.
 func refreshCookieSecure(r *http.Request) bool {
-	return clientip.RequestScheme(r) == schemeHTTPS
+	switch clientip.RequestScheme(r) {
+	case schemeHTTPS:
+		return true
+	case "":
+		return r.TLS != nil
+	default:
+		return false
+	}
 }
 
 const schemeHTTPS = "https"

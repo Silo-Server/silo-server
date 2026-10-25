@@ -86,6 +86,32 @@ func TestRefreshCookieSecure_FollowsRequestScheme(t *testing.T) {
 	}
 }
 
+// A trusted proxy that sends several X-Forwarded-Proto values leaves the
+// scheme ambiguous; a TLS connection still gets a Secure cookie.
+func TestRefreshCookieSecure_AmbiguousProxySchemeKeepsTLS(t *testing.T) {
+	login := func(w http.ResponseWriter, r *http.Request) {
+		setRefreshCookie(w, r, "refresh-value", time.Hour)
+	}
+	for _, tc := range []struct {
+		name       string
+		target     string
+		wantSecure bool
+	}{
+		{name: "tls connection", target: "https://example.test/login", wantSecure: true},
+		{name: "plain connection", target: "/login", wantSecure: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.target, nil)
+			req.Header.Add("X-Forwarded-Proto", "http")
+			req.Header.Add("X-Forwarded-Proto", "https")
+			got := refreshCookieFrom(t, "192.0.2.0/24", req, login)
+			if got.Secure != tc.wantSecure {
+				t.Errorf("Secure = %v, want %v", got.Secure, tc.wantSecure)
+			}
+		})
+	}
+}
+
 // Without clientip.Middleware, the connection's TLS state alone decides, and
 // X-Forwarded-Proto is ignored.
 func TestRefreshCookieSecure_WithoutMiddlewareUsesTLS(t *testing.T) {
