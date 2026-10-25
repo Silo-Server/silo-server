@@ -1618,6 +1618,14 @@ Because v2 rejects unknown query parameters, a client sends `include_items` only
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
 home sections service is not wired.
+`listHomeSections` and `listLibrarySections` take an optional `item_limit` (1 to 100) that caps
+every row: each row's limit becomes the smaller of its own effective limit and `item_limit`, and
+the response's per-row `item_limit` reports the capped value. The cap applies to the resolved rows
+before their items are fetched, so the hide-watched widening and the cross-row duplicate filter
+work from the capped size; `total_count` keeps its meaning. Without the parameter every row keeps
+its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
+only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
+`include_items_max` is.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond

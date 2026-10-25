@@ -31743,6 +31743,14 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "section_item_limit_max": {
+            "description": "The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured",
+            "examples": [
+              100
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -164715,6 +164723,22 @@
             }
           },
           {
+            "description": "Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter",
+            "explode": false,
+            "in": "query",
+            "name": "item_limit",
+            "schema": {
+              "description": "Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter",
+              "examples": [
+                20
+              ],
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
             "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
@@ -172158,6 +172182,22 @@
               ],
               "minLength": 1,
               "type": "string"
+            }
+          },
+          {
+            "description": "Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter",
+            "explode": false,
+            "in": "query",
+            "name": "item_limit",
+            "schema": {
+              "description": "Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter",
+              "examples": [
+                20
+              ],
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {

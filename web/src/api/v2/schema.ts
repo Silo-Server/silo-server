@@ -24707,6 +24707,12 @@ export interface components {
       /** @description Opaque revision of this document */
       revision: string;
       /**
+       * Format: int64
+       * @description The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured
+       * @example 100
+       */
+      section_item_limit_max?: number;
+      /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
@@ -107392,6 +107398,8 @@ export interface operations {
         backdrop_width?: number;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter */
+        item_limit?: number;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
         logo_width?: number;
         /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
@@ -112419,6 +112427,8 @@ export interface operations {
         backdrop_width?: number;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter */
+        item_limit?: number;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
         logo_width?: number;
         /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
