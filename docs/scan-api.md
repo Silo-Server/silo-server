@@ -427,5 +427,7 @@ that folder. Scans running on different servers in a cluster are not serialized.
 
 The frozen alpha surface serves the same two commands at `POST /api/v1/scan` and
 `POST /api/v1/scan/cancel`, with integer `library_id` values, a flat `{error, message}` error
-envelope, and no problem-document `type`. Those routes are frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1` namespace with
-`410 Gone` and the `client_upgrade_required` problem code. Point new integrations at `/api/v2`.
+envelope, and no problem-document `type`. Those routes are frozen: no feature work lands on them.
+After the bridge window, and once a maintainer decides to retire it (#886), the main API listener
+answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem
+code; `/api/v1/health` and `/api/v1/ready` keep answering. Point new integrations at `/api/v2`.

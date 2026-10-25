@@ -35,7 +35,7 @@ matches "Lark Hackshaw" but not "Chad Thackston", and `luc` matches "Jean-Luc".
 A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
-repeated word counts once. `%` and `_` are literal. Case-insensitive exact name
+word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
 matches come first;
 other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
@@ -100,7 +100,9 @@ so the parameter can narrow a scope but never widen it; a scope left with no
 library answers no values. `library_ids` is refused with `source=section`.
 `getCatalogFilters` accepts it too.
 
-The answer carries two lists, each at most `limit` long.
+The answer carries two lists, each at most `limit` long. `limit` accepts up to
+100, but the server caps it at 50: a larger value returns at most 50 values in
+each list, and `has_more` and `values_has_more` are measured against 50.
 
 `matches` holds the values that start with `q`, ignoring case, in A to Z order,
 and is empty for an empty `q`. `has_more` is true when more values than `limit`
@@ -162,7 +164,7 @@ A successful save returns `200` with the stored `CollectionSortPreference`.
 ignored for Watchlist and Favorites. Saved personal-list preferences accept
 non-personalized sort fields; `added_at` means the date the item was added to the
 list. Personalized sorts (`progress`, `date_viewed`, and `plays`) are rejected for
-both saved preferences and Favorites/Watchlist browse. History accepts
+saved Watchlist and Favorites preferences and for Favorites/Watchlist browse. History accepts
 `date_viewed` with an active profile, but rejects mutable `progress` and `plays`
 sorts. An empty `field` pins the profile to list source order.
 
@@ -441,10 +443,11 @@ adding it to a profile's page fails validation. A profile can still save a
 
 The alpha `/api/v1` surface exposes the same saved-sort and capability features at
 `/api/v1/collections/sort-preference`, `/api/v1/collections/capabilities`, and
-`/api/v1/catalog`, with numeric `collection_id` values instead of strings. Those
-paths are frozen: no feature work lands on them, and Silo 1.0 answers the whole
-`/api/v1` namespace with `410 Gone` and the `client_upgrade_required` problem code.
-Build against `/api/v2`.
+`/api/v1/catalog`. Those paths are frozen: no feature work lands on them. After the
+bridge window, and once a maintainer decides to retire it (#886), the main API
+listener answers the `/api/v1` business routes with `410 Gone` and the
+`client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready` keep
+answering. Build against `/api/v2`.
 
 ## Personal-list pagination
 
@@ -1054,8 +1057,8 @@ level or inside the SDK's `metadata` envelope:
   show them. They are always percentages: `scale` and `percent` are ignored.
 - `name`: the plain-text mark clients show next to the score, at most 24
   characters.
-- `label`: optional; the source's full name in the administrator's list, at
-  most 60 characters. `name` stands in when it is absent.
+- `label`: optional; the source's full name in the administrator's list. `name`
+  stands in when it is absent or longer than 60 characters.
 - `scale`: the top of the source's own scale, above 0 and at most 100. The
   plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
 - `percent`: optional; `true` shows the 0-100 score as a percentage, and the
