@@ -24,6 +24,7 @@ type fakePluginMetadataClient struct {
 	imagesResponse *pluginv1.GetImagesResponse
 	seasonsResp    *pluginv1.GetSeasonsResponse
 	episodesResp   *pluginv1.GetEpisodesResponse
+	personResp     *pluginv1.GetPersonDetailResponse
 
 	searchReq      *pluginv1.SearchMetadataRequest
 	getMetadataReq *pluginv1.GetMetadataRequest
@@ -58,7 +59,7 @@ func (f *fakePluginMetadataClient) GetImages(_ context.Context, req *pluginv1.Ge
 }
 
 func (f *fakePluginMetadataClient) GetPersonDetail(_ context.Context, _ *pluginv1.GetPersonDetailRequest) (*pluginv1.GetPersonDetailResponse, error) {
-	return nil, nil
+	return f.personResp, nil
 }
 
 func (f *fakePluginMetadataClient) ResolveImageURL(context.Context, *pluginv1.ResolveImageURLRequest) (*pluginv1.ResolveImageURLResponse, error) {
@@ -595,6 +596,7 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 			{Title: "Local", ImageUrl: sidecar},
 			{Title: "Remote", ImageUrl: remote},
 		}},
+		personResp: &pluginv1.GetPersonDetailResponse{Person: &pluginv1.PersonDetailRecord{Name: "Local", PhotoPath: sidecar}},
 	}
 	provider, err := NewPluginProviderWithClientFactory(map[string]string{
 		pluginInstallationIDSetting: "1",
@@ -649,5 +651,13 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 	}
 	if len(results) != 2 || results[0].ImageURL != "" || results[1].ImageURL != remote {
 		t.Fatalf("search images = %+v, want local dropped and remote kept", results)
+	}
+
+	person, err := provider.GetPersonDetail(ctx, PersonDetailRequest{ProviderIDs: ids})
+	if err != nil {
+		t.Fatalf("GetPersonDetail() error = %v", err)
+	}
+	if person == nil || person.PhotoPath != "" {
+		t.Fatalf("person detail = %+v, want the local photo dropped", person)
 	}
 }
