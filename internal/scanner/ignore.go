@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -50,7 +51,10 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 			return nil, false, fmt.Errorf("read ignore ancestor %s: %w", dir, err)
 		}
 		var skip bool
-		rules, skip = dirIgnoreRules(rules, dir, dir, entries)
+		rules, skip, err = dirIgnoreRules(rules, dir, dir, entries)
+		if err != nil {
+			return nil, false, err
+		}
 		if skip {
 			return rules, true, nil
 		}
@@ -66,15 +70,15 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 // libraryRootSkipped reports whether root's own ignore files exclude the whole
 // root. It checks only the two marker names instead of listing the root, which
 // can hold many thousands of entries.
-func libraryRootSkipped(root string) bool {
+func libraryRootSkipped(root string) (bool, error) {
 	entries := make([]fs.DirEntry, 0, 2)
 	for _, name := range []string{ignoreFileName, ignoreMarkerNoMedia} {
 		if info, err := os.Lstat(filepath.Join(root, name)); err == nil {
 			entries = append(entries, fs.FileInfoToDirEntry(info))
 		}
 	}
-	_, skip := dirIgnoreRules(nil, root, root, entries)
-	return skip
+	_, skip, err := dirIgnoreRules(nil, root, root, entries)
+	return skip, err
 }
 
 // Filesystem ignore conventions honored during scans:
@@ -118,9 +122,11 @@ type gitIgnorePattern struct {
 // dirIgnoreRules applies a directory's own ignore files. skip reports that the
 // directory is excluded entirely, together with everything under it: it holds
 // .nomedia, or an .ignore without a valid pattern. Otherwise rules is the rule
-// set its children inherit. Only regular files count as ignore files, and an
-// unreadable one is treated as absent.
-func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath string, entries []fs.DirEntry) (rules []ignoreRules, skip bool) {
+// set its children inherit. Only regular files count as ignore files. One the
+// listing names but that cannot be read is an error: treating it as absent
+// would import what it excludes, then retire all of it once it reads again.
+// One removed since the listing is absent.
+func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath string, entries []fs.DirEntry) (rules []ignoreRules, skip bool, err error) {
 	var hasIgnore, hasSiloIgnore bool
 	for _, entry := range entries {
 		if !entry.Type().IsRegular() {
@@ -128,7 +134,7 @@ func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath str
 		}
 		switch entry.Name() {
 		case ignoreMarkerNoMedia:
-			return inherited, true
+			return inherited, true, nil
 		case ignoreFileName:
 			hasIgnore = true
 		case siloIgnoreFileName:
@@ -137,31 +143,52 @@ func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath str
 	}
 	rules = inherited
 	if hasIgnore {
-		if content, err := os.ReadFile(filepath.Join(dirPhysicalPath, ignoreFileName)); err == nil {
-			patterns := parseGitIgnorePatterns(string(content))
+		content, ok, err := readIgnoreFile(dirPhysicalPath, ignoreFileName)
+		if err != nil {
+			return inherited, false, err
+		}
+		if ok {
+			patterns := parseGitIgnorePatterns(content)
 			if len(patterns) == 0 {
-				return inherited, true
+				return inherited, true, nil
 			}
 			rules = append(rules, ignoreRules{basePath: dirLogicalPath, gitPatterns: patterns})
 		}
 	}
 	if hasSiloIgnore {
-		if content, err := os.ReadFile(filepath.Join(dirPhysicalPath, siloIgnoreFileName)); err == nil {
-			if patterns := parseIgnorePatterns(string(content)); len(patterns) > 0 {
-				rules = append(rules, ignoreRules{basePath: dirLogicalPath, patterns: patterns})
-			}
+		content, _, err := readIgnoreFile(dirPhysicalPath, siloIgnoreFileName)
+		if err != nil {
+			return inherited, false, err
+		}
+		if patterns := parseIgnorePatterns(content); len(patterns) > 0 {
+			rules = append(rules, ignoreRules{basePath: dirLogicalPath, patterns: patterns})
 		}
 	}
-	return rules, false
+	return rules, false, nil
+}
+
+// readIgnoreFile reads the named ignore file in dir. ok is false when the file
+// no longer exists.
+func readIgnoreFile(dir, name string) (content string, ok bool, err error) {
+	data, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // dir is a library directory being scanned.
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read ignore file: %w", err)
+	}
+	return string(data), true, nil
 }
 
 // DirSkipped reports whether a directory's own ignore files exclude it and
 // everything under it: it holds .nomedia, or an .ignore without a valid
 // pattern. entries is the directory's listing. Real-time library monitoring
-// uses it, so it skips exactly the directories a scan skips.
-func DirSkipped(dir string, entries []fs.DirEntry) bool {
-	_, skip := dirIgnoreRules(nil, dir, dir, entries)
-	return skip
+// uses it, so it skips exactly the directories a scan skips. It returns an
+// error when an ignore file in the listing cannot be read; a scan records a
+// walk failure there.
+func DirSkipped(dir string, entries []fs.DirEntry) (bool, error) {
+	_, skip, err := dirIgnoreRules(nil, dir, dir, entries)
+	return skip, err
 }
 
 // parseIgnorePatterns converts .siloignore file content into match patterns.
