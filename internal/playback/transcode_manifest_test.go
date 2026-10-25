@@ -365,6 +365,112 @@ func TestLongTitlePlaylistsCarryTheSignedQueryOnce(t *testing.T) {
 	}
 }
 
+// TestLongTitleSubtitleRenditionPlaylistsCarryTheSignedQueryOnce covers the
+// subtitle media playlist of a session with an HLS subtitle rendition, for a
+// client that negotiated hls_variable_substitution_v1. The subtitle playlist
+// is derived from the video playlist (an encode's synthetic grid, a copy
+// remux's keyframe plan or FFmpeg's EVENT playlist, or a node playlist the API
+// relays), so it must keep that playlist's definition wherever it keeps a
+// reference, and every subtitle segment URI must resolve to the literal URL.
+// The multivariant playlist keeps the literal query: a multivariant playlist's
+// definitions would not reach the media playlists it names.
+func TestLongTitleSubtitleRenditionPlaylistsCarryTheSignedQueryOnce(t *testing.T) {
+	const (
+		fourHours = 4 * 60 * 60.0
+		maxBytes  = 1 << 20
+		segments  = 7200
+	)
+	token := strings.Repeat("eyJzaWQiOi", 165)
+	rawQuery := "st=" + token
+	rendition := func(opts TranscodeOpts) TranscodeOpts {
+		opts.SegmentDuration, opts.TotalDuration = 2, fourHours
+		opts.HLSVariableSubstitution = true
+		return opts
+	}
+	encoded := rendition(subtitleRenditionTestOpts(""))
+	copyOpts := rendition(copyRemuxRenditionOpts("", false))
+	ext := hlsSegmentExtension(copyOpts)
+	subtitles := func(t *testing.T, session *TranscodeSession, query string) []byte {
+		t.Helper()
+		if !session.HasSubtitleRendition() {
+			t.Fatal("session publishes no subtitle rendition")
+		}
+		return buildManifestForTest(t, session, joinQuery(SubtitleRenditionQueryParam+"="+subtitleRenditionSubtitles, query))
+	}
+	literal := func(n int) []string {
+		uris := make([]string, 0, n)
+		for i := range n {
+			uris = append(uris, fmt.Sprintf("segment/%s%05d%s?%s", subtitleSegmentPrefix, i, subtitleSegmentExt, rawQuery))
+		}
+		return uris
+	}
+
+	tests := []struct {
+		name    string
+		session *TranscodeSession
+		render  func(t *testing.T, session *TranscodeSession) []byte
+		want    []string
+	}{
+		{
+			name:    "encoded transcode, synthetic VOD",
+			session: &TranscodeSession{opts: encoded},
+			want:    literal(segments),
+		},
+		{
+			name:    "copy remux, complete keyframe playlist",
+			session: &TranscodeSession{opts: copyOpts, copyPlan: &copySegmentPlan{durations: slices.Repeat([]float64{2.002}, segments)}},
+			want:    literal(segments),
+		},
+		{
+			name:    "copy remux, EVENT playlist first fetch",
+			session: realPlaylistSession(t, copyOpts, ffmpegPlaylistFixture(3, ext, false)),
+			want:    literal(3),
+		},
+		{
+			name:    "node playlist relayed by the API",
+			session: realPlaylistSession(t, copyOpts, ffmpegPlaylistFixture(segments, ext, true)),
+			// The node strips "st", so it renders without a query and the
+			// API's relay appends the token.
+			render: func(t *testing.T, session *TranscodeSession) []byte {
+				return AppendManifestQueryParamWithSubstitution(subtitles(t, session, ""), "st", token)
+			},
+			want: literal(segments),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var manifest []byte
+			if tt.render != nil {
+				manifest = tt.render(t, tt.session)
+			} else {
+				manifest = subtitles(t, tt.session, rawQuery)
+			}
+			if len(manifest) >= maxBytes {
+				t.Fatalf("subtitle playlist is %d bytes, want under %d", len(manifest), maxBytes)
+			}
+			if !bytes.Contains(manifest, []byte("#EXT-X-DEFINE:")) {
+				t.Fatal("subtitle playlist carries no variable definition")
+			}
+			got := resolvePlaylistURIs(t, string(manifest))
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("subtitle playlist resolves %d URIs, want %d; first %q, want %q", len(got), len(tt.want), got[0], tt.want[0])
+			}
+
+			master := buildManifestForTest(t, tt.session, rawQuery)
+			if bytes.Contains(master, []byte("#EXT-X-DEFINE:")) || !bytes.Contains(master, []byte("master.m3u8?"+SubtitleRenditionQueryParam+"="+subtitleRenditionSubtitles+"&"+rawQuery+"\"")) {
+				t.Fatal("multivariant playlist must name its media playlists with the literal query")
+			}
+		})
+	}
+}
+
+func joinQuery(a, b string) string {
+	if b == "" {
+		return a
+	}
+	return a + "&" + b
+}
+
 // TestRewrittenPlaylistsStayLiteralWithoutSubstitutionFeature pins the
 // playlists the server rewrites for a client that did not negotiate
 // hls_variable_substitution_v1 (AetherEngine on Apple platforms parses them
