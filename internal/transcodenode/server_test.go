@@ -1579,6 +1579,8 @@ func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 
 func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
+	tracker := &recordingSessionTracker{}
+	server.tracker = tracker
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	releaseHandler := make(chan struct{})
@@ -1632,6 +1634,12 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after stop = %d, want 0", got)
+	}
+	// A running remux is tracked under the viewer's playback session id.
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if len(tracker.removed) != 1 || tracker.removed[0] != "playback-1" {
+		t.Fatalf("removed sessions = %v, want playback session %q", tracker.removed, "playback-1")
 	}
 }
 
