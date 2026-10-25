@@ -108,7 +108,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, and `hls_copy_mpegts_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1`, and `hls_copy_mpegts_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -129,6 +129,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 | `subrip_sidecar_v1` | `/api/v2` only. An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 | `hls_subtitle_renditions_v1` | `/api/v2` only. An opted-in client receives a `server_transcode_hls` plan's embedded text subtitle as a WebVTT `SUBTITLES` rendition of the plan's HLS stream (`subtitle.hls_rendition`) instead of a sidecar artifact (§8) |
+| `hls_remux_subtitle_renditions_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1`. The client also receives a `server_remux_hls` plan's embedded text subtitle as `subtitle.hls_rendition`, on a subtitle playlist that follows the remux's keyframe-cut segments; without it a remux keeps its sidecar (§8) |
 | `hls_copy_mpegts_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. The client's `server_remux_hls` plans that copy H.264 or HEVC are packaged as MPEG-TS instead of fragmented MP4, marked by `effective_recipe.segment_container: "mpegts"` (§5) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
@@ -1141,7 +1142,7 @@ and a replan can neither add nor drop them:
 | `authorized_media_origins_v1` | It selects which origins may serve the attempt's media. A plan that already handed out a proxy origin outlives the replan that would revoke it, so the client would be left holding a URL it no longer trusts (§4.1) |
 | `software_video_decode_v1` | It widens the direct-play evidence tiers. Dropping it converts a direct route into a transcode and persists that downgrade into the durable request |
 | `subrip_sidecar_v1` | It picks the representation of every SRT sidecar URL. A mid-attempt switch would publish one track under two URLs (§8) |
-| `hls_subtitle_renditions_v1` | It decides whether a transcode's stream URL is a multivariant playlist carrying the subtitle or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
+| `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1` | They decide whether a transcode's or a copy remux's stream URL is a multivariant playlist carrying the subtitle or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
 
 The server silently restores the negotiated state of each, whatever the replan
 sends — including an explicit list that omits one, which is otherwise a valid
@@ -1537,7 +1538,7 @@ Native embedded selection requires `embedded_subtitles_v1` in `client_features` 
 
 The scanner records `container_track_id` as the MP4 track ID (`tkhd`) that FFprobe reports and, for Matroska, as the TrackEntry's `TrackNumber`, which FFprobe does not report. The scanner reads the Matroska `Tracks` element itself and maps each entry to its FFmpeg stream the way FFmpeg's demuxer creates streams. It records a number only when the per-type stream counts, the subtitle positions, and the subtitle codecs all agree with the probe. A track number is often not stream index + 1, because remuxes keep the original numbers. Tracks with the legacy codec IDs `S_ASS` and `S_SSA` get no ID: FFmpeg reports them as `ass`, but Media3 drops them, so a client could not resolve the number and its capability cannot exclude them. Files probed before Matroska numbers were recorded get them from the `backfill_matroska_track_numbers` task, which reads only the `Tracks` element and writes only when the file and the row still match the stored probe. It reads only files with a SubRip or ASS track lacking an ID, the codecs a client currently plays by track number, and records each file it reads in `matroska_track_backfill_checks` against the file's size, mtime and stored tracks. A recorded file is read again only after one of those changes or the matching rules do; a file storage could not open, or that differs on disk from its row until a scan rewrites it, is retried on the next start. A file skipped for its codecs, such as a PGS-only one, gets an ID from its next reprobe, or from the backfill once its codec is added to that list. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
 
-The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars, burn-in, or, for a transcode, an HLS subtitle rendition (below). Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
+The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars, burn-in, or, for an HLS transcode or HLS copy remux, an HLS subtitle rendition (below). Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
 
 A confirmed native selection failure triggers `failure_recovery` with `failure.classification: "subtitle_embedded_failed"`. The server disables native selection for the rest of that playback attempt, including later capability refreshes, and replans with an executable fallback. The native identity participates in both plan identifiers, so the same video route with extracted subtitles is a distinct attempt. Seek reanchors preserve the native identity and reject source drift.
 
@@ -1553,18 +1554,24 @@ A client that sends `subrip_sidecar_v1` in `client_features` to `/api/v2` receiv
 demux the entire source, because Matroska interleaves subtitle packets and
 indexes only video; on network storage that outlasts a player's readiness
 deadline. A client that sends `hls_subtitle_renditions_v1` to `/api/v2` instead
-receives such a track inside the transcode itself. It applies when all of these
+receives such a track inside the HLS stream itself. It applies when all of these
 hold:
 
-- the plan is `server_transcode_hls` (encoded video, never a copy remux);
+- the plan is `server_transcode_hls`, or `server_remux_hls` (a video stream
+  copy, including the Dolby Vision strip and either segment container) for a
+  client that also sends `hls_remux_subtitle_renditions_v1` in
+  `client_features`. A remux for a client without it keeps its sidecar and its
+  media playlist;
 - the selected track is embedded text the policy already shows as text
   (`render` or `convert`): SubRip, WebVTT, mov_text, or ASS/SSA unless the
   client requires authored fidelity;
 - the source duration is known and the playlist fits the synthetic VOD bound;
 - an executor can emit it: this server, or a transcode node advertising the
-  `hls_subtitle_rendition_v1` transport feature. Node selection then admits only
-  such nodes, and a node that does not attest `subtitle_rendition` in its start
-  response is stopped and skipped.
+  `hls_subtitle_rendition_v1` transport feature for a transcode, or
+  `hls_remux_subtitle_rendition_v1` for a copy remux, under that workload's
+  routing policy. Node selection then admits only such nodes, and a node that
+  does not attest `subtitle_rendition` in its start response is stopped and
+  skipped.
 
 The decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:2",
 "hls_rendition":{"group_id":"subs","name":"Subtitles","format":"vtt",
@@ -1575,44 +1582,79 @@ has one. The plan's stream URL is then a multivariant playlist: one
 `AUTOSELECT=YES`) and one variant naming it in `SUBTITLES`. Both URIs are the
 same `master.m3u8` with `silo_rendition=subtitles` or `silo_rendition=video`
 and the original query, so every relay path serves them unchanged. The video
-playlist is the ordinary synthetic VOD playlist; the subtitle playlist lists
-the same segments (`segment/sub_NNNNN.vtt`) with the same durations. The client
+playlist is the one the plan would serve without the rendition; the subtitle
+playlist lists the same segments (`segment/sub_NNNNN.vtt`) with the same
+durations, media sequence, and playlist type. For a transcode that is the
+synthetic VOD playlist. A copy remux cuts its segments at source keyframes, so
+they vary in length: its subtitle playlist is the keyframe-plan VOD playlist
+or, without one, FFmpeg's growing `EVENT` playlist, with the same
+`EXT-X-START` and, once FFmpeg finishes, the same `EXT-X-ENDLIST`. A copy
+remux's variant carries the `VIDEO-RANGE` of the video it copies, fixed when
+the plan starts from the source track's scanned transfer characteristic: `PQ`
+for SMPTE ST 2084, `HLG` for ARIB STD-B67, none for any other signaled
+transfer, such as Dolby Vision 8.2's SDR base layer. A track that signals no
+transfer is `PQ` when the copy keeps the Dolby Vision strip's HDR10 base layer
+or Dolby Vision in a `dvh1` sample entry (profile 5), and otherwise names
+none. HLS treats a variant without the attribute as SDR. The client
 selects the rendition in the player's subtitle (legible) group and fetches no
 sidecar. A client that scopes its media credentials to the plan's URLs must
 admit `master.m3u8` with exactly one `silo_rendition=video` or
 `silo_rendition=subtitles` query, or the player cannot open either playlist.
 
-The transcode's own FFmpeg process writes the track as WebVTT beside the HLS
-output, on the same `-copyts` source clock, so a cue is on disk once the video
-around it is. Subtitle segment N carries every cue overlapping the source
-time video segment N covers, `[O + (N−K)·d, O + (N−K+1)·d)`, with its absolute
-source time and settings; a cue spanning segments repeats in each. K is the
+The stream's own FFmpeg process writes the track as WebVTT beside the HLS
+output, on the same `-copyts` source clock (a copy remux adds `-start_at_zero`
+to both), so a cue is on disk once the video around it is. Subtitle segment N
+carries every cue overlapping the source time video segment N covers,
+`[O + T(N) − T(K), O + T(N+1) − T(K))`, with its absolute source time and
+settings; a cue spanning segments repeats in each. T(N) is where segment N
+starts on the video playlist: `N·d` on a transcode's fixed grid, the summed
+durations of the segments before it on a copy remux's playlist. K is the
 segment the generation started at and O the source time of its first video
 frame, read once per generation from that segment's first video PTS less the
-timestamp-map shift below. O is not `K·d` when the source clock does not start
+timestamp-map offset below. O is not `K·d` when the source clock does not start
 at zero: the first generation's grid starts at the first video frame, while an
 input seek counts from the container's start time. On MPEG-TS, whose
 timestamps wrap at 2^33 ticks, O takes the cue clock's epoch, and every window
 of the generation keeps it. A
 generation's output is read only while no restart is under way and no later
-generation has rewritten it; a generation whose origin cannot be read uses
-`[N·d, (N+1)·d)`. Every segment starts with
+generation has rewritten it; a generation whose origin cannot be read takes
+its first segment's planned start instead (`K·d` for a transcode, the resolved
+keyframe for a copy remux). The media's last segment also carries every later
+cue. Every segment starts with
 `X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:<offset>`, where `<offset>` is the
 video segments' shift from the source clock: 900000 (10 s) for MPEG-TS and 0
-for fMP4. A segment whose cues are not produced yet is waited for while
-FFmpeg runs: as long as its video segment would be (up to 30 s) when the
-running or restarting transcode is about to reach it, otherwise a few seconds.
-It is then answered as a valid WebVTT document with no cues, which a player
-keeps, so the longer wait is what keeps cues after a slow seek restart.
-Subtitle segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
+for fMP4, plus, for a copy remux, how much later its HLS mux put the
+generation's video. A generation that starts at the clock's zero has negative
+decode times from B-frames or AAC priming; fMP4's `make_non_negative` moves
+the whole HLS output later by that lead, and MPEG-TS's offset lands on the
+first decode time, so the video starts the lead after it. The WebVTT output
+moves with neither: on a default x264 source the lead is two frames. Each
+copy generation therefore also writes its first video packet, unshifted, as
+`framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
+first segment's observed start less that packet's time, read with O, and
+recorded with it. The packet's record is read before the segment; after three
+reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
+while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
+running or restarting stream is about to reach it, or is a keyframe-planned
+copy, which runs on to every segment; otherwise a few seconds. It is then
+answered as a valid WebVTT document with no cues, which a player keeps, so
+the longer wait is what keeps cues after a slow seek restart. A
+keyframe-planned copy is the exception: like its video segment, a subtitle
+segment FFmpeg has not reached counts as the player's position for the
+throttle while it waits, and if FFmpeg has still not reached it after the
+wait it answers `404`, which the player can retry, rather than an empty
+document it would keep. Subtitle
+segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
-produced keeps its cues. The output directory records each generation's cue
-file and the segments it finished (`subtitle_spans.json`), so a session
+produced keeps its cues. On FFmpeg's own playlist a generation keeps the
+segment durations its playlist listed, which the next generation's playlist
+replaces. The output directory records each generation's cue file, the
+segments it finished, and those durations (`subtitle_spans.json`), so a session
 rebuilt from its recipe on the same directory serves the cues of every video
 segment it serves from disk, and names its own cue files after the recorded
 ones. Bitmap tracks keep their sidecar or burn-in routes.
 
-The rendition is part of the transcode recipe. Turning subtitles on or
+The rendition is part of the stream's recipe. Turning subtitles on or
 choosing another track therefore starts a new HLS generation at the current
 position, like a burn-in change; turning them off keeps the running transport,
 whose playlist still offers the old rendition for the client to leave
@@ -1622,8 +1664,9 @@ falls back to the sidecar instead of `adaptation_exhausted`. A client whose
 player never offered the rendition sends that recovery with
 `failure.classification: "subtitle_hls_rendition_failed"`; the server then
 stops offering renditions for the rest of the attempt, so a later quality or
-track change does not repeat the failure. The feature is
-attempt-sticky (§6); `/api/v1` neither advertises nor negotiates it.
+track change does not repeat the failure, on a transcode or a remux. Both
+features are attempt-sticky (§6); `/api/v1` neither advertises nor negotiates
+them.
 
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`

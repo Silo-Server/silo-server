@@ -52,9 +52,12 @@ type ExecutableRecipeV3 struct {
 	ExternalSubtitlePath string `json:"external_subtitle_path,omitempty"`
 	EmbeddedStreamIndex  int    `json:"embedded_stream_index,omitempty"`
 	DownloadedSubtitleID int    `json:"downloaded_subtitle_id,omitempty"`
-	// SubtitleRendition emits the selected subtitle as the transcode's HLS
-	// subtitle rendition. It needs version 4 so a binary that predates it
-	// rejects the recipe instead of reopening the transport without one.
+	// SubtitleRendition emits the selected subtitle as the HLS stream's
+	// subtitle rendition: a transcode's, or an HLS copy remux's. It needs
+	// version 4 so a binary that predates it rejects the recipe instead of
+	// reopening the transport without one. A copy remux's needs no later
+	// version: binaries from before copy remux renditions read version 4 and
+	// reject a rendition outside a transcode.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
 	// CopyVideoMPEGTS mirrors the plan's MPEG-TS segment container. It needs
 	// version 5 so a binary that predates it rejects the recipe instead of
@@ -172,7 +175,8 @@ func (r ExecutableRecipeV3) Valid() bool {
 	if r.CopyVideoMPEGTS && (r.PlayMethod != PlayRemux || r.TargetVideoCodec != codecCopyV3) {
 		return false
 	}
-	if r.SubtitleRendition && (r.PlayMethod != PlayTranscode || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0) {
+	hlsRemux := r.PlayMethod == PlayRemux && r.TargetVideoCodec == codecCopyV3
+	if r.SubtitleRendition && ((r.PlayMethod != PlayTranscode && !hlsRemux) || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0) {
 		return false
 	}
 	hasToneMapField := r.ToneMapPolicy != "" || r.ToneMapMode != "" || r.ToneMapSourceKind != "" || r.ToneMapRecipeVersion != "" || r.ToneMapPreflightRequired || !r.ToneMapSourceRevision.IsZero()

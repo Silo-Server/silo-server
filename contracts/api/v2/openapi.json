@@ -228595,6 +228595,9 @@
           "video_bitstream_filter": {
             "type": "string"
           },
+          "video_range": {
+            "type": "string"
+          },
           "video_sample_entry": {
             "type": "string"
           }

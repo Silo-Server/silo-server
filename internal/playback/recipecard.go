@@ -112,6 +112,7 @@ type RecipeCard struct {
 	ToneMapDVRPUPresent        bool                   `json:"tone_map_dv_rpu_present,omitempty"`
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
+	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
@@ -245,6 +246,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		ToneMapDVRPUPresent:        opts.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       opts.VideoBitstreamFilter,
 		VideoSampleEntry:           opts.VideoSampleEntry,
+		VideoRange:                 opts.VideoRange,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
 		KeyframePlaylist:           opts.KeyframePlaylist,
 		SeekSeconds:                opts.SeekSeconds,
@@ -349,6 +351,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		ToneMapDVRPUPresent:        c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
+		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
@@ -463,6 +466,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ToneMapDVRPUPresent:        c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
+		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
@@ -552,6 +556,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		ToneMapDVRPUPresent:           c.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:          c.VideoBitstreamFilter,
 		VideoSampleEntry:              c.VideoSampleEntry,
+		VideoRange:                    c.VideoRange,
 		CopyVideoMPEGTS:               c.CopyVideoMPEGTS,
 		KeyframePlaylist:              c.KeyframePlaylist,
 		SeekSeconds:                   c.SeekSeconds,

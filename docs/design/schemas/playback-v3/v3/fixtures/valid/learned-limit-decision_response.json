@@ -24,6 +24,7 @@
     "marker_thumbnails_v1",
     "hls_subtitle_renditions_v1",
     "plan_active_quality_v1",
+    "hls_remux_subtitle_renditions_v1",
     "hls_copy_mpegts_v1"
   ],
   "outcome": "playable",

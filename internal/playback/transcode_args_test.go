@@ -1450,7 +1450,7 @@ type ffmpegArgsTokenCase struct {
 }
 
 // TestStartTranscodeRejectsUnvalidatedRecipes covers admission of bitstream
-// filter and sample-entry recipes before FFmpeg starts.
+// filter, sample-entry, and HLS video range recipes before FFmpeg starts.
 func TestStartTranscodeRejectsUnvalidatedRecipes(t *testing.T) {
 	for _, tc := range []struct {
 		opts    TranscodeOpts
@@ -1460,6 +1460,9 @@ func TestStartTranscodeRejectsUnvalidatedRecipes(t *testing.T) {
 		{TranscodeOpts{VideoBitstreamFilter: DV7ToHDR10BitstreamFilter, TargetCodecVideo: "h264"}, "unsupported video bitstream filter recipe"},
 		{TranscodeOpts{TargetCodecVideo: "copy", VideoSampleEntry: "dvhe"}, "unsupported video sample-entry recipe"},
 		{TranscodeOpts{TargetCodecVideo: "h264", VideoSampleEntry: VideoSampleEntryDVH1}, "unsupported video sample-entry recipe"},
+		// The range is written into the playlist verbatim.
+		{TranscodeOpts{TargetCodecVideo: "copy", VideoRange: "PQ\n#EXT-X-ENDLIST"}, "unsupported HLS video range"},
+		{TranscodeOpts{TargetCodecVideo: "h264", VideoRange: HLSVideoRangePQ}, "unsupported HLS video range"},
 	} {
 		if _, err := StartTranscode(context.Background(), tc.opts); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Fatalf("StartTranscode(%+v) error = %v, want %q", tc.opts, err, tc.wantErr)
