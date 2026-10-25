@@ -398,6 +398,11 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 		if err != nil {
 			return nil, err
 		}
+		// The store reports whole seconds; cut the column's microseconds the
+		// same way, so the rows decay and age exactly as the walk's did.
+		for i := range rows {
+			rows[i].UpdatedAt = rows[i].UpdatedAt.UTC().Truncate(time.Second)
+		}
 		ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
 		if err != nil {
 			return nil, err

@@ -364,8 +364,7 @@ func TestProgressReadsMatchStoreWalkPostgres(t *testing.T) {
 		ids := make(map[string]struct{}, len(progress))
 		for _, wp := range progress {
 			ids[wp.MediaItemID] = struct{}{}
-			// The walk keeps whole seconds, the query the column's microseconds.
-			progressRows[name] = append(progressRows[name], progressRow{wp.MediaItemID, wp.PositionSeconds, wp.DurationSeconds, wp.Completed, wp.UpdatedAt.Unix()})
+			progressRows[name] = append(progressRows[name], progressRow{wp.MediaItemID, wp.PositionSeconds, wp.DurationSeconds, wp.Completed, wp.UpdatedAt.UnixMicro()})
 		}
 		if len(progress) != len(wantProgress) || !maps.Equal(ids, wantProgress) {
 			t.Fatalf("%s: %d progress rows of %d titles, want %d; extra %v, missing %v", name, len(progress), len(ids), len(wantProgress), setDifference(ids, wantProgress), setDifference(wantProgress, ids))
