@@ -113,7 +113,7 @@ transcode nodes, PostgreSQL tuning, backups, and updates.
 ## Builds and releases
 
 Until the first release, default-branch images carry an ordered `build-N` tag
-and a short commit SHA alongside `latest`. Build numbers order published images;
+and the full commit SHA alongside `latest`. Build numbers order published images;
 they are not release versions. [Release versioning](docs/release-versioning.md)
 defines each tag and the SemVer contract.
 

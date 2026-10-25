@@ -10,7 +10,7 @@ Silo uses a cinema-first design language for media streaming interfaces. Media c
 
 The UI should feel like a dark theater, not a dashboard. Media artwork, backdrops, and thumbnails carry most of the visual weight. Interface chrome stays restrained so content stays primary. When a user lands on the app, the first thing they should feel is the content — a sweeping backdrop, a cinematic title, artwork that fills the viewport.
 
-Themes should let content imagery be the primary source of color. Theme accent colors should complement, not compete with, poster and backdrop artwork. The default theme (Midnight Cinema) uses a monochromatic palette specifically so the media provides all the color.
+Themes should let content imagery be the primary source of color. Theme accent colors should complement, not compete with, poster and backdrop artwork. Silo's one theme, Cinema Dark (the `midnight-cinema` block in `app.css`), uses a monochromatic palette specifically so the media provides all the color.
 
 ## How To Use It
 
@@ -91,7 +91,7 @@ Examples:
 - Card hover uses subtle scale and brightness lift.
 - Sidebar collapse expands and contracts smoothly.
 - Hero transitions should crossfade rather than snap.
-- Hero backdrops use slow Ken Burns zoom (10-15 seconds, linear easing).
+- Hero backdrops use slow Ken Burns zoom (12-18 seconds, linear easing).
 - Ambient color shifts transition over 1-2 seconds with gentle easing.
 
 ### 8. Immersion Levels
@@ -116,7 +116,7 @@ Examples:
 
 ## Color Architecture
 
-Colors are organized as semantic layers. Theme files provide the actual values; components should reference tokens rather than raw colors.
+Colors are organized as semantic layers. `app.css` provides the actual values; components should reference tokens rather than raw colors.
 
 ### Surface Hierarchy
 
@@ -146,7 +146,7 @@ Colors are organized as semantic layers. Theme files provide the actual values; 
 ### Ambient Tokens
 
 - `--ambient`: dominant color extracted from the currently featured artwork. Set dynamically via JavaScript. Used for subtle background glow and atmosphere. Falls back to `--primary` when no artwork color is available.
-- `--ambient-glow`: a low-opacity radial gradient using `--ambient` placed behind hero sections and detail page headers. Should be barely perceptible — felt more than seen.
+- `--ambient-glow-opacity`: the opacity of the `.ambient-glow` class, a radial gradient using `--ambient` placed behind hero sections and detail page headers. Should be barely perceptible — felt more than seen.
 
 ### Border Tokens
 
@@ -201,9 +201,11 @@ Colors are organized as semantic layers. Theme files provide the actual values; 
 
 The hero should feel cinematic, not like a banner. On first load the hero should dominate the viewport, with content rows discoverable via scroll.
 
-- Mobile: `h-[60vh]`, `min-h-[400px]`
-- Desktop: `h-[75vh]`, `min-h-[500px]`, `max-h-[900px]`
-- Detail page heroes can be taller since they are the entire context for the page
+Home heroes use `HERO_BANNER_SIZE` from `design-system.ts`:
+
+- Mobile: `h-[54vh]`, `min-h-[380px]`, `max-h-[760px]`
+- Desktop (`lg`): `h-[66vh]`, with the same minimum and maximum
+- Detail page heroes can be taller since they are the entire context for the page: `min-h-[60dvh]`, `lg:min-h-[72dvh]`
 
 ## Motion
 
@@ -287,7 +289,7 @@ Implementation cues:
 - Keep metadata compact and secondary (badges, small text).
 - Apply Ken Burns motion to the backdrop image for ambient life.
 - Set `--ambient` from the dominant backdrop color for atmosphere glow.
-- Height should be `75vh` on desktop — cinematic, not a banner.
+- Size it with `HERO_BANNER_SIZE` (`66vh` on desktop; the Library Recommended tab uses the taller `HERO_BANNER_SIZE_TALL`): cinematic, not a banner.
 
 ### Media Carousel Row
 
@@ -318,7 +320,7 @@ Implementation cues:
 The most important single page in the app. When a user selects a title, the page should feel like opening a collector's edition — fully immersive, cinematic, and dedicated to that content.
 
 Implementation cues:
-- Full-bleed backdrop hero, taller than home heroes (`75-85vh`).
+- Full-bleed backdrop hero, taller than home heroes (`min-h-[60dvh]`, `lg:min-h-[72dvh]`).
 - Set `--ambient` from the backdrop artwork to tint the page atmosphere.
 - Sidebar should auto-collapse or recede to maximize immersion.
 - Info architecture below the hero: tagline, metadata badges, overview text, action buttons, then supplementary sections (cast carousel, season/episode list, recommendations).
@@ -368,4 +370,3 @@ Implementation cues:
 
 - [../src/lib/design-system.ts](../src/lib/design-system.ts): code-backed constants and shared class strings
 - [../src/app.css](../src/app.css): CSS tokens and component utility classes
-- [../src/lib/themes.ts](../src/lib/themes.ts): theme definitions and metadata
