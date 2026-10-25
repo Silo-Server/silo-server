@@ -932,6 +932,37 @@ carries the signed stream token `st` on its media URLs — never on subtitle or
 font-bundle routes. It is an opaque transport credential rather than a playback
 parameter, and it is outside the table above.
 
+A media playlist whose segment URIs would repeat a credential-sized query (the
+`st` token, or a media-element account token) can carry that value once through
+HLS variable substitution: an `EXT-X-DEFINE` at `EXT-X-VERSION:8`, referenced
+as `{$name}` in each URI. The resolved URIs are byte-identical to the literal
+form. Without it a long title's playlist exceeds 4 MiB, which some players
+(Roku) refuse.
+
+- The playlists the server builds itself (the synthetic VOD playlist of an
+  encoded transcode, the complete keyframe playlist of a copy remux, and the
+  subtitle-rendition media playlists) use `silo_query` for every client once
+  the saving reaches 64 KiB.
+- The playlists it rewrites use it only when the start listed
+  `hls_variable_substitution_v1` in
+  `client_playback_context.deliveries.hls.features`: FFmpeg's real copy or
+  sliding playlist (`silo_query`), and a transcode node's playlist relayed by
+  the API (`silo_st`, the token the API adds). There the decision depends only
+  on the value (each URI must save at least 64 bytes), never on how many
+  segments the playlist lists yet, so a still-growing EVENT playlist keeps one
+  form from its first fetch even when its final length is unknown. Without the
+  feature these stay literal, for clients that parse playlists themselves
+  without `EXT-X-DEFINE` support. `/api/v2` lists the feature in the
+  capabilities `features`; `/api/v1` never negotiates it. Like the
+  attempt-sticky client features, it is fixed at start: a replan's hls
+  delivery features can neither add nor drop it, because a reused HLS
+  transport keeps serving the form it was built with. It changes playlist text
+  only, so it is not part of plan identity. It rides the stream token and
+  recipe card (the `hvs` claim), so the relay and a restarted server keep the
+  negotiated form.
+
+A playlist served larger than 3.5 MiB is logged with its session id.
+
 ---
 
 ## 5. The timeline model
@@ -1148,6 +1179,12 @@ The server silently restores the negotiated state of each, whatever the replan
 sends — including an explicit list that omits one, which is otherwise a valid
 way to drop a feature. Seek replans never replace the feature list at all.
 Changing any of these modes means stopping and starting a new attempt.
+
+`hls_variable_substitution_v1` is an hls delivery feature
+(`client_playback_context.deliveries.hls.features`) rather than a client
+feature, but it is fixed the same way: the server restores its start state in
+the replan's hls delivery, because a reused HLS transport keeps serving the
+playlist form it was built with (§4.2).
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 

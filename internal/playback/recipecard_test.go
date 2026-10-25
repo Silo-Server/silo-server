@@ -55,6 +55,8 @@ func recipeCardFixtureOpts(revision tonemap.SourceRevision) TranscodeOpts {
 		ThrottleSeconds:        180,
 		CopyVideoMPEGTS:        true,
 		KeyframePlaylist:       true,
+		// Playlist form, not media bytes, but a reconstruct must keep it.
+		HLSVariableSubstitution: true,
 	}
 }
 
@@ -136,6 +138,9 @@ func checkRoundTripRecipeOpts(t *testing.T, got, opts TranscodeOpts, revision to
 	}
 	if !got.CopyVideoMPEGTS || !got.KeyframePlaylist {
 		t.Errorf("copy-video MPEG-TS or keyframe playlist lost in round trip: %+v", got)
+	}
+	if !got.HLSVariableSubstitution {
+		t.Error("HLSVariableSubstitution lost in round trip")
 	}
 }
 
@@ -353,6 +358,9 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.ThrottleSeconds != card.ThrottleSeconds ||
 		!got.CopyVideoMPEGTS || !got.KeyframePlaylist {
 		t.Fatalf("encode parameters lost in round trip (non-v2 source channels must be stripped):\n have %+v\n want %+v", got, card)
+	}
+	if !claims.HLSVariableSubstitution || !got.HLSVariableSubstitution {
+		t.Fatal("HLSVariableSubstitution lost in the stream token")
 	}
 }
 

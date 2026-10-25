@@ -77,3 +77,25 @@ func TestAttemptStickyFeaturesV3AreAdvertised(t *testing.T) {
 		}
 	}
 }
+
+// The hls playlist form is fixed at start: a replan's own hls delivery
+// features can neither add hls_variable_substitution_v1 nor drop it, because
+// a reused HLS transport keeps serving the form its session was built with.
+func TestPinHLSVariableSubstitutionV3(t *testing.T) {
+	withFeature := func(request StartRequestV3) StartRequestV3 {
+		delivery := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		delivery.Features = append(slices.Clone(delivery.Features), FeatureHLSVariableSubstitutionV3)
+		request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = delivery
+		return request
+	}
+	for _, negotiated := range []bool{true, false} {
+		start, replan := validStartRequestV3(), withFeature(validStartRequestV3())
+		if negotiated {
+			start, replan = withFeature(validStartRequestV3()), validStartRequestV3()
+		}
+		PinHLSVariableSubstitutionV3(&replan.ClientPlaybackContext, start)
+		if got := HLSVariableSubstitutionV3(replan); got != negotiated {
+			t.Fatalf("negotiated at start = %v, replan pinned to %v", negotiated, got)
+		}
+	}
+}

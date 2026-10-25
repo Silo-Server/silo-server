@@ -2837,6 +2837,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)
 		return
 	}
+	playback.WarnIfPlaylistOversized(r.Context(), "transcodenode", sessionID, manifest)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-store, no-transform, max-age=0")

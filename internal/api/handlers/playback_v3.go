@@ -220,6 +220,19 @@ type mediaAuthModeV3 struct {
 	// the API server. Never true without headerAuth — on a legacy attempt the
 	// signed proxy URL already carries its own authority.
 	proxyEgress bool
+	// hlsVariableSubstitution is the hls delivery's
+	// hls_variable_substitution_v1 feature on /api/v2: a playlist the server
+	// rewrites (FFmpeg's real playlist, a relayed node playlist) may carry a
+	// credential-sized query once through EXT-X-DEFINE. It changes playlist
+	// text only, so it is not part of plan identity.
+	hlsVariableSubstitution bool
+}
+
+// withHLSVariableSubstitutionV3 adds the request's playlist-substitution
+// opt-in to mode. The frozen /api/v1 surface never negotiates it.
+func withHLSVariableSubstitutionV3(r *http.Request, mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
+	mode.hlsVariableSubstitution = isNativeAPIV2(r.Context()) && playback.HLSVariableSubstitutionV3(req)
+	return mode
 }
 
 // headerAuthenticatedMediaV3 resolves the negotiated media transport mode from
@@ -2219,7 +2232,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
+	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(req.ClientFeatures), req)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
@@ -4059,6 +4072,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			opts.HWAccel = playback.HWAccelNone
 		}
 	}
+	opts.HLSVariableSubstitution = mode.hlsVariableSubstitution
 	usedToneMapFallback := false
 	var ts *playback.TranscodeSession
 	var startupFailure *localTransportStartupFailureV3
@@ -4393,6 +4407,9 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	card.RoutingExecutionNodeID = node.ID
 	card.RoutingExecution = string(noderouting.ExecutionTranscode)
 	card.RoutingEgress = string(noderouting.EgressAPI)
+	// The node never sees the token, so the API relaying its playlist reads
+	// the negotiated playlist form from the token's claims.
+	card.HLSVariableSubstitution = mode.hlsVariableSubstitution
 	if nodePlan.ProxyNode != nil {
 		card.RoutingEgress = string(noderouting.EgressProxy)
 		card.RoutingEgressNodeID = nodePlan.ProxyNode.ID
@@ -5029,6 +5046,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	// downstream — the durable normalized request, the transport's media-auth
 	// mode, the planner's evidence tiers — reads the pinned list.
 	req.ClientFeatures = playback.PinAttemptStickyFeaturesV3(req.ClientFeatures, record.NormalizedRequest.ClientFeatures)
+	playback.PinHLSVariableSubstitutionV3(&req.ClientPlaybackContext, record.NormalizedRequest)
 	if err := req.Validate(); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
@@ -5777,10 +5795,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
-	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
-	// so this mode always equals the one the attempt started under: a reused
-	// transport cannot change the session's media security contract.
-	mode := headerAuthenticatedMediaV3(start.ClientFeatures)
+	// Media authentication and the hls playlist form are attempt-sticky (pinned
+	// in HandleReplanPlaybackV3), so this mode always equals the one the
+	// attempt started under: a reused transport cannot change the session's
+	// media security contract or the playlist form it serves.
+	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(start.ClientFeatures), start)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor

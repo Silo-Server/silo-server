@@ -153,6 +153,16 @@ const (
 	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
 )
 
+// FeatureHLSVariableSubstitutionV3 is an hls delivery feature: the client
+// resolves EXT-X-DEFINE variables in media playlists, so a playlist the
+// server rewrites (FFmpeg's real copy playlist, a transcode node's
+// playlist relayed by the API) may carry a credential-sized query once
+// instead of on every segment URI. Long titles otherwise exceed the 4 MiB
+// some players accept. The playlists the server builds itself use the
+// substitution for every client regardless. /api/v2 advertises it in the
+// capabilities features list.
+const FeatureHLSVariableSubstitutionV3 = "hls_variable_substitution_v1"
+
 // Worker transport features are protocol capabilities rather than media
 // transformations. They let route planning exclude an older worker before a
 // client is handed a URL that worker cannot serve.
@@ -258,7 +268,13 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3)
+}
+
+// HLSVariableSubstitutionV3 reports whether the request's hls delivery
+// listed hls_variable_substitution_v1.
+func HLSVariableSubstitutionV3(request StartRequestV3) bool {
+	return deliverySupportsFeatureV3(request, DeliveryClassHLSV3, FeatureHLSVariableSubstitutionV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -1616,6 +1632,24 @@ func PinAttemptStickyFeaturesV3(requested, negotiated []string) []string {
 		}
 	}
 	return pinned
+}
+
+// PinHLSVariableSubstitutionV3 forces hls_variable_substitution_v1 in
+// requested's hls delivery back to the state negotiated established. Like the
+// attempt-sticky client features, the playlist form is fixed at start: a
+// reused HLS transport keeps serving the form its session was built with, so
+// a replan must not record or plan a different one. Stop/start is the
+// boundary for changing it.
+func PinHLSVariableSubstitutionV3(requested *ClientPlaybackContextV3, negotiated StartRequestV3) {
+	delivery, ok := requested.Deliveries[DeliveryClassHLSV3]
+	if !ok {
+		return
+	}
+	delivery.Features = WithoutFeatureV3(delivery.Features, FeatureHLSVariableSubstitutionV3)
+	if HLSVariableSubstitutionV3(negotiated) {
+		delivery.Features = append(delivery.Features, FeatureHLSVariableSubstitutionV3)
+	}
+	requested.Deliveries[DeliveryClassHLSV3] = delivery
 }
 
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {

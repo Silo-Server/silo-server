@@ -172,6 +172,12 @@ type TranscodeOpts struct {
 	NodeType        string
 	ExecutionMode   string
 	FFmpegLogSink   FFmpegLogSink
+
+	// HLSVariableSubstitution is the client's hls_variable_substitution_v1
+	// delivery feature: FFmpeg's real playlist carries a credential-sized
+	// query once through EXT-X-DEFINE instead of on every segment URI. It
+	// changes playlist text only, never media bytes.
+	HLSVariableSubstitution bool
 	// PrepareProgressSink receives PrepareFile's live encode progress. Like
 	// the log sink it is process-local and never frozen into a recipe.
 	PrepareProgressSink PrepareProgressSink
@@ -362,16 +368,6 @@ const DefaultSegmentDuration = defaultSegmentDuration
 // count. At the default two-second duration this preserves the historical
 // 100,000-second limit; shorter fragments reach the same bound sooner.
 const maxSyntheticManifestSegments = 50_000
-
-// Large synthetic playlists used to repeat the full access and reconstruction
-// query on every segment URI. For a feature-length title that turns a small
-// index into several megabytes of duplicate JWT text, delaying both transfer
-// and hls.js parsing. HLS variable substitution keeps the query once while
-// preserving the exact resolved segment URLs. Keep small playlists on the
-// simpler legacy form; below this byte threshold the saving is immaterial.
-const minManifestQuerySubstitutionSavings = 64 * 1024
-
-const manifestQueryVariable = "silo_query"
 
 // remountStartOffsetSeconds is a positive, effectively-zero HLS start offset.
 // Media3 suppresses live-edge position projection for EVENT playlists only
@@ -2312,6 +2308,9 @@ func (s *TranscodeSession) buildVideoPlaylist(segPrefix, rawQuery string) ([]byt
 			return nil, err
 		}
 		manifest = stabilizeCopyHLSRemountTimeline(manifest, opts)
+		if opts.HLSVariableSubstitution {
+			return RewriteManifestPathsWithSubstitution(manifest, segPrefix, rawQuery)
+		}
 		return RewriteManifestPaths(manifest, segPrefix, rawQuery)
 	}
 
@@ -2994,20 +2993,6 @@ func (s *TranscodeSession) generateSyntheticPlaylist(segPrefix, rawQuery, namePr
 	return buf.Bytes()
 }
 
-func syntheticManifestQuery(segmentCount int, rawQuery string) (definition, suffix string, minVersion int) {
-	if rawQuery == "" {
-		return "", "", 0
-	}
-	legacySuffix := "?" + rawQuery
-	variableSuffix := "?{$" + manifestQueryVariable + "}"
-	savingsPerSegment := len(legacySuffix) - len(variableSuffix)
-	if savingsPerSegment <= 0 || int64(segmentCount)*int64(savingsPerSegment) < minManifestQuerySubstitutionSavings || strings.ContainsAny(rawQuery, "\"\r\n") {
-		return "", legacySuffix, 0
-	}
-	definition = fmt.Sprintf("#EXT-X-DEFINE:NAME=\"%s\",VALUE=\"%s\"\n", manifestQueryVariable, rawQuery)
-	return definition, variableSuffix, 8
-}
-
 // GetSegment returns the file path of a named segment if it exists.
 func (s *TranscodeSession) GetSegment(name string) (string, error) {
 	// Sanitize the name to prevent directory traversal.
@@ -3609,16 +3594,36 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 // string. This ensures the HLS player's segment requests match server routes
 // and preserve any auth or cache-busting parameters from the manifest URL.
 func RewriteManifestPaths(manifest []byte, segPrefix, rawQuery string) ([]byte, error) {
+	return rewriteManifestPaths(manifest, segPrefix, rawQuery, false)
+}
+
+// RewriteManifestPathsWithSubstitution is RewriteManifestPaths for a session
+// whose client negotiated hls_variable_substitution_v1: a credential-sized
+// query (see minRewrittenURISavings) is carried once through variable
+// substitution.
+func RewriteManifestPathsWithSubstitution(manifest []byte, segPrefix, rawQuery string) ([]byte, error) {
+	return rewriteManifestPaths(manifest, segPrefix, rawQuery, true)
+}
+
+func rewriteManifestPaths(manifest []byte, segPrefix, rawQuery string, substitute bool) ([]byte, error) {
 	if err := validateManifestHeader(manifest); err != nil {
 		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	var suffix string
+	lines := bytes.Split(manifest, []byte("\n"))
+	var suffix, definition string
 	if rawQuery != "" {
 		suffix = "?" + rawQuery
 	}
+	// Never define a variable beside the input's own definitions.
+	if substitute && rawQuery != "" && !bytes.Contains(manifest, []byte("#EXT-X-DEFINE:")) {
+		var reference string
+		definition, reference = manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings)
+		if definition != "" {
+			suffix = "?" + reference
+		}
+	}
 
-	lines := bytes.Split(manifest, []byte("\n"))
 	for i, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
@@ -3642,6 +3647,9 @@ func RewriteManifestPaths(manifest []byte, segPrefix, rawQuery string) ([]byte, 
 
 		// Segment filename line.
 		lines[i] = []byte(segPrefix + string(trimmed) + suffix)
+	}
+	if definition != "" {
+		lines = insertManifestDefinition(lines, definition)
 	}
 	return bytes.Join(lines, []byte("\n")), nil
 }
@@ -3683,11 +3691,34 @@ func rewriteMapURI(line []byte, segPrefix, suffix string) ([]byte, error) {
 // restart cannot reconstruct the session. Re-injecting the client-facing token
 // here keeps reconstruction working without ever exposing it to the node.
 func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
+	return appendManifestQueryParam(manifest, key, value, false)
+}
+
+// AppendManifestQueryParamWithSubstitution is AppendManifestQueryParam for a
+// session whose client negotiated hls_variable_substitution_v1: in a media
+// playlist the value is carried once through variable substitution (a
+// "silo_<key>" EXT-X-DEFINE) under the same rule as
+// RewriteManifestPathsWithSubstitution. A multivariant playlist keeps the
+// literal value.
+func AppendManifestQueryParamWithSubstitution(manifest []byte, key, value string) []byte {
+	return appendManifestQueryParam(manifest, key, value, true)
+}
+
+func appendManifestQueryParam(manifest []byte, key, value string, substitute bool) []byte {
 	if key == "" || validateManifestHeader(manifest) != nil {
 		return manifest
 	}
 	param := key + "=" + value
 	lines := bytes.Split(manifest, []byte("\n"))
+	var definition string
+	name := manifestParamVariablePrefix + key
+	if substitute && isManifestVariableName(name) && isMediaPlaylist(lines) && !bytes.Contains(manifest, []byte(`NAME="`+name+`"`)) {
+		var reference string
+		definition, reference = manifestVariable(name, value, minRewrittenURISavings)
+		if definition != "" {
+			param = key + "=" + reference
+		}
+	}
 	for i, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
@@ -3703,6 +3734,9 @@ func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
 			continue
 		}
 		lines[i] = appendURIQueryParam(trimmed, param)
+	}
+	if definition != "" {
+		lines = insertManifestDefinition(lines, definition)
 	}
 	return bytes.Join(lines, []byte("\n"))
 }
