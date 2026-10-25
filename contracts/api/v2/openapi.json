@@ -234640,6 +234640,9 @@
           "keyframe_playlist": {
             "type": "boolean"
           },
+          "require_audio_track": {
+            "type": "boolean"
+          },
           "session_id": {
             "type": "string"
           },
