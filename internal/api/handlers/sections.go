@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
@@ -1382,36 +1385,36 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 
 	var wg sync.WaitGroup
 
-	wg.Go(func() {
+	goSectionLookup(ctx, &wg, "overlay_summaries", func() {
 		if len(contentIDs) == 0 || h.fetcher == nil {
 			return
 		}
 		summaries, err := h.fetcher.ListOverlaySummaries(ctx, contentIDs, viewerAccess)
 		if err != nil {
-			slog.ErrorContext(ctx, "loading overlay summaries", "component", "api", "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelError), "loading overlay summaries", "component", "api", "error", err)
 			return
 		}
 		overlaySummaries = summaries
 	})
 
-	wg.Go(func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
+	goSectionLookup(ctx, &wg, "play_targets", func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
 
 	if knownUserStates != nil {
 		userStates = knownUserStates
 	} else {
-		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+		goSectionLookup(ctx, &wg, "user_states", func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
 	// localizedItems lines up with allItems: a content ID can sit in several
 	// rows with different artwork, so each row keeps its own clone.
 	var localizedItems []*models.MediaItem
 	var pendingTranslations map[string]string
 	localizationAccess := sectionLocalizationAccess(viewerAccess, libraryID)
-	wg.Go(func() {
+	goSectionLookup(ctx, &wg, "localization", func() {
 		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
 	})
-	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
-	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
-	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	goSectionLookup(ctx, &wg, "image_urls", func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
+	goSectionLookup(ctx, &wg, "episode_meta", func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
+	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
 
 	wg.Wait()
 
@@ -1446,6 +1449,22 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		})
 	}
 	return resp
+}
+
+// goSectionLookup runs one of buildSectionsWithUserStates' card lookups on
+// wg. The lookups run on their own goroutines, out of reach of the request's
+// panic recovery, so a panic is logged and leaves the lookup's result empty,
+// as its errors do.
+func goSectionLookup(ctx context.Context, wg *sync.WaitGroup, lookup string, run func()) {
+	wg.Go(func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "section card lookup panicked", "component", "api", "lookup", lookup,
+					"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+			}
+		}()
+		run()
+	})
 }
 
 // resolveSectionPlayableTargets resolves the play target of every section
@@ -1603,7 +1622,7 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	}
 	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "loading section manga chapter metadata", "component", "api", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
@@ -1639,7 +1658,7 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 
 	_, meta, err := h.episodeFetcher.FetchEpisodesByContentIDs(ctx, ids, filter)
 	if err != nil {
-		slog.WarnContext(ctx, "loading section episode metadata", "component", "api", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta

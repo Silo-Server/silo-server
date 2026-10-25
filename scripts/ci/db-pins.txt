@@ -166,6 +166,9 @@
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestNextUpModeStatementBudgetPostgres
 
+# Home sections: one statement for a content ID lookup of any length.
+./internal/sections TestContentIDLookupsKeepOneStatementPostgres
+
 # Server collection rows: a cached row costs one revision read, which shows an
 # edit on the next read, and lists what the collection's page lists.
 ./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB
@@ -297,3 +300,11 @@
 # Person lookups resolve their metadata providers with one statement and reuse
 # them: later lookups in the window issue none, and a plugin change drops them.
 ./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
+
+# A Jellyfin NextUp page that asks for detail fields, and an Ids list, fetch
+# their details as one batch and answer exactly what per-item lookups did.
+./internal/jellycompat TestCompatDetailBatchesMatchPerItemDB
+
+# A Jellyfin item request resolves the viewer access scope once, however many
+# catalog reads in the request need it.
+./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB

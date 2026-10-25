@@ -328,6 +328,17 @@ export function settingsAttentionItems(items: readonly SettingsHealthItem[]): Se
   return items.filter((item) => item.action != null);
 }
 
+/** The attention items, and whether every input they depend on has arrived. */
+export interface SettingsAttentionState {
+  items: SettingsHealthItem[];
+  /**
+   * False while the settings map, branding, or server status is still
+   * loading. An item missing from `items` then may simply not be known yet,
+   * rather than resolved.
+   */
+  loaded: boolean;
+}
+
 /**
  * What in the server's setup needs the admin, for the Dashboard's notice and
  * the admin sidebar's dots. Every query it reads is one a settings page
@@ -335,6 +346,11 @@ export function settingsAttentionItems(items: readonly SettingsHealthItem[]): Se
  * never reads as unconfigured.
  */
 export function useSettingsAttention(): SettingsHealthItem[] {
+  return useSettingsAttentionState().items;
+}
+
+/** {@link useSettingsAttention}, plus whether its inputs have all arrived. */
+export function useSettingsAttentionState(): SettingsAttentionState {
   const { data: settings } = useAdminServerSettings();
   const { data: sensitive } = useAdminSensitiveStatus();
   const { data: serverStatus } = useAdminServerStatus();
@@ -349,7 +365,7 @@ export function useSettingsAttention(): SettingsHealthItem[] {
   );
 
   return useMemo(() => {
-    if (settings == null) return [];
+    if (settings == null) return { items: [], loaded: false };
     const items = settingsAttentionItems(
       buildSettingsHealth({
         settings,
@@ -361,7 +377,11 @@ export function useSettingsAttention(): SettingsHealthItem[] {
     );
     // Branding reports whether storage is available; before it arrives that
     // reads as false, which is not the same as storage that is not set up.
-    return branding.loaded ? items : items.filter((item) => item.id !== "storage");
+    // Server status says which saved settings wait on a restart; before it
+    // arrives, transcoding saved as on reads "Ready" though it is still off.
+    return branding.loaded
+      ? { items, loaded: serverStatus != null }
+      : { items: items.filter((item) => item.id !== "storage"), loaded: false };
   }, [
     branding.loaded,
     branding.storageAvailable,

@@ -12,7 +12,7 @@ type AdminPluginRepositoryCreationService interface {
 	Create(context.Context, plugins.CreateRepositoryInput) (*plugins.Repository, error)
 }
 type AdminPluginRepositoryCreateBody struct {
-	URL         string `json:"url" minLength:"1" maxLength:"8192"`
+	URL         string `json:"url" format:"uri-reference" minLength:"1" maxLength:"8192"`
 	DisplayName string `json:"display_name" minLength:"1" maxLength:"1024"`
 	Enabled     *bool  `json:"enabled,omitempty"`
 }

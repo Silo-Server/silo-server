@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -16,7 +17,31 @@ import (
 
 type AdminHistoryImportRun struct {
 	HistoryImportRun
+	PlayedSince *Instant `json:"played_since,omitempty" doc:"The lookback cutoff: the run imports only items last played at or after it. Absent for a full import."`
 }
+
+// adminHistoryMaxLookbackHours is the maximum tag on AdminHistoryImportRunCreate.
+const adminHistoryMaxLookbackHours = 8760
+
+// AdminHistoryImportRunCreate is the optional body of run and bulk-run.
+type AdminHistoryImportRunCreate struct {
+	LookbackHours *int `json:"lookback_hours,omitempty" nullable:"true" minimum:"1" maximum:"8760" doc:"Import only items last played within this many hours before the run is queued. Resume positions and favorites are still read in full. Jellyfin sources only. Write it as a plain JSON integer; 72.0 and 1e2 are refused. Omit it or send null for a full import." example:"72"`
+}
+type AdminHistoryImportRunCreateInput struct {
+	AdminHistoryImportIDInput
+	Body *AdminHistoryImportRunCreate `required:"false" doc:"Absent, empty, or whitespace-only runs a full import, whatever the Content-Type; any other body must be application/json."`
+}
+
+// adminHistoryRunOptions turns a run body into run options, taking the
+// lookback cutoff from now.
+func adminHistoryRunOptions(body *AdminHistoryImportRunCreate, now time.Time) historyimport.AdminRunOptions {
+	if body == nil || body.LookbackHours == nil {
+		return historyimport.AdminRunOptions{}
+	}
+	since := now.Add(-time.Duration(*body.LookbackHours) * time.Hour)
+	return historyimport.AdminRunOptions{PlayedSince: &since}
+}
+
 type AdminHistoryImportRunOutput struct {
 	Status     int
 	ETag       string `header:"ETag"`
@@ -64,7 +89,7 @@ type AdminHistoryImportPlexLoginOutput struct {
 
 func adminHistoryRunLocation(id string) string { return Prefix + "/admin/history-imports/runs/" + id }
 func safeAdminHistoryRun(run *historyimport.Run) AdminHistoryImportRun {
-	out := AdminHistoryImportRun{HistoryImportRun: historyImportRunOf(run)}
+	out := AdminHistoryImportRun{HistoryImportRun: historyImportRunOf(run), PlayedSince: instantPtr(run.PlayedSince)}
 	out.Cancelable = !out.Terminal
 	return out
 }
@@ -72,7 +97,8 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 	cursors := NewCursors(reg.deps.CursorSecret)
 	create := op(http.MethodPost, "/admin/history-imports/mappings/{id}/run", "createAdminHistoryImportRun", false)
 	create.DefaultStatus = http.StatusAccepted
-	Register(reg, create, func(ctx context.Context, in *AdminHistoryImportIDInput) (*AdminHistoryImportRunOutput, error) {
+	create.BlankBodyIsAbsent = true
+	Register(reg, create, func(ctx context.Context, in *AdminHistoryImportRunCreateInput) (*AdminHistoryImportRunOutput, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {
 			return nil, p
@@ -81,7 +107,7 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 		if p != nil {
 			return nil, p
 		}
-		run, err := s.CreateAdminRun(ctx, id)
+		run, err := s.CreateAdminRun(ctx, id, adminHistoryRunOptions(in.Body, time.Now()))
 		if err != nil {
 			return nil, adminHistoryProblem(err)
 		}
@@ -136,7 +162,9 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 		}
 		return out, nil
 	})
-	Register(reg, op(http.MethodPost, "/admin/history-imports/sources/{id}/bulk-run", "bulkCreateAdminHistoryImportRuns", false), func(ctx context.Context, in *AdminHistoryImportIDInput) (*AdminHistoryImportBulkOutput, error) {
+	bulk := op(http.MethodPost, "/admin/history-imports/sources/{id}/bulk-run", "bulkCreateAdminHistoryImportRuns", false)
+	bulk.BlankBodyIsAbsent = true
+	Register(reg, bulk, func(ctx context.Context, in *AdminHistoryImportRunCreateInput) (*AdminHistoryImportBulkOutput, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {
 			return nil, p
@@ -145,7 +173,7 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 		if p != nil {
 			return nil, p
 		}
-		result, err := s.BulkCreateAdminRuns(ctx, id)
+		result, err := s.BulkCreateAdminRuns(ctx, id, adminHistoryRunOptions(in.Body, time.Now()))
 		if err != nil {
 			if errors.Is(err, historyimport.ErrBulkRunTooLarge) {
 				return nil, NewProblem(TypeValidationFailed, "This source has more than 200 mappings; start individual mapping runs.")

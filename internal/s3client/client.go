@@ -109,7 +109,7 @@ func NewClient(cfg BucketConfig) *Client {
 
 	role := telemetry.Role(cfg.Role)
 	s3Client := s3.New(s3.Options{
-		APIOptions:   []func(*middleware.Stack) error{observeS3(role)},
+		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled},
 		HTTPClient:   observedHTTPClient{inner: sharedHTTPClient(), role: role},
 		Region:       region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
@@ -119,6 +119,7 @@ func NewClient(cfg BucketConfig) *Client {
 			"",
 		),
 		UsePathStyle: cfg.PathStyle,
+		Retryer:      newRetryer(),
 	})
 
 	// URL signing is local work, so it must not appear as a storage call.

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -269,7 +270,8 @@ func TestRecipeCardClientMetadataStoredNotInClaims(t *testing.T) {
 }
 
 // TestReconstructSessionRestoresClientMetadata verifies a rebuilt session keeps its client identity,
-// so the admin client label and Jellyfin pill survive a server restart.
+// so the admin client label and Jellyfin pill survive a server restart, and takes the viewer's
+// address from the media request that rebuilt it.
 func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	tm := NewTranscodeManager()
 	tm.Sessions = NewSessionManager(0, 0)
@@ -281,9 +283,12 @@ func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	card.ClientChannel = "  beta\t  "
 	card.ClientUserAgent = "  Findroid/0.15 (Android)  "
 
-	session := tm.ReconstructSession(t.Context(), "sess-jf", 42, card)
+	session := tm.ReconstructSession(clientip.SetContext(t.Context(), "203.0.113.20"), "sess-jf", 42, card)
 	if session == nil {
 		t.Fatal("reconstruct returned nil")
+	}
+	if session.ClientIP != "203.0.113.20" {
+		t.Fatalf("ClientIP = %q, want the rebuilding request's 203.0.113.20", session.ClientIP)
 	}
 	if session.ClientName != "Findroid" || session.ClientVersion != "0.15" || session.ClientBuild != "20260814" || session.ClientChannel != "beta" || session.ClientUserAgent != "Findroid/0.15 (Android)" {
 		t.Fatalf("client metadata not restored: %+v", session)

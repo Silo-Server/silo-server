@@ -8,7 +8,7 @@ import FilterRuleEditor, { getFilterRuleFieldOptions } from "./FilterRuleEditor"
 
 vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
-  useExtendedQueryRules: () => true,
+  useQueryRuleCapabilities: () => ({ extendedRules: true, showTitleRules: true }),
 }));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
@@ -77,6 +77,16 @@ describe("FilterRuleEditor", () => {
     expect(values("episode")).not.toContain("rating_rt_audience");
     expect(values("episode")).toContain("rating_tmdb");
     expect(values("series")).toContain("rating_rt_critic");
+  });
+
+  it("offers show-title rules only for episodes on a server that supports them", () => {
+    const fields = (scope: Parameters<typeof getFilterRuleFieldOptions>[1], supported: boolean) =>
+      getFilterRuleFieldOptions(false, scope, undefined, { showTitleRules: supported });
+    expect(fields("episode", true).map((field) => field.value)).toContain("show_title");
+    expect(fields("episode", false).map((field) => field.value)).not.toContain("show_title");
+    for (const scope of ["all", "video", "series", "movie", "ebook"] as const) {
+      expect(fields(scope, true).map((field) => field.value)).not.toContain("show_title");
+    }
   });
 
   it("offers a rating only while its source is shown", () => {

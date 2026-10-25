@@ -65,6 +65,8 @@ const AUDIO_AHEAD_SECONDS = 1.5;
  */
 const FFMPEG_PREROLL_SECONDS = 0.5;
 const URL_CACHE_BYTES = 96 * 1024 * 1024;
+/** How long a read's newest data may wait before the page hears of it. */
+const MEDIA_DATA_REPORT_MS = 250;
 /** Audio sent to the worklet before the page may report the position playable. */
 const AUDIO_BUFFERED_SECONDS = 0.25;
 
@@ -142,6 +144,41 @@ function post(message: WorkerToPageMessage, transfer: Transferable[] = []): void
   scope.postMessage(message, transfer);
 }
 
+let nextMediaRequest = 0;
+
+/**
+ * Fetches for the source and tells the page what each response body
+ * receives, so it can tell a slow link, whose data keeps arriving, from a
+ * silent one, and measure the plan's throughput.
+ */
+async function meteredFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (!response.body) return response;
+  const request = nextMediaRequest++;
+  let bytes = 0;
+  let first = 0;
+  let last = 0;
+  let report: ReturnType<typeof setTimeout> | null = null;
+  const counted = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        last = performance.timeOrigin + performance.now();
+        if (bytes === 0) first = last;
+        bytes += chunk.byteLength;
+        report ??= setTimeout(() => {
+          report = null;
+          post({ type: "media-data", request, bytes, first, last });
+        }, MEDIA_DATA_REPORT_MS);
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+  // Mediabunny also reads the response's url, type and redirect flag, which a
+  // new Response around the counted body would lose.
+  Object.defineProperty(response, "body", { value: counted });
+  return response;
+}
+
 function fail(run: number | null, error: unknown, fallback: string): void {
   if (run !== null && run !== generation) return;
   const classification = error instanceof EngineFailure ? error.classification : fallback;
@@ -176,7 +213,13 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     source: new UrlSource(spec.url, {
       requestInit: { headers: spec.headers },
       maxCacheSize: URL_CACHE_BYTES,
-      getRetryDelay: (attempts) => (attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null),
+      fetchFn: meteredFetch,
+      getRetryDelay: (attempts) => {
+        // A failed read is the transport failing; the page treats it as an
+        // outage rather than a slow link.
+        post({ type: "read-failed" });
+        return attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null;
+      },
     }),
   });
   try {

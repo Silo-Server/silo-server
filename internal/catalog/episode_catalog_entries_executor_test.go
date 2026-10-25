@@ -10,6 +10,7 @@ func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.
 	var args []any
 	argIdx := 2
 	applyEpisodeCatalogAccessFilter(
+		7,
 		AccessFilter{DisabledLibraryIDs: []int{9}},
 		&whereParts,
 		&args,
@@ -30,8 +31,8 @@ func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.
 	if strings.Contains(where, "SELECT e_parent.series_id") {
 		t.Fatalf("read-model path must use ece.series_id without an episode lookup, got %s", where)
 	}
-	if len(args) != 2 || argIdx != 4 {
-		t.Fatalf("args = %v, argIdx = %d; want episode and series disabled-list args and 4", args, argIdx)
+	if len(args) != 3 || argIdx != 5 {
+		t.Fatalf("args = %v, argIdx = %d; want the episode disabled list, the series library and disabled list, and 5", args, argIdx)
 	}
 }
 

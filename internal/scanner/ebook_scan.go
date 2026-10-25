@@ -478,7 +478,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
 					slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", mf.FilePath,

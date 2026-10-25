@@ -359,11 +359,7 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 	// running FFmpeg has passed it and won't write it again.
 	case progress.Running && segNum > progress.ProducedHead && segNum >= progress.StartSegmentNumber &&
 		segNum <= progress.ProducedHead+plannedWaitSegments:
-		s.mu.Lock()
-		if segNum > s.lastRequestedSegment {
-			s.lastRequestedSegment = segNum
-		}
-		s.mu.Unlock()
+		s.notePlannedSegmentRequest(segNum)
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = true
@@ -410,7 +406,7 @@ func (s *TranscodeSession) plannedSegmentProgress() SegmentProgress {
 	if progress.SegmentDuration <= 0 {
 		progress.SegmentDuration = defaultSegmentDuration
 	}
-	progress.StartSegmentNumber, progress.ProducedHead, progress.ProducedCount, progress.LastProducedAt = s.copyGroups.progress()
+	progress.StartSegmentNumber, progress.ProducedHead, _, progress.LastProducedAt = s.copyGroups.progress()
 	// The throttler reads output older than the current FFmpeg as left over
 	// from an earlier one. The current run's last group is its output.
 	progress.ManifestModTime = progress.LastProducedAt
@@ -447,6 +443,17 @@ func (s *TranscodeSession) plannedManifestWhenReady() ([]byte, error) {
 func audioRecipeKey(opts TranscodeOpts) string {
 	return fmt.Sprintf("%d/%d/%s/%d/%d", opts.AudioTrackIndex, opts.SourceAudioChannels,
 		strings.ToLower(opts.TargetCodecAudio), opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
+}
+
+// notePlannedSegmentRequest records a request for planned segment segNum,
+// which FFmpeg hasn't reached, as the player's position, so the throttler
+// lets FFmpeg run on to it rather than hold the request until it times out.
+func (s *TranscodeSession) notePlannedSegmentRequest(segNum int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if segNum > s.lastRequestedSegment {
+		s.lastRequestedSegment = segNum
+	}
 }
 
 // manifest returns the plan as a complete VOD playlist for the session's

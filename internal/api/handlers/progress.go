@@ -10,13 +10,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/clientclock"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
-
-// progressClockSkew bounds how far ahead of server time a client-supplied
-// progress event time may sit before it is clamped to "now".
-const progressClockSkew = 2 * time.Minute
 
 const syncProgressStatusError = "error"
 
@@ -29,19 +26,6 @@ func parseClientEventTime(s string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return t.UTC(), nil
-}
-
-// clampEventAt bounds a client event time to at most now+skew: a value past the
-// window is clamped to now, so a skewed or malicious clock can at most claim
-// "now" for its own profile and never lock in a far-future LWW win (invariant 1).
-func clampEventAt(client, now time.Time) time.Time {
-	if client.IsZero() {
-		return now
-	}
-	if client.After(now.Add(progressClockSkew)) {
-		return now
-	}
-	return client
 }
 
 // ProgressLibraryLookup resolves which progress items belong to a library.
@@ -492,8 +476,8 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 			// never the timestamp alone.
 			client := item.UpdatedAt.UTC()
 			now := time.Now()
-			eventAt := clampEventAt(client, now)
-			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {
+			eventAt := clientclock.Clamp(client, now)
+			if !client.IsZero() && clientclock.TooFarAhead(client, now) {
 				slog.WarnContext(ctx, "clamped future-dated progress event time", "component", "api",
 					"profile_id", profileID, "media_item_id", item.MediaItemID)
 			}

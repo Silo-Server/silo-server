@@ -1056,6 +1056,27 @@ first scan, a higher one finishes the backlog sooner. The value is capped by the
 process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
+`metadata.fallback_language` is the language metadata refreshes use when
+providers have no title, description, or episode text in a library's metadata
+language. It defaults to `en`; any registered two-letter ISO 639-1 code is
+accepted, and `original` turns the fallback off so the original language is
+used, as before the setting existed. A refresh that writes an item in its base
+language fetches the missing text in the fallback language and stores it there.
+Gaps the fallback language cannot fill keep the original-language text. A
+manual refresh asks for fallback text even where text is stored. A scheduled
+refresh asks only for fields that have no stored text, and not again for text
+no language had on an earlier pass.
+Text in another library's language row is never filled: those rows fall back to
+the base row when read.
+
+The setting also orders artwork. With it on, posters rank library language,
+fallback language, English, textless, then any other language, and logos,
+banners, and other titled artwork rank library language, fallback language,
+English, language-neutral, then any other language. This applies to English
+libraries too, where a textless poster now beats one titled in another
+language. With it off, a poster in any language still beats a textless one.
+The setting applies without a restart.
+
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
 requires a public S3 bucket because local artwork storage is available. With it
 off, clients load item artwork straight from the providers: refreshes select no

@@ -442,7 +442,7 @@ func TestHEVCTranscodeManifestAndProgressUseFMP4Segments(t *testing.T) {
 		t.Fatal(err)
 	}
 	progress := session.SegmentProgress(time.Now())
-	if progress.ProducedCount != 1 || progress.ProducedHead != 0 {
+	if progress.ProducedHead != 0 || progress.LastProducedAt.IsZero() {
 		t.Fatalf("HEVC segment progress = %#v, want one produced fMP4 segment", progress)
 	}
 }
@@ -711,8 +711,8 @@ var segmentRecoveryDecisionCases = []struct {
 		wantWait: true, wantReason: "near_produced_head",
 		check: func(t *testing.T, d SegmentRecoveryDecision) {
 			waitsWithoutRestart(t, d)
-			if p := d.Progress; p.ProducedHead != 225 || p.ProducedCount != 2 || !p.HasManifest {
-				t.Fatalf("progress = %+v, want two ready files ending at225 with a manifest", p)
+			if p := d.Progress; p.ProducedHead != 225 || !p.HasManifest {
+				t.Fatalf("progress = %+v, want ready files ending at 225 with a manifest", p)
 			}
 		},
 	},
@@ -851,7 +851,7 @@ func (w *recordingWriteCloser) Close() error {
 	return nil
 }
 
-func writeManifestRange(t *testing.T, dir string, first int, last int, ext string) {
+func writeManifestRange(t testing.TB, dir string, first int, last int, ext string) {
 	t.Helper()
 
 	lines := []string{
@@ -879,6 +879,80 @@ func writeSegmentFile(t *testing.T, dir string, name string, data []byte, modTim
 	}
 	if err := os.Chtimes(filepath.Join(dir, name), modTime, modTime); err != nil {
 		t.Fatalf("chtimes segment %s: %v", name, err)
+	}
+}
+
+func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
+	// Each playlist lists segments 0-9. Segments in present are written in
+	// order, two seconds apart, as FFmpeg writes them; empty ones after them.
+	tests := []struct {
+		name     string
+		start    int
+		present  []int
+		empty    []int
+		wantHead int
+		wantLast int // the segment whose write time is reported, or -1 for none
+	}{
+		{name: "pruned prefix", present: []int{6, 7, 8, 9}, wantHead: 9, wantLast: 9},
+		{
+			name:    "missing and zero-byte tail, gap, unlisted newer file",
+			present: []int{0, 1, 2, 5, 6, 12}, empty: []int{7},
+			wantHead: 6, wantLast: 6,
+		},
+		{name: "playlist left behind a later start", start: 40, present: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, wantHead: 39, wantLast: 9},
+		{name: "nothing listed on disk", start: 3, wantHead: 2, wantLast: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeManifestRange(t, dir, 0, 9, ".ts")
+			written := time.Now().Add(-time.Hour).Truncate(time.Second)
+			writtenAt := map[int]time.Time{}
+			write := func(n int, data []byte) {
+				written = written.Add(2 * time.Second)
+				writeSegmentFile(t, dir, fmt.Sprintf("seg_%05d.ts", n), data, written)
+				writtenAt[n] = written
+			}
+			for _, n := range tt.present {
+				write(n, []byte("x"))
+			}
+			for _, n := range tt.empty {
+				write(n, nil)
+			}
+			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{
+				TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tt.start,
+			}}
+
+			got := session.SegmentProgress(time.Now())
+			if got.ProducedHead != tt.wantHead || !got.LastProducedAt.Equal(writtenAt[tt.wantLast]) || !got.HasManifest {
+				t.Fatalf("progress head %d, last produced %v, manifest %t; want head %d, last produced %v (segment %d), manifest true",
+					got.ProducedHead, got.LastProducedAt, got.HasManifest, tt.wantHead, writtenAt[tt.wantLast], tt.wantLast)
+			}
+		})
+	}
+}
+
+// BenchmarkSegmentProgress reads progress from a playlist whose segments are
+// all still on disk: 3,600 entries is a two-hour title at the default segment
+// length, and 50,000 is the playlist cap FFmpeg is started with.
+func BenchmarkSegmentProgress(b *testing.B) {
+	for _, entries := range []int{3_600, maxSyntheticManifestSegments} {
+		b.Run(strconv.Itoa(entries), func(b *testing.B) {
+			dir := b.TempDir()
+			writeManifestRange(b, dir, 0, entries-1, ".ts")
+			for n := range entries {
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("seg_%05d.ts", n)), []byte("x"), 0o644); err != nil {
+					b.Fatal(err)
+				}
+			}
+			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 2}}
+			b.ReportAllocs()
+			for b.Loop() {
+				if progress := session.SegmentProgress(time.Now()); progress.ProducedHead != entries-1 {
+					b.Fatalf("ProducedHead = %d, want %d", progress.ProducedHead, entries-1)
+				}
+			}
+		})
 	}
 }
 

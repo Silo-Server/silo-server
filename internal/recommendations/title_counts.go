@@ -3,14 +3,17 @@ package recommendations
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // titleCountTTL is how long Highly Rated reuses one access scope's title
@@ -90,7 +93,7 @@ func (c *titleCountCache) get(ctx context.Context, filter catalog.AccessFilter, 
 		}
 		countCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), titleCountTimeout)
 		defer cancel()
-		counts, err := count(countCtx, filter)
+		counts, err := countRecovering(countCtx, filter, count)
 		if err != nil {
 			slog.WarnContext(countCtx, "counting titles for Highly Rated failed; reusing the last counts", "component", "recommendations", "error", err)
 			c.store(key, c.fallback(key), titleCountRetry)
@@ -111,6 +114,20 @@ func (c *titleCountCache) get(ctx context.Context, filter catalog.AccessFilter, 
 	case <-ctx.Done():
 	}
 	return c.fallback(key)
+}
+
+// countRecovering runs count for get's shared count, which runs on
+// singleflight's goroutine, out of reach of the request's panic recovery, so
+// a panic becomes the count's error.
+func countRecovering(ctx context.Context, filter catalog.AccessFilter, count titleCounter) (counts []int64, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.ErrorContext(ctx, "counting titles for Highly Rated panicked", "component", "recommendations",
+				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+			counts, err = nil, errors.New("counting titles panicked")
+		}
+	}()
+	return count(ctx, filter)
 }
 
 // lookup returns key's counts, whether they are fresh, and whether there

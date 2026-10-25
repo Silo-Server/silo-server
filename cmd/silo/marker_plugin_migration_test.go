@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -64,6 +68,33 @@ type fakeMarkerLegacySettings map[string]string
 
 func (f fakeMarkerLegacySettings) Get(_ context.Context, key string) (string, error) {
 	return f[key], nil
+}
+
+type fakeMarkerProviderConfigs struct {
+	rows map[string]markers.ProviderConfig
+	// sharingSeeds lists the rows seeded through EnsureDefaultSharing; the
+	// store's DB test covers how markers.share_by_default shapes them.
+	sharingSeeds []string
+}
+
+func (f *fakeMarkerProviderConfigs) Get(provider string) (markers.ProviderConfig, bool) {
+	c, ok := f.rows[provider]
+	return c, ok
+}
+
+func (f *fakeMarkerProviderConfigs) Ensure(_ context.Context, c markers.ProviderConfig) error {
+	if f.rows == nil {
+		f.rows = map[string]markers.ProviderConfig{}
+	}
+	if _, ok := f.rows[c.Provider]; !ok {
+		f.rows[c.Provider] = c
+	}
+	return nil
+}
+
+func (f *fakeMarkerProviderConfigs) EnsureDefaultSharing(ctx context.Context, c markers.ProviderConfig) error {
+	f.sharingSeeds = append(f.sharingSeeds, c.Provider)
+	return f.Ensure(ctx, c)
 }
 
 func TestCopyLegacyIntroDBPluginConfigCopiesAPIKeyOnce(t *testing.T) {
@@ -215,13 +246,49 @@ func TestReloadMarkerPluginProvidersRemovesProviderOnConfigReadFailure(t *testin
 }
 
 func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
+	sharingDefaults := map[string]any{
+		"default_contribute_enabled":        true,
+		"default_contribute_auto_local":     "true",
+		"default_contribute_min_confidence": 0.9,
+	}
 	for _, test := range []struct {
 		name       string
 		metadata   map[string]any
 		wantSubmit bool
+		wantAmend  bool
+		wantAbsent bool
+		// wantConfig is the row created for the provider; Provider,
+		// FetchEnabled and FetchPriority are not compared.
+		wantConfig       markers.ProviderConfig
+		wantShareDefault bool
+		// wantSharingSeed means the row is seeded through EnsureDefaultSharing,
+		// so markers.share_by_default=false keeps it off.
+		wantSharingSeed bool
 	}{
-		{name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true},
-		{name: "fetch-only manifest", metadata: map[string]any{"metadata": map[string]any{"supports_contribution": false}}, wantSubmit: false},
+		{
+			name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
+		{
+			name:       "fetch-only manifest ignores sharing defaults",
+			metadata:   map[string]any{"metadata": map[string]any{"supports_contribution": false, "default_contribute_enabled": true}},
+			wantSubmit: false,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
+		{
+			name:       "amend and absent declared",
+			metadata:   map[string]any{"metadata": map[string]any{"supports_amend": true, "supports_absent": true}},
+			wantSubmit: true, wantAmend: true, wantAbsent: true,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
+		{
+			name:             "sharing defaults start contribution on",
+			metadata:         map[string]any{"metadata": sharingDefaults},
+			wantSubmit:       true,
+			wantConfig:       markers.ProviderConfig{ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9},
+			wantShareDefault: true,
+			wantSharingSeed:  true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeMarkerCapabilities{
@@ -233,16 +300,107 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			runtimeConfigs := &fakeMarkerRuntimeConfigs{configs: map[int][]*plugins.RuntimeConfig{}}
 			registry := markers.NewRegistry(nil)
 			resolver := markers.NewPluginResolverAdapter(&unusedMarkerPluginResolver{})
-			if err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
+			configs := &fakeMarkerProviderConfigs{}
+			if err := reloadMarkerPluginProviders(context.Background(), registry, configs, store, runtimeConfigs, nil, resolver); err != nil {
 				t.Fatalf("reloadMarkerPluginProviders: %v", err)
 			}
 			providers := registry.Providers()
 			if len(providers) != 1 {
 				t.Fatalf("providers = %d, want 1", len(providers))
 			}
+			got := configs.rows[providers[0].ID()]
+			if seeded := len(configs.sharingSeeds) == 1; seeded != test.wantSharingSeed {
+				t.Fatalf("sharing seeds = %v, want sharing seed %v", configs.sharingSeeds, test.wantSharingSeed)
+			}
+			if got.ContributeEnabled != test.wantConfig.ContributeEnabled ||
+				got.ContributeAutoLocal != test.wantConfig.ContributeAutoLocal ||
+				got.ContributeMinConfidence != test.wantConfig.ContributeMinConfidence {
+				t.Fatalf("config = %+v, want contribution like %+v", got, test.wantConfig)
+			}
+			if share := providers[0].(markers.DescribedProvider).ProviderDescription().DefaultContributeEnabled; share != test.wantShareDefault {
+				t.Fatalf("DefaultContributeEnabled = %v, want %v", share, test.wantShareDefault)
+			}
 			if _, ok := providers[0].(markers.Submitter); ok != test.wantSubmit {
 				t.Fatalf("provider %T implements Submitter = %v, want %v", providers[0], ok, test.wantSubmit)
 			}
+			if !test.wantSubmit {
+				return
+			}
+			reqs := providers[0].(markers.SubmissionRequirementProvider).SubmissionRequirements()
+			if reqs.SupportsAmend != test.wantAmend || reqs.SupportsAbsent != test.wantAbsent {
+				t.Fatalf("submission requirements = %+v, want amend=%v absent=%v", reqs, test.wantAmend, test.wantAbsent)
+			}
 		})
+	}
+}
+
+// Saving markers.share_by_default=false stops sharing on every installed
+// provider whose manifest shares by default, disabled and currently fetch-only
+// ones included, using only the save's own connection:
+// database.max_connections may be 1.
+func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	installations := plugins.NewInstallationStore(pool)
+	configs := markers.NewProviderConfigStore(pool)
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	install := func(name string, enabled bool, metadata map[string]any) string {
+		t.Helper()
+		installation, err := installations.Create(ctx, plugins.CreateInstallationInput{
+			PluginID: "test.markers." + name + "." + suffix, Version: "1.0.0", InstallPath: t.TempDir(), Enabled: enabled,
+			Capabilities: []plugins.Capability{{Type: sdkcapability.MarkerProvider, ID: "markers", Metadata: metadata}},
+		})
+		if err != nil {
+			t.Fatalf("install %s: %v", name, err)
+		}
+		t.Cleanup(func() { _ = installations.Delete(context.Background(), installation.ID) })
+		provider := markers.PluginProviderID(installation.ID, "markers")
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = $1`, provider)
+		})
+		if err := configs.Ensure(ctx, markers.ProviderConfig{
+			Provider: provider, FetchEnabled: true, ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9,
+		}); err != nil {
+			t.Fatalf("seed %s config: %v", name, err)
+		}
+		return provider
+	}
+	sharingDisabled := install("sharing", false, map[string]any{"metadata": map[string]any{"default_contribute_enabled": true}})
+	optedIn := install("opted-in", true, nil)
+	fetchOnly := install("fetch-only", true, map[string]any{"metadata": map[string]any{"default_contribute_enabled": true, "supports_contribution": false}})
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := stopDefaultMarkerSharingInTx(ctx, tx); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("stopDefaultMarkerSharingInTx: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := configs.Reload(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	for provider, wantSharing := range map[string]bool{sharingDisabled: false, optedIn: true, fetchOnly: false} {
+		if got, _ := configs.Get(provider); got.ContributeEnabled != wantSharing || got.ContributeAutoLocal != wantSharing {
+			t.Errorf("%s = %+v, want sharing %v", provider, got, wantSharing)
+		}
 	}
 }

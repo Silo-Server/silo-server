@@ -185,6 +185,14 @@ sign-in refused by the sign-in policy (`local_login_disabled`,
 directory password) answers 401 `InvalidUsernameOrPassword` with the reason
 as its message; a provider that cannot answer is 503 `ServiceUnavailable`.
 
+Every password Silo sends to the directory, from sign-in on any listener or
+from linking, first spends the sign-in attempt budget of the name it was sent
+with ([Sign-in attempts per name](../auth-api.md#sign-in-attempts-per-name)).
+Guessing at a directory name therefore stops at that budget however many
+addresses the guesses come from. A directory whose lockout threshold is below
+the budget, or that accepts several names for one entry, can still lock the
+entry.
+
 Audiobookshelf compatibility (beta) signs in local accounts only: its sessions
 refresh without the provider re-check below, so directory users are not
 routed to their provider there.

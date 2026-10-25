@@ -123,11 +123,11 @@ func TestAccumulateSeasonResults_FillsMissingAndAddsSeasons(t *testing.T) {
 	accumulateSeasonResults(accumulator, []SeasonResult{
 		{SeasonNumber: 22, Title: "Season 22"},
 		{SeasonNumber: 23, Title: "Season 23"},
-	})
+	}, "")
 	accumulateSeasonResults(accumulator, []SeasonResult{
 		{SeasonNumber: 23, Title: "TMDB Season 23", PosterPath: "tmdb://season-23.jpg"},
 		{SeasonNumber: 24, Title: "Season 24", PosterPath: "tmdb://season-24.jpg"},
-	})
+	}, "")
 
 	seasons := flattenSeasonResults(accumulator)
 	if len(seasons) != 3 {
@@ -156,7 +156,7 @@ func TestAccumulateEpisodeResults_FillsMissingAndAddsEpisodes(t *testing.T) {
 			EpisodeNumber: 1,
 			Title:         "Pilot",
 		},
-	})
+	}, "")
 	accumulateEpisodeResults(accumulator, []EpisodeResult{
 		{
 			SeasonNumber:  1,
@@ -172,7 +172,7 @@ func TestAccumulateEpisodeResults_FillsMissingAndAddsEpisodes(t *testing.T) {
 			Title:         "Episode 2",
 			ProviderIDs:   map[string]string{"tmdb": "ep-2"},
 		},
-	})
+	}, "")
 
 	episodes := flattenEpisodeResults(accumulator)
 	if len(episodes) != 2 {
@@ -757,7 +757,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", "", false, true)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -965,7 +965,7 @@ func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) 
 		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
 	}, "series-1", "fr", "series", localizedItemText(&MetadataResult{}, canonical, []MetadataField{FieldOverview}), canonical,
-		nil, MergeFillEmpty, "fr", false, true)
+		nil, MergeFillEmpty, "fr", "", false, true)
 
 	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
 		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)

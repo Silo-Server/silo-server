@@ -50,6 +50,9 @@ type TranscodeOpts struct {
 	SourceVideoBitDepth  int
 	VideoBitstreamFilter string // validated copy-mode BSF: DV7ToHDR10BitstreamFilter
 	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
+	// VideoRange is the HLS VIDEO-RANGE a copy remux's subtitle rendition
+	// variant names (CopyHLSVideoRange): "", PQ, or HLG.
+	VideoRange string
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
@@ -139,8 +142,8 @@ type TranscodeOpts struct {
 	SubtitleCodec string
 	// SubtitleRendition emits the selected embedded text track
 	// (SubtitleTrackIndex, never burned in) from this same ffmpeg process as
-	// the WebVTT subtitle rendition of the synthetic HLS playlist. See
-	// subtitle_rendition.go.
+	// the WebVTT subtitle rendition of its HLS playlist, for a transcode or
+	// an HLS copy remux. See subtitle_rendition.go.
 	SubtitleRendition bool
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
@@ -324,7 +327,6 @@ func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
 type SegmentProgress struct {
 	ProducedHead    int
-	ProducedCount   int
 	LastProducedAt  time.Time
 	ManifestModTime time.Time
 	// GenerationStartedAt is when the ffmpeg process that currently owns the
@@ -410,6 +412,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 			(opts.VideoSampleEntry != VideoSampleEntryHVC1 || !strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC)) {
 		return nil, fmt.Errorf("unsupported video sample-entry recipe")
 	}
+	if !validCopyHLSVideoRange(opts) {
+		return nil, errors.New("unsupported HLS video range")
+	}
 	if opts.CopyVideoMPEGTS && !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return nil, fmt.Errorf("copy-video MPEG-TS requires video copy")
 	}
@@ -486,7 +491,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	var subtitleSpans []subtitleCueSpan
 	var subtitleCueBase uint64
 	if subtitleRenditionActive(opts) {
-		subtitleSpans, subtitleCueBase = loadSubtitleSpans(opts)
+		subtitleSpans, subtitleCueBase = loadSubtitleSpans(opts, copyPlan)
 		opts.subtitleCueFile = subtitleCueFileName(subtitleCueBase)
 	}
 	s := &TranscodeSession{
@@ -2324,18 +2329,27 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 
 // BuildPlaybackManifest returns the manifest we should expose to clients.
 //
-// Copy-video sessions always expose FFmpeg's real manifest so the playlist
-// timing matches the variable-length fragments FFmpeg actually writes and the
-// seekable window reflects what FFmpeg has produced so far. Encoded transcodes
+// Copy-video sessions expose their keyframe plan or FFmpeg's real manifest, so
+// the playlist timing matches the variable-length fragments FFmpeg actually
+// writes and, without a plan, the seekable window reflects what FFmpeg has
+// produced so far. Encoded transcodes
 // use the synthetic full VOD manifest only while its segment count is bounded;
 // longer media uses FFmpeg's real sliding playlist.
+//
+// A session with a subtitle rendition answers its multivariant playlist, or
+// the media playlist rawQuery selects (see buildSubtitleRenditionPlaylist).
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	if s.HasSubtitleRendition() {
+		return s.buildSubtitleRenditionPlaylist(segPrefix, rawQuery)
+	}
+	return s.buildVideoPlaylist(segPrefix, rawQuery)
+}
+
+// buildVideoPlaylist is the session's video media playlist.
+func (s *TranscodeSession) buildVideoPlaylist(segPrefix, rawQuery string) ([]byte, error) {
 	opts := s.Opts()
 	if s.copyPlan != nil {
 		return s.copyPlan.manifest(opts, segPrefix, rawQuery), nil
-	}
-	if s.HasSubtitleRendition() {
-		return s.buildSubtitleRenditionPlaylist(segPrefix, rawQuery), nil
 	}
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
@@ -2880,19 +2894,21 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 
-	for _, entry := range timeline.entries {
-		segmentPath := filepath.Join(s.outputDir, segmentFilename(entry.number, opts))
-		info, err := os.Stat(segmentPath)
+	// FFmpeg numbers segments in order, renames each finished segment into
+	// place (-hls_flags temp_file) before rewriting the playlist to list it,
+	// and lists only its own segments because append_list is not set. The last
+	// listed segment still on disk is therefore both the highest and the most
+	// recently written, so the walk stops there instead of statting every
+	// entry of a playlist that can list 50,000 segments.
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		number := timeline.entries[i].number
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(number, opts)))
 		if err != nil || info.Size() <= 0 {
 			continue
 		}
-		progress.ProducedCount++
-		if entry.number > progress.ProducedHead {
-			progress.ProducedHead = entry.number
-		}
-		if info.ModTime().After(progress.LastProducedAt) {
-			progress.LastProducedAt = info.ModTime()
-		}
+		progress.ProducedHead = max(progress.ProducedHead, number)
+		progress.LastProducedAt = info.ModTime()
+		break
 	}
 
 	return progress

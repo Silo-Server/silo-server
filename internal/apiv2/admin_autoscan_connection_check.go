@@ -14,7 +14,7 @@ type AdminAutoscanConnectionTestService interface {
 }
 type AdminAutoscanConnectionTestBody struct {
 	ConnectionID         *string `json:"connection_id,omitempty" maxLength:"256"`
-	BaseURL              string  `json:"base_url,omitempty" maxLength:"8192"`
+	BaseURL              string  `json:"base_url,omitempty" format:"uri-reference" maxLength:"8192"`
 	APIKeyRef            string  `json:"api_key_ref,omitempty" maxLength:"8192" writeOnly:"true"`
 	RequestIntegrationID *string `json:"request_integration_id,omitempty" maxLength:"256"`
 }

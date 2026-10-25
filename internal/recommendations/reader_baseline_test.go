@@ -22,7 +22,7 @@ func TestGetBecauseYouWatchedRowsReadsSeveralAnchors(t *testing.T) {
 			RecTypeBecauseWatched + "|third":  scoredRun("third", 5),
 		}},
 		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true),
 	}
 	ctx := t.Context()
 

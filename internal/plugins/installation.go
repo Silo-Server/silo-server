@@ -424,6 +424,25 @@ func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID
 	return scanCapabilities(rows)
 }
 
+// ListCapabilitiesOfType lists one capability type across every installation
+// that is not builtin, enabled or not. q may be a transaction, so a caller that
+// holds one needs no second pool connection.
+func ListCapabilitiesOfType(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, capabilityType string,
+) ([]*Capability, error) {
+	rows, err := q.Query(ctx, `SELECT c.plugin_installation_id, c.capability_type, c.capability_id, c.metadata, c.created_at, c.updated_at
+		FROM plugin_capabilities c
+		JOIN plugin_installations i ON i.id = c.plugin_installation_id
+		WHERE c.capability_type = $1 AND i.kind <> $2
+		ORDER BY c.plugin_installation_id ASC, c.capability_id ASC`, capabilityType, KindBuiltin)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin capabilities of type %s: %w", capabilityType, err)
+	}
+	defer rows.Close()
+	return scanCapabilities(rows)
+}
+
 func (s *InstallationStore) SaveArchive(
 	ctx context.Context,
 	installationID int,

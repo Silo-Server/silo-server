@@ -43,9 +43,11 @@ import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
+import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
+import type { BufferingMode } from "@/player/buffering-quality";
 import type {
   EpisodeRef,
   IntroSkipMode,
@@ -215,7 +217,8 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     request.returnHref == null &&
     request.audioTrackIndex == null &&
     request.prePlaySubtitleMode == null &&
-    request.prePlaySubtitleSelection == null
+    request.prePlaySubtitleSelection == null &&
+    !request.versionPicked
   ) {
     return undefined;
   }
@@ -225,6 +228,7 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     audioTrackIndex: request.audioTrackIndex,
     prePlaySubtitleMode: request.prePlaySubtitleMode,
     prePlaySubtitleSelection: request.prePlaySubtitleSelection ?? null,
+    versionPicked: request.versionPicked,
   };
 }
 
@@ -580,6 +584,7 @@ function WatchPlaybackHostContent() {
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
+  const playbackProfileId = currentProfile?.id ?? null;
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -609,8 +614,15 @@ function WatchPlaybackHostContent() {
   // consulted, so a recap or preview override an admin (or the user) set on a
   // device silently did nothing. One batched read costs no more than the single
   // key did and makes all three behave as the contract says they do.
+  const supportsBufferingQualityMode =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+    );
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
+      ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -632,6 +644,14 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
+  const loadedBufferingMode = supportsBufferingQualityMode
+    ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+        | BufferingMode
+        | undefined)
+    : undefined;
+  useEffect(() => {
+    if (loadedBufferingMode) rememberBufferingMode(playbackProfileId, loadedBufferingMode);
+  }, [loadedBufferingMode, playbackProfileId]);
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
   const {
@@ -943,6 +963,9 @@ function WatchPlaybackHostContent() {
           {
             contentId: activeRequest.contentId,
             fileId: nextPartFileId,
+            // The next part of a version the viewer picked, before Play or
+            // in the player, is still the viewer's pick.
+            versionPicked: activeRequest.versionPicked || exitState?.versionPinned,
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,
@@ -1145,6 +1168,14 @@ function WatchPlaybackHostContent() {
     if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
     return legacy ? "always" : "ask";
   })();
+  // Until the profile's mode loads, or if the read fails, the mode this
+  // browser saw last for the profile applies, and the default only when it
+  // has seen none: the start does not wait, and a `never` profile keeps its
+  // `ignore`. A server without the setting runs the default.
+  const bufferingMode: BufferingMode =
+    capabilitiesKnown && !supportsBufferingQualityMode
+      ? "always"
+      : (loadedBufferingMode ?? lastBufferingMode(playbackProfileId) ?? "always");
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
@@ -1165,6 +1196,7 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
+          bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}

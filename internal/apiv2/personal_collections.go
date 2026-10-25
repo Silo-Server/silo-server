@@ -34,7 +34,7 @@ type PersonalCollection struct {
 	SortConfig                 json.RawMessage `json:"sort_config" doc:"Default sort document; {} when unset"`
 	SortOrder                  int             `json:"sort_order" doc:"Position in its creator's own order of collections" example:"0"`
 	GroupID                    *ID             `json:"group_id" nullable:"true" doc:"Always null: personal collection groups are no longer supported" example:"g1"`
-	SourceURL                  string          `json:"source_url" doc:"Where an imported collection is synced from; empty otherwise" example:""`
+	SourceURL                  string          `json:"source_url" doc:"Where an imported collection is synced from; empty otherwise; not validated as a URI" example:""`
 	SourceConfig               json.RawMessage `json:"source_config,omitempty" doc:"Import source document; absent for a manual or smart collection"`
 	SyncSchedule               string          `json:"sync_schedule" doc:"Empty when the collection is not synced" example:""`
 	SyncCadence                string          `json:"sync_cadence" enum:",daily,weekly,monthly,custom" doc:"The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces" example:""`
@@ -45,7 +45,7 @@ type PersonalCollection struct {
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment; absent when none"`
 	ItemCount                  int             `json:"item_count" example:"4"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections" example:"false"`
-	PosterURL                  string          `json:"poster_url" doc:"Presigned, short-lived; empty when there is no poster" example:""`
+	PosterURL                  string          `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when there is no poster" example:""`
 	PosterThumbhash            string          `json:"poster_thumbhash" example:""`
 	PosterIsCollage            bool            `json:"poster_is_collage" doc:"poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
@@ -102,7 +102,7 @@ type PersonalCollectionCreate struct {
 	SortConfig                 json.RawMessage `json:"sort_config,omitempty" doc:"Default sort document"`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment"`
 	IncludeInServerCollections *bool           `json:"include_in_server_collections,omitempty" nullable:"false" example:"false"`
-	PosterSourceURL            *string         `json:"poster_source_url,omitempty" nullable:"false" doc:"An image URL the server fetches and stores as the poster" example:""`
+	PosterSourceURL            *string         `json:"poster_source_url,omitempty" format:"uri-reference" nullable:"false" doc:"An image URL the server fetches and stores as the poster" example:""`
 }
 
 // PersonalCollectionCreateInput is the createCollection request.
@@ -254,7 +254,7 @@ type CollectionImportBase struct {
 	Limit                  *int            `json:"limit,omitempty" nullable:"false" minimum:"1" doc:"Cap on synced items; the server's own maximum applies when omitted" example:"50"`
 	SyncSchedule           *string         `json:"sync_schedule,omitempty" nullable:"false" doc:"Sync cadence name; the server default when omitted" example:"daily"`
 	IsShared               *bool           `json:"is_shared,omitempty" nullable:"false" doc:"Show the collection to every profile on the login; defaults to false" example:"false"`
-	PosterURL              *string         `json:"poster_url,omitempty" nullable:"false" doc:"A bundled template poster path or an image URL" example:""`
+	PosterURL              *string         `json:"poster_url,omitempty" format:"uri-reference" nullable:"false" doc:"A bundled template poster path or an image URL" example:""`
 	LibraryIDs             *[]ID           `json:"library_ids,omitempty" nullable:"false" doc:"Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted" example:"[\"1\"]"`
 	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment"`
 	SortConfig             json.RawMessage `json:"sort_config,omitempty" doc:"Default sort document"`
@@ -263,7 +263,7 @@ type CollectionImportBase struct {
 // MDBListCollectionImport is the importMDBListCollection body.
 type MDBListCollectionImport struct {
 	CollectionImportBase
-	URL string `json:"url" minLength:"1" doc:"An MDBList list page (https://mdblist.com/lists/...)" example:"https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"`
+	URL string `json:"url" format:"uri" minLength:"1" doc:"An MDBList list page (https://mdblist.com/lists/...)" example:"https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"`
 }
 
 // MDBListCollectionImportInput is the importMDBListCollection request.
@@ -287,7 +287,7 @@ type TMDBCollectionImportInput struct {
 // TMDBListCollectionImport is the importTMDBListCollection body.
 type TMDBListCollectionImport struct {
 	CollectionImportBase
-	URL string `json:"url" minLength:"1" doc:"A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID" example:"https://www.themoviedb.org/list/310-my-movie-list"`
+	URL string `json:"url" format:"uri-reference" minLength:"1" doc:"A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID" example:"https://www.themoviedb.org/list/310-my-movie-list"`
 }
 
 // TMDBListCollectionImportInput is the importTMDBListCollection request.
@@ -330,7 +330,7 @@ type MDBListList struct {
 	MediaType   string `json:"media_type" doc:"movie or show as MDBList reports it" example:"movie"`
 	Items       int    `json:"items" example:"100"`
 	Likes       int    `json:"likes" example:"250"`
-	URL         string `json:"url" doc:"The list page; empty when MDBList did not report one" example:"https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"`
+	URL         string `json:"url" format:"uri-reference" doc:"The list page; empty when MDBList did not report one" example:"https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"`
 }
 
 // MDBListListCollection is the MDBList discovery envelope.

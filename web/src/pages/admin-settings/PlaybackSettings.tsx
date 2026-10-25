@@ -48,6 +48,7 @@ const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
   "playback.hw_accel",
   "allow_4k_transcode",
+  "playback.prefer_lower_version_transcode",
   "playback.allow_hevc_encoding",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
@@ -118,6 +119,11 @@ function remakeDescription(widthChanged: boolean, previews: number | null): stri
 
 const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold"];
 
+const SPEED_TEST_KEYS = [
+  "playback.bandwidth_probe_automatic",
+  "playback.bandwidth_probe_max_age_days",
+];
+
 const MARKER_KEYS = [
   "markers.mode",
   "markers.detect_intros",
@@ -135,6 +141,7 @@ const MARKER_KEYS = [
 // loaded or saved here.
 const KEYS = [
   ...WATCH_KEYS,
+  ...SPEED_TEST_KEYS,
   ...TRANSCODING_ESSENTIAL_KEYS,
   ...TRANSCODING_ADVANCED_KEYS,
   ...PREVIEW_IMAGE_KEYS,
@@ -212,6 +219,7 @@ export default function PlaybackSettings() {
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
   const throttleOn = form.getValue("enable_transcode_throttle") === "true";
+  const allow4KTranscode = form.getValue("allow_4k_transcode") === "true";
   // Every advanced transcoding key has one row, except the device picker,
   // which renders only when it applies.
   const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
@@ -350,6 +358,15 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
+          {allow4KTranscode && (
+            <SettingField
+              label="Prefer 1080p versions"
+              type="toggle"
+              description="Transcode from the 1080p version instead of the 4K file when both exist."
+              value={form.getValue("playback.prefer_lower_version_transcode")}
+              onChange={(v) => form.setValue("playback.prefer_lower_version_transcode", v)}
+            />
+          )}
           <SettingField
             label="Allow HEVC encoding"
             type="toggle"
@@ -497,6 +514,26 @@ export default function PlaybackSettings() {
               restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
             />
           </AdvancedSection>
+        </FieldGroup>
+
+        <FieldGroup label="Connection speed tests" restartAll={allRestart(SPEED_TEST_KEYS)}>
+          <SettingField
+            label="Automatic speed tests"
+            type="toggle"
+            description="Apps test a device's connection only when the server has no current reading for it. Off, viewers can still run Test speed in Settings."
+            value={form.getValue("playback.bandwidth_probe_automatic")}
+            onChange={(v) => form.setValue("playback.bandwidth_probe_automatic", v)}
+            restartRequired={restartKeys.has("playback.bandwidth_probe_automatic")}
+          />
+          <SettingField
+            label="Keep a reading for"
+            type="number"
+            unit="days"
+            description="1 to 30. An app tests again once its reading is older."
+            value={form.getValue("playback.bandwidth_probe_max_age_days")}
+            onChange={(v) => form.setValue("playback.bandwidth_probe_max_age_days", v)}
+            restartRequired={restartKeys.has("playback.bandwidth_probe_max_age_days")}
+          />
         </FieldGroup>
 
         <FieldGroup

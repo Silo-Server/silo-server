@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -204,6 +205,52 @@ func TestRecommendationSectionReadErrorFailsTheSection(t *testing.T) {
 	got, err := (&Fetcher{}).FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
 	if err != nil || len(got.Items) != 0 {
 		t.Fatalf("FetchOne without a reader = %d items, %v; want an empty section", len(got.Items), err)
+	}
+}
+
+// watchedSetReader reads the profile's watched set before answering a For You
+// or Because You Watched row, as the Reader does to filter them.
+type watchedSetReader struct {
+	poolReader
+	signals *recommendations.SignalReader
+}
+
+func (r *watchedSetReader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, err
+	}
+	return r.poolReader.SectionForYouMain(ctx, userID, profileID, filter)
+}
+
+func (r *watchedSetReader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, "", err
+	}
+	return r.poolReader.SectionBecauseYouWatched(ctx, userID, profileID, sourceItemID, libraryIDs, filter)
+}
+
+// countingWatchedRepo counts watched set reads. No other repo read is reached.
+type countingWatchedRepo struct {
+	*recommendations.Repo
+	reads atomic.Int32
+}
+
+func (r *countingWatchedRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.reads.Add(1)
+	return map[string]struct{}{}, nil
+}
+
+// One FetchAll reads the profile's watched set once for its For You and
+// Because You Watched sections, which run in parallel.
+func TestFetchAllReadsTheWatchedSetOnce(t *testing.T) {
+	repo := &countingWatchedRepo{}
+	fetcher := &Fetcher{RecommendationReader: &watchedSetReader{signals: recommendations.NewSignalReader(repo, nil)}}
+	fetcher.FetchAll(t.Context(), []ResolvedSection{
+		{ID: "for-you", SectionType: SectionRecommendedForYou, ItemLimit: 20},
+		{ID: "because", SectionType: SectionBecauseYouWatched, ItemLimit: 20},
+	}, nil, nil, 7, "p1", catalog.AccessFilter{})
+	if got := repo.reads.Load(); got != 1 {
+		t.Fatalf("watched set reads = %d, want 1", got)
 	}
 }
 

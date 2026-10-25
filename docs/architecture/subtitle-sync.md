@@ -19,8 +19,8 @@ on its row (`timing_scale`, `timing_offset_ms`); a sidecar's lives in
 `external_subtitle_timings` (see [sidecar subtitles](#sidecar-subtitles)). The
 bytes never change.
 
-- Every client delivery path applies the timing to the original bytes before
-  any conversion: the playback subtitle route, the Jellyfin subtitle stream,
+- Every client delivery path decodes the original bytes to UTF-8
+  (`subtitles.DecodeText`) and applies the timing before any conversion: the playback subtitle route, the Jellyfin subtitle stream,
   offline downloads, and the source of an AI translation
   (`subtitles.DeliveryBytes` for stored subtitles, `playback.LoadExternalSubtitle`
   for sidecars). Those responses are `Cache-Control: private, no-cache`, since
@@ -40,7 +40,8 @@ bytes never change.
 
 Silo is a media server, not a media manager: it never writes a sidecar file.
 A sidecar's correction is a row keyed by the media file and the SHA-256 of the
-sidecar's bytes.
+sidecar's bytes on disk, before any UTF-8 decoding, so the lookup on delivery
+and the sync job's change check hash the same bytes.
 
 - **Identity.** Clients name a sidecar by its sync key,
   `external-{sha256 of its path}`, the same path key playback URLs pin it with

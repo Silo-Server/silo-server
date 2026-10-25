@@ -206,13 +206,21 @@ func NeedsToneMap(file *models.MediaFile) bool {
 	return false
 }
 
+// VideoRangeTypeIsHDR10Plus reports whether a stored video range type names
+// HDR10+. The scanner spells it "HDR10Plus" (also inside DOVIWithHDR10Plus);
+// "HDR10+" is accepted for values written by other tools.
+func VideoRangeTypeIsHDR10Plus(rangeType string) bool {
+	value := strings.ToLower(rangeType)
+	return strings.Contains(value, "hdr10plus") || strings.Contains(value, "hdr10+")
+}
+
 // DynamicRangeForVideoTrack derives a normalized dynamic-range label from the
 // scanner's Dolby Vision, HDR10+, transfer, and range metadata.
 func DynamicRangeForVideoTrack(track models.VideoTrack) string {
 	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
 		return DynamicRangeDolbyVision
 	}
-	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
+	if track.HDR10Plus || VideoRangeTypeIsHDR10Plus(track.VideoRangeType) {
 		return DynamicRangeHDR10Plus
 	}
 	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))

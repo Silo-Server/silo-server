@@ -46,16 +46,20 @@ Je suis tres heureux de vous voir ici ce soir.
 }
 
 func TestResolveUploadLanguage(t *testing.T) {
+	french := "1\r\n00:00:01,000 --> 00:00:04,000\r\nBonjour tout le monde, comment allez-vous aujourd'hui?\r\n\r\n2\r\n00:00:05,000 --> 00:00:08,000\r\nJe suis tres heureux de vous voir ici ce soir.\r\n"
 	for _, tc := range []struct {
 		filename string
+		data     []byte
 		want     string
 		source   LanguageDetectionSource // empty: not checked
 	}{
-		{"subtitle.srt", "de", LanguageSourceManual},
+		{"subtitle.srt", []byte("hello"), "de", LanguageSourceManual},
 		// Filename detection wins over a non-override user language.
-		{"movie.ja.srt", "ja", ""},
+		{"movie.ja.srt", []byte("hello"), "ja", ""},
+		// UTF-16 text is read as Upload stores it, so the preview matches.
+		{"subtitle.srt", utf16LEWithBOM(french), "fr", LanguageSourceContent},
 	} {
-		detected, err := ResolveUploadLanguage(tc.filename, FormatSRT, []byte("hello"), "de", false)
+		detected, err := ResolveUploadLanguage(tc.filename, FormatSRT, tc.data, "de", false)
 		if err != nil {
 			t.Fatalf("ResolveUploadLanguage(%q) error = %v", tc.filename, err)
 		}

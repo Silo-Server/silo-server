@@ -1,6 +1,7 @@
 {
-  "revision": "49220410b1e429a5668743a5a4b0a0dff17504393d81f2255cd5a66e5adfa8a0",
+  "revision": "d59e83e83e092c4d23790a934141e5448e08cbc09625f1247ef2f1c0b700bf8c",
   "state": "available",
   "allowed": true,
-  "clear_resume_position": true
+  "clear_resume_position": true,
+  "mark_watched_records_rewatch": true
 }

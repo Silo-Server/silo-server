@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -39,6 +40,10 @@ type Provider struct {
 	password string
 	limiter  *subtitles.RateLimiter
 
+	// fileClient fetches the link a download answer names. The provider
+	// chooses that address, so it may reach public hosts only.
+	fileClient *http.Client
+
 	mu    sync.Mutex
 	token string
 }
@@ -50,7 +55,7 @@ func New(cfg Config) *Provider {
 		base = defaultBaseURL
 	}
 	return &Provider{
-		client:   &http.Client{Timeout: 15 * time.Second},
+		client:   &http.Client{Timeout: 15 * time.Second, CheckRedirect: subtitles.SameOriginRedirects},
 		baseURL:  base,
 		username: cfg.Username,
 		password: cfg.Password,
@@ -58,6 +63,7 @@ func New(cfg Config) *Provider {
 			MaxRequests: 40,
 			Window:      10 * time.Second,
 		}),
+		fileClient: netguard.NewClient(15 * time.Second),
 	}
 }
 
@@ -232,7 +238,7 @@ func (p *Provider) fetchDownloadLink(ctx context.Context, body io.Reader) ([]byt
 	if err != nil {
 		return nil, "", err
 	}
-	fileResp, err := p.client.Do(fileReq)
+	fileResp, err := p.fileClient.Do(fileReq)
 	if err != nil {
 		return nil, "", fmt.Errorf("opensubtitles: fetch file: %w", err)
 	}

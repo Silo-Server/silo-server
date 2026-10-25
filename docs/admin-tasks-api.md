@@ -36,8 +36,8 @@ its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
-by default: processed search index events, activity log, task history, expired
-login sessions, policy decision log, and notifications. The log steps also
+by default: processed search index events, activity log, task history, autoscan
+events, expired login sessions, policy decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Every server fires
 the same trigger, so a PostgreSQL advisory lock lets one server run the steps;
 the others record a completed run that did nothing. Each step keeps its
@@ -80,6 +80,13 @@ requires explicit review and revision adoption before another submission. It
 disables both mutation retries and authentication-refresh replay. The inherited
 `max_runtime_ms` setting is stored but is not enforced by the task runner; the
 editor labels that limitation rather than promising a timeout.
+
+A task can spread its scheduled starts so servers sharing a remote service do
+not start together. Each daily or weekly run of such a task starts at a random
+point in a window after its configured time, chosen when the run is scheduled,
+and `next_run_at` reports that time. The window applies to default and edited
+schedules alike and is not part of the stored triggers. `contribute_markers`
+spreads its runs over four hours. Manual runs start at once.
 
 ## History and metrics
 

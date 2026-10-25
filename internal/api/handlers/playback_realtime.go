@@ -38,7 +38,7 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
 	}
-	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", userInitiated), nil
+	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", userInitiated, false), nil
 }
 
 // endPlaybackSessionAuthority ends the live session and revokes its streams
@@ -98,7 +98,7 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
 	result := h.realtimeStopHistory(ctx, session)
 	h.recordAdminStopHistory(ctx, session)
-	h.notifyStoppedSession(ctx, session, result, true)
+	h.notifyStoppedSession(ctx, session, result, true, false)
 }
 
 func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) watchstate.PlaybackStopResult {

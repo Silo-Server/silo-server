@@ -482,7 +482,8 @@ type MetadataService struct {
 	libraryRoots    LibraryRootResolver
 	// localImageProvider overrides the built-in sidecar discovery in tests.
 	localImageProvider ImageProvider
-	autoCacheImages    atomic.Bool // hot-reloaded from metadata.cache_images
+	autoCacheImages    atomic.Bool  // hot-reloaded from metadata.cache_images
+	fallbackLanguage   atomic.Value // string; hot-reloaded from metadata.fallback_language
 	imageResolver      interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
@@ -2185,6 +2186,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	// Phase 4a: Seasons — resolve with "season" content level.
 	var allSeasons []SeasonResult
 	var allEpisodes []EpisodeResult
+	var seasonChain, episodeChain []Provider
 	if contentType == "series" {
 		if libraryRoots == nil {
 			libraryRoots, err = s.configuredNamingRootsForContent(ctx, req.ContentID, scopeFolderID)
@@ -2197,7 +2199,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			append(append([]string(nil), representativeFilePath), allGroupFilePaths...),
 			libraryRoots...,
 		)
-		seasonChain, err := resolveChain("season")
+		seasonChain, err = resolveChain("season")
 		if err != nil {
 			return nil, err
 		}
@@ -2247,7 +2249,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
-			accumulateSeasonResults(seasonResults, seasons)
+			accumulateSeasonResults(seasonResults, seasons, req.Language)
 		}
 		allSeasons = flattenSeasonResults(seasonResults)
 
@@ -2267,7 +2269,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		sort.Ints(episodeSeasonNumbers)
 		if len(episodeSeasonNumbers) > 0 {
-			episodeChain, err := resolveChain("episode")
+			episodeChain, err = resolveChain("episode")
 			if err != nil {
 				return nil, err
 			}
@@ -2316,8 +2318,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					if isIdentityHinter {
 						localArtworkSearched |= localArtworkEpisode
+						markLocalEpisodeTitles(episodes)
 					}
-					accumulateEpisodeResults(episodeResults, episodes)
+					accumulateEpisodeResults(episodeResults, episodes, req.Language)
 				}
 			}
 			allEpisodes = flattenEpisodeResults(episodeResults)
@@ -2343,6 +2346,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
+
+	// Text the providers lack in req.Language is fetched in the fallback
+	// language now, before persistence takes its locks.
+	req.fallback = s.fetchFallbackText(ctx, req, contentType, accumulatedIDs, accumulator, allSeasons, allEpisodes,
+		fallbackSources{item: itemChain, season: seasonChain, episode: episodeChain})
 
 	ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	if s.localArtworkUsable() {
@@ -2510,8 +2518,18 @@ func foldProviderResult(accumulator, result *MetadataResult, language, providerS
 		delete(result.ProviderIDs, key)
 	}
 	mergePreferredTitleMetadata(accumulator, result, language, providerSlug, !isIdentityHinter)
+	taglineWasEmpty := strings.TrimSpace(accumulator.Tagline) == ""
+	if preferRequestedLanguageText(&accumulator.Overview, &accumulator.OverviewLanguage, result.Overview, result.OverviewLanguage, language) &&
+		isForeignText(accumulator.Tagline, accumulator.taglineLanguage, language) {
+		// A tagline in another language goes with the overview it came with;
+		// one from another provider, such as the library's own files, stays.
+		accumulator.Tagline, accumulator.taglineLanguage = result.Tagline, result.OverviewLanguage
+	}
 	mergeProviderIDs(accumulator, result)
 	MergeMetadata(result, accumulator, nil, MergeFillEmpty)
+	if taglineWasEmpty && strings.TrimSpace(accumulator.Tagline) != "" {
+		accumulator.taglineLanguage = result.OverviewLanguage
+	}
 }
 
 func mergePreferredTitleMetadata(accumulator, result *MetadataResult, language, provider string, attributeAliases bool) {
@@ -2828,19 +2846,28 @@ func (s *MetadataService) mergeAndPersist(
 	// never flag the item again). Fall back to the non-adopting behavior in
 	// that case — keep the existing stamp and let the fetch route to the
 	// localization tables like any other non-canonical refresh.
-	adoptLanguage := req.AdoptLanguage
-	if adoptLanguage && isFieldLocked(locked, FieldName) && isFieldLocked(locked, FieldOverview) {
-		adoptLanguage = false
+	canonicalLanguage, isCanonicalWrite := canonicalMetadataLanguage(req, existingItem, locked)
+	// Read once, so artwork and text in this write follow the same setting.
+	fallbackLanguage := s.configuredFallbackLanguage()
+	switch {
+	case isCanonicalWrite:
+		// Fallback text belongs to the provider IDs it was fetched with, so it
+		// applies after persistence moved the item to another content ID too.
+		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
+		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
+		req.fallback.applyToChildren(seasons, episodes, req.Language, contentID)
+	case fallbackLanguage != "":
+		// Text a provider marked as another language is no translation: the
+		// localization row stays empty and falls back to the base row. With
+		// the fallback off the original language is wanted, so it stays.
+		if isForeignText(accumulator.Title, accumulator.TitleLanguage, req.Language) {
+			// localizedItemText leaves a fallback title out of the row.
+			accumulator.TitleIsFallback = true
+		}
+		dropForeignText(&accumulator.Overview, &accumulator.OverviewLanguage, req.Language)
+		dropForeignText(&accumulator.Tagline, &accumulator.taglineLanguage, req.Language)
+		dropForeignChildText(seasons, episodes, req.Language)
 	}
-
-	canonicalLanguage := strings.TrimSpace(req.Language)
-	if !adoptLanguage && existingItem != nil && strings.TrimSpace(existingItem.DefaultMetadataLanguage) != "" {
-		canonicalLanguage = strings.TrimSpace(existingItem.DefaultMetadataLanguage)
-	}
-	if canonicalLanguage == "" {
-		canonicalLanguage = "en"
-	}
-	isCanonicalWrite := existingItem == nil || strings.EqualFold(req.Language, canonicalLanguage)
 	// Whether the providers listed any people, before the merge below folds
 	// the stored item into the accumulator.
 	providersListPeople := len(accumulator.People) > 0
@@ -2960,7 +2987,7 @@ func (s *MetadataService) mergeAndPersist(
 			// rated or not; fill-empty would keep it over an unrated one.
 			stored = clearStoredItemArtwork(item)
 		}
-		applyBestImages(item, images, imageMode, req.Language)
+		applyBestImages(item, images, imageMode, req.Language, fallbackLanguage)
 		stored.restoreUnfilled(item)
 		if s.localArtworkUsable() || artworkLocked(item) {
 			// With local art unusable a pending local source is dropped too,
@@ -2984,7 +3011,7 @@ func (s *MetadataService) mergeAndPersist(
 	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem, keepStored)
 		dropGoneItemOnlyArtwork(localArt, item, images)
-		applyLocalArtworkFallback(item, existingItem, images, req.Language)
+		applyLocalArtworkFallback(item, existingItem, images, req.Language, fallbackLanguage)
 	}
 
 	if isNew && contentID == "" {
@@ -3043,7 +3070,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		loc := buildItemLocalizationRecord(
 			existingLoc, contentID, req.Language, contentType, localizedItemText(fetchedText, accumulator, locked), copiesOf,
-			images, mergeMode, req.Language,
+			images, mergeMode, req.Language, fallbackLanguage,
 			isFieldLocked(locked, FieldName),
 			keepStored,
 		)
@@ -4525,6 +4552,12 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
+		if strings.EqualFold(language, canonicalLanguage) {
+			s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode)
+		} else if s.configuredFallbackLanguage() != "" {
+			// Text a provider marked as another language is no translation.
+			dropForeignChildText(seasons, episodes, language)
+		}
 		persistCtx := ctx
 		if s.localArtworkUsable() {
 			persistCtx = withLocalArtworkSearched(ctx, seasonSearched|episodeSearched)
@@ -4670,7 +4703,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			if season.SeasonNumber != seasonNumber {
 				continue
 			}
-			accumulateSeasonResults(seasonResults, []SeasonResult{season})
+			accumulateSeasonResults(seasonResults, []SeasonResult{season}, language)
 		}
 	}
 	return flattenSeasonResults(seasonResults), searched, nil
@@ -4717,6 +4750,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 		}
 		if _, local := p.(IdentityHintProvider); local {
 			searched |= localArtworkEpisode
+			markLocalEpisodeTitles(episodes)
 		}
 		for _, episode := range episodes {
 			if episode.SeasonNumber != seasonNumber {
@@ -4725,7 +4759,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			if episodeNumber > 0 && episode.EpisodeNumber != episodeNumber {
 				continue
 			}
-			accumulateEpisodeResults(episodeResults, []EpisodeResult{episode})
+			accumulateEpisodeResults(episodeResults, []EpisodeResult{episode}, language)
 		}
 	}
 	return flattenEpisodeResults(episodeResults), searched, nil
@@ -4948,7 +4982,10 @@ type episodeResultKey struct {
 	episodeNumber int
 }
 
-func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []SeasonResult) {
+// accumulateSeasonResults merges a provider's seasons into accumulator,
+// earlier providers first, except that text in language replaces text a
+// provider marked as another language.
+func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []SeasonResult, language string) {
 	for _, season := range seasons {
 		existing := accumulator[season.SeasonNumber]
 		if existing == nil {
@@ -4957,6 +4994,8 @@ func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []Season
 			continue
 		}
 
+		preferRequestedLanguageText(&existing.Title, &existing.TitleLanguage, season.Title, season.TitleLanguage, language)
+		preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, season.Overview, season.OverviewLanguage, language)
 		preferLocalSeasonPoster(existing, &season)
 		MergeSeasonResult(&season, existing, MergeFillEmpty)
 	}
@@ -4980,7 +5019,9 @@ func flattenSeasonResults(accumulator map[int]*SeasonResult) []SeasonResult {
 	return results
 }
 
-func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, episodes []EpisodeResult) {
+// accumulateEpisodeResults merges a provider's episodes into accumulator the
+// way accumulateSeasonResults merges seasons.
+func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, episodes []EpisodeResult, language string) {
 	for _, episode := range episodes {
 		key := episodeResultKey{
 			seasonNumber:  episode.SeasonNumber,
@@ -4992,6 +5033,9 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			accumulator[key] = &cp
 			continue
 		}
+
+		foldEpisodeTitle(existing, episode, language)
+		preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, episode.Overview, episode.OverviewLanguage, language)
 
 		recordEpisodeStillFallback(existing, episode)
 		preferLocalEpisodeStill(existing, &episode)
@@ -5073,7 +5117,7 @@ func buildItemLocalizationRecord(
 	canonical *MetadataResult,
 	images []RemoteImage,
 	mergeMode MergeMode,
-	preferredLanguage string,
+	preferredLanguage, fallbackLanguage string,
 	titleLocked bool,
 	keepStored bool,
 ) *models.MediaItemLocalization {
@@ -5130,7 +5174,7 @@ func buildItemLocalizationRecord(
 	}
 	// Local sidecar art is language-neutral: it must not duplicate into every
 	// localization row, so local candidates only compete at the item level.
-	applyBestImages(locItem, withoutLocalImages(images), mergeMode, preferredLanguage)
+	applyBestImages(locItem, withoutLocalImages(images), mergeMode, preferredLanguage, fallbackLanguage)
 	prepareItemImagesForQueue(locItem, existingLocItem, keepStored)
 
 	loc.PosterPath = locItem.PosterPath
@@ -8511,7 +8555,7 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 			return err
 		}
 	}
-	if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, []string{fromContentID}); err != nil {
+	if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, []string{fromContentID}); err != nil {
 		return err
 	}
 
@@ -9096,7 +9140,10 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	return item
 }
 
-func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMode, preferredLang string) {
+// applyBestImages picks the item's artwork from images. preferredLang is the
+// library's metadata language; fallbackLang is metadata.fallback_language,
+// empty when it is off.
+func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMode, preferredLang, fallbackLang string) {
 	// Images arrive in provider-chain order (highest priority first).
 	// Within each language tier, the first provider with a match wins; within
 	// that provider, pick the highest-rated image.
@@ -9135,55 +9182,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		return &best{}
 	}
 
-	preferredLang = strings.TrimSpace(preferredLang)
-	languageIs := func(want string) func(RemoteImage) bool {
-		return func(img RemoteImage) bool {
-			return strings.EqualFold(strings.TrimSpace(img.Language), want)
-		}
-	}
-	hasLanguage := func(img RemoteImage) bool {
-		return strings.TrimSpace(img.Language) != ""
-	}
-	languageNeutral := func(img RemoteImage) bool {
-		return strings.TrimSpace(img.Language) == ""
-	}
-	posterHasText := func(img RemoteImage) bool {
-		if img.IncludesText != nil {
-			return *img.IncludesText
-		}
-		return hasLanguage(img)
-	}
-	posterLanguageIs := func(want string) func(RemoteImage) bool {
-		return func(img RemoteImage) bool {
-			return posterHasText(img) && strings.EqualFold(strings.TrimSpace(img.Language), want)
-		}
-	}
-	posterTextless := func(img RemoteImage) bool {
-		return !posterHasText(img)
-	}
-
-	// Posters should carry a title in the library's metadata language. English
-	// is the cross-language fallback, followed by another text-bearing poster;
-	// textless artwork is used only when no poster with text is available.
-	posterFilters := make([]func(RemoteImage) bool, 0, 4)
-	if preferredLang != "" {
-		posterFilters = append(posterFilters, posterLanguageIs(preferredLang))
-	}
-	if !strings.EqualFold(preferredLang, "en") {
-		posterFilters = append(posterFilters, posterLanguageIs("en"))
-	}
-	posterFilters = append(posterFilters, posterHasText, posterTextless)
-
-	// Logos also follow the library language. A language-neutral logo is a safer
-	// fallback than a logo explicitly tagged with an unrelated language.
-	logoFilters := make([]func(RemoteImage) bool, 0, 4)
-	if preferredLang != "" {
-		logoFilters = append(logoFilters, languageIs(preferredLang))
-	}
-	if !strings.EqualFold(preferredLang, "en") {
-		logoFilters = append(logoFilters, languageIs("en"))
-	}
-	logoFilters = append(logoFilters, languageNeutral, hasLanguage)
+	posterFilters, logoFilters := artworkLanguageFilters(preferredLang, fallbackLang)
 
 	bestByType := map[ImageType]*best{
 		ImagePoster: selectBest(ImagePoster, posterFilters),
@@ -9191,7 +9190,7 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		// language-neutral backgrounds win. A tagged backdrop is still better
 		// than none, so it stays as the terminal tier: items whose backdrops
 		// are all language-tagged must not end up with no backdrop at all.
-		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{languageNeutral, hasLanguage}),
+		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{imageLanguageNeutral, imageHasLanguage}),
 		ImageLogo:     selectBest(ImageLogo, logoFilters),
 		// Banners, thumbs, clear art and disc art usually carry the title, so
 		// they follow the library language like logos.
@@ -9237,6 +9236,67 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		}
 		applyIfBetter(field.path, bestByType[field.imageType])
 	}
+}
+
+func imageLanguageIs(want string) func(RemoteImage) bool {
+	return func(img RemoteImage) bool {
+		return strings.EqualFold(strings.TrimSpace(img.Language), want)
+	}
+}
+
+func imageHasLanguage(img RemoteImage) bool {
+	return strings.TrimSpace(img.Language) != ""
+}
+
+func imageLanguageNeutral(img RemoteImage) bool {
+	return strings.TrimSpace(img.Language) == ""
+}
+
+func posterHasText(img RemoteImage) bool {
+	if img.IncludesText != nil {
+		return *img.IncludesText
+	}
+	return imageHasLanguage(img)
+}
+
+func posterTextless(img RemoteImage) bool {
+	return !posterHasText(img)
+}
+
+func posterLanguageIs(want string) func(RemoteImage) bool {
+	return func(img RemoteImage) bool {
+		return posterHasText(img) && strings.EqualFold(strings.TrimSpace(img.Language), want)
+	}
+}
+
+// artworkLanguageFilters returns the tiers applyBestImages tries, in order,
+// for posters and for logo-like artwork. Artwork with text follows the
+// library's metadata language, then the fallback language, then English as
+// the cross-language fallback.
+func artworkLanguageFilters(preferredLang, fallbackLang string) (posters, logos []func(RemoteImage) bool) {
+	fallbackLang = strings.TrimSpace(fallbackLang)
+	textLanguages := make([]string, 0, 3)
+	for _, language := range []string{strings.TrimSpace(preferredLang), fallbackLang, "en"} {
+		if language != "" && !slices.ContainsFunc(textLanguages, func(seen string) bool { return strings.EqualFold(seen, language) }) {
+			textLanguages = append(textLanguages, language)
+		}
+	}
+	for _, language := range textLanguages {
+		posters = append(posters, posterLanguageIs(language))
+		logos = append(logos, imageLanguageIs(language))
+	}
+	// With the fallback on, textless artwork beats a poster titled in another
+	// language (usually the original one, which the fallback exists to
+	// avoid); with it off, any text-bearing poster beats textless artwork.
+	if fallbackLang != "" {
+		posters = append(posters, posterTextless, posterHasText)
+	} else {
+		posters = append(posters, posterHasText, posterTextless)
+	}
+	// A language-neutral logo is a safer fallback than a logo explicitly
+	// tagged with an unrelated language.
+	logos = append(logos, imageLanguageNeutral, imageHasLanguage)
+	return posters, logos
 }
 
 // isWordmarkLogoCandidate rejects clear art offered as a logo. Clear art is an

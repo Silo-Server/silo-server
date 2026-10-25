@@ -3,8 +3,10 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -303,62 +305,68 @@ func TestHandleItems_SeriesParentWithSeasonIDsListsSeasons(t *testing.T) {
 	}
 }
 
+// TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons pages a series'
+// seasons, including with a Limit large enough that StartIndex+Limit overflows.
 func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
 	codec := NewResourceIDCodec()
 	seriesContentID := "series-1"
 	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{
-			{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10},
-			{ContentID: "season-2", SeasonNumber: 2, Title: "Season 2", EpisodeCount: 8},
-		},
-	}
+	for _, limit := range []string{"1", strconv.Itoa(math.MaxInt)} {
+		t.Run("Limit="+limit, func(t *testing.T) {
+			contentSvc := &countingContentService{
+				seasons: []upstreamSeason{
+					{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10},
+					{ContentID: "season-2", SeasonNumber: 2, Title: "Season 2", EpisodeCount: 8},
+				},
+			}
 
-	h := &ItemsHandler{
-		content:  contentSvc,
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		images:   NewImageCache(time.Hour, time.Now),
-	}
+			h := &ItemsHandler{
+				content:  contentSvc,
+				userData: &mockUserDataService{},
+				codec:    codec,
+				mapper:   newMapper(codec, &config.Config{}),
+				images:   NewImageCache(time.Hour, time.Now),
+			}
 
-	req := httptest.NewRequest("GET", "/Users/test/Items?ParentId="+encodedSeriesID+
-		"&IncludeItemTypes=Season&Recursive=false&SortBy=IndexNumber&SortOrder=Ascending"+
-		"&Fields=PrimaryImageAspectRatio,CanDelete&StartIndex=1&Limit=1", nil)
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
-		StreamAppUserID: 1,
-		ProfileID:       "profile-1",
-	}))
+			req := httptest.NewRequest("GET", "/Users/test/Items?ParentId="+encodedSeriesID+
+				"&IncludeItemTypes=Season&Recursive=false&SortBy=IndexNumber&SortOrder=Ascending"+
+				"&Fields=PrimaryImageAspectRatio,CanDelete&StartIndex=1&Limit="+limit, nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+				StreamAppUserID: 1,
+				ProfileID:       "profile-1",
+			}))
 
-	rec := httptest.NewRecorder()
-	h.HandleItems(rec, req)
+			rec := httptest.NewRecorder()
+			h.HandleItems(rec, req)
 
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if contentSvc.listSeasonsCalls != 1 || contentSvc.listSeasonsSeries != seriesContentID {
-		t.Fatalf("ListSeasons calls = %d for %q, want 1 for %q",
-			contentSvc.listSeasonsCalls, contentSvc.listSeasonsSeries, seriesContentID)
-	}
+			if rec.Code != 200 {
+				t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+			}
+			if contentSvc.listSeasonsCalls != 1 || contentSvc.listSeasonsSeries != seriesContentID {
+				t.Fatalf("ListSeasons calls = %d for %q, want 1 for %q",
+					contentSvc.listSeasonsCalls, contentSvc.listSeasonsSeries, seriesContentID)
+			}
 
-	var result queryResultDTO
-	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if result.TotalRecordCount != 2 || result.StartIndex != 1 {
-		t.Fatalf("TotalRecordCount/StartIndex = %d/%d, want 2/1",
-			result.TotalRecordCount, result.StartIndex)
-	}
-	if len(result.Items) != 1 {
-		t.Fatalf("len(Items) = %d, want 1", len(result.Items))
-	}
-	item := result.Items[0]
-	if item.Type != "Season" || item.Name != "Season 2" {
-		t.Fatalf("item = {%q %q}, want Season/Season 2", item.Type, item.Name)
-	}
-	if item.ParentID != encodedSeriesID || item.SeriesID != encodedSeriesID {
-		t.Fatalf("ParentID/SeriesID = %q/%q, want %q/%q",
-			item.ParentID, item.SeriesID, encodedSeriesID, encodedSeriesID)
+			var result queryResultDTO
+			if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if result.TotalRecordCount != 2 || result.StartIndex != 1 {
+				t.Fatalf("TotalRecordCount/StartIndex = %d/%d, want 2/1",
+					result.TotalRecordCount, result.StartIndex)
+			}
+			if len(result.Items) != 1 {
+				t.Fatalf("len(Items) = %d, want 1", len(result.Items))
+			}
+			item := result.Items[0]
+			if item.Type != "Season" || item.Name != "Season 2" {
+				t.Fatalf("item = {%q %q}, want Season/Season 2", item.Type, item.Name)
+			}
+			if item.ParentID != encodedSeriesID || item.SeriesID != encodedSeriesID {
+				t.Fatalf("ParentID/SeriesID = %q/%q, want %q/%q",
+					item.ParentID, item.SeriesID, encodedSeriesID, encodedSeriesID)
+			}
+		})
 	}
 }
 
@@ -636,5 +644,50 @@ func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
 
 	if rec.Code != 404 {
 		t.Fatalf("expected status 404 for unknown SeasonId; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Jellyfin SDK getMediaFolders() (Maintainerr's library discovery) reads the
+// caller's libraries from /Library/MediaFolders as a QueryResult of
+// CollectionFolder items whose Ids match /UserViews.
+func TestMediaFoldersListsVisibleLibrariesAsCollectionFolders(t *testing.T) {
+	collections := &fakeCollectionSource{collections: []*models.LibraryCollection{{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 1}}}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+		{ID: 2, Name: "Shows", Type: "series"},
+	}, nil)
+	req := httptest.NewRequest("GET", "/Library/MediaFolders", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	rec := httptest.NewRecorder()
+	h.HandleMediaFolders(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("MediaFolders: %d %s", rec.Code, rec.Body.String())
+	}
+	var result queryResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ id, name, collectionType string }{
+		{h.codec.EncodeIntID(EncodedIDLibrary, 1), "Movies", "movies"},
+		{h.codec.EncodeIntID(EncodedIDLibrary, 2), "Shows", "tvshows"},
+	}
+	if result.TotalRecordCount != len(want) || len(result.Items) != len(want) {
+		t.Fatalf("got %d items (total %d), want %d: %s", len(result.Items), result.TotalRecordCount, len(want), rec.Body.String())
+	}
+	for i, w := range want {
+		got := result.Items[i]
+		if got.ID != w.id || got.Name != w.name || got.CollectionType != w.collectionType || got.Type != "CollectionFolder" || !got.IsFolder {
+			t.Fatalf("item %d = %+v, want Id %s Name %s CollectionType %s CollectionFolder", i, got, w.id, w.name, w.collectionType)
+		}
+	}
+
+	// Silo has no hidden media folders: isHidden=true lists none.
+	req = httptest.NewRequest("GET", "/Library/MediaFolders?isHidden=true", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	rec = httptest.NewRecorder()
+	h.HandleMediaFolders(rec, req)
+	var hidden queryResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &hidden); err != nil || rec.Code != 200 || hidden.Items == nil || len(hidden.Items) != 0 || hidden.TotalRecordCount != 0 {
+		t.Fatalf("MediaFolders?isHidden=true: %d %s", rec.Code, rec.Body.String())
 	}
 }

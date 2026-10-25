@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 const setupMediaTypeJSON = "application/json"
@@ -231,11 +232,17 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 	}
 	pair, user, err := h.service.LoginWithProvider(ctx, in.Provider, in.Username, in.Password, in.DeviceName, in.IP)
 	if err != nil {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			return TokenPairView{}, signInThrottledError(throttled)
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
 		}
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
@@ -278,6 +285,9 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		case errors.Is(err, auth.ErrUserDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
 		}
@@ -289,6 +299,15 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		ExpiresIn:    pair.ExpiresIn,
 		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
+}
+
+// signInThrottledError is the 429 for a name that has used its sign-in
+// attempt budget: rate_limited on v1, as for a locked profile PIN, and the
+// rate_limited problem on v2. Both send Retry-After.
+func signInThrottledError(err *auth.SignInThrottledError) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many failed sign-ins for this name. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(err.RetryAfter)
+	return e
 }
 
 // externalSignInError maps the refusals of the local-password policy and of

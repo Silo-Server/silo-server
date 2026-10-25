@@ -103,3 +103,52 @@ func TestOrderedApplePushTransport(t *testing.T) {
 		t.Fatal("absent registration", r.Code)
 	}
 }
+
+type fakeApplePushRetirement struct {
+	calls int
+	cmd   notifications.ApplePushRetirement
+	err   error
+}
+
+func (*fakeApplePushRetirement) ApplePushRetirementAvailable() bool { return true }
+func (f *fakeApplePushRetirement) RetireApplePush(_ context.Context, cmd notifications.ApplePushRetirement) (notifications.ApplePushReceipt, error) {
+	f.calls++
+	f.cmd = cmd
+	return notifications.ApplePushReceipt{Generation: cmd.Generation, Removed: true}, f.err
+}
+
+// The app calls retirement after it has discarded its login session, so the
+// route must answer on the installation key alone.
+func TestApplePushRetirementTransportNeedsNoSession(t *testing.T) {
+	f := new(fakeApplePushRetirement)
+	deps := pilotDeps(nil, nil)
+	deps.ApplePushRetirement = f
+	h := NewHandler(deps)
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	headers := map[string]string{"X-Push-Installation-Key": key, "X-Push-Generation": "9007199254740993"}
+	path, body := Prefix+"/devices/push/apple/retire", `{"device_id":"install"}`
+	r := do(t, h, http.MethodPost, path, body, headers)
+	if r.Code != 200 || strings.TrimSpace(r.Body.String()) != `{"generation":"9007199254740993","removed":true}` || f.cmd != (notifications.ApplePushRetirement{DeviceID: "install", InstallationKey: key, Generation: 9007199254740993}) {
+		t.Fatalf("%d %s %+v", r.Code, r.Body.String(), f.cmd)
+	}
+	for _, bad := range []string{"0", "01", "9223372036854775808"} {
+		before := f.calls
+		r = do(t, h, http.MethodPost, path, body, with(headers, "X-Push-Generation", bad))
+		if r.Code != 422 || f.calls != before {
+			t.Fatalf("generation=%q status=%d", bad, r.Code)
+		}
+	}
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{{notifications.ErrPushGenerationConflict, 409}, {notifications.ErrPushInstallationProof, 403}, {notifications.ErrPushDeviceInvalid, 422}, {notifications.ErrPushDeviceUnavailable, 503}} {
+		f.err = tc.err
+		if r = do(t, h, http.MethodPost, path, body, headers); r.Code != tc.status {
+			t.Fatalf("error=%v status=%d", tc.err, r.Code)
+		}
+	}
+	deps.ApplePushRetirement = nil
+	if r = do(t, NewHandler(deps), http.MethodPost, path, body, headers); r.Code != 503 {
+		t.Fatal("absent retirement", r.Code)
+	}
+}

@@ -7,7 +7,7 @@ import { RuleBuilder, RuleSortField } from "./RuleBuilder";
 
 vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
-  useExtendedQueryRules: () => true,
+  useQueryRuleCapabilities: () => ({ extendedRules: true, showTitleRules: true }),
 }));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),

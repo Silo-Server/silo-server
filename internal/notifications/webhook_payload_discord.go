@@ -85,7 +85,7 @@ type discordWebhookBody struct {
 // policy (description first, then drop fields right-to-left).
 func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 	return json.Marshal(discordWebhookBody{
-		Embeds:   []discordEmbed{buildDiscordEmbed(row, test)},
+		Embeds:   []discordEmbed{buildDiscordDigestEntry(row, test).embed},
 		Username: siloSenderName,
 	})
 }
@@ -101,19 +101,21 @@ type discordDMBody struct {
 }
 
 // BuildDiscordDMPayload renders one account's pending deliveries as a single
-// bot DM, one embed per item up to Discord's 10-embed cap. Overflow keeps the
-// newest items and points at the Silo inbox for the rest, mirroring the email
-// digest's rendering cap.
+// bot DM, one embed per item up to Discord's 10-embed cap and the message's
+// 6,000-character budget. Overflow keeps the newest items and points at the
+// Silo inbox for the rest, mirroring the email digest's rendering cap.
 func BuildDiscordDMPayload(rows []DeliveryRow) ([]byte, error) {
 	overflow := 0
 	if len(rows) > discordDMMaxEmbeds {
 		overflow = len(rows) - discordDMMaxEmbeds
 		rows = rows[len(rows)-discordDMMaxEmbeds:]
 	}
-	embeds := make([]discordEmbed, 0, len(rows))
+	entries := make([]discordDigestEntry, 0, len(rows))
 	for _, row := range rows {
-		embeds = append(embeds, buildDiscordEmbed(row, false))
+		entries = append(entries, buildDiscordDigestEntry(row, false))
 	}
+	embeds, dropped := fitDiscordMessage(entries)
+	overflow += dropped
 	body := discordDMBody{Embeds: embeds}
 	if overflow > 0 {
 		body.Content = fmt.Sprintf("…and %d more in your Silo inbox", overflow)
@@ -153,11 +155,11 @@ func discordEmbedFooterText(contentRating string, test bool) string {
 	return siloSenderName
 }
 
-// buildDiscordEmbed renders one delivery as a Discord embed within all of
-// Discord's per-embed limits: poster thumbnail, overview teaser, provider
+// buildDiscordDigestEntry renders one delivery as a Discord embed within all
+// of Discord's per-embed limits: poster thumbnail, overview teaser, provider
 // links, rating, and genres on top of the title/reason basics. The
 // season/episode code lives in the title, so no dedicated fields repeat it.
-func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
+func buildDiscordDigestEntry(row DeliveryRow, test bool) discordDigestEntry {
 	flags := parseReasonFlags(row.ReasonFlags)
 
 	// Titles assembled from catalog metadata virtually never approach the
@@ -217,13 +219,12 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 		color = serverChannelColorDeclined
 	}
 	embed := discordEmbed{
-		Title:       title,
-		URL:         ids.titleURL(),
-		Description: embedDescription(overview, ids),
-		Color:       color,
-		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row)},
-		Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
-		Fields:      fields,
+		Title:  title,
+		URL:    ids.titleURL(),
+		Color:  color,
+		Author: &discordEmbedAuthor{Name: discordEmbedAuthorLine(row)},
+		Footer: &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
+		Fields: fields,
 	}
 	// The poster decision (provider CDN vs presigned vs none) is the sender
 	// layer's: builders render whatever PosterURL carries.
@@ -233,8 +234,7 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 	if !row.CreatedAt.IsZero() {
 		embed.Timestamp = row.CreatedAt.UTC().Format(time.RFC3339)
 	}
-	enforceDiscordTotalLimit(&embed)
-	return embed
+	return newDiscordDigestEntry(embed, overview, ids)
 }
 
 func discordEmbedTitle(row DeliveryRow) string {
@@ -290,18 +290,29 @@ func discordEmbedColor(flags ReasonFlags) int {
 	}
 }
 
-func discordEmbedTotal(embed *discordEmbed) int {
-	total := len(embed.Title) + len(embed.Description)
+// discordEmbedLen sums length over the embed text Discord's 6,000-character
+// limit counts: title, description, field names and values, footer, and
+// author name.
+func discordEmbedLen(embed *discordEmbed, length func(string) int) int {
+	total := length(embed.Title) + length(embed.Description)
 	if embed.Author != nil {
-		total += len(embed.Author.Name)
+		total += length(embed.Author.Name)
 	}
 	if embed.Footer != nil {
-		total += len(embed.Footer.Text)
+		total += length(embed.Footer.Text)
 	}
 	for _, field := range embed.Fields {
-		total += len(field.Name) + len(field.Value)
+		total += length(field.Name) + length(field.Value)
 	}
 	return total
+}
+
+func byteLen(s string) int { return len(s) }
+
+// discordEmbedTotal counts in bytes, which never undercounts Discord's
+// characters.
+func discordEmbedTotal(embed *discordEmbed) int {
+	return discordEmbedLen(embed, byteLen)
 }
 
 // enforceDiscordTotalLimit applies the 6,000-char total cap: truncate the
@@ -319,6 +330,106 @@ func enforceDiscordTotalLimit(embed *discordEmbed) {
 	}
 	for discordEmbedTotal(embed) > discordTotalLimit && len(embed.Fields) > 0 {
 		embed.Fields = embed.Fields[:len(embed.Fields)-1]
+	}
+}
+
+// discordDigestEntry is one digest embed plus the parts of its description,
+// so the message budget can shorten the overview teaser without cutting the
+// provider link line.
+type discordDigestEntry struct {
+	embed  discordEmbed
+	teaser string
+	links  string
+}
+
+// newDiscordDigestEntry sets the embed's description from the overview and
+// provider links and applies the per-embed limits.
+func newDiscordDigestEntry(embed discordEmbed, overview string, ids providerIDs) discordDigestEntry {
+	entry := discordDigestEntry{embed: embed, teaser: overviewSnippet(overview), links: ids.linkLine()}
+	entry.embed.Description = joinDescription(entry.teaser, entry.links)
+	enforceDiscordTotalLimit(&entry.embed)
+	return entry
+}
+
+// discordMinTeaser is the shortest overview teaser worth sending; below it the
+// message budget drops teasers entirely.
+const discordMinTeaser = 80
+
+// discordTextLen counts characters for Discord's limits: code points, with
+// characters outside the Basic Multilingual Plane (most emoji) counted twice
+// so the count is safe whether Discord counts code points or UTF-16 units.
+func discordTextLen(s string) int {
+	n := 0
+	for _, r := range s {
+		n++
+		if r > 0xFFFF {
+			n++
+		}
+	}
+	return n
+}
+
+// discordMessageChars counts embed text across a whole message, the scope of
+// Discord's 6,000-character limit.
+func discordMessageChars(embeds []discordEmbed) int {
+	total := 0
+	for i := range embeds {
+		total += discordEmbedLen(&embeds[i], discordTextLen)
+	}
+	return total
+}
+
+// renderDiscordDigest returns the entries' embeds with every overview teaser
+// clipped to teaserLimit characters; a negative limit leaves teasers whole.
+func renderDiscordDigest(entries []discordDigestEntry, teaserLimit int) []discordEmbed {
+	embeds := make([]discordEmbed, 0, len(entries))
+	for _, entry := range entries {
+		embed := entry.embed
+		if teaserLimit >= 0 {
+			// Only ever shorten: the per-embed limits may already have cut
+			// this description below what the parts would rebuild.
+			if description := joinDescription(shortenTeaser(entry.teaser, teaserLimit), entry.links); len(description) < len(embed.Description) {
+				embed.Description = description
+			}
+		}
+		embeds = append(embeds, embed)
+	}
+	return embeds
+}
+
+// fitDiscordMessage applies Discord's 6,000-character limit to a whole
+// multi-embed message. Teasers shorten first, as evenly as the budget allows;
+// when even teaser-less embeds don't fit, the oldest entry drops. The newest
+// entry always stays (one embed already fits on its own). Returns the embeds
+// to send and how many entries were dropped.
+func fitDiscordMessage(entries []discordDigestEntry) ([]discordEmbed, int) {
+	for dropped := 0; ; dropped++ {
+		fits := func(teaserLimit int) ([]discordEmbed, bool) {
+			embeds := renderDiscordDigest(entries, teaserLimit)
+			return embeds, discordMessageChars(embeds) <= discordTotalLimit
+		}
+		if embeds, ok := fits(-1); ok {
+			return embeds, dropped
+		}
+		// The total shrinks with the teaser limit, so search for the
+		// longest limit that fits; only a checked limit is ever returned.
+		lo, hi, best := discordMinTeaser, discordOverviewLimit, -1
+		for lo <= hi {
+			mid := (lo + hi) / 2
+			if _, ok := fits(mid); ok {
+				best, lo = mid, mid+1
+			} else {
+				hi = mid - 1
+			}
+		}
+		if best >= 0 {
+			embeds, _ := fits(best)
+			return embeds, dropped
+		}
+		if embeds, ok := fits(0); ok || len(entries) == 1 {
+			return embeds, dropped
+		}
+		entries = entries[1:]
 	}
 }
 

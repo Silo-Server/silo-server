@@ -56,7 +56,7 @@ type RequestMediaResult struct {
 	Overview         string            `json:"overview,omitempty"`
 	PosterPath       string            `json:"poster_path,omitempty" doc:"TMDB image path" example:"/abc.jpg"`
 	BackdropPath     string            `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	ReleaseDate      string            `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
+	ReleaseDate      string            `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
 	Popularity       float64           `json:"popularity,omitempty"`
 	VoteAverage      float64           `json:"vote_average,omitempty"`
 	Availability     string            `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
@@ -85,7 +85,7 @@ type RequestMediaDetail struct {
 	Overview            string                   `json:"overview,omitempty"`
 	PosterPath          string                   `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath        string                   `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	ReleaseDate         string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	ReleaseDate         string                   `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Year                int                      `json:"year,omitempty" example:"1995"`
 	Runtime             int                      `json:"runtime,omitempty" doc:"Minutes" example:"170"`
 	Genres              []string                 `json:"genres" doc:"Empty, never null"`
@@ -97,8 +97,8 @@ type RequestMediaDetail struct {
 	ProductionCompanies []string                 `json:"production_companies" doc:"Empty, never null"`
 	NumberOfSeasons     int                      `json:"number_of_seasons,omitempty"`
 	NumberOfEpisodes    int                      `json:"number_of_episodes,omitempty"`
-	FirstAirDate        string                   `json:"first_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	LastAirDate         string                   `json:"last_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	FirstAirDate        string                   `json:"first_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
+	LastAirDate         string                   `json:"last_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Networks            []string                 `json:"networks" doc:"Empty, never null"`
 	Cast                []RequestMediaCastMember `json:"cast" doc:"Empty, never null"`
 	Director            string                   `json:"director,omitempty"`
@@ -116,7 +116,7 @@ type RequestMediaSeason struct {
 	SeasonNumber int    `json:"season_number" example:"2"`
 	Name         string `json:"name,omitempty" example:"Season 2"`
 	EpisodeCount int    `json:"episode_count" doc:"Episodes TMDB lists for the season, aired or not" example:"10"`
-	AirDate      string `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
+	AirDate      string `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"2025-01-17"`
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	Availability string `json:"availability" enum:"missing,partial,available" doc:"Whether every aired episode is in the library" example:"partial"`
 	Requested    bool   `json:"requested" doc:"The title's active request covers this season"`
@@ -160,7 +160,7 @@ type DiscoverBrand struct {
 	TMDBID          int     `json:"tmdb_id,omitempty" doc:"TMDB identifier (external, not a Silo ID)" example:"420"`
 	Slug            string  `json:"slug" example:"marvel-studios"`
 	DisplayName     string  `json:"display_name" example:"Marvel Studios"`
-	LogoURL         *string `json:"logo_url,omitempty" nullable:"true"`
+	LogoURL         *string `json:"logo_url,omitempty" format:"uri" nullable:"true"`
 	GradientFrom    string  `json:"gradient_from,omitempty" example:"#1a1a2e"`
 	GradientTo      string  `json:"gradient_to,omitempty" example:"#16213e"`
 	SeriesSupported bool    `json:"series_supported,omitempty" doc:"Whether the brand can be browsed for series"`
@@ -176,7 +176,7 @@ type DiscoverBrowsePage struct {
 	Kind        string               `json:"kind" doc:"studio, network, or genre" example:"studio"`
 	Slug        string               `json:"slug" example:"marvel-studios"`
 	DisplayName string               `json:"display_name" example:"Marvel Studios"`
-	LogoURL     *string              `json:"logo_url,omitempty" nullable:"true"`
+	LogoURL     *string              `json:"logo_url,omitempty" format:"uri" nullable:"true"`
 	MediaType   string               `json:"media_type" doc:"movie or series" example:"movie"`
 	Sort        string               `json:"sort" example:"popularity"`
 	Page        int                  `json:"page" example:"1"`
@@ -923,7 +923,7 @@ func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaRe
 	for _, r := range results {
 		out = append(out, RequestMediaResult{
 			MediaType: string(r.MediaType), TMDBID: r.TMDBID, Title: r.Title, Year: r.Year, Overview: r.Overview,
-			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: r.ReleaseDate,
+			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: calendarDate(r.ReleaseDate),
 			Popularity: r.Popularity, VoteAverage: r.VoteAverage, Availability: string(r.Availability),
 			LibraryContentID: r.LibraryContentID, Request: requestMediaStateOf(r.Request),
 		})
@@ -943,11 +943,11 @@ func requestMediaDetailOf(d *mediarequests.MediaDetail) RequestMediaDetail {
 	return RequestMediaDetail{
 		MediaType: string(d.MediaType), TMDBID: d.TMDBID, IMDbID: d.IMDbID, TVDBID: d.TVDBID,
 		Title: d.Title, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, Overview: d.Overview,
-		PosterPath: d.PosterPath, BackdropPath: d.BackdropPath, ReleaseDate: d.ReleaseDate, Year: d.Year,
+		PosterPath: d.PosterPath, BackdropPath: d.BackdropPath, ReleaseDate: calendarDate(d.ReleaseDate), Year: d.Year,
 		Runtime: d.Runtime, Genres: NonNil(d.Genres), VoteAverage: d.VoteAverage, VoteCount: d.VoteCount,
 		Status: d.Status, Homepage: d.Homepage, ContentRating: d.ContentRating,
 		ProductionCompanies: NonNil(d.ProductionCompanies), NumberOfSeasons: d.NumberOfSeasons,
-		NumberOfEpisodes: d.NumberOfEpisodes, FirstAirDate: d.FirstAirDate, LastAirDate: d.LastAirDate,
+		NumberOfEpisodes: d.NumberOfEpisodes, FirstAirDate: calendarDate(d.FirstAirDate), LastAirDate: calendarDate(d.LastAirDate),
 		Networks: NonNil(d.Networks), Cast: cast, Director: d.Director, Creators: NonNil(d.Creators),
 		Recommendations: requestMediaResultsOf(d.Recommendations), Availability: string(d.Availability),
 		LibraryContentID: d.LibraryContentID, Request: requestMediaStateOf(d.Request),
@@ -959,7 +959,7 @@ func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMedia
 	out := make([]RequestMediaSeason, 0, len(seasons))
 	for _, s := range seasons {
 		out = append(out, RequestMediaSeason{
-			SeasonNumber: s.Number, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: s.AirDate,
+			SeasonNumber: s.Number, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: calendarDate(s.AirDate),
 			PosterPath: s.PosterPath, Availability: string(s.Availability), Requested: s.Requested,
 		})
 	}

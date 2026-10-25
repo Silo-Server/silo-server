@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -30,16 +32,30 @@ func newPINLimitStore(t *testing.T) userstore.UserStore {
 	t.Helper()
 	store := newProfileTestStore(t)
 	ctx := context.Background()
-	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: ptr("1234")}); err != nil {
+	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PINHash: storedPIN(t, "1234")}); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Kid"}); err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
-	if err := store.UpdateProfile(ctx, "profile-2", userstore.UpdateProfileInput{PIN: ptr("5678")}); err != nil {
+	if err := store.UpdateProfile(ctx, "profile-2", userstore.UpdateProfileInput{PINHash: storedPIN(t, "5678")}); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
 	return store
+}
+
+// storedPIN is a profile PIN as the profile handlers store it: its bcrypt
+// hash, or "" for none.
+func storedPIN(t *testing.T, pin string) *string {
+	t.Helper()
+	if pin == "" {
+		return new("")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return new(string(hash))
 }
 
 func postVerifyPIN(t *testing.T, h *ProfileHandler, profileID, pin string) *httptest.ResponseRecorder {

@@ -16,6 +16,10 @@ const requestHostKey contextKey = "request_host"
 // it, before Middleware overwrote RemoteAddr with the resolved client IP.
 const peerIPKey contextKey = "peer_addr"
 
+// forwardedClientUnknownKey marks a request whose resolved client IP is a
+// forwarder's own address; see ForwardedClientUnknown.
+const forwardedClientUnknownKey contextKey = "forwarded_client_unknown"
+
 // Middleware returns chi-compatible middleware that resolves the client IP
 // and stores it in the request context. It also overwrites r.RemoteAddr so
 // that downstream middleware (e.g. chi's Logger) and any code reading
@@ -32,12 +36,16 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 			peer := r.RemoteAddr
 			scheme := resolver.requestScheme(r)
 			host := resolver.requestHost(r)
-			ip := resolver.ClientIP(r)
+			resolved, clientUnknown := resolver.resolve(r)
+			ip := normalize(resolved)
 			r.RemoteAddr = ip
 			ctx := context.WithValue(r.Context(), clientIPKey, ip)
 			ctx = context.WithValue(ctx, requestSchemeKey, scheme)
 			ctx = context.WithValue(ctx, requestHostKey, host)
 			ctx = context.WithValue(ctx, peerIPKey, peer)
+			if clientUnknown {
+				ctx = context.WithValue(ctx, forwardedClientUnknownKey, true)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -48,6 +56,17 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 func FromContext(ctx context.Context) string {
 	ip, _ := ctx.Value(clientIPKey).(string)
 	return ip
+}
+
+// ForwardedClientUnknown reports whether the request was forwarded for a
+// client the resolver could not identify, so FromContext holds a forwarder's
+// own address. That happens when a peer outside the trusted proxies sends
+// forwarding headers, when a trusted proxy names an untrusted hop that itself
+// forwarded for someone, and when a trusted proxy's headers name no usable
+// address. False when Middleware did not run.
+func ForwardedClientUnknown(ctx context.Context) bool {
+	unknown, _ := ctx.Value(forwardedClientUnknownKey).(bool)
+	return unknown
 }
 
 // PeerFromContext returns the transport peer address (host:port, as the

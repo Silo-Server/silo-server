@@ -197,8 +197,8 @@ func TestSeasonAndEpisodeResultsKeepDisplacedRemoteArtwork(t *testing.T) {
 			seasons := map[int]*SeasonResult{}
 			episodes := map[episodeResultKey]*EpisodeResult{}
 			for _, path := range tc.order {
-				accumulateSeasonResults(seasons, []SeasonResult{{SeasonNumber: 1, PosterPath: path}})
-				accumulateEpisodeResults(episodes, []EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, StillPath: path}})
+				accumulateSeasonResults(seasons, []SeasonResult{{SeasonNumber: 1, PosterPath: path}}, "")
+				accumulateEpisodeResults(episodes, []EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, StillPath: path}}, "")
 			}
 			season := seasons[1]
 			if season.PosterPath != local || season.remotePosterPath != "tmdb://season-1.jpg" {
@@ -222,7 +222,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("empty slot waiting on its local copy", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster, BackdropPath: "tmdb/movie/1/backdrop.webp", BackdropSourcePath: "tmdb://backdrop.jpg"}
-		applyLocalArtworkFallback(item, nil, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en", "")
 		if item.PosterPath != "tmdb://poster.jpg" || item.PosterSourcePath != localPoster {
 			t.Fatalf("poster = %q from %q, want the remote stand-in with the local source kept", item.PosterPath, item.PosterSourcePath)
 		}
@@ -233,7 +233,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("cached copy already showing", func(t *testing.T) {
 		item := &models.MediaItem{PosterPath: "local/movie/1/abcd1234/poster/w500.webp", PosterSourcePath: localPoster}
-		applyLocalArtworkFallback(item, nil, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en", "")
 		if item.PosterPath != "local/movie/1/abcd1234/poster/w500.webp" {
 			t.Fatalf("poster = %q, want the cached copy kept", item.PosterPath)
 		}
@@ -241,7 +241,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("locked artwork", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster, LockedFields: []int{int(FieldImages)}}
-		applyLocalArtworkFallback(item, nil, images, "en")
+		applyLocalArtworkFallback(item, nil, images, "en", "")
 		if item.PosterPath != "" {
 			t.Fatalf("poster = %q, want no stand-in under an artwork lock", item.PosterPath)
 		}
@@ -254,7 +254,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("local re-apply keeps the served remote image", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster}
-		applyLocalArtworkFallback(item, servedItem, localOnly, "en")
+		applyLocalArtworkFallback(item, servedItem, localOnly, "en", "")
 		if item.PosterPath != "tmdb://served.jpg" || item.PosterThumbhash != "served-hash" || item.PosterSourcePath != localPoster {
 			t.Fatalf("poster = %q (thumbhash %q) from %q, want the served image as the stand-in", item.PosterPath, item.PosterThumbhash, item.PosterSourcePath)
 		}
@@ -262,7 +262,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("a remote candidate outranks the served image", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster}
-		applyLocalArtworkFallback(item, servedItem, images, "en")
+		applyLocalArtworkFallback(item, servedItem, images, "en", "")
 		if item.PosterPath != "tmdb://poster.jpg" || item.PosterThumbhash != "" {
 			t.Fatalf("poster = %q (thumbhash %q), want the refresh's best remote image", item.PosterPath, item.PosterThumbhash)
 		}
@@ -270,7 +270,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("nothing served and nothing remote", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: localPoster}
-		applyLocalArtworkFallback(item, &models.MediaItem{}, localOnly, "en")
+		applyLocalArtworkFallback(item, &models.MediaItem{}, localOnly, "en", "")
 		if item.PosterPath != "" {
 			t.Fatalf("poster = %q, want the slot empty until the copy lands", item.PosterPath)
 		}
@@ -279,13 +279,13 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 	t.Run("served clear art never stands in for the logo", func(t *testing.T) {
 		const clearArt = "tvdb://banners/v4/series/1/clearart/art.png"
 		item := &models.MediaItem{LogoSourcePath: "file:///media/Film/clearlogo.png?v=1-1"}
-		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: clearArt, LogoSourcePath: clearArt}, localOnly, "en")
+		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: clearArt, LogoSourcePath: clearArt}, localOnly, "en", "")
 		if item.LogoPath != "" {
 			t.Fatalf("logo = %q, want no clear-art stand-in", item.LogoPath)
 		}
 		const wordmark = "tmdb://logo/wordmark.png"
 		item = &models.MediaItem{LogoSourcePath: "file:///media/Film/clearlogo.png?v=1-1"}
-		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: wordmark, LogoSourcePath: wordmark}, localOnly, "en")
+		applyLocalArtworkFallback(item, &models.MediaItem{LogoPath: wordmark, LogoSourcePath: wordmark}, localOnly, "en", "")
 		if item.LogoPath != wordmark {
 			t.Fatalf("logo = %q, want the served wordmark as the stand-in", item.LogoPath)
 		}
@@ -293,7 +293,7 @@ func TestApplyLocalArtworkFallback(t *testing.T) {
 
 	t.Run("an NFO image URL gets no stand-in", func(t *testing.T) {
 		item := &models.MediaItem{PosterSourcePath: "nfo+https://example.com/poster.jpg"}
-		applyLocalArtworkFallback(item, servedItem, localOnly, "en")
+		applyLocalArtworkFallback(item, servedItem, localOnly, "en", "")
 		if item.PosterPath != "" {
 			t.Fatalf("poster = %q, want no stand-in for an NFO image URL", item.PosterPath)
 		}

@@ -19,7 +19,7 @@ type AdminNodeSessionService interface {
 }
 type AdminNodeSession struct {
 	SessionID         ID       `json:"session_id"`
-	NodeURL           string   `json:"node_url"`
+	NodeURL           string   `json:"node_url" doc:"Address the node reported for itself; not validated as a URI"`
 	NodeName          string   `json:"node_name"`
 	UserID            string   `json:"user_id,omitempty" doc:"Display label, not the account identifier."`
 	AuthUserID        ID       `json:"auth_user_id"`

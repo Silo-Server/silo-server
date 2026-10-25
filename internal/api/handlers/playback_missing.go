@@ -19,7 +19,7 @@ import (
 // MissingFileMarker marks media files as missing when playback discovers they
 // no longer exist on disk.
 type MissingFileMarker interface {
-	MarkMissing(ctx context.Context, id int, since time.Time) error
+	MarkMissing(ctx context.Context, id int, filePath string, since time.Time) error
 }
 
 type playbackFilePreflightError struct {
@@ -127,7 +127,7 @@ func markPlaybackFileMissing(
 	file.MissingSince = &since
 
 	if marker != nil {
-		if err := marker.MarkMissing(ctx, file.ID, since); err != nil {
+		if err := marker.MarkMissing(ctx, file.ID, file.FilePath, since); err != nil {
 			slog.WarnContext(ctx, "failed to mark playback file missing", "component", "api",
 				"file_id", file.ID,
 				"path", file.FilePath,

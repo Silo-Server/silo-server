@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/storetest"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 // Imported progress and history carry the event's own time, and a history
@@ -104,6 +106,42 @@ func TestImportedWritesAfterSameSecondRemovalDB(t *testing.T) {
 		}
 		if created, err := store.AddHistoryIfMissing(ctx, imported(next.Add(400*time.Millisecond).Format(time.RFC3339Nano))); err != nil || created {
 			t.Fatalf("sub-second replay of a whole-second import: created %v, err %v; want a duplicate", created, err)
+		}
+	})
+
+	// A mark unwatched keeps the play it cleared. A new play later in that
+	// second is a different watch, not a duplicate of the kept one.
+	t.Run("AddHistoryIfMissingAfterUnmark", func(t *testing.T) {
+		const mediaItemID = "same-second-unmark"
+		imported := func(at time.Time) userstore.WatchHistoryEntry {
+			return userstore.WatchHistoryEntry{ProfileID: "p1", MediaItemID: mediaItemID, WatchedAt: at.Format(time.RFC3339Nano), Completed: true, Source: userstore.WatchHistorySourceImport}
+		}
+		if created, err := store.AddHistoryIfMissing(ctx, imported(second)); err != nil || !created {
+			t.Fatalf("seed: created %v, err %v", created, err)
+		}
+		svc := watchstate.NewService(storetest.SingleStoreProvider{Store: store})
+		if err := svc.RecordImportedMarkUnplayed(ctx, userID, "p1", mediaItemID, removedAt); err != nil {
+			t.Fatal(err)
+		}
+		kept, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{ProfileID: "p1", MediaItemIDs: []string{mediaItemID}})
+		if err != nil || len(kept) != 0 {
+			t.Fatalf("completed history after the unmark: %+v, err %v; want none counting as watched", kept, err)
+		}
+		listed := 0
+		rows, err := store.ListHistory(ctx, "p1", 50, 0)
+		for _, row := range rows {
+			if row.MediaItemID == mediaItemID {
+				listed++
+			}
+		}
+		if err != nil || listed != 1 {
+			t.Fatalf("history after the unmark: %+v, err %v; want the kept play listed", rows, err)
+		}
+		if created, err := store.AddHistoryIfMissing(ctx, imported(later)); err != nil || !created {
+			t.Fatalf("import at %s, after the %s unmark: created %v, err %v; want a new play", later.Format(time.RFC3339Nano), removedAt.Format(time.RFC3339Nano), created, err)
+		}
+		if created, err := store.AddHistoryIfMissing(ctx, imported(later.Add(50*time.Millisecond))); err != nil || created {
+			t.Fatalf("replay of the new play: created %v, err %v; want a duplicate", created, err)
 		}
 	})
 }

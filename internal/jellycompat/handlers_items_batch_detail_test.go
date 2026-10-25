@@ -160,3 +160,19 @@ func TestHandleBrowseItems_BatchDetailMatchesPerItem(t *testing.T) {
 		t.Fatalf("batched output missing MediaSources: %s", batchBody)
 	}
 }
+
+// TestBatchListItemDetailsSkipsPerItemFallbackAfterCancel: once the request is
+// canceled, a failed batch is not retried one item at a time on the same
+// context. TestHandleBrowseItems_BatchDetailMatchesPerItem covers the
+// fallback on a live request.
+func TestBatchListItemDetailsSkipsPerItemFallbackAfterCancel(t *testing.T) {
+	content := newEquivalenceContent(true)
+	h := &ItemsHandler{content: content}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	details := h.batchListItemDetails(ctx, &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, []string{"movie-1", "episode-1"}, nil)
+	if content.batchCalls != 1 || content.perItemCalls != 0 || len(details) != 0 {
+		t.Fatalf("batchCalls=%d perItemCalls=%d details=%d after cancel; want 1, 0 and 0", content.batchCalls, content.perItemCalls, len(details))
+	}
+}
