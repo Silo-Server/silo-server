@@ -122764,15 +122764,15 @@
             }
           },
           {
-            "description": "Window in hours, counting the current hour.",
+            "description": "Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day.",
             "explode": false,
             "in": "query",
             "name": "hours",
             "schema": {
               "default": 24,
-              "description": "Window in hours, counting the current hour.",
+              "description": "Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day.",
               "format": "int64",
-              "maximum": 720,
+              "maximum": 24,
               "minimum": 1,
               "type": "integer"
             }

@@ -42,7 +42,7 @@ type Middleware struct {
 func NewMiddleware(perKey RateLimiter, global RateLimiter, store SettingsStore, isMemory bool) *Middleware {
 	var quota QuotaLimiter
 	if rl, ok := perKey.(*RedisLimiter); ok {
-		quota = NewRedisQuotaLimiter(rl.client)
+		quota = NewRedisQuotaLimiter(rl)
 	} else {
 		quota = NewMemoryQuotaLimiter()
 	}
@@ -369,8 +369,8 @@ const overQuotaLogEvery = 10 * time.Minute
 
 // allowSession spends one request from the caller's sign-in session quota.
 // It counts what a client asks of the API, not what it plays or downloads:
-// media transfer routes, API keys (which have their own tiers), admins and
-// impersonating admins are not counted. In log mode a session over the quota
+// playback and media transfer routes, API keys (which have their own tiers),
+// admins and impersonating admins are not counted. In log mode a session over the quota
 // is logged and served; in enforce mode it is refused.
 func (mw *Middleware) allowSession(w http.ResponseWriter, r *http.Request, q SessionQuotaConfig, reject RejectBodyWriter) bool {
 	if q.Mode != SessionQuotaLog && q.Mode != SessionQuotaEnforce {
@@ -378,7 +378,7 @@ func (mw *Middleware) allowSession(w http.ResponseWriter, r *http.Request, q Ses
 	}
 	claims := apimw.GetClaims(r.Context())
 	if claims == nil || claims.SessionID == "" || claims.TokenType != auth.TokenTypeAccess ||
-		claims.Role == models.RoleAdmin || claims.ImpersonatorUserID != nil || IsMediaTransferPath(r.URL.Path) {
+		claims.Role == models.RoleAdmin || claims.ImpersonatorUserID != nil || IsQuotaExemptPath(r.URL.Path) {
 		return true
 	}
 	result := mw.quota.Take(r.Context(), "session:"+claims.SessionID, q)
@@ -412,26 +412,28 @@ func (mw *Middleware) logOverQuota(r *http.Request, claims *auth.Claims, q Sessi
 		"requests_per_hour", q.RequestsPerHour, "burst", q.Burst, "user_agent", r.UserAgent(), "path", r.URL.Path)
 }
 
-// MediaTransferPathPattern matches the native media transfer routes
-// (internal/api's nativeMediaRoutes): playback, downloads, direct downloads,
-// the bandwidth probe, theme audio and ebook reads. A player fetches these as
-// fast as the media needs, so session quotas do not count them. The pattern
-// uses only syntax Go and PostgreSQL read alike, so the API usage summary
-// leaves out the same requests in SQL.
-const MediaTransferPathPattern = `^/api/v[12]/(stream/|playback/transcode/|direct-download|playback/bandwidth-probe)` +
+// QuotaExemptPathPattern matches the routes session quotas do not count:
+// everything under /stream and /playback, so a player keeps reporting
+// progress, replanning and stopping after its session runs out, and the
+// other native media transfer routes (internal/api's nativeMediaRoutes):
+// downloads, direct downloads, theme audio and ebook reads. Playback is
+// bounded by stream limits instead. The pattern uses only syntax Go and
+// PostgreSQL read alike, so the API usage summary leaves out the same
+// requests in SQL.
+const QuotaExemptPathPattern = `^/api/v[12]/(stream|playback)(/|$)` +
+	`|^/api/v[12]/direct-download(-proxy)?$` +
 	`|^/api/v[12]/downloads/[^/]+/(file|file-proxy)$` +
 	`|^/api/v[12]/downloads/[^/]+/subtitles/` +
 	`|^/api/v2/catalog/items/[^/]+/themes/[^/]+/audio$` +
 	`|^/api/v1/ebooks/[^/]+/files/[^/]+/read$`
 
-var mediaTransferPath = regexp.MustCompile(MediaTransferPathPattern)
+var quotaExemptPath = regexp.MustCompile(QuotaExemptPathPattern)
 
-// IsMediaTransferPath reports whether path is a media transfer route that
-// session quotas do not count.
-func IsMediaTransferPath(path string) bool {
-	// Every media route is under the native API; the prefix check keeps the
+// IsQuotaExemptPath reports whether session quotas leave path uncounted.
+func IsQuotaExemptPath(path string) bool {
+	// Every exempt route is under the native API; the prefix check keeps the
 	// regexp off the other listeners' requests.
-	return strings.HasPrefix(path, "/api/v") && mediaTransferPath.MatchString(path)
+	return strings.HasPrefix(path, "/api/v") && quotaExemptPath.MatchString(path)
 }
 
 // authPeerBudgetMultiplier sizes the budget that every forwarded client behind

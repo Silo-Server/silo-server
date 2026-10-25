@@ -504,25 +504,30 @@ session therefore also spends a token bucket, keyed `session:<session_id>`, that
   token, and logs the same line.
 
 The quota counts native API requests made with a login session's access token. It
-does not count media transfer routes (`ratelimit.MediaTransferPathPattern`, which must
-match every route in `internal/api`'s native media route list), API-key requests,
-which have their own tiers, admins, or requests made while impersonating. The
-Jellyfin-compatible listener has its own sessions and is not counted. Buckets share
-the per-key limiter's backend. Redis keeps one bucket per session for every
-instance, timed by the Redis clock, and falls back to a per-process bucket while Redis
-is unavailable, as the window counters do. Settings changes keep every bucket's
-balance; a bucket reads its size and rate on each request.
+does not count anything under `/api/v1/stream`, `/api/v2/stream`, `/api/v1/playback`
+or `/api/v2/playback`, so a player keeps reporting progress, replanning and stopping
+after its session runs out; the other media transfer routes (downloads, direct
+downloads, theme audio and ebook reads); API-key requests, which have their own tiers;
+admins; or requests made while impersonating. `ratelimit.QuotaExemptPathPattern`
+defines the exempt routes and must match every route in `internal/api`'s native media
+route list. The Jellyfin-compatible listener has its own sessions and is not counted.
+Buckets share the per-key limiter's backend. Redis keeps one bucket per session for
+every instance, timed by the Redis clock, and shares the window limiter's outage
+pause: while Redis is unavailable each process counts in its own bucket. Settings
+changes keep every bucket's balance; a bucket reads its size and rate on each
+request.
 
 The defaults come from production traffic. The busiest first-party sessions stayed
 under 20000 requests in any hour and rarely went above 10000, while a polling
 integration ran at about 30000 an hour around the clock. The burst lets a client
 sync a whole library in one sitting; the refill rate caps what it can sustain.
 
-`GET /api/v2/admin/stats/api-clients` lists the sessions with the most counted
-requests in a window, summarized hourly from the activity log by the hidden
-`summarize_api_usage` task and kept for 30 days, with each session's 429 count.
-`GET /api/v2/admin/stats/api-clients/{session_id}/endpoints` lists the routes one
-session called. Both are admin-only; `api_clients` in
+`GET /api/v2/admin/stats/api-clients` lists the sessions with the most requests in a
+window, leaving out what the quota leaves out, with each session's 429 count. The
+hidden `summarize_api_usage` task summarizes the activity log into UTC hours every 15
+minutes and keeps them for 30 days. `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+lists the routes one session called in up to the last 24 hours. Both are admin-only;
+`api_clients` in
 `GET /api/v2/admin/dashboard/capabilities` advertises them.
 
 ## Profile PINs

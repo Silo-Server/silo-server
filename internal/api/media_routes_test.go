@@ -102,19 +102,27 @@ func TestNewRouterRegistersTranscodeShutdownWork(t *testing.T) {
 
 // A media route the session quota counted would refuse playback or a download
 // mid-transfer once a session spent its hour, so every declared route must be
-// one ratelimit.IsMediaTransferPath exempts.
+// one ratelimit.IsQuotaExemptPath exempts; the API calls beside them must not be.
 func TestSessionQuotaExemptsMediaRoutes(t *testing.T) {
 	param := regexp.MustCompile(`\{[^}]+\}`)
 	for _, routes := range [][]streamtelemetry.MediaRoute{nativeMediaRoutes, playbackV2MediaRoutes} {
 		for _, route := range routes {
 			path := param.ReplaceAllString(route.Pattern, "x")
-			if !ratelimit.IsMediaTransferPath(path) {
+			if !ratelimit.IsQuotaExemptPath(path) {
 				t.Errorf("%s %s is a media route the session quota would count", route.Method, route.Pattern)
 			}
 		}
 	}
-	for _, path := range []string{"/api/v2/catalog/items/x", "/api/v2/downloads/x", "/api/v1/ebooks/x/files/y", "/api/v2/playback/x/progress"} {
-		if ratelimit.IsMediaTransferPath(path) {
+	for _, path := range []string{"/api/v2/playback", "/api/v2/playback/x/progress", "/api/v1/playback/x/progress"} {
+		if !ratelimit.IsQuotaExemptPath(path) {
+			t.Errorf("%s is a playback call the session quota must not count", path)
+		}
+	}
+	for _, path := range []string{
+		"/api/v2/catalog/items/x", "/api/v2/downloads/x", "/api/v1/ebooks/x/files/y",
+		"/api/v2/direct-download/links", "/api/v2/playbackx", "/api/v2/streams",
+	} {
+		if ratelimit.IsQuotaExemptPath(path) {
 			t.Errorf("%s is an API route the session quota must count", path)
 		}
 	}

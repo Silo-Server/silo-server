@@ -482,7 +482,7 @@ export default function SecurityAccessSettings() {
           <SettingFieldRow
             label="Hourly request quota"
             htmlFor="session-quota-mode"
-            description="Each sign-in session gets a bucket of requests that refills over the hour, which stops a client that stays under the limits above all day. Playback, downloads, admins and API keys don't count. Log only records sessions that run out; Enforce refuses them until the bucket refills. The dashboard's Busiest API clients card shows who is close."
+            description="Each sign-in session gets a bucket of requests that refills over the hour, which stops a client that stays under the limits above all day. Playback, downloads, admins and API keys don't count. Log only records sessions that run out; Enforce refuses them until the bucket refills. The dashboard's Busiest API clients card shows which sessions make the most requests."
           >
             <Select
               value={sessionQuota.mode}

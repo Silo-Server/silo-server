@@ -1,8 +1,9 @@
 -- +goose Up
 -- +goose StatementBegin
 -- Hourly API request counts per sign-in session, summarized from activity_log
--- for the admin dashboard's API clients card. Media transfer requests are left
--- out, as the session quota leaves them out. refused counts 429 responses.
+-- for the admin dashboard's API clients card. It leaves out what the session
+-- quota leaves out: playback and media transfer routes, admins, and requests
+-- made while impersonating. Hours are UTC. refused counts 429 responses.
 -- Rows are rewritten while their hour is recent and pruned after 30 days; the
 -- primary key's leading hour serves both the window reads and the pruning.
 CREATE TABLE public.api_client_usage_hourly (

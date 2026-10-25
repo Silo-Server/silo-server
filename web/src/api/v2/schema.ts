@@ -81148,7 +81148,7 @@ export interface operations {
   getAdminDashboardAPIClientEndpoints: {
     parameters: {
       query?: {
-        /** @description Window in hours, counting the current hour. */
+        /** @description Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day. */
         hours?: number;
       };
       header?: {

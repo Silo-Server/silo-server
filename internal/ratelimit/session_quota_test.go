@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/cache"
-	"github.com/Silo-Server/silo-server/internal/config"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
@@ -46,11 +44,11 @@ func TestQuotaBucket(t *testing.T) {
 	}
 
 	// A bucket is dropped only once it would be full again.
-	ml.evict(start.Add(time.Hour + 2*time.Second))
+	ml.evictLocked(start.Add(time.Hour + 2*time.Second))
 	if len(ml.buckets) != 1 {
 		t.Fatalf("bucket evicted before it refilled")
 	}
-	ml.evict(start.Add(time.Hour + 3*time.Second))
+	ml.evictLocked(start.Add(time.Hour + 3*time.Second))
 	if len(ml.buckets) != 0 {
 		t.Fatalf("refilled bucket kept after eviction")
 	}
@@ -82,7 +80,6 @@ func TestSessionQuotaMiddleware(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mw := NewMiddleware(&recordingLimiter{}, &recordingLimiter{}, nil, true)
-			t.Cleanup(mw.quota.Close)
 			mw.cfg = DefaultConfig()
 			mw.cfg.Session = SessionQuotaConfig{Mode: tt.mode, RequestsPerHour: 1, Burst: 2}
 			handler := mw.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
@@ -102,7 +99,6 @@ func TestSessionQuotaMiddleware(t *testing.T) {
 
 	// Sessions of one account have separate buckets.
 	mw := NewMiddleware(&recordingLimiter{}, &recordingLimiter{}, nil, true)
-	t.Cleanup(mw.quota.Close)
 	mw.cfg = DefaultConfig()
 	mw.cfg.Session = SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 1, Burst: 1}
 	handler := mw.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
@@ -116,19 +112,13 @@ func TestSessionQuotaMiddleware(t *testing.T) {
 	}
 }
 
-// While Redis is down the quota still holds, counted on this node, and takes
-// stop calling Redis until the pause ends.
+// While Redis is down the quota still holds, counted on this node, and a
+// failed take pauses the window limiter too, so the request's other checks
+// stop calling Redis as well.
 func TestRedisQuotaLimiterCountsLocallyWhileRedisIsDown(t *testing.T) {
-	client, err := cache.NewDeadlineRedisClientForRole(config.RedisConfig{URL: "redis://" + refusingRedisAddr(t)}, "tasks")
-	if err != nil {
-		t.Fatalf("redis client: %v", err)
-	}
-	t.Cleanup(func() { _ = cache.CloseRedisClient(client) })
 	commands := &commandHook{}
-	client.AddHook(commands)
-	rl := NewRedisQuotaLimiter(client)
-	t.Cleanup(rl.Close)
-	rl.callTimeout = 100 * time.Millisecond
+	windows := hookedRedisLimiter(t, refusingRedisAddr(t), commands)
+	rl := NewRedisQuotaLimiter(windows)
 	q := SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 1, Burst: 2}
 
 	if got := rl.Take(t.Context(), "session:s", q); !got.Allowed {
@@ -141,7 +131,10 @@ func TestRedisQuotaLimiterCountsLocallyWhileRedisIsDown(t *testing.T) {
 	if got := rl.Take(t.Context(), "session:s", q); got.Allowed {
 		t.Fatalf("third take = %+v, want the burst of 2 enforced on this node", got)
 	}
+	if got := windows.Allow(t.Context(), "ip:192.0.2.1", Rate{RequestsPerSecond: 10, RequestsPerMinute: 600, Burst: 10}); !got.Allowed {
+		t.Fatalf("window check during the pause = %+v, want allowed", got)
+	}
 	if got := commands.started.Load(); got != sent {
-		t.Fatalf("takes during the pause sent %d commands to Redis, want none", got-sent)
+		t.Fatalf("checks during the pause sent %d commands to Redis, want none", got-sent)
 	}
 }

@@ -43,7 +43,8 @@ type AdminRateLimitConfigView struct {
 	IPReqPerMinute     float64                               `json:"ip_requests_per_minute"`
 	IPBurst            int                                   `json:"ip_burst"`
 	AuthEndpoints      map[string]authEndpointConfigResponse `json:"auth_endpoints"`
-	SessionQuota       AdminRateLimitSessionQuotaView        `json:"session_quota"`
+	// SessionQuota is served on /api/v2 only; the frozen v1 handlers drop it.
+	SessionQuota *AdminRateLimitSessionQuotaView `json:"session_quota,omitempty"`
 	// Active reports whether a limiter is running in this process. The
 	// limiter is constructed at startup, so config saved while it is absent
 	// (or a backend change while it is running) needs a restart to apply.
@@ -119,6 +120,7 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
+	resp.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -151,7 +153,7 @@ func (h *RateLimitHandler) adminRateLimitConfigView(values map[string]string) Ad
 		IPReqPerMinute:     cfg.IPReqPerMinute,
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
-		SessionQuota: AdminRateLimitSessionQuotaView{
+		SessionQuota: &AdminRateLimitSessionQuotaView{
 			Mode: cfg.Session.Mode, RequestsPerHour: cfg.Session.RequestsPerHour, Burst: cfg.Session.Burst,
 		},
 		Active:         h.mw != nil,
@@ -184,6 +186,7 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
 
 	result, err := h.UpdateAdminRateLimitConfig(r.Context(), req, nil)
 	if err != nil {

@@ -3,11 +3,9 @@ package ratelimit
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"math"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -19,7 +17,6 @@ import (
 // notice a client that stays just under them all day.
 type QuotaLimiter interface {
 	Take(ctx context.Context, key string, q SessionQuotaConfig) AllowResult
-	Close()
 }
 
 // quotaBucket is one key's bucket. full is when it refills completely, after
@@ -73,20 +70,19 @@ func secondsDuration(seconds float64) time.Duration {
 	return time.Duration(math.MaxInt64)
 }
 
-// MemoryQuotaLimiter keeps quota buckets in this process.
+// quotaEvictEvery is how often a take also drops refilled buckets.
+const quotaEvictEvery = time.Minute
+
+// MemoryQuotaLimiter keeps quota buckets in this process. It drops refilled
+// buckets as it goes, at most once a minute, so it needs no goroutine.
 type MemoryQuotaLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*quotaBucket
-	done    chan struct{}
-	once    sync.Once
+	mu        sync.Mutex
+	buckets   map[string]*quotaBucket
+	lastEvict time.Time
 }
 
-// NewMemoryQuotaLimiter returns a limiter that drops refilled buckets in the
-// background.
 func NewMemoryQuotaLimiter() *MemoryQuotaLimiter {
-	ml := &MemoryQuotaLimiter{buckets: make(map[string]*quotaBucket), done: make(chan struct{})}
-	go ml.evictLoop()
-	return ml
+	return &MemoryQuotaLimiter{buckets: make(map[string]*quotaBucket)}
 }
 
 func (ml *MemoryQuotaLimiter) Take(_ context.Context, key string, q SessionQuotaConfig) AllowResult {
@@ -96,6 +92,9 @@ func (ml *MemoryQuotaLimiter) Take(_ context.Context, key string, q SessionQuota
 func (ml *MemoryQuotaLimiter) takeAt(key string, q SessionQuotaConfig, now time.Time) AllowResult {
 	ml.mu.Lock()
 	defer ml.mu.Unlock()
+	if now.Sub(ml.lastEvict) >= quotaEvictEvery {
+		ml.evictLocked(now)
+	}
 	b := ml.buckets[key]
 	if b == nil {
 		b = &quotaBucket{tokens: float64(q.Burst), updated: now}
@@ -104,24 +103,8 @@ func (ml *MemoryQuotaLimiter) takeAt(key string, q SessionQuotaConfig, now time.
 	return b.take(q, now)
 }
 
-func (ml *MemoryQuotaLimiter) Close() { ml.once.Do(func() { close(ml.done) }) }
-
-func (ml *MemoryQuotaLimiter) evictLoop() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ml.done:
-			return
-		case now := <-ticker.C:
-			ml.evict(now)
-		}
-	}
-}
-
-func (ml *MemoryQuotaLimiter) evict(now time.Time) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
+func (ml *MemoryQuotaLimiter) evictLocked(now time.Time) {
+	ml.lastEvict = now
 	for key, b := range ml.buckets {
 		if !now.Before(b.full) {
 			delete(ml.buckets, key)
@@ -160,31 +143,32 @@ redis.call('EXPIRE', KEYS[1], math.ceil((burst - tokens) / rate) + 60)
 return {allowed, tostring(tokens)}
 `)
 
-// RedisQuotaLimiter shares quota buckets across API servers. A take Redis
-// cannot answer is counted on this node instead, and calls pause for
-// redisOutagePause after a failure, as RedisLimiter does.
+// RedisQuotaLimiter shares quota buckets across API servers. It shares the
+// window limiter's outage pause: while that limiter counts locally, takes
+// count in a per-process bucket without calling Redis, and a take that fails
+// starts the pause the window limiter's background retry ends. A request's
+// checks therefore stop waiting on Redis together.
 type RedisQuotaLimiter struct {
-	client      *redis.Client
-	callTimeout time.Duration
-	pausedUntil atomic.Int64
-	local       *MemoryQuotaLimiter
+	windows *RedisLimiter
+	local   *MemoryQuotaLimiter
 }
 
-// NewRedisQuotaLimiter returns a Redis-backed quota limiter.
-func NewRedisQuotaLimiter(client *redis.Client) *RedisQuotaLimiter {
-	return &RedisQuotaLimiter{client: client, callTimeout: redisCallTimeout, local: NewMemoryQuotaLimiter()}
+// NewRedisQuotaLimiter returns a quota limiter on the window limiter's
+// client and outage state.
+func NewRedisQuotaLimiter(windows *RedisLimiter) *RedisQuotaLimiter {
+	return &RedisQuotaLimiter{windows: windows, local: NewMemoryQuotaLimiter()}
 }
 
 func (rl *RedisQuotaLimiter) Take(ctx context.Context, key string, q SessionQuotaConfig) AllowResult {
 	now := time.Now()
-	if rl.paused(ctx, now) {
+	if rl.windows.pausedUntil.Load() != 0 {
 		return rl.local.takeAt(key, q, now)
 	}
 	// The bucket is shared, so a caller that gave up must not leave it half
 	// spent; the call timeout still bounds the wait.
-	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rl.callTimeout)
+	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rl.windows.callTimeout)
 	defer cancel()
-	raw, err := quotaScript.Run(callCtx, rl.client, []string{"silo:ratelimit:quota:" + key},
+	raw, err := quotaScript.Run(callCtx, rl.windows.client, []string{"silo:ratelimit:quota:" + key},
 		strconv.FormatFloat(q.RequestsPerHour/3600, 'g', -1, 64), q.Burst).Slice()
 	var tokens float64
 	if err == nil {
@@ -196,48 +180,11 @@ func (rl *RedisQuotaLimiter) Take(ctx context.Context, key string, q SessionQuot
 		}
 	}
 	if err != nil {
-		if rl.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
-			logQuotaRedisPause(ctx, err)
+		if rl.windows.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
+			logRedisPause(ctx, err, key)
 		}
 		return rl.local.takeAt(key, q, now)
 	}
 	allowed, _ := raw[0].(int64)
 	return quotaResult(allowed == 1, tokens, q, now)
 }
-
-// paused reports whether a take at now skips Redis. The first take after a
-// pause runs out starts the next pause and pings Redis in the background,
-// which ends the pause if Redis answers, so no request waits on a Redis that
-// is down.
-func (rl *RedisQuotaLimiter) paused(ctx context.Context, now time.Time) bool {
-	until := rl.pausedUntil.Load()
-	if until == 0 {
-		return false
-	}
-	if pauseTime(now) >= until {
-		next := pauseTime(now.Add(redisOutagePause))
-		if rl.pausedUntil.CompareAndSwap(until, next) {
-			go rl.probe(context.WithoutCancel(ctx), next)
-		}
-	}
-	return true
-}
-
-func (rl *RedisQuotaLimiter) probe(ctx context.Context, pause int64) {
-	ctx, cancel := context.WithTimeout(ctx, rl.callTimeout)
-	defer cancel()
-	if err := rl.client.Ping(ctx).Err(); err != nil {
-		logQuotaRedisPause(ctx, err)
-		return
-	}
-	if rl.pausedUntil.CompareAndSwap(pause, 0) {
-		slog.InfoContext(ctx, "session quota Redis answering again", "component", "ratelimit")
-	}
-}
-
-func logQuotaRedisPause(ctx context.Context, err error) {
-	slog.WarnContext(ctx, "session quota Redis error, counting requests on this node until it answers",
-		"component", "ratelimit", "error", err, "retry_every", redisOutagePause)
-}
-
-func (rl *RedisQuotaLimiter) Close() { rl.local.Close() }

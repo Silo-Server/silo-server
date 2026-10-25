@@ -9,8 +9,9 @@ export type AdminApiClient = AdminApiClients["clients"][number];
 export type AdminApiClientEndpoints =
   V2Result<"GET /api/v2/admin/stats/api-clients/{session_id}/endpoints">;
 
-/** Mirrors the server's window: 1 hour to 30 days. */
+/** Mirrors the server's windows: 1 hour to 30 days, and a day for one session's routes. */
 const MAX_HOURS = 720;
+export const MAX_ENDPOINT_HOURS = 24;
 /** The summaries are rewritten every 15 minutes; a minute of staleness is invisible. */
 const API_CLIENTS_STALE_TIME = 55_000;
 const API_CLIENTS_LIMIT = 10;
@@ -37,9 +38,9 @@ export function useAdminApiClients(hours: number) {
   });
 }
 
-/** The routes one session called most; fetched only when its row is open. */
+/** The routes one session called most, over at most a day; fetched only when its row is open. */
 export function useAdminApiClientEndpoints(sessionId: string | null, hours: number) {
-  const window = normalizeApiClientHours(hours);
+  const window = Math.min(normalizeApiClientHours(hours), MAX_ENDPOINT_HOURS);
   return useQuery({
     queryKey: adminKeys.apiClientEndpoints(sessionId ?? "", window),
     enabled: sessionId !== null,

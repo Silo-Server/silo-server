@@ -20,7 +20,7 @@ type AdminAPIClientsInput struct {
 }
 type AdminAPIClientEndpointsInput struct {
 	SessionID string `path:"session_id" minLength:"1" maxLength:"128"`
-	Hours     int    `query:"hours" minimum:"1" maximum:"720" default:"24" doc:"Window in hours, counting the current hour."`
+	Hours     int    `query:"hours" minimum:"1" maximum:"24" default:"24" doc:"Window in hours, counting the current hour. It reads one session's activity log rows, so it covers at most a day."`
 }
 
 // AdminAPIClient is one sign-in session's API use in the window. Requests

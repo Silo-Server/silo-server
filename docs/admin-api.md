@@ -1429,11 +1429,12 @@ Both lists are `[]` on a server with no history, never `null`.
 ## `GET /api/v2/admin/stats/api-clients`
 
 The login sessions with the most API requests in a window, for the dashboard's
-**Busiest API clients** card. Requests are counted the way the session quota
-counts them (see [Session quota](auth-api.md#session-quota)): media transfer
-routes are left out. The hidden `summarize_api_usage` task writes hourly
-summaries from the activity log every 15 minutes, so the newest requests can be
-up to 15 minutes late, and keeps them for 30 days.
+**Busiest API clients** card. It leaves out what the session quota leaves out
+(see [Session quota](auth-api.md#session-quota)): playback and media transfer
+routes, admins, and requests made while impersonating. `requests` includes
+requests a rate limit refused. The hidden `summarize_api_usage` task writes UTC
+hourly summaries from the activity log every 15 minutes, so the newest requests
+can be up to 15 minutes late, and keeps them for 30 days.
 
 | Parameter | Type | Meaning |
 |---|---|---|
@@ -1456,10 +1457,10 @@ session out without touching the account's other devices.
 
 ## `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
 
-The ten routes one session called most in the window (`hours`, as above), each
-with `method`, `route` (the matched route pattern), `requests` and `refused`.
-It reads the activity log for that one session. A session with no summarized
-requests in the window is `404 not_found`.
+The ten routes one session called most, each with `method`, `route` (the
+matched route pattern), `requests` and `refused`. `hours` is 1..24, default 24:
+it reads the activity log rows of that one session, so its window stays short.
+A session with no summarized requests in the window is `404 not_found`.
 
 ## `GET /api/v2/admin/stats/downloads`
 
@@ -1799,7 +1800,7 @@ The dashboard uses these acting-administrator operations under `/api/v2/admin/st
 | `/top-activity` | `getAdminDashboardTopActivity` | `days`: 1–30, default 7; `limit`: 1–25, default 10 |
 | `/downloads` | `getAdminDashboardDownloadsStats` | `limit`: 1–25, default 10 |
 | `/api-clients` | `getAdminDashboardAPIClients` | `hours`: 1–720, default 24; `limit`: 1–25, default 10 |
-| `/api-clients/{session_id}/endpoints` | `getAdminDashboardAPIClientEndpoints` | `hours`: 1–720, default 24 |
+| `/api-clients/{session_id}/endpoints` | `getAdminDashboardAPIClientEndpoints` | `hours`: 1–24, default 24 |
 
 The first four accept `refresh=true` to invalidate the provider cache before reading.
 Out-of-range inputs return a validation problem; the frozen v1 routes continue

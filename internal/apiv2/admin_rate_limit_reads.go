@@ -59,7 +59,10 @@ type AdminRateLimitReadInput struct {
 type AdminRateLimitStatusOutput struct{ Body AdminRateLimitStatus }
 
 func adminRateLimitConfigOf(v handlers.AdminRateLimitConfigView) AdminRateLimitConfig {
-	out := AdminRateLimitConfig{Enabled: v.Enabled, Backend: v.Backend, GlobalReqPerSecond: v.GlobalReqPerSecond, IPReqPerSecond: v.IPReqPerSecond, IPReqPerMinute: v.IPReqPerMinute, IPBurst: v.IPBurst, SessionQuota: AdminRateLimitSessionQuota(v.SessionQuota), Tiers: make(map[string]AdminRateLimitTier, len(v.Tiers)), AuthEndpoints: make(map[string]AdminRateLimitAuthEndpoint, len(v.AuthEndpoints))}
+	out := AdminRateLimitConfig{Enabled: v.Enabled, Backend: v.Backend, GlobalReqPerSecond: v.GlobalReqPerSecond, IPReqPerSecond: v.IPReqPerSecond, IPReqPerMinute: v.IPReqPerMinute, IPBurst: v.IPBurst, Tiers: make(map[string]AdminRateLimitTier, len(v.Tiers)), AuthEndpoints: make(map[string]AdminRateLimitAuthEndpoint, len(v.AuthEndpoints))}
+	if v.SessionQuota != nil {
+		out.SessionQuota = AdminRateLimitSessionQuota(*v.SessionQuota)
+	}
 	for name, t := range v.Tiers {
 		out.Tiers[name] = AdminRateLimitTier{t.RequestsPerSecond, t.RequestsPerMinute, t.Burst}
 	}

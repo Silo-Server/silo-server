@@ -1,6 +1,7 @@
 // Package apiusage summarizes API requests per sign-in session, so an admin
-// can see which clients load the server most. It reads activity_log, counting
-// requests the way the session quota does: media transfer routes are left out.
+// can see which clients load the server most. It reads activity_log and leaves
+// out what the session quota leaves out: playback and media transfer routes,
+// admins, and requests made while impersonating.
 package apiusage
 
 import (
@@ -21,8 +22,11 @@ const (
 	// catchUp bounds how far back a summary pass starts after the task has
 	// not run for a while; older hours stay unsummarized.
 	catchUp = 48 * time.Hour
-	// MaxWindowHours is the longest window a read covers.
+	// MaxWindowHours is the longest window TopClients reads.
 	MaxWindowHours = 720
+	// MaxEndpointHours is the longest window ClientEndpoints reads. It scans
+	// one session's activity rows, so its window stays short.
+	MaxEndpointHours = 24
 	// endpointLimit is how many routes ClientEndpoints returns.
 	endpointLimit = 10
 )
@@ -44,10 +48,12 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// Summarize rewrites the hourly rows from the last summarized hour, or from
-// catchUp ago if that is later, through now. Rewriting the last hour again
-// completes the hour the previous pass caught part of. It returns how many
-// session-hours it wrote.
+// Summarize rewrites the hourly rows from the hour before the last summarized
+// one, or from catchUp ago if that is later, through now. Rewriting those two
+// hours completes the hour the previous pass caught part of and picks up rows
+// the activity log wrote late: a row carries its request's start time and is
+// written after the request ends. Hours are UTC, as the reads count them. It
+// returns how many session-hours it wrote.
 func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
 	var last *time.Time
 	if err := s.pool.QueryRow(ctx, `SELECT max(hour) FROM api_client_usage_hourly`).Scan(&last); err != nil {
@@ -56,23 +62,27 @@ func (s *Store) Summarize(ctx context.Context, now time.Time) (int64, error) {
 	// A last hour after now (a clock that stepped back) would stall every
 	// pass until the clock caught up, so it is ignored.
 	from := now.Add(-catchUp).Truncate(time.Hour)
-	if last != nil && last.After(from) && !last.After(now) {
-		from = *last
+	if last != nil && !last.After(now) {
+		if redo := last.Add(-time.Hour); redo.After(from) {
+			from = redo
+		}
 	}
 	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO api_client_usage_hourly (hour, session_id, user_id, user_agent, requests, refused)
-		SELECT date_trunc('hour', "timestamp"), session_id, max(user_id),
-		       left(coalesce(mode() WITHIN GROUP (ORDER BY user_agent), ''), 256),
-		       count(*), count(*) FILTER (WHERE status_code = 429)
-		FROM activity_log
-		WHERE "timestamp" >= $1 AND "timestamp" < $2
-		  AND session_id IS NOT NULL AND session_id <> ''
-		  AND path !~ $3
+		SELECT date_trunc('hour', a."timestamp", 'UTC'), a.session_id, max(a.user_id),
+		       left(coalesce(mode() WITHIN GROUP (ORDER BY a.user_agent), ''), 256),
+		       count(*), count(*) FILTER (WHERE a.status_code = 429)
+		FROM activity_log a
+		WHERE a."timestamp" >= $1 AND a."timestamp" < $2
+		  AND a.session_id IS NOT NULL AND a.session_id <> ''
+		  AND a.impersonator_user_id IS NULL
+		  AND a.path !~ $3
+		  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = a.user_id AND u.role = 'admin')
 		GROUP BY 1, 2
 		ON CONFLICT (hour, session_id) DO UPDATE
 		SET user_id = EXCLUDED.user_id, user_agent = EXCLUDED.user_agent,
 		    requests = EXCLUDED.requests, refused = EXCLUDED.refused`,
-		from, now, ratelimit.MediaTransferPathPattern)
+		from, now, ratelimit.QuotaExemptPathPattern)
 	if err != nil {
 		return 0, fmt.Errorf("summarize API usage: %w", err)
 	}
@@ -168,10 +178,11 @@ type Endpoint struct {
 }
 
 // ClientEndpoints returns the routes a session called most in the last hours
-// hours. It reads activity_log through the account's index, so it answers for
-// one session at a time.
+// hours, at most MaxEndpointHours. It reads activity_log through the
+// account's index and filters the session's rows, so it answers for one
+// session at a time over a short window.
 func (s *Store) ClientEndpoints(ctx context.Context, now time.Time, sessionID string, hours int) ([]Endpoint, error) {
-	from := windowStart(now, hours)
+	from := windowStart(now, min(hours, MaxEndpointHours))
 	var userID *int
 	err := s.pool.QueryRow(ctx,
 		`SELECT max(user_id) FROM api_client_usage_hourly WHERE session_id = $1 AND hour >= $2`, sessionID, from,
@@ -185,10 +196,11 @@ func (s *Store) ClientEndpoints(ctx context.Context, now time.Time, sessionID st
 	rows, err := s.pool.Query(ctx, `
 		SELECT method, coalesce(nullif(path_pattern, ''), path), count(*), count(*) FILTER (WHERE status_code = 429)
 		FROM activity_log
-		WHERE user_id = $1 AND "timestamp" >= $2 AND session_id = $3 AND path !~ $4
+		WHERE user_id = $1 AND "timestamp" >= $2 AND session_id = $3
+		  AND impersonator_user_id IS NULL AND path !~ $4
 		GROUP BY 1, 2
 		ORDER BY 3 DESC, 1, 2
-		LIMIT $5`, *userID, from, sessionID, ratelimit.MediaTransferPathPattern, endpointLimit)
+		LIMIT $5`, *userID, from, sessionID, ratelimit.QuotaExemptPathPattern, endpointLimit)
 	if err != nil {
 		return nil, fmt.Errorf("read API client endpoints: %w", err)
 	}

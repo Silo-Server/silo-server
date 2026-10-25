@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   type AdminApiClient,
+  MAX_ENDPOINT_HOURS,
   useAdminApiClientEndpoints,
   useAdminApiClients,
   useRevokeApiClientSession,
@@ -35,9 +36,9 @@ function sharePercent(requests: number, total: number): string {
 /**
  * The sign-in sessions that asked the most of the API over the chosen window.
  *
- * Counts what the session quota counts: playback and download transfers are
- * left out, so a household watching a film does not outrank a script polling
- * the catalog. A row opens to the routes the session called and a way to sign
+ * Leaves out what the session quota leaves out: playback, downloads, admins
+ * and impersonation, so a household watching a film does not outrank a script
+ * polling the catalog. A row opens to the routes the session called and a way to sign
  * just that session out; the account's other devices stay signed in.
  */
 export function ApiClientsWidget() {
@@ -163,6 +164,7 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
           {client.peak_hour_requests.toLocaleString()} requests
         </dd>
       </dl>
+      <div>Routes called in the last {Math.min(hours, MAX_ENDPOINT_HOURS)} h</div>
       {endpoints.isLoading ? (
         <div>Loading routes…</div>
       ) : endpoints.error ? (
