@@ -1721,6 +1721,46 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 	}
 }
 
+// A stop removes the tracker record under the transport id unless a progressive
+// remux is still running here: a native v3 HLS job is tracked under that id, not
+// its card's playback session id, and an ended remux already removed its own.
+func TestHandleStopRemovesTrackerRecordByTransportID(t *testing.T) {
+	const transportID = "playback-1-plan-transport"
+	remuxCard := nativeTransportCard("playback-1", transportID)
+	remuxCard.PlayMethod = playback.PlayRemux
+	for _, tc := range []struct {
+		name    string
+		card    *playback.RecipeCard
+		running bool
+	}{
+		{name: "native HLS transcode", card: nativeTransportCard("playback-1", transportID), running: true},
+		{name: "remux no longer running here", card: remuxCard},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newTestServer(t)
+			tracker := &recordingSessionTracker{}
+			server.tracker = tracker
+			if tc.running {
+				server.sessions[transportID] = &playback.TranscodeSession{}
+				server.activeJobs.Store(1)
+			}
+			server.SetRecipeStore(&stubRecipeStore{card: tc.card, ok: true})
+			rr := httptest.NewRecorder()
+
+			server.handleStop(rr, stopRequest(transportID))
+
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			tracker.mu.Lock()
+			defer tracker.mu.Unlock()
+			if len(tracker.removed) != 1 || tracker.removed[0] != transportID {
+				t.Fatalf("removed sessions = %v, want transport %q", tracker.removed, transportID)
+			}
+		})
+	}
+}
+
 func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }

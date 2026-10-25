@@ -2670,22 +2670,23 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	durableProgressive := false
 	authorityFound := false
-	playbackSessionID := sessionID
 	if s.recipeStore != nil {
 		card, ok := s.recipeStore.Get(r.Context(), sessionID)
 		authorityFound = ok && card != nil
 		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
-		if authorityFound && card.SessionID != "" {
-			playbackSessionID = card.SessionID
-		}
 	}
 
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	// An HLS job is tracked under the transport id it started with, which for a
+	// native v3 transcode is not its card's SessionID. Only a progressive remux
+	// still running here is tracked under the viewer's playback session id; one
+	// that has ended already removed its own record.
+	trackerSessionID := sessionID
 	if progressiveFound && progressive.playbackSessionID != "" {
-		playbackSessionID = progressive.playbackSessionID
+		trackerSessionID = progressive.playbackSessionID
 	}
 	if progressiveFound || durableProgressive {
 		if s.stoppedProgressiveRemuxes == nil {
@@ -2742,7 +2743,11 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), playbackSessionID)
+		// The job has already been stopped, so its record goes even if the
+		// caller gave up on this request.
+		removeCtx, cancelRemove := context.WithTimeout(context.WithoutCancel(r.Context()), sessionTrackingOperationTimeout)
+		s.tracker.Remove(removeCtx, trackerSessionID)
+		cancelRemove()
 	}
 	var shutdownErr error
 	if progressiveFound {
