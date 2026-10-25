@@ -261,3 +261,44 @@ func (n *connCountingTranscodeNode) releaseWave(t *testing.T, count int) {
 		n.release <- struct{}{}
 	}
 }
+
+// TestRelayToTranscodeNodeRefusesNodeRedirectsOnNativeV2: a node redirect
+// relayed verbatim sends the client, and the credentials it attached for this
+// server, to another origin. Routes wrapped in RefuseRelayRedirects answer 502
+// instead; a 304 answers a conditional request and is still relayed.
+func TestRelayToTranscodeNodeRefusesNodeRedirectsOnNativeV2(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		nodeStatus int
+		wantStatus int
+	}{
+		{"redirect", http.StatusTemporaryRedirect, http.StatusBadGateway},
+		{"not modified", http.StatusNotModified, http.StatusNotModified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.nodeStatus != http.StatusNotModified {
+					w.Header().Set("Location", "https://elsewhere.example/master.m3u8")
+				}
+				w.WriteHeader(tc.nodeStatus)
+			}))
+			defer node.Close()
+
+			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+			serve := RefuseRelayRedirects(func(w http.ResponseWriter, r *http.Request) {
+				if err := handler.relayToTranscodeNode(w, r, node.URL, "/transcode/remote/master.m3u8"); err != nil {
+					t.Fatalf("relay error = %v", err)
+				}
+			})
+			req := withPlaybackRouteParam(httptest.NewRequest(http.MethodGet, "/playback/transcode/public/master.m3u8", nil), "session_id", "public")
+			rr := httptest.NewRecorder()
+			serve(rr, req)
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusBadGateway && rr.Header().Get("Location") != "" {
+				t.Fatalf("refused redirect still carries Location %q", rr.Header().Get("Location"))
+			}
+		})
+	}
+}

@@ -2266,8 +2266,9 @@ func generateFixtures(t *testing.T) map[string][]byte {
 		} else {
 			r = httptest.NewRequest(c.method, c.path, nil)
 		}
-		// Absolute discovery URLs in published fixtures use a reserved test host.
-		if r.URL.Path == Prefix+"/playback/capabilities" {
+		// Absolute discovery URLs and origins in published fixtures use a
+		// reserved test host.
+		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" {
 			r.Host = "api.example.test"
 		}
 		for k, v := range c.headers {

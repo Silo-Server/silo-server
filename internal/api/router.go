@@ -2678,8 +2678,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Raw v2 delivery shares the byte-protocol handlers; fonts use the typed
 		// service. Both retain token-carried reconstruction and deny markers.
 		v2deps.PlaybackMedia = &apiv2.PlaybackMediaHandlers{
-			Manifest: observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest),
-			Segment:  observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment),
+			Manifest: observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", handlers.RefuseRelayRedirects(playbackHandler.HandleGetTranscodeManifest)),
+			Segment:  observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", handlers.RefuseRelayRedirects(playbackHandler.HandleGetTranscodeSegment)),
 		}
 		if streamHandler != nil {
 			v2deps.PlaybackMedia.Original = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

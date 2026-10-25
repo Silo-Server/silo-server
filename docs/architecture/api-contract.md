@@ -923,16 +923,32 @@ existing five-minute maximum. It is never broadened to `/`.
 
 `GET /api/v2/system/info` is always registered, unauthenticated, and usable before login or
 profile selection. It exposes at least the server build version, API major, contract digest, and
-links to capability documents. The response is bounded — a small fixed document with no
-per-request, per-account, or deployment-topology detail — and carries an explicit reviewed cache
-policy rather than silently inheriting the structured default. The exact response schema, its
-bound, and its cache directives are part of the foundation contract.
+links to capability documents. The response is bounded — a small document with no per-account or
+deployment-topology detail — and carries an explicit reviewed cache policy rather than silently
+inheriting the structured default. The exact response schema, its bound, and its cache directives
+are part of the foundation contract.
+
+Its one per-request member is `request_origin`: the origin the request reached, serialized and
+derived exactly like the OAuth `iss` (`clientip.RequestOrigin`) — the transport scheme and `Host`,
+replaced by `X-Forwarded-Proto` and `X-Forwarded-Host` only from a configured trusted proxy. A
+client that must not send credentials to an origin it did not configure (the Roku client follows
+redirects silently and re-sends a request body on 307) compares it with its configured origin
+before signing in. Because of that member the response is `Cache-Control: private, no-cache`, so a
+shared cache never serves one origin's value to another.
+
+The same clients rely on authenticated `/api/v2` routes not redirecting them to another origin or
+from HTTPS to HTTP. The transcode manifest and segment relay answers a node's redirect with 502
+instead of relaying it, and plugin content answers a plugin redirect that leaves the request's
+origin with 502. The deliberate exceptions are the 307s to a media proxy on `-proxy` download
+routes and on `getPlaybackBandwidthProbe` with `media_path=true`, which a client opts into, and the
+public browser OAuth and Discord-link handshakes.
 
 Exposing the server build version and contract digest before authentication is a deliberate,
 reviewed decision. An updated client must be able to tell a v2 server from a v1-only alpha server
 before it holds a credential, and version obscurity is not a control Silo relies on. That trade is
-accepted for these fields only; the endpoint carries nothing else an unauthenticated caller should
-not see.
+accepted for these fields only; `request_origin` echoes back only what the caller sent or what its
+own path to the server supplied, and the endpoint carries nothing else an unauthenticated caller
+should not see.
 
 Clients use capability documents to decide whether a feature exists. The server version and
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility

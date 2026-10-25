@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type contextKey string
@@ -127,4 +129,40 @@ func RequestHost(r *http.Request) string {
 		return host
 	}
 	return r.Host
+}
+
+// RequestOrigin is the origin r arrived on, scheme://host[:port] as
+// SerializeOrigin writes it: the host from RequestHost and the scheme from
+// RequestScheme, so forwarding headers count only from a trusted proxy and
+// only after Middleware ran. Ambiguous proxy scheme metadata names the
+// transport's scheme; a client that compares this origin with the one it
+// configured then sees a mismatch and refuses, never a false match.
+func RequestOrigin(r *http.Request) string {
+	scheme := RequestScheme(r)
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+	}
+	return SerializeOrigin(scheme, RequestHost(r))
+}
+
+// SerializeOrigin is scheme://host[:port] with the scheme and host in lower
+// case, the default port of the scheme left out, IPv6 hosts in brackets, and
+// no path or trailing slash.
+func SerializeOrigin(scheme, host string) string {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	hostURL := url.URL{Host: strings.TrimSpace(host)}
+	name, port := strings.ToLower(hostURL.Hostname()), hostURL.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if strings.Contains(name, ":") {
+		name = "[" + name + "]"
+	}
+	if port != "" {
+		name += ":" + port
+	}
+	return scheme + "://" + name
 }

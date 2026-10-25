@@ -31643,6 +31643,11 @@ export interface components {
       /** @description Stable links to the contract and to capability documents */
       links: components["schemas"]["SystemInfoLinks"];
       /**
+       * @description The origin this request reached, scheme://host[:port]: scheme and host in lower case, the scheme's default port omitted, IPv6 hosts in brackets, no path or trailing slash. It is the transport scheme and Host header, replaced by X-Forwarded-Proto and X-Forwarded-Host only when the request came from a configured trusted proxy, derived the same way as the OAuth iss. A client compares it with its configured server origin before sending credentials, to detect a redirect or a proxy that delivered the request elsewhere. Always present on servers that serve it; absent on older servers.
+       * @example https://silo.example.com
+       */
+      request_origin?: string;
+      /**
        * @description Server build identity (short revision, +dirty when built from a modified tree, or "unavailable"). Diagnostic only: never feature-detect on it.
        * @example 1.0.0-dev
        */

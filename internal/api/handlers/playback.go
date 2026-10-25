@@ -2267,6 +2267,13 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if isRedirectStatus(resp.StatusCode) && refusesRelayRedirects(r.Context()) {
+		// The Location is not logged: it may carry a signed token.
+		slog.WarnContext(r.Context(), "transcode node answered a redirect; not relayed", "component", "api", "status", resp.StatusCode, "playback_session_id", sessionID)
+		writeTranscodeNodeUnavailable(w)
+		return nil
+	}
+
 	// The node strips "st" from the request query (kept out of node URLs/logs),
 	// so the segment/init URIs in the manifest it builds carry no token. Without
 	// it, a segment fetched after a node or API restart cannot reconstruct the
