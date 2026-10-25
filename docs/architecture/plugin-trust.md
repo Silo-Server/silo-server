@@ -14,10 +14,13 @@ native child process through go-plugin. The API server, or the
 - **The same OS user.** The shipped image runs as root, so plugins do too.
   There is no separate user, namespace, seccomp profile, or filesystem
   confinement.
-- **The parent's full environment.** go-plugin appends `os.Environ()` to the
-  command unless `SkipHostEnv` is set, and Silo doesn't set it. That includes
-  `DATABASE_URL`, `SECRET_KEY`, and `REDIS_URL`. Even with a scrubbed
-  environment, a process running as the same user can read the server's
+- **An allowlisted environment.** `pluginhost.ProcessEnv`
+  (`internal/pluginhost/process_env.go`) passes only `PATH`, `HOME`, `TMPDIR`,
+  `TZ`, the locale, the CA certificate paths, and the proxy variables, and the
+  host sets go-plugin's `SkipHostEnv` so go-plugin doesn't append the rest.
+  This keeps `DATABASE_URL`, `SECRET_KEY`, `REDIS_URL` and the like out of
+  anything a plugin dumps or reports about its own environment. It is not a
+  boundary: a process running as the same user can still read the server's
   `/proc/<pid>/environ`.
 - **The same network.** A plugin can open connections to Postgres, Redis, and
   anything else the server can reach, without going through the host.
@@ -27,8 +30,9 @@ native child process through go-plugin. The API server, or the
 
 Installation runs code too. `loadManifestFromBinary`
 (`internal/plugins/installer.go`) executes a package's binary with the
-`manifest` argument to read its manifest, before the admin configures or
-enables it. Installing a package is the point of trust, not enabling it.
+`manifest` argument, and the same environment, to read its manifest before
+the admin configures or enables it. Installing a package is the point of
+trust, not enabling it.
 
 ## What RuntimeHost scoping is for
 
@@ -50,8 +54,8 @@ than it would trust the remote service.
   not an admin can install or run plugin code, or can use an honest plugin to
   reach data or actions their own account isn't allowed, for example through
   the routes or content a plugin serves.
-- Settings a plugin needs belong in its config schema. The inherited
-  environment is not part of the plugin contract and may stop being passed.
+- Settings a plugin needs belong in its config schema. The host passes no
+  other server environment variables.
 - Real isolation would mean a separate user and network namespace per plugin,
   filesystem confinement, and a different way to run local tools. That is a
   redesign of the plugin runtime and is not planned.
