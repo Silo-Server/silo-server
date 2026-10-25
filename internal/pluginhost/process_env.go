@@ -30,7 +30,8 @@ var processEnvNames = map[string]bool{
 // subset of the server's own. Callers starting a plugin binary set it as the
 // command's Env, so the child never sees the rest.
 func ProcessEnv() []string {
-	var env []string
+	// Never nil: a nil exec.Cmd.Env inherits the whole environment.
+	env := []string{}
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if processEnvNames[name] || strings.HasPrefix(name, "LC_") {
