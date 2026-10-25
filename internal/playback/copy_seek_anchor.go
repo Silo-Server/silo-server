@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -126,8 +127,20 @@ func resolveCopySeekAnchor(
 		return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: %w", err)
 	}
 
+	anchor, ok := firstFramecrcTimestamp(stdout.Bytes())
+	if !ok {
+		return 0, 0, errors.New("resolve copy seek anchor: ffmpeg returned no video packet timestamp")
+	}
+	anchor = math.Max(0, anchor)
+	return anchor, int(anchor / float64(segmentDuration)), nil
+}
+
+// firstFramecrcTimestamp returns the presentation time, in seconds, of the
+// first stream-0 packet a framecrc report lists (its decode time when the
+// packet has none).
+func firstFramecrcTimestamp(report []byte) (float64, bool) {
 	timeBaseNumerator, timeBaseDenominator := int64(0), int64(0)
-	for line := range bytes.SplitSeq(stdout.Bytes(), []byte("\n")) {
+	for line := range bytes.SplitSeq(report, []byte("\n")) {
 		trimmed := strings.TrimSpace(string(line))
 		if strings.HasPrefix(trimmed, "#tb 0:") {
 			parts := strings.Split(strings.TrimSpace(strings.TrimPrefix(trimmed, "#tb 0:")), "/")
@@ -154,9 +167,7 @@ func resolveCopySeekAnchor(
 		if err != nil || math.IsNaN(anchor) || math.IsInf(anchor, 0) {
 			continue
 		}
-		anchor = math.Max(0, anchor)
-		return anchor, int(anchor / float64(segmentDuration)), nil
+		return anchor, true
 	}
-
-	return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg returned no video packet timestamp")
+	return 0, false
 }

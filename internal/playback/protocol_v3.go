@@ -87,10 +87,19 @@ const (
 	FeatureSubripSidecarV3    = "subrip_sidecar_v1"
 	// FeatureHLSSubtitleRenditionsV3 is the client's statement that it plays
 	// a subtitle carried as a WebVTT SUBTITLES rendition of the plan's HLS
-	// stream (subtitle.hls_rendition) instead of a sidecar artifact. Only a
-	// server_transcode_hls plan uses it, for an embedded text track. It
-	// exists only on /api/v2 (see NativeServerFeaturesV3).
+	// stream (subtitle.hls_rendition) instead of a sidecar artifact. A
+	// server_transcode_hls plan uses it for an embedded text track, and a
+	// server_remux_hls plan too when the client also lists
+	// FeatureHLSRemuxSubtitleRenditionsV3. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
 	FeatureHLSSubtitleRenditionsV3 = "hls_subtitle_renditions_v1"
+	// FeatureHLSRemuxSubtitleRenditionsV3 extends FeatureHLSSubtitleRenditionsV3,
+	// which it requires, to HLS copy remuxes: an opted-in client receives a
+	// server_remux_hls plan's embedded text track as subtitle.hls_rendition,
+	// on a subtitle playlist that follows the remux's keyframe-cut segments
+	// (a VOD keyframe plan or FFmpeg's EVENT playlist). Without it a remux
+	// keeps its sidecar. It exists only on /api/v2 (see NativeServerFeaturesV3).
+	FeatureHLSRemuxSubtitleRenditionsV3 = "hls_remux_subtitle_renditions_v1"
 	// FeaturePlanActiveQualityV3 tells a client the plan names the
 	// available_qualities entry it delivers in active_quality, so an absent
 	// active_quality means "no entry" rather than "a server that predates
@@ -155,7 +164,21 @@ const (
 	// A transcode node that emits and serves an HLS WebVTT subtitle rendition
 	// (TranscodeOpts.SubtitleRendition).
 	TransportFeatureHLSSubtitleRenditionV1 = "hls_subtitle_rendition_v1"
+	// A transcode node that also emits the rendition for an HLS copy remux,
+	// whose subtitle playlist follows the keyframe plan or FFmpeg's EVENT
+	// playlist. Nodes with only hls_subtitle_rendition_v1 refuse it.
+	TransportFeatureHLSRemuxSubtitleRenditionV1 = "hls_remux_subtitle_rendition_v1"
 )
+
+// HLSSubtitleRenditionTransportFeatureV3 is the transport feature a node must
+// advertise to emit the subtitle rendition of a stream whose video target is
+// targetVideoCodec.
+func HLSSubtitleRenditionTransportFeatureV3(targetVideoCodec string) string {
+	if strings.EqualFold(strings.TrimSpace(targetVideoCodec), codecCopyV3) {
+		return TransportFeatureHLSRemuxSubtitleRenditionV1
+	}
+	return TransportFeatureHLSSubtitleRenditionV1
+}
 
 // Degradation warning codes reported by playback plans.
 const (
@@ -223,7 +246,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -1546,12 +1569,13 @@ func HasFeatureV3(features []string, wanted string) bool {
 //     seek reanchor must reproduce the frozen plan's artifact exactly.
 //   - hls_subtitle_renditions_v1 decides whether the transcode's stream URL
 //     is a multivariant playlist carrying the subtitle or a media playlist
-//     beside a sidecar. A reused HLS transport keeps the shape it was built
-//     with, so the attempt has to keep the same answer.
+//     beside a sidecar, and hls_remux_subtitle_renditions_v1 the same for a
+//     copy remux. A reused HLS transport keeps the shape it was built with,
+//     so the attempt has to keep the same answer.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeatureHLSRemuxSubtitleRenditionsV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

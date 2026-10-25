@@ -652,7 +652,7 @@
         },
         "hls_rendition": {
           "type": "object",
-          "description": "The selected track is carried by the plan's HLS stream: a multivariant playlist whose SUBTITLES group group_id holds it as one WebVTT rendition. Published only on server_transcode_hls plans to clients that negotiated hls_subtitle_renditions_v1. Mutually exclusive with artifact and embedded; inventory URLs remain available for other selections.",
+          "description": "The selected track is carried by the plan's HLS stream: a multivariant playlist whose SUBTITLES group group_id holds it as one WebVTT rendition. Published only on server_transcode_hls plans to clients that negotiated hls_subtitle_renditions_v1, and on server_remux_hls plans to clients that also negotiated hls_remux_subtitle_renditions_v1. Mutually exclusive with artifact and embedded; inventory URLs remain available for other selections.",
           "required": [
             "group_id",
             "name",
