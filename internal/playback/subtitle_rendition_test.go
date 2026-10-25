@@ -1437,6 +1437,32 @@ func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 	})
 }
 
+// A subtitle request past the copy plan never moves the throttle position:
+// the throttler would measure the buffer against a segment that will never
+// exist and stop pausing FFmpeg.
+func TestPlannedCopySubtitleSegmentPastThePlanLeavesTheThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		opts := copyRemuxRenditionOpts(t.TempDir(), false)
+		opts.subtitleCueFile = subtitleCueFileName(0)
+		durations := []float64{2, 2, 2, 2, 2, 2}
+		writeCopyRemuxPlaylist(t, opts.OutputDir, opts, 0, durations[:2], false)
+		if err := os.WriteFile(filepath.Join(opts.OutputDir, opts.subtitleCueFile), []byte("WEBVTT\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		session := &TranscodeSession{outputDir: opts.OutputDir, opts: opts, copyPlan: &copySegmentPlan{durations: durations}, running: true, lastRequestedSegment: 1}
+		session.startSubtitleSpanLocked(opts)
+
+		rr := httptest.NewRecorder()
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_99999.vtt", nil), 99999)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("segment past the plan = %d, want 404", rr.Code)
+		}
+		if got := session.LastRequestedSegment(); got != 1 {
+			t.Fatalf("throttle position = %d, want 1", got)
+		}
+	})
+}
+
 // A seek restart replaces FFmpeg's playlist, so a closed generation keeps the
 // durations its own playlist listed: its segments' cues stay where they were,
 // in the running session and in one rebuilt from the span record.

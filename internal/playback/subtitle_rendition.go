@@ -287,9 +287,11 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 		if !waitable || !time.Now().Before(deadline) {
 			return subtitleSegmentDocument(opts, segNum, subtitleCueWindow{}, nil), nil
 		}
-		if s.copyPlan != nil {
+		if s.copyPlan != nil && segNum >= 0 && segNum < len(s.copyPlan.durations) {
 			// A player may fetch subtitles ahead of video: the wait counts
-			// toward the throttle as the video segment's does.
+			// toward the throttle as the video segment's does. A segment
+			// past the plan never comes, and as the throttle position it
+			// would stop the throttler from ever pausing FFmpeg.
 			s.notePlannedSegmentRequest(segNum)
 		}
 		// A long wait backs off so it does not re-read the playlist ten
