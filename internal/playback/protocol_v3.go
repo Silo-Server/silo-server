@@ -1635,7 +1635,7 @@ func PinAttemptStickyFeaturesV3(requested, negotiated []string) []string {
 }
 
 // PinHLSVariableSubstitutionV3 forces hls_variable_substitution_v1 in
-// requested's hls delivery back to the state negotiated established. Like the
+// requested's hls delivery back to the state the start negotiated. Like the
 // attempt-sticky client features, the playlist form is fixed at start: a
 // reused HLS transport keeps serving the form its session was built with, so
 // a replan must not record or plan a different one. Stop/start is the
@@ -1652,6 +1652,14 @@ func PinHLSVariableSubstitutionV3(requested *ClientPlaybackContextV3, negotiated
 	delivery, ok := requested.Deliveries[DeliveryClassHLSV3]
 	if !ok && !pinned {
 		return
+	}
+	if !ok {
+		// The placeholder is persisted, and the schema requires these lists
+		// to be arrays, never null.
+		delivery = DeliveryCapabilityV3{
+			Containers: []string{}, VideoCodecs: []string{}, AudioDecodeCodecs: []string{},
+			AudioPassthroughCodecs: []string{}, ValidatedClaims: []string{}, Transformations: []TransformationV3{},
+		}
 	}
 	delivery.Features = WithoutFeatureV3(delivery.Features, FeatureHLSVariableSubstitutionV3)
 	if pinned {
