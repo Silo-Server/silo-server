@@ -105,6 +105,10 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
+A single-container alternative, with PostgreSQL inside the Silo container and
+Redis and Meilisearch available on request, is described in
+[docs/omnibus-image.md](docs/omnibus-image.md).
+
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
 storage, GPU acceleration, Meilisearch, external PostgreSQL and Redis,

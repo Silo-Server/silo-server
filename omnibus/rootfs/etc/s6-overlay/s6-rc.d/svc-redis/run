@@ -1,0 +1,20 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+if ! enabled redis; then
+  notify_ready
+  exec sleep infinity
+fi
+export HOME=/config/redis
+# A redis.conf in /config/redis replaces the built-in settings entirely.
+if [[ -f /config/redis/redis.conf ]]; then
+  exec s6-notifyoncheck -d -n 0 -w 1000 \
+    s6-setuidgid redis redis-server /config/redis/redis.conf
+fi
+exec s6-notifyoncheck -d -n 0 -w 1000 \
+  s6-setuidgid redis redis-server \
+    --bind 127.0.0.1 --port 6379 --protected-mode yes \
+    --dir /config/redis --save 60 1000 --appendonly no \
+    --daemonize no --supervised no --logfile '' --loglevel notice

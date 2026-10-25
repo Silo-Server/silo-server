@@ -1,0 +1,45 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Map the silo account onto PUID and PGID and give it access to any GPU
+# devices passed into the container.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+PUID="${PUID:-911}"
+PGID="${PGID:-911}"
+if [[ ! "$PUID" =~ ^[0-9]+$ || ! "$PGID" =~ ^[0-9]+$ ]]; then
+  echo "PUID and PGID must be numeric (got PUID=$PUID PGID=$PGID)" >&2
+  exit 1
+fi
+
+[[ "$(id -g silo)" == "$PGID" ]] || groupmod -o -g "$PGID" silo
+[[ "$(id -u silo)" == "$PUID" ]] || usermod -o -u "$PUID" silo
+
+for g in video render; do
+  if getent group "$g" >/dev/null; then
+    usermod -aG "$g" silo
+  fi
+done
+
+# Devices bind-mounted from the host carry host group ids. Create a matching
+# group when none exists so the silo user can open them.
+for dev in /dev/dri/* /dev/nvidia*; do
+  [[ -c "$dev" ]] || continue
+  gid="$(stat -c %g "$dev")"
+  [[ "$gid" == 0 ]] && continue
+  group="$(getent group "$gid" | cut -d: -f1 || true)"
+  if [[ -z "$group" ]]; then
+    group="dev$gid"
+    groupadd -g "$gid" "$group"
+  fi
+  usermod -aG "$group" silo
+done
+
+cat <<BANNER
+───────────────────────────────────────
+Silo omnibus
+silo uid: $(id -u silo)
+silo gid: $(id -g silo)
+───────────────────────────────────────
+BANNER

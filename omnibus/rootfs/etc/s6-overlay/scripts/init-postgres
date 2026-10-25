@@ -1,0 +1,38 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Create the PostgreSQL cluster on first start and refuse to open a data
+# directory written by another major version.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+enabled postgres || exit 0
+export HOME=/config/postgres
+PGDATA=/config/postgres/data
+
+if [[ -s "$PGDATA/PG_VERSION" ]]; then
+  have="$(<"$PGDATA/PG_VERSION")"
+  if [[ "$have" != "$PG_MAJOR" ]]; then
+    cat >&2 <<MSG
+/config/postgres/data was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR.
+Start the previous image, dump the silo database with pg_dump, move the old data
+directory aside, then start this image and restore the dump. See docs/omnibus-image.md.
+MSG
+    exit 1
+  fi
+  own_tree postgres postgres "$PGDATA"
+  chmod 0700 "$PGDATA"
+  # Nothing else runs PostgreSQL in this container, so a pid file here is
+  # always left over from an unclean stop.
+  rm -f "$PGDATA/postmaster.pid"
+else
+  log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
+  install -d -o postgres -g postgres -m 0700 "$PGDATA"
+  s6-setuidgid postgres initdb -D "$PGDATA" -U silo \
+    --encoding=UTF8 --locale=en_US.UTF-8 \
+    --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+  printf "\ninclude_dir = 'conf.d'\n" >> "$PGDATA/postgresql.conf"
+fi
+
+install -d -o postgres -g postgres -m 0755 "$PGDATA/conf.d"
+install -o postgres -g postgres -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"

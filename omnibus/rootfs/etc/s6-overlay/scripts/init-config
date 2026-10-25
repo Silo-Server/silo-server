@@ -1,0 +1,70 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Lay out /config, decide which bundled services run, and publish the
+# connection settings Silo needs as environment for the later services.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+install -d -m 0755 "$STATE_DIR"
+
+# One directory per service, each owned by that service's account.
+install -d -m 0755 /config
+install -d -o silo -g silo /config/silo /config/silo/artwork /config/silo/compat /config/silo/plugins
+install -d -o postgres -g postgres -m 0750 /config/postgres
+install -d -o redis -g redis -m 0750 /config/redis
+install -d -o meilisearch -g meilisearch -m 0750 /config/meilisearch
+own_tree silo silo /config/silo
+install -d -o postgres -g postgres -m 2775 /run/postgresql
+# Silo's transcode and prepared-download defaults live under /tmp. Mount them
+# to keep them across container recreation.
+install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
+
+# PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere.
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  : > "$STATE_DIR/postgres.enabled"
+  export_env DATABASE_URL "postgres://silo@/silo?host=/run/postgresql&sslmode=disable"
+  postgres_state="bundled"
+else
+  postgres_state="external ($DATABASE_URL)"
+fi
+
+# Redis: off by default. An explicit REDIS_URL always wins over the bundle.
+if [[ -n "${REDIS_URL:-}" ]]; then
+  redis_state="external"
+elif truthy "${ENABLE_REDIS:-false}"; then
+  : > "$STATE_DIR/redis.enabled"
+  export_env REDIS_URL "redis://127.0.0.1:6379"
+  redis_state="bundled"
+else
+  redis_state="off"
+fi
+
+# Meilisearch: off by default. The master key is generated once and kept in
+# /config/meilisearch/master-key unless MEILI_MASTER_KEY is provided.
+if truthy "${ENABLE_MEILISEARCH:-false}"; then
+  : > "$STATE_DIR/meilisearch.enabled"
+  key_file=/config/meilisearch/master-key
+  if [[ -n "${MEILI_MASTER_KEY:-}" ]]; then
+    key="$MEILI_MASTER_KEY"
+  elif [[ -s "$key_file" ]]; then
+    key="$(<"$key_file")"
+  else
+    key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    (umask 077 && printf '%s\n' "$key" > "$key_file")
+    chown meilisearch:meilisearch "$key_file"
+    log "generated a Meilisearch master key at $key_file"
+  fi
+  (umask 077 && printf '%s' "$key" > "$STATE_DIR/meili-master-key")
+  meilisearch_state="bundled"
+else
+  meilisearch_state="off"
+fi
+
+if [[ -n "${MODE:-}" && "$MODE" != "integrated" ]]; then
+  warn "MODE=$MODE; the omnibus image runs one integrated node, other modes are not supported"
+fi
+
+log "postgres: $postgres_state"
+log "redis: $redis_state"
+log "meilisearch: $meilisearch_state"

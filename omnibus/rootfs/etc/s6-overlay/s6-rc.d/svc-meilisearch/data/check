@@ -1,0 +1,2 @@
+#!/bin/sh
+curl -fsS "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}/health" 2>/dev/null | grep -q available
