@@ -33,12 +33,32 @@ func ValidateSubtitleContent(format SubtitleFormat, data []byte) error {
 		cues, err := ParseCuesForFormat(format, text)
 		ok = err == nil && len(cues) > 0
 	case FormatSUB:
-		ok = hasMicroDVDCue(text) || subViewerCue.Match(text)
+		ok = subDemuxer(text) != ""
 	}
 	if !ok {
 		return ErrUnreadableSubtitle
 	}
 	return nil
+}
+
+// SUBDemuxer returns the FFmpeg input format for .sub subtitle data, which
+// FFmpeg has no "sub" demuxer for: "microdvd" or "subviewer", read from the
+// cues as ValidateSubtitleContent reads them, or "" when data holds neither,
+// such as a binary VobSub .sub. Like those demuxers, it reads UTF-8 with or
+// without a BOM and not UTF-16, which they turn into no cues or an error;
+// DeliveryBytes hands over UTF-8.
+func SUBDemuxer(data []byte) string {
+	return subDemuxer(bytes.TrimPrefix(data, utf8BOM))
+}
+
+func subDemuxer(text []byte) string {
+	switch {
+	case hasMicroDVDCue(text):
+		return "microdvd"
+	case subViewerCue.Match(text):
+		return "subviewer"
+	}
+	return ""
 }
 
 // hasMicroDVDCue reports a MicroDVD line with displayed text. A line such as
