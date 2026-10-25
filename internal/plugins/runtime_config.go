@@ -204,6 +204,40 @@ func (s *RuntimeConfigStore) ListGlobalConfigs(ctx context.Context, installation
 	return configs, nil
 }
 
+// ListGlobalConfigKeys names the global configuration entries an installation
+// has stored, without decoding any of them.
+//
+// Presence is all a caller needs to answer "has an operator configured this
+// plugin", and stopping at the key avoids decrypting secrets for a caller that
+// is not entitled to read them.
+func (s *RuntimeConfigStore) ListGlobalConfigKeys(ctx context.Context, installationID int) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT config_key
+		FROM plugin_runtime_configs
+		WHERE plugin_installation_id = $1
+		ORDER BY config_key ASC
+	`, installationID)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin runtime config keys: %w", err)
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0, 4)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scanning plugin runtime config key: %w", err)
+		}
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating plugin runtime config keys: %w", err)
+	}
+	return keys, nil
+}
+
 func runtimeConfigAAD(installationID int, key string) string {
 	return secret.RowAAD(
 		"plugin_runtime_configs",

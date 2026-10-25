@@ -43556,6 +43556,13 @@
             ],
             "type": "string"
           },
+          "configured_global_keys": {
+            "description": "Global config keys the operator has filled in; a per-account setting that depends on one can only be offered when it is present. Values are never included. Empty, never null.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "description": "Installation identifier",
             "examples": [
@@ -43599,7 +43606,8 @@
           "version",
           "user_config_schema",
           "routes",
-          "assets"
+          "assets",
+          "configured_global_keys"
         ],
         "type": "object"
       },
