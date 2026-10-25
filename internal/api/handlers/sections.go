@@ -813,6 +813,15 @@ func (h *SectionHandler) listProfileOverrides(ctx context.Context, q SectionOver
 	if overrides == nil {
 		overrides = []userstore.SectionOverride{}
 	}
+	// A row saved before the item_limit cap may hold a larger value. Report
+	// it capped, as the resolver applies it, so a client that sends back
+	// what it read is not refused by saveProfileOverrides.
+	for i := range overrides {
+		if limit := overrides[i].ItemLimit; limit != nil && *limit > sections.MaxItemLimit {
+			capped := sections.MaxItemLimit
+			overrides[i].ItemLimit = &capped
+		}
+	}
 	return overrides, nil
 }
 

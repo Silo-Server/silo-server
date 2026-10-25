@@ -575,3 +575,25 @@ func TestSaveProfileOverridesRejectsOversizedItemLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestListProfileOverridesCapsStoredItemLimit: a row saved before the cap
+// lists at the cap, so a client that saves back what it read is not refused.
+func TestListProfileOverridesCapsStoredItemLimit(t *testing.T) {
+	huge := 1_000_000_000
+	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{ID: "o1", SectionID: "s1", ItemLimit: &huge}}}
+	h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
+	q := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
+
+	listed, err := h.ListProfileOverrides(t.Context(), q)
+	if err != nil {
+		t.Fatalf("ListProfileOverrides: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ItemLimit == nil || *listed[0].ItemLimit != sections.MaxItemLimit {
+		t.Fatalf("listed = %+v, want one override with item_limit %d", listed, sections.MaxItemLimit)
+	}
+
+	writes := []SectionOverrideWrite{{ID: listed[0].ID, SectionID: listed[0].SectionID, ItemLimit: listed[0].ItemLimit}}
+	if err := h.SaveProfileOverrides(t.Context(), q, writes); err != nil {
+		t.Fatalf("saving the listed overrides back: %v", err)
+	}
+}
