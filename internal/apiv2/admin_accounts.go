@@ -290,6 +290,10 @@ func registerAdminAccounts(reg *Registry) {
 	})
 	create := adminAccountOperation(http.MethodPost, "", "createAdminUser", false)
 	create.DefaultStatus = 201
+	// A taken username or email, or an access group on a server without
+	// access groups, is 409; a default profile the user store cannot create
+	// in the same transaction is 501 capability_unsupported.
+	create.Errors = append(create.Errors, http.StatusConflict, http.StatusNotImplemented)
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
@@ -312,7 +316,11 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		return &struct{}{}, nil
 	})
-	Register(reg, adminAccountOperation(http.MethodPost, "/{id}/impersonate", "impersonateAdminUser", false), func(ctx context.Context, in *AdminAccountImpersonateInput) (*TokenPairOutput, error) {
+	// Impersonating while already impersonating, or on a server without
+	// impersonation configured, is 409.
+	impersonate := adminAccountOperation(http.MethodPost, "/{id}/impersonate", "impersonateAdminUser", false)
+	impersonate.Errors = append(impersonate.Errors, http.StatusConflict)
+	Register(reg, impersonate, func(ctx context.Context, in *AdminAccountImpersonateInput) (*TokenPairOutput, error) {
 		svc, p := reg.adminAccounts()
 		if p != nil {
 			return nil, p
