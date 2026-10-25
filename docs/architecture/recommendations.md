@@ -287,8 +287,10 @@ Discover reads the profile's watched set once per request and shares it
 between its rows and the airings it blends in; Watch Tonight shares it
 between its candidates, its cold-start fallback and the handler's filter; a
 Home render shares it between its For You and Because You Watched rows. On
-the Postgres user store the set is one query planned for the profile; only a
-user store outside Postgres is walked page by page.
+the Postgres user store the set is one query planned for the profile, and the
+progress that abandoned titles and the taste profile come from is one query
+plus one for ebook reading progress; only a user store outside Postgres is
+walked page by page.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until

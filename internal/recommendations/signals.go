@@ -380,6 +380,11 @@ func (s *SignalReader) favoriteItemIDs(ctx context.Context, userID int, profileI
 	}
 }
 
+// WatchProgressForUser returns every progress row of the profile, with its
+// ebook reading progress when it has a user store. When the store keeps
+// progress in the Postgres tables the rows are one query, plus one for the
+// ebooks; only a store outside them is walked page by page, since on
+// Postgres the walk is quadratic (see readWatchedItemIDSet).
 func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
@@ -387,6 +392,17 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 	}
 	if !ok {
 		return s.repo.GetWatchProgressForUser(ctx, userID, profileID)
+	}
+	if !s.storeIsSeparate() {
+		rows, err := s.repo.GetWatchProgressForUser(ctx, userID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		return append(rows, ebookProgress...), nil
 	}
 
 	rows := make([]WatchProgressRow, 0, signalPageSize)
