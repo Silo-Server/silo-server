@@ -470,6 +470,13 @@ function WatchProviderCard({
   const runInfo = connection.connected ? deriveRunInfo(connection, latestRun) : null;
   const settingsPanelId = `watch-provider-${providerKey}-settings`;
   const hasError = Boolean(runInfo?.errorMessage);
+  // Removal sync covers both directions: it removes locally when the provider
+  // drops an item, and on the provider when the local list drops one. Keep the
+  // switch usable while either direction of the list is active.
+  const favoritesSyncEnabled =
+    connection.import_favorites_enabled || connection.export_favorites_enabled;
+  const watchlistSyncEnabled =
+    connection.import_watchlist_enabled || connection.export_watchlist_enabled;
   const supportsRatings =
     connection.capabilities.import_ratings || connection.capabilities.export_ratings;
 
@@ -793,9 +800,10 @@ function WatchProviderCard({
                     onChange={(checked) =>
                       updateConnection.mutate({
                         export_favorites_enabled: checked,
-                        sync_favorite_removals_enabled: checked
-                          ? connection.sync_favorite_removals_enabled
-                          : false,
+                        sync_favorite_removals_enabled:
+                          checked || connection.import_favorites_enabled
+                            ? connection.sync_favorite_removals_enabled
+                            : false,
                       })
                     }
                   />
@@ -806,7 +814,7 @@ function WatchProviderCard({
                     label="Sync favorite removals"
                     description="Remove provider-synced favorites on the other side when they are explicitly unfavorited."
                     checked={connection.sync_favorite_removals_enabled}
-                    disabled={isBusy || !connection.export_favorites_enabled}
+                    disabled={isBusy || !favoritesSyncEnabled}
                     onChange={(checked) =>
                       updateConnection.mutate({ sync_favorite_removals_enabled: checked })
                     }
@@ -834,9 +842,10 @@ function WatchProviderCard({
                     onChange={(checked) =>
                       updateConnection.mutate({
                         export_watchlist_enabled: checked,
-                        sync_watchlist_removals_enabled: checked
-                          ? connection.sync_watchlist_removals_enabled
-                          : false,
+                        sync_watchlist_removals_enabled:
+                          checked || connection.import_watchlist_enabled
+                            ? connection.sync_watchlist_removals_enabled
+                            : false,
                       })
                     }
                   />
@@ -847,7 +856,7 @@ function WatchProviderCard({
                     label="Sync watchlist removals"
                     description="Remove provider-synced watchlist items on the other side when they are removed locally."
                     checked={connection.sync_watchlist_removals_enabled}
-                    disabled={isBusy || !connection.export_watchlist_enabled}
+                    disabled={isBusy || !watchlistSyncEnabled}
                     onChange={(checked) =>
                       updateConnection.mutate({ sync_watchlist_removals_enabled: checked })
                     }

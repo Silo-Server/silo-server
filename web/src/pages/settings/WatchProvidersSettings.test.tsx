@@ -20,7 +20,7 @@ vi.mock("@/hooks/queries/watchProviders", () => ({
     isLoading: false,
   }),
   useWatchProviderConnection: () => ({
-    data: makeConnection(),
+    data: currentConnection,
     isLoading: false,
     isFetching: false,
   }),
@@ -35,6 +35,9 @@ vi.mock("@/hooks/queries/watchProviders", () => ({
 }));
 
 import WatchProvidersSettings from "./WatchProvidersSettings";
+
+// The connection the panel reads. A test swaps it before rendering.
+let currentConnection = makeConnection();
 
 function makeConnection(): WatchProviderConnection {
   return {
@@ -127,6 +130,7 @@ describe("WatchProvidersSettings", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mocks.updateConnection.mockReset();
+    currentConnection = makeConnection();
   });
 
   afterEach(() => {
@@ -198,5 +202,47 @@ describe("WatchProvidersSettings", () => {
     act(() => toggle.click());
     expect(settingsPanel(container)).toBeNull();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps removal sync usable from either direction of the list", async () => {
+    const base = makeConnection();
+    currentConnection = {
+      ...base,
+      capabilities: {
+        ...base.capabilities,
+        import_favorites: true,
+        export_favorites: true,
+        remove_favorites: true,
+        import_watchlist: true,
+        export_watchlist: true,
+        remove_watchlist: true,
+      },
+      // Import-only: the provider feeds this profile and nothing is sent back.
+      import_favorites_enabled: true,
+      export_favorites_enabled: false,
+      import_watchlist_enabled: true,
+      export_watchlist_enabled: false,
+    };
+
+    const queryClient = new QueryClient();
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <WatchProvidersSettings />
+        </QueryClientProvider>,
+      );
+    });
+
+    act(() => findButton(container, "Settings").click());
+    await flush();
+
+    const favoriteRemovals = container.querySelector(
+      "#watch-provider-simkl-favorite-removals",
+    ) as HTMLButtonElement;
+    const watchlistRemovals = container.querySelector(
+      "#watch-provider-simkl-watchlist-removals",
+    ) as HTMLButtonElement;
+    expect(favoriteRemovals.disabled).toBe(false);
+    expect(watchlistRemovals.disabled).toBe(false);
   });
 });
