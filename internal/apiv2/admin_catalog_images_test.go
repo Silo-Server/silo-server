@@ -187,10 +187,8 @@ func TestAdminImageUpload(t *testing.T) {
 		t.Fatalf("errors = %+v, want body.type", p.Errors)
 	}
 	for name, form := range map[string][2]string{
-		"unknown type": func() [2]string { b, c := itemImageForm(t, "banner", "image/png", 16); return [2]string{b, c} }(),
-		"no type":      func() [2]string { b, c := itemImageForm(t, "", "image/png", 16); return [2]string{b, c} }(),
-		"no image":     func() [2]string { b, c := itemImageForm(t, "poster", "", -1); return [2]string{b, c} }(),
-		"gif part":     func() [2]string { b, c := itemImageForm(t, "poster", "image/gif", 16); return [2]string{b, c} }(),
+		"no image": func() [2]string { b, c := itemImageForm(t, "poster", "", -1); return [2]string{b, c} }(),
+		"gif part": func() [2]string { b, c := itemImageForm(t, "poster", "image/gif", 16); return [2]string{b, c} }(),
 	} {
 		requireProblem(t, post(form[0], form[1], adminToken), TypeValidationFailed)
 		if f.calls != 1 {

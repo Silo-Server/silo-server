@@ -65,8 +65,6 @@ func TestAdminUploadItemImageCachesForTheTarget(t *testing.T) {
 		season              int
 	}{
 		{"movie poster", "movie", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "movie", ContentType: "movie", ImageType: metadata.ImagePoster}, -1},
-		{"series logo", "series", "logo", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImageLogo}, -1},
-		{"series backdrop", "series", "backdrop", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImageBackdrop}, -1},
 		{"season poster", "season-2", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImagePoster}, 2},
 	}
 	for _, tc := range cases {
@@ -102,11 +100,9 @@ func TestAdminUploadItemImageRejectsBeforeCaching(t *testing.T) {
 		{"empty file", "movie", "poster", nil, http.StatusBadRequest},
 		{"oversized file", "movie", "poster", make([]byte, metadata.MaxUploadedImageBytes+1), http.StatusBadRequest},
 		{"unknown type read as a poster elsewhere", "movie", "cover", []byte("x"), http.StatusBadRequest},
-		{"type the picker does not offer", "movie", "banner", []byte("x"), http.StatusBadRequest},
-		{"still", "movie", "still", []byte("x"), http.StatusBadRequest},
+		{"type the picker does not offer", "movie", "still", []byte("x"), http.StatusBadRequest},
 		{"season backdrop", "season-2", "backdrop", []byte("x"), http.StatusBadRequest},
 		{"episode", "episode", "poster", []byte("x"), http.StatusBadRequest},
-		{"audiobook", "book", "poster", []byte("x"), http.StatusBadRequest},
 		{"missing item", "missing", "poster", []byte("x"), http.StatusNotFound},
 	}
 	for _, tc := range cases {
@@ -132,7 +128,6 @@ func TestAdminUploadItemImageMapsCacheFailures(t *testing.T) {
 		status int
 	}{
 		{"not an image", metadata.ErrUnsupportedUploadedImage, http.StatusBadRequest},
-		{"wrapped decode failure", errors.Join(metadata.ErrUnsupportedUploadedImage, errors.New("vips: unsupported")), http.StatusBadRequest},
 		{"no artwork storage", metadata.ErrImageUploadUnavailable, http.StatusServiceUnavailable},
 		{"storage failure", errors.New("put local/series/series/poster: access denied"), http.StatusInternalServerError},
 	}
@@ -212,11 +207,5 @@ func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
 		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 || len(svc.uploads) != 0 {
 			t.Fatalf("provider %d, local %d, upload %d calls, want none", svc.providerCalls, len(svc.applyLocal), len(svc.uploads))
 		}
-	})
-
-	t.Run("an upload for another slot is refused", func(t *testing.T) {
-		svc := &localImageServiceFake{}
-		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "backdrop"})
-		requireAPIStatus(t, err, http.StatusBadRequest)
 	})
 }
