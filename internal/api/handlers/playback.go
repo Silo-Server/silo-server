@@ -1498,10 +1498,13 @@ func (h *PlaybackHandler) markSpannedEpisodesWatched(ctx context.Context, watchS
 		slog.ErrorContext(ctx, "failed to list multi-episode file episodes", "component", "api", "session", session.ID, "error", err)
 		return
 	}
+	// Only the episodes the file serves: lookups stop catalog.MaxEpisodeSpan
+	// episodes past the first.
+	last := min(file.MultiEpisodeEnd, first.EpisodeNumber+catalog.MaxEpisodeSpan)
 	var targets []watchstate.LeafWatchTarget
 	for _, episode := range season {
 		if episode.EpisodeNumber > first.EpisodeNumber &&
-			episode.EpisodeNumber >= file.MultiEpisodeStart && episode.EpisodeNumber <= file.MultiEpisodeEnd {
+			episode.EpisodeNumber >= file.MultiEpisodeStart && episode.EpisodeNumber <= last {
 			targets = append(targets, watchstate.LeafWatchTarget{MediaItemID: episode.ContentID})
 		}
 	}

@@ -1452,27 +1452,33 @@ func (l testSeasonEpisodeLookup) ListBySeason(context.Context, string, int) ([]*
 	return l.season, nil
 }
 
-// A completed multi-episode file marks every episode of its range watched, so
-// the next episode offered is not the same file again (issue #739).
+// A completed multi-episode file marks the episodes of its range it serves
+// watched, so the next episode offered is not the same file again (issue
+// #739). Episodes past the lookup bound don't resolve to the file and stay
+// unwatched.
 func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
 	store := newPlaybackTestStore(t)
 	file := &models.MediaFile{
 		ID:                42,
 		ContentID:         "series-1",
 		EpisodeID:         "episode-1",
-		FilePath:          "/media/Show/Season 01/Show - S01E01-E02.mkv",
+		FilePath:          "/media/Show/Season 01/Show - S01E01-E12.mkv",
 		Duration:          3600,
 		MultiEpisodeStart: 1,
-		MultiEpisodeEnd:   2,
+		MultiEpisodeEnd:   12,
 	}
 	episode := func(number int) *models.Episode {
 		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
 	}
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
+	season := make([]*models.Episode, 0, 12)
+	for number := 1; number <= 12; number++ {
+		season = append(season, episode(number))
+	}
 	handler.EpisodeLookup = testSeasonEpisodeLookup{
 		testEpisodeLookup: testEpisodeLookup{episode: episode(1)},
-		season:            []*models.Episode{episode(1), episode(2), episode(3)},
+		season:            season,
 	}
 
 	handler.persistStopAndHistory(context.Background(), &playback.Session{
@@ -1483,11 +1489,11 @@ func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
 		Position:    3590,
 	})
 
-	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-3"})
+	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-11", "episode-12"})
 	if err != nil {
 		t.Fatalf("list progress: %v", err)
 	}
-	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-3": false} {
+	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-11": true, "episode-12": false} {
 		if got := progress[id].Completed; got != want {
 			t.Errorf("%s completed = %v, want %v", id, got, want)
 		}

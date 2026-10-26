@@ -90,7 +90,31 @@ func SpanReachSQL(param string) string {
 // returns the series of the added rows. filePredicate is an SQL condition on
 // media_files mf that selects the files to consider, with args as its
 // parameters from $1. Callers recompute the series' membership denorms.
+//
+// Curated rebind and split lock a series row before changing its memberships,
+// so this locks the candidate series first, in content ID order, and inserts in
+// a later statement.
 func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredicate string, args ...any) ([]string, error) {
+	missing := `
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
+		WHERE ` + filePredicate + `
+		  AND NOT EXISTS (
+			SELECT 1 FROM episode_libraries el
+			WHERE el.episode_id = covered.content_id
+			  AND el.media_folder_id = mf.media_folder_id
+		  )`
+	var candidateSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(DISTINCT covered.series_id), ARRAY[]::text[])`+missing, args...).Scan(&candidateSeriesIDs); err != nil {
+		return nil, fmt.Errorf("finding spanned episode library membership: %w", err)
+	}
+	if len(candidateSeriesIDs) == 0 {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, candidateSeriesIDs); err != nil {
+		return nil, fmt.Errorf("locking series for spanned episode library membership: %w", err)
+	}
+
 	var seriesIDs []string
 	if err := tx.QueryRow(ctx, `
 		WITH inserted AS (
@@ -100,9 +124,7 @@ func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredica
 			SELECT covered.content_id,
 			       mf.media_folder_id,
 			       MIN(mf.created_at),
-			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]
-			FROM episodes covered`+spannedEpisodeJoinSQL+`
-			WHERE `+filePredicate+`
+			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]`+missing+`
 			GROUP BY covered.content_id, mf.media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 			RETURNING episode_id
