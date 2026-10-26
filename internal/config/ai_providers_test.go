@@ -53,6 +53,13 @@ func TestPlanAIProviderConversionKeepsEachJobOnItsEndpoint(t *testing.T) {
 			providers: 2,
 		},
 		{
+			name:      "default endpoint saved with a trailing slash also serves speech",
+			stored:    map[string]string{"ai.base_url": "https://api.openai.com/", "ai.api_key": "sk-text"},
+			text:      endpoint{"https://api.openai.com", "sk-text"},
+			speech:    endpoint{"https://api.openai.com", "sk-text"},
+			providers: 1,
+		},
+		{
 			name:      "speech key alone on the default endpoint",
 			stored:    map[string]string{"ai.auth_mode": "chatgpt", "ai.asr_api_key": "sk-speech"},
 			speech:    endpoint{"https://api.openai.com", "sk-speech"},

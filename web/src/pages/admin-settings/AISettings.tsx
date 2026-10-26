@@ -684,15 +684,20 @@ export default function AISettings() {
       effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
     );
 
+    // None releases the text provider; it saves while nothing translates.
+    const textCleared = authMode !== "chatgpt" && textProviderID === "";
+    const textFeaturesOn = subtitleTranslateEnabled || descriptionEnabled;
     const requiresTextConnection =
-      textDirty ||
+      (textDirty && (!textCleared || textFeaturesOn)) ||
       (form.isDirty("subtitle_ai.enabled") && subtitleTranslateEnabled) ||
       (form.isDirty("metadata_ai.enabled") && descriptionEnabled);
     if (requiresTextConnection && !textReady) {
       toast.error(
         authMode === "chatgpt"
           ? "Connect a ChatGPT account and choose an available text model."
-          : "Choose a text provider and a model.",
+          : textCleared && textDirty
+            ? "Turn off subtitle and description translation before removing the text provider."
+            : "Choose a text provider and a model.",
       );
       return;
     }

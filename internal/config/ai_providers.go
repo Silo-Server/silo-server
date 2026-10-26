@@ -431,7 +431,7 @@ func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]
 	storedTextURL := firstNonEmpty(stored[legacyAITextURLSetting], stored[legacySubtitleURLSetting])
 	textKey := firstNonEmpty(stored[legacyAITextKeySetting], stored[legacySubtitleKeySetting])
 	// The text endpoint defaulted to OpenAI when none was stored.
-	textBaseURL := firstNonEmpty(storedTextURL, openAIBaseURL)
+	textBaseURL := strings.TrimRight(firstNonEmpty(storedTextURL, openAIBaseURL), "/")
 	if storedTextURL != "" || textKey != "" {
 		bind(AITextProviderSettingKey, adoptAIProvider(registry, textBaseURL, textKey, AICapabilityChat))
 	}

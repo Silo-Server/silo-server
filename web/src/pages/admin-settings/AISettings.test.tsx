@@ -397,6 +397,26 @@ describe("AISettings", () => {
     expect(mocks.setValue).toHaveBeenCalledWith("ai.text_provider_id", "router");
   });
 
+  it.each([
+    ["with translation off", "false", true],
+    ["while subtitles still translate", "true", false],
+  ])("saves None for the text provider %s", async (_name, translating, saves) => {
+    values["ai.text_provider_id"] = "";
+    values["subtitle_ai.enabled"] = translating;
+    values["metadata_ai.enabled"] = "false";
+    dirtyKeys = ["ai.text_provider_id"];
+    dirtyCount = 1;
+
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    if (saves) expect(mocks.save).toHaveBeenCalledOnce();
+    else
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Turn off subtitle and description translation before removing the text provider.",
+      );
+  });
+
   // Releasing a job's provider is how an unused provider becomes removable.
   it.each([
     ["Text model", "ai.text_provider_id"],
