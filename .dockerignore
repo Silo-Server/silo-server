@@ -3,7 +3,16 @@
 .superpowers
 .env
 .env.*
-docs/
+docs/*
+!docs/design/
+docs/design/*
+!docs/design/schemas/
+docs/design/schemas/*
+!docs/design/schemas/buffering-quality/
+docs/design/schemas/buffering-quality/*
+!docs/design/schemas/buffering-quality/v1/
+docs/design/schemas/buffering-quality/v1/*
+!docs/design/schemas/buffering-quality/v1/vectors.json
 node_modules
 web/node_modules
 web/dist

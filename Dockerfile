@@ -16,6 +16,8 @@ COPY web/ .
 # The v2 contract fixtures are imported by web tests, which `tsrs -b` type-checks
 # as part of the build; they live outside web/ so copy them explicitly.
 COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
+# Buffering tests also import the shared design vectors during type-checking.
+COPY docs/design/schemas/buffering-quality/v1/ /app/docs/design/schemas/buffering-quality/v1/
 RUN pnpm run build
 
 # Allow CI to inject prebuilt frontend assets via a named `frontend_dist`
