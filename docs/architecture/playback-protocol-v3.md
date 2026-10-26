@@ -158,8 +158,9 @@ their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
 administrator-enabled hardware or software policy and a successful device-level
 smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind, or,
 for Dolby Vision Profile 5 and compatibility ID `0`, the `dolby_vision` kind,
-which only RPU-applying executors smoke. A client must not assume a
-transformation exists because this document names it.
+which only RPU-applying executors smoke, or, for PQ tagged full range, the
+`pq_full_range` kind, which only the software executor smokes. A client must
+not assume a transformation exists because this document names it.
 
 `enabled` survives from the rollout period and is now constant `true`; the
 negative shape was deliberately removed while the alpha `/api/v1` contract was
@@ -2084,7 +2085,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |
-| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`) |
+| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`), and the full-range PQ kind only on the software executor (`tonemapx` or the Hable fallback) |
 
 `GET /playback/capability` reports the union of currently eligible local and
 pooled executors. The generic tone-map transformation does not reveal hardware
@@ -2116,7 +2117,17 @@ both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
 SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
 complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
 other kinds cached. A `dolby_vision` smoke that fails for any other reason is
-retried after five minutes instead of being cached. Missing,
+retried after five minutes instead of being cached.
+A PQ base whose stream is tagged full range (`pc`) resolves to the
+`pq_full_range` kind. Every other kind's graph declares limited-range input;
+this one keeps each decoded frame's own range, because a container can tag a
+stream full range while its bitstream codes limited levels. Only the software
+executor advertises it, because its `zscale` and `tonemapx` stages read that
+range; the hardware filters have not been shown to, so a hardware-only policy
+refuses these sources with `hdr_transcode_unsupported`. The software
+executor's complete inventory includes `pq_full_range`. Its decoded samples
+must carry an explicit range, so it always takes the sample check below. A
+full-range HLG or SDR base remains unsupported. Missing,
 reserved, legacy, or contradictory signaling
 is only a candidate classification: the selected executor must successfully
 decode and normalize samples near the beginning, midpoint, and end before the
