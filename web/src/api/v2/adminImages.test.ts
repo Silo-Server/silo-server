@@ -69,15 +69,13 @@ it("refuses image results when authority changes during decoding", async () => {
   await expect(getAdminItemImages("item-1")).rejects.toThrow();
 });
 it("uploads the image and its slot as a multipart form", async () => {
-  const mock = vi
-    .fn()
-    .mockResolvedValue(
-      jsonResponse({
-        content_id: "item-1",
-        stored_path: "local/movies/item-1/poster",
-        thumbhash: "",
-      }),
-    );
+  const mock = vi.fn().mockResolvedValue(
+    jsonResponse({
+      content_id: "item-1",
+      stored_path: "local/movies/item-1/poster",
+      thumbhash: "",
+    }),
+  );
   vi.stubGlobal("fetch", mock);
   const file = new File(["png"], "poster.png", { type: "image/png" });
   const out = await uploadAdminItemImage("item-1", "backdrop", file);
