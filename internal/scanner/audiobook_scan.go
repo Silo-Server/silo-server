@@ -14,12 +14,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type filesystemRootContentFinder interface {
@@ -123,7 +125,7 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 		return "", false, nil
 	}
 
-	entries, err := os.ReadDir(folderPath)
+	entries, err := fspath.ReadDir(folderPath)
 	if err != nil {
 		return "", false, fmt.Errorf("read folder: %w", err)
 	}
@@ -136,7 +138,7 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 		if allowedPaths != nil && !allowedPaths[full] {
 			continue
 		}
-		info, statErr := os.Stat(full)
+		info, statErr := fspath.Stat(full)
 		if statErr != nil {
 			return "", false, fmt.Errorf("stat %s: %w", full, statErr)
 		}
@@ -168,10 +170,12 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	}
 	// A previous scan may have retired an ignored part without rebuilding the
 	// remaining files' presentation. Matching sizes and mtimes do not make that
-	// incomplete multipart book safe to skip.
+	// incomplete multipart book safe to skip. A single-file book carries no
+	// presentation or edition; earlier builds' filename variant pass could
+	// leave both behind, so rebuild such a book once.
 	for _, file := range existing {
 		if len(existing) == 1 {
-			if file.PresentationKind == audiobookMultipartKind {
+			if file.PresentationKind != "" || file.EditionKey != "" {
 				return "", false, nil
 			}
 		} else if file.PresentationKind != audiobookMultipartKind || file.PresentationPartTotal != len(existing) {
@@ -280,7 +284,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		}
 		isDir := entry.IsDir()
 		if entry.Type()&os.ModeSymlink != 0 {
-			info, err := os.Stat(child)
+			info, err := fspath.Stat(child)
 			if err != nil {
 				recordWalkFailure(&scan.walkFailures, child)
 				slog.WarnContext(ctx, "audiobook scan: symlink stat failed", "component", "scanner", "path", child, "error", err)
@@ -328,7 +332,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 			root:      cleanRoot,
 			seenPaths: make(map[string]bool),
 		}
-		info, statErr := os.Stat(cleanRoot)
+		info, statErr := fspath.Stat(cleanRoot)
 		switch {
 		case statErr != nil:
 			scan.rootErr = fmt.Errorf("stat root: %w", statErr)
@@ -341,7 +345,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 			rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
 		}
 		if scan.rootErr == nil && !ignored {
-			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), rules, honorIgnores, os.ReadDir)
+			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), rules, honorIgnores, fspath.ReadDir)
 			if walkErr != nil {
 				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
 					return nil, walkErr
@@ -667,7 +671,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
 					slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
@@ -1242,7 +1246,7 @@ func (s *Scanner) upsertAudiobookPresentationTx(
 	probeUpdatedAt := time.Now().UTC()
 	mediaFiles := make([]models.MediaFile, 0, partTotal)
 	for idx, af := range book.Files {
-		info, err := os.Stat(af.Path)
+		info, err := fspath.Stat(af.Path)
 		if err != nil {
 			return fmt.Errorf("stat media file %s: %w", af.Path, err)
 		}

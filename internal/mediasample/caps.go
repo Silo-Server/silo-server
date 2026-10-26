@@ -5,13 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -106,7 +107,7 @@ func (c Capabilities) Require(req Request) error {
 type listFunc func(ctx context.Context, name string, stdin []byte, args ...string) ([]byte, error)
 
 func runListing(ctx context.Context, name string, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := fspath.CommandContext(ctx, name, args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

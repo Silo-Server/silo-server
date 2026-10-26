@@ -23,6 +23,19 @@ func EpisodeKey(seasonNumber, episodeNumber int) int {
 	return seasonNumber*episodeKeySeasonMultiplier + episodeNumber
 }
 
+// firstRegularEpisodeKey is the lowest key outside season 0, the specials.
+const firstRegularEpisodeKey = 1 * episodeKeySeasonMultiplier
+
+// hasRegularEpisodes reports whether any key is outside season 0.
+func hasRegularEpisodes(episodeKeys map[string]int) bool {
+	for _, key := range episodeKeys {
+		if key >= firstRegularEpisodeKey {
+			return true
+		}
+	}
+	return false
+}
+
 // SplitEpisodeKey is the inverse of EpisodeKey.
 func SplitEpisodeKey(key int) (seasonNumber, episodeNumber int) {
 	return key / episodeKeySeasonMultiplier, key % episodeKeySeasonMultiplier

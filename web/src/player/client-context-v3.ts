@@ -23,11 +23,8 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
-import {
-  onMeteredConnection,
-  readMeasuredBandwidthKbps,
-  readMeteredObservedLimitKbps,
-} from "./bandwidth-probe";
+import { onMeteredConnection, readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import { detectFormFactor } from "./form-factor";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -244,27 +241,15 @@ export function buildDeliveriesV3(
  * Measured downlink in kbps for the planner's Auto choice: a source that fits
  * the estimate plays as-is, and only one that does not is converted.
  *
- * A fresh measurement from the background bandwidth probe wins, unless the
+ * A fresh measurement from the background bandwidth probe is used, unless the
  * link is metered (Data Saver or cellular): that measurement was taken on
- * another link, so only a limit playback observed on this kind of link counts
- * there. `connection.downlink` is never used: browsers round and cap it
- * (Chromium at 10 Mbps), so it is a guess, not a measurement. Returns
- * undefined when nothing was measured, which lets Auto send the source.
+ * another link, and a metered one is never probed. `connection.downlink` is
+ * never used: browsers round and cap it (Chromium at 10 Mbps), so it is a
+ * guess, not a measurement. Returns undefined when nothing was measured, which
+ * lets Auto send the source, under any limit the server learned.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  // On a metered link a probe result describes another link; only a limit
-  // playback observed on a metered link describes this one.
-  return onMeteredConnection() ? readMeteredObservedLimitKbps() : readMeasuredBandwidthKbps();
-}
-
-/** Coarse form factor, used by the server only for quirk lookups. */
-function detectFormFactor(): string {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent.toLowerCase();
-  if (/\b(smart-?tv|smarttv|googletv|appletv|hbbtv|netcast|webos|tizen)\b/.test(ua)) return "tv";
-  if (/\b(ipad|tablet)\b/.test(ua)) return "tablet";
-  if (/\b(iphone|ipod|android.*mobile|mobile)\b/.test(ua)) return "phone";
-  return "desktop";
+  return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
 }
 
 /** Bounded (≤128 chars) opaque platform detail; the server treats it as text. */

@@ -1,10 +1,13 @@
 package scanner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func TestExtraStillDirsFind(t *testing.T) {
@@ -99,5 +102,35 @@ func TestExtraStillDirsUnreadableFolder(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "gone")
 	if got, _, ok := newExtraStillDirs(nil).find(filepath.Join(missing, "Making Of.mkv")); ok || got != "" {
 		t.Fatalf("find = %q, %v; want unknown", got, ok)
+	}
+}
+
+type recordingStillCacher struct {
+	scannerImageCacher
+	data []byte
+}
+
+func (c *recordingStillCacher) CacheExtraStill(_ context.Context, data []byte, _ string) (string, string, error) {
+	c.data = data
+	return "stored", "", nil
+}
+
+// An extra whose folder and name are not UTF-8 comes from the walk with an
+// fspath-encoded path; its image is still found and read.
+func TestExtraStillNonUTF8Name(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "B\xe5rd")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	writeTestFile(t, filepath.Join(dir, "P\xe5 tur-thumb.jpg"), "img")
+	video := fspath.Encode(filepath.Join(dir, "P\xe5 tur.mkv"))
+	got, info, ok := newExtraStillDirs(nil).find(video)
+	if want := fspath.Encode(filepath.Join(dir, "P\xe5 tur-thumb.jpg")); !ok || got != want || info == nil {
+		t.Fatalf("find = %q, %v, %v; want %q", got, info, ok, want)
+	}
+	cacher := &recordingStillCacher{}
+	s := &Scanner{imageCacher: cacher}
+	if _, _, err := s.cacheExtraStill(t.Context(), "extra", got, info); err != nil || string(cacher.data) != "img" {
+		t.Fatalf("cacheExtraStill = %v, data %q", err, cacher.data)
 	}
 }

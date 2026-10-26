@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"os"
 	"regexp"
 	"strings"
 	"unicode"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -42,11 +42,11 @@ func (r *DialogueBoundaryRefiner) RefineChromaprintStart(ctx context.Context, ca
 	if !ok {
 		return segment, false, nil
 	}
-	data, err := os.ReadFile(subtitle.Path)
+	data, err := fspath.ReadFile(subtitle.Path)
 	if err != nil {
 		return segment, false, fmt.Errorf("read dialogue subtitle %q for file %d: %w", subtitle.Path, candidate.FileID, err)
 	}
-	cues, err := subtitles.ParseCues(data)
+	cues, err := subtitles.ParseCues(subtitles.DecodeText(subtitles.SubtitleFormat(subtitle.Format), subtitle.Language, data))
 	if err != nil {
 		return segment, false, fmt.Errorf("parse dialogue subtitle %q for file %d: %w", subtitle.Path, candidate.FileID, err)
 	}

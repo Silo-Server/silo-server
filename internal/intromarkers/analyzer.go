@@ -727,20 +727,23 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		if !opts.deadline.IsZero() && time.Now().After(opts.deadline) {
 			return remaining, summary
 		}
-		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
-			continue
-		}
-
-		hasIntro := candidate.marker(kindIntro).present()
-		effectiveSource := candidate.effectiveSource(kindIntro)
-		if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
-			continue
-		}
-		if hasIntro && !opts.forceExistingScanner {
-			continue
-		}
-
 		segment, ok := DetectChapterIntro(candidate.Chapters)
+		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
+			// Only an online intro rated below the file's own chapter gives
+			// way to it. Refinement can only raise the chapter's confidence.
+			if !ok || !candidate.yieldsToChapter(kindIntro, segment) {
+				continue
+			}
+		} else {
+			hasIntro := candidate.marker(kindIntro).present()
+			effectiveSource := candidate.effectiveSource(kindIntro)
+			if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
+				continue
+			}
+			if hasIntro && !opts.forceExistingScanner {
+				continue
+			}
+		}
 		if !ok {
 			remaining = append(remaining, candidate)
 			continue

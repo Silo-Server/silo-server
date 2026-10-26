@@ -172,7 +172,11 @@ export interface CompatConnectInfo {
     server_name: string;
   };
   account: {
-    /** False for SSO/plugin-provisioned accounts, which cannot use compat login. */
+    /**
+     * False when the account's local password can't sign in: SSO/plugin-provisioned
+     * accounts, and accounts that aren't break-glass while the server turns
+     * password sign-in off.
+     */
     password_login_available: boolean;
   };
 }
@@ -720,6 +724,29 @@ export interface SeasonUserData {
 }
 
 export type ItemUserData = LeafItemUserData | SeasonUserData;
+
+const LEAF_USER_DATA_KEYS = [
+  "position_seconds",
+  "duration_seconds",
+  "is_in_progress",
+  "last_file_id",
+  "last_resolution",
+  "last_hdr",
+  "last_codec_video",
+  "last_edition_key",
+] as const;
+
+/**
+ * Narrows user data to the leaf shape. The server omits a zero position, so a
+ * movie whose only state is its remembered version carries `last_file_id`
+ * without `position_seconds`; any leaf-only field identifies it.
+ */
+export function leafUserData(userData: ItemUserData | undefined): LeafItemUserData | undefined {
+  if (!userData) return undefined;
+  return LEAF_USER_DATA_KEYS.some((key) => key in userData)
+    ? (userData as LeafItemUserData)
+    : undefined;
+}
 
 export interface Season {
   content_id: string;
@@ -1681,7 +1708,7 @@ export interface LibraryTabResponse {
 
 // One library's bucket of server (admin-curated) collections in the aggregated
 // server-collections response. `collections` is a capped teaser slice;
-// `total_count` is the full visible count, used for the "See all (N)" link.
+// `total_count` is the full visible count.
 export interface ServerCollectionsLibrary {
   library_id: number;
   library_name: string;
@@ -3288,9 +3315,15 @@ export interface AdminPlaybackHistoryItem {
   play_method: string;
   started_at: string;
   ended_at: string;
+  /** Where the play ended, not how long it was watched. */
   watched_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
+  /** Measured watch time; null for a play recorded before it was measured. */
+  played_seconds: number | null;
+  series_title: string;
+  season_number: number | null;
+  episode_number: number | null;
 }
 
 export interface AdminUserProfile {
@@ -3345,6 +3378,7 @@ export interface AdminDeviceSummary {
 }
 
 export interface AdminDeviceDetail {
+  connections?: V2Components["schemas"]["AdminDeviceConnection"][];
   user_id: number;
   username: string;
   email: string;
@@ -5201,6 +5235,7 @@ export type MarkerProviderConfig =
 export interface MarkerProviderUpdateRequest {
   fetch_enabled?: boolean;
   fetch_priority?: number;
+  fetch_min_confidence?: number;
   contribute_enabled?: boolean;
   contribute_auto_local?: boolean;
   contribute_min_confidence?: number;

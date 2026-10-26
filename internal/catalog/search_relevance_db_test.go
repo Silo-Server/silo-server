@@ -97,6 +97,22 @@ func TestSearchRelevancePostgres(t *testing.T) {
 			}
 		}
 	})
+	t.Run("diacritics do not change matches", func(t *testing.T) {
+		shoguns := ids("shogun", "shogun-assassin")
+		for query, want := range map[string][]string{
+			"shogun":      shoguns,
+			"Shōgun":      shoguns,
+			"SHŌGUN":      shoguns,
+			"shog":        shoguns,
+			"pokemon":     ids("pokemon", "pokemon-ascii"),
+			"pokémon":     ids("pokemon", "pokemon-ascii"),
+			"œuvre wilde": ids("wilde", "wilde-ascii"),
+		} {
+			if got := search(t, query); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
+				t.Errorf("%q results = %v, want %v", query, got, want)
+			}
+		}
+	})
 	t.Run("repeated words do not outrank shorter titles", func(t *testing.T) {
 		got := search(t, "star wars")
 		if !slices.Equal(got, ids("star-wars", "star-wars-rebels", "clone-wars", "star-wars-twice")) {
@@ -175,6 +191,13 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 		{"star-wars-twice", "movie", "From Star Wars to Star Wars", ""},
 		{"lantern-harbor", "movie", "Lantern Harbor", ""},
 		{"harbor-tales", "movie", "Northern Lights", "Tales from the Lantern Keeper's Distant Northern Harbor"},
+		{"shogun", "series", "Shōgun", ""},
+		{"shogun-assassin", "movie", "Shogun Assassin", ""},
+		// A decomposed title (e + U+0301), as some file systems store names.
+		{"pokemon", "movie", "Poke\u0301mon Detective", ""},
+		{"pokemon-ascii", "movie", "Pokemon Detective Origins", ""},
+		{"wilde", "movie", "Dorian Gray", "Le Portrait de Dorian Gray: Œuvre de Wilde"},
+		{"wilde-ascii", "movie", "Oeuvre of Wilde", ""},
 	} {
 		exec(`INSERT INTO media_items(content_id,type,title,year) VALUES($1,$2,$3,2000)`, id(item.name), item.kind, item.title)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id(item.name), library)
@@ -188,4 +211,27 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 		addAlias("harbor-tales", alias)
 	}
 	return library, id
+}
+
+// TestSearchTextFoldMatchesGoPostgres keeps the Go query fold and
+// public.fold_search_diacritics alike: a query token that folds differently
+// from the stored title never matches it.
+func TestSearchTextFoldMatchesGoPostgres(t *testing.T) {
+	pool := searchOptimizationPool(t, nil)
+	inputs := []string{"Shōgun", "Poke\u0301mon", "Straße ẞ", "Æon Flux", "Œuvre", "Łódź", "Smørrebrød", "Đà Nẵng", "İstanbul", "한국어", "がぎぐ", "Йога", "Ζωή", "plain ASCII"}
+	for _, block := range [][2]rune{{0xc0, 0x24f}, {0x300, 0x3ff}, {0x400, 0x4ff}, {0x1e00, 0x1fff}} {
+		for r := block[0]; r <= block[1]; r++ {
+			inputs = append(inputs, "x"+string(r)+"y")
+		}
+	}
+	var got []string
+	if err := pool.QueryRow(t.Context(), `SELECT array_agg(public.fold_search_diacritics(s) ORDER BY ord)
+		FROM unnest($1::text[]) WITH ORDINALITY AS u(s, ord)`, inputs).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	for i, input := range inputs {
+		if want := foldSearchDiacritics(input); got[i] != want {
+			t.Errorf("fold_search_diacritics(%q) = %q, Go folds it to %q", input, got[i], want)
+		}
+	}
 }

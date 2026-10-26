@@ -270,16 +270,26 @@ func TestSourceConversionPreflightFilterMapsQSVFramesOnce(t *testing.T) {
 }
 
 func TestSourceConversionPreflightMirrorsSoftwareDecodeForVAAPI(t *testing.T) {
-	args := sourceConversionPreflightArgs(SourcePreflightRequest{
-		Mode: ModeHardware, Backend: BackendVAAPI, Kind: SourcePQ,
-		HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
-	}, 0, "")
-	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "-hwaccel") {
-		t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
-	}
-	if !strings.Contains(joined, "format=nv12,hwupload") {
-		t.Fatalf("software-decode preflight did not upload frames before VAAPI tone mapping: %s", joined)
+	// Playback uploads HDR frames as 10-bit p010le and SDR frames as nv12
+	// (#2269); the preflight must test the same upload.
+	for kind, want := range map[SourceKind]string{
+		SourcePQ:       "format=p010le,hwupload,",
+		SourceHLG:      "format=p010le,hwupload,",
+		SourceSDRBT709: "format=nv12,hwupload,",
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			args := sourceConversionPreflightArgs(SourcePreflightRequest{
+				Mode: ModeHardware, Backend: BackendVAAPI, Kind: kind,
+				HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
+			}, 0, "")
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "-hwaccel") {
+				t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
+			}
+			if !strings.Contains(joined, want+VAAPIFilter(kind)) {
+				t.Fatalf("software-decode preflight did not upload with %q before VAAPI tone mapping: %s", want, joined)
+			}
+		})
 	}
 }
 

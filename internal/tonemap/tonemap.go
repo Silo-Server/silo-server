@@ -206,13 +206,21 @@ func NeedsToneMap(file *models.MediaFile) bool {
 	return false
 }
 
+// VideoRangeTypeIsHDR10Plus reports whether a stored video range type names
+// HDR10+. The scanner spells it "HDR10Plus" (also inside DOVIWithHDR10Plus);
+// "HDR10+" is accepted for values written by other tools.
+func VideoRangeTypeIsHDR10Plus(rangeType string) bool {
+	value := strings.ToLower(rangeType)
+	return strings.Contains(value, "hdr10plus") || strings.Contains(value, "hdr10+")
+}
+
 // DynamicRangeForVideoTrack derives a normalized dynamic-range label from the
 // scanner's Dolby Vision, HDR10+, transfer, and range metadata.
 func DynamicRangeForVideoTrack(track models.VideoTrack) string {
 	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
 		return DynamicRangeDolbyVision
 	}
-	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
+	if track.HDR10Plus || VideoRangeTypeIsHDR10Plus(track.VideoRangeType) {
 		return DynamicRangeHDR10Plus
 	}
 	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))
@@ -494,6 +502,18 @@ func SourceMatrix(kind SourceKind) string {
 // and therefore needs gamut conversion but no luminance tone mapping.
 func IsSDRSource(kind SourceKind) bool {
 	return kind == SourceSDRBT709 || kind == SourceSDRBT2020
+}
+
+// SoftwareUploadFilter moves CPU-decoded frames onto a QSV or VAAPI device
+// ahead of the hardware tone-map graph: 8-bit nv12 for SDR sources, 10-bit
+// p010le for HDR ones. Playback and the source preflight share it so the
+// preflight tests the upload playback actually runs.
+func SoftwareUploadFilter(kind SourceKind) string {
+	format := "p010le"
+	if IsSDRSource(kind) {
+		format = "nv12"
+	}
+	return "format=" + format + ",hwupload,"
 }
 
 // AllSourceKinds returns every base signal supported by capability probes.

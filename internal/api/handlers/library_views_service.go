@@ -297,7 +297,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if err != nil {
 		return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	adminCollections = h.withViewerPosters(ctx, adminCollections, AccessFilterFromContext(ctx, ""))
+	access := AccessFilterFromContext(ctx, "")
+	adminCollections = catalog.CollectionsShownToViewer(adminCollections, h.viewerCollectionCounts(ctx, adminCollections, access))
+	adminCollections = h.withViewerPosters(ctx, adminCollections, access)
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
 		Collections: h.libraryCollectionResponsesOf(ctx, adminCollections),

@@ -25,6 +25,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
@@ -91,6 +92,7 @@ type Dependencies struct {
 	DirectDownloadLinks              DirectDownloadLinkService
 	ViewerSubtitleDelete             ViewerSubtitleDeleteService
 	OrderedApplePush                 OrderedApplePushService
+	ApplePushRetirement              ApplePushRetirementService
 	NotificationEmailVerification    NotificationEmailVerificationService
 	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
 	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService
@@ -110,6 +112,7 @@ type Dependencies struct {
 	AdminOperationalLogs             AdminOperationalLogsService
 	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
 	OrderedAndroidPush               OrderedAndroidPushService
+	AndroidPushRetirement            AndroidPushRetirementService
 	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
 	WatchTogetherClose               WatchTogetherCloseService
 	WatchTogetherRoomRead            WatchTogetherRoomReadService
@@ -692,8 +695,10 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 //   - a panic anywhere, including Huma's own marshal failure after the status
 //     would already have been sent, becomes the internal_error problem with no
 //     detail leakage;
-//   - a success body is never written once the client has gone away (net/http
-//     cancels the request context on disconnect);
+//   - the operation's own status and body are written even once the request
+//     context is canceled, because net/http cancels it for a client that only
+//     half-closed as well as one that left; writing nothing would reach a
+//     reading client as net/http's empty 200;
 //   - a problem — including the 408 for a body-read timeout, which net/http
 //     also reports as a canceled context — is still delivered.
 //
@@ -710,7 +715,7 @@ func bufferStructuredResponse(ctx huma.Context, next func(huma.Context)) {
 
 func bufferResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bw := &bufferedWriter{w: w, ctx: r.Context(), retirement: make(http.Header)}
+		bw := &bufferedWriter{w: w, retirement: make(http.Header)}
 		r = r.WithContext(context.WithValue(r.Context(), retirementHeadersKey{}, bw.retirement))
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -733,7 +738,6 @@ func bufferResponse(next http.Handler) http.Handler {
 
 type bufferedWriter struct {
 	w          http.ResponseWriter
-	ctx        context.Context
 	status     int
 	body       bytes.Buffer
 	flushed    bool
@@ -773,6 +777,9 @@ func (b *bufferedWriter) discard() {
 	maps.Copy(h, b.retirement)
 }
 
+// flush writes the buffered response whether or not the request context has
+// ended (see bufferResponse). A client that has really gone never reads the
+// bounded body, and observe records the request by what was written.
 func (b *bufferedWriter) flush() {
 	if b.flushed {
 		return
@@ -780,10 +787,6 @@ func (b *bufferedWriter) flush() {
 	b.flushed = true
 	if b.status == 0 {
 		b.status = http.StatusOK
-	}
-	if b.ctx.Err() != nil && b.status < 400 {
-		// The client is gone; a success body has nobody to read it.
-		return
 	}
 	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
 		// No body travels with these statuses, so no representation header
@@ -1188,7 +1191,18 @@ func serviceProblem(err error) *Problem {
 		}
 		return p
 	}
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return passwordHashBusyProblem()
+	}
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
+}
+
+// passwordHashBusyProblem answers a password or PIN the server was too busy
+// to hash or check (passwordhash.ErrBusy): a capacity failure, retried after
+// the delay, never a wrong password.
+func passwordHashBusyProblem() *Problem {
+	return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").
+		WithRetryAfter(passwordhash.RetryAfterSeconds)
 }
 
 // externalSignInProblemTypes keeps the external sign-in codes a shared

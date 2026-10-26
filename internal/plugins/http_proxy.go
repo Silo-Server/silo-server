@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -98,7 +99,17 @@ func (p *HTTPProxy) PublicGETRoute(ctx context.Context, installationID int, rout
 	return descriptor != nil && descriptor.GetAccess() == publicAccess, nil
 }
 
+// ServeRoute serves a dynamic plugin route on the frozen /api/v1 mount and
+// relays the plugin's status and Location unchanged.
 func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installationID int, authenticated bool, admin bool) {
+	p.serveRoute(w, r, installationID, authenticated, admin, false)
+}
+
+// serveRoute serves a dynamic plugin route. With sameOriginRedirects, a
+// plugin redirect to another origin than the one the request arrived on is
+// answered with 502 instead: a client following it would carry the
+// credentials it attached for this server to that origin.
+func (p *HTTPProxy) serveRoute(w http.ResponseWriter, r *http.Request, installationID int, authenticated bool, admin bool, sameOriginRedirects bool) {
 	descriptors, err := p.service.RouteDescriptors(r.Context(), installationID)
 	if err != nil {
 		if errors.Is(err, ErrInstallationDisabled) || errors.Is(err, ErrInstallationNotFound) {
@@ -187,17 +198,31 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 		http.Error(w, "plugin route failed", http.StatusBadGateway)
 		return
 	}
+	writePluginRouteResponse(w, r, installationID, response, sameOriginRedirects)
+}
 
-	for key, value := range filteredResponseHeaders(response.GetHeaders()) {
+// writePluginRouteResponse relays a plugin route's answer: its allowed
+// headers, status and body. With sameOriginRedirects, a redirect that leaves
+// the request's origin, or whose Location is ambiguous, is a 502 instead (see
+// serveRoute).
+func writePluginRouteResponse(w http.ResponseWriter, r *http.Request, installationID int, response *pluginv1.HandleHTTPResponse, sameOriginRedirects bool) {
+	status := int(response.GetStatusCode())
+	if status == 0 {
+		status = http.StatusOK
+	}
+	headers, ambiguousLocation := filteredResponseHeaders(response.GetHeaders())
+	if sameOriginRedirects && isRedirectStatus(status) && (ambiguousLocation || redirectLeavesOrigin(r, headers[locationHeader])) {
+		slog.WarnContext(r.Context(), "plugin route redirected to another origin or sent several Location headers; not relayed", "component", "plugins", "installation_id", installationID, "status", status)
+		http.Error(w, "plugin route redirected to another origin", http.StatusBadGateway)
+		return
+	}
+	for key, value := range headers {
 		w.Header().Set(key, value)
 	}
 	// A plugin answers with its own Content-Type; the browser must not
 	// reinterpret the body as something else (script, HTML) on Silo's origin.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if response.GetStatusCode() == 0 {
-		response.StatusCode = http.StatusOK
-	}
-	w.WriteHeader(int(response.GetStatusCode()))
+	w.WriteHeader(status)
 	_, _ = w.Write(response.GetBody())
 }
 
@@ -375,7 +400,45 @@ func forwardedRequestHeaders(headers http.Header) map[string]string {
 	return values
 }
 
-func filteredResponseHeaders(headers map[string]string) map[string]string {
+// isRedirectStatus reports whether status is a redirection a client follows:
+// any 3xx except 304 Not Modified.
+func isRedirectStatus(status int) bool {
+	return status >= http.StatusMultipleChoices && status < http.StatusBadRequest && status != http.StatusNotModified
+}
+
+// redirectLeavesOrigin reports whether location, resolved against r, names
+// another origin than the one r arrived on (clientip.RequestOrigin), a
+// scheme downgrade included. A relative location stays on the origin; one
+// that does not parse is treated as leaving it, and so are two spellings
+// that url.Parse reads as a path but browsers and other WHATWG URL parsers
+// read as an authority on another host: a backslash (`/\host`, as WHATWG
+// reads `\` as `/`) and three or more leading slashes (`///host`, as WHATWG
+// skips any number of slashes before the host). (url.Parse already refuses
+// the tab, newline, and other control characters those parsers strip.)
+func redirectLeavesOrigin(r *http.Request, location string) bool {
+	location = strings.TrimSpace(location)
+	if strings.Contains(location, `\`) || strings.HasPrefix(location, "///") {
+		return true
+	}
+	origin := clientip.RequestOrigin(r)
+	base, err := url.Parse(origin)
+	if err != nil {
+		return true
+	}
+	target, err := base.Parse(location)
+	if err != nil {
+		return true
+	}
+	return clientip.SerializeOrigin(target.Scheme, target.Host) != origin
+}
+
+const locationHeader = "Location"
+
+// filteredResponseHeaders keeps the allowed plugin response headers under
+// their canonical names, so each is written once with the value kept here.
+// A plugin can send one header under several spellings, and which value
+// survives is then unspecified; ambiguousLocation reports that for Location.
+func filteredResponseHeaders(headers map[string]string) (filtered map[string]string, ambiguousLocation bool) {
 	allowed := map[string]struct{}{
 		"content-type":  {},
 		"cache-control": {},
@@ -383,13 +446,19 @@ func filteredResponseHeaders(headers map[string]string) map[string]string {
 		"last-modified": {},
 		"location":      {},
 	}
-	filtered := make(map[string]string, len(headers))
+	filtered = make(map[string]string, len(headers))
+	locations := 0
 	for key, value := range headers {
-		if _, ok := allowed[strings.ToLower(key)]; ok {
-			filtered[key] = value
+		if _, ok := allowed[strings.ToLower(key)]; !ok {
+			continue
 		}
+		key = http.CanonicalHeaderKey(key)
+		if key == locationHeader {
+			locations++
+		}
+		filtered[key] = value
 	}
-	return filtered
+	return filtered, locations > 1
 }
 
 type pluginAccessContextKey string

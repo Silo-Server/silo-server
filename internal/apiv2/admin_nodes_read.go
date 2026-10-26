@@ -20,9 +20,9 @@ type AdminNode struct {
 	ID                               ID              `json:"id"`
 	Name                             string          `json:"name"`
 	Type                             string          `json:"type" enum:"proxy,transcode"`
-	URL                              string          `json:"url"`
+	URL                              string          `json:"url" doc:"Node address as configured; not validated as a URI"`
 	Enabled                          bool            `json:"enabled"`
-	PublicURL                        *string         `json:"public_url,omitempty"`
+	PublicURL                        *string         `json:"public_url,omitempty" doc:"Client-facing node address as configured; not validated as a URI"`
 	Healthy                          bool            `json:"healthy"`
 	ActiveJobs                       int             `json:"active_jobs"`
 	Group                            *string         `json:"group"`

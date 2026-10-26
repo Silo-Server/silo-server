@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -269,9 +270,10 @@ func (s *Store) Upsert(ctx context.Context, a Artifact) error {
 // RecordFailure records a failed analysis with a retry time that backs off
 // over the recording server's consecutive failures. It leaves a complete or
 // unusable row for the same file identity in place: that result still
-// stands, and was most likely written by another server meanwhile. A failed
-// row carries no payload, so binaries that predate artifact statuses read it
-// as a cache miss.
+// stands, and was most likely written by another server meanwhile. An
+// unusable row whose detail failure.ReplacesUnusable lists is replaced all
+// the same. A failed row carries no payload, so binaries that predate
+// artifact statuses read it as a cache miss.
 func (s *Store) RecordFailure(ctx context.Context, failure Failure) error {
 	if err := validateKey(failure.Key); err != nil {
 		return err
@@ -293,7 +295,8 @@ func (s *Store) RecordFailure(ctx context.Context, failure Failure) error {
 				return err
 			}
 			if previous != nil && previous.Identity == failure.Identity &&
-				(previous.Status == StatusComplete || previous.Status == StatusUnusable) {
+				(previous.Status == StatusComplete ||
+					previous.Status == StatusUnusable && !slices.Contains(failure.ReplacesUnusable, previous.Detail)) {
 				return nil
 			}
 			count, retryAfter := NextFailure(previous, failure)

@@ -21,7 +21,7 @@ type WatchTogetherSuggestionCreateInput struct {
 		ContentType  string `json:"content_type" enum:"movie,episode"`
 		Title        string `json:"title" minLength:"1" maxLength:"4096"`
 		Subtitle     string `json:"subtitle,omitempty" maxLength:"4096"`
-		PosterURL    string `json:"poster_url,omitempty" maxLength:"8192"`
+		PosterURL    string `json:"poster_url,omitempty" format:"uri-reference" maxLength:"8192"`
 		Note         string `json:"note,omitempty" maxLength:"8192"`
 	}
 }

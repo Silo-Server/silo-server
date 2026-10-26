@@ -85,6 +85,11 @@ type Failure struct {
 	RecordedBy string
 	Error      string
 	At         time.Time
+	// ReplacesUnusable lists the details of unusable rows the failure
+	// replaces even for the same file identity: verdicts an earlier build
+	// stored that the kind no longer trusts. No current writer may store
+	// them, or a failure could overwrite a verdict settled meanwhile.
+	ReplacesUnusable []string
 }
 
 // State is what a stored artifact means for a file now.

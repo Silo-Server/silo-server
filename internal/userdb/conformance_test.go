@@ -25,6 +25,14 @@ func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
 }
 
+// TestSQLiteUnmarkKeepsHistory runs the mark-unwatched conformance test
+// against the SQLite backend; the Postgres backend runs it in
+// internal/userstore/pgstore.
+func TestSQLiteUnmarkKeepsHistory(t *testing.T) {
+	storetest.RunUnmarkKeepsHistory(t, newConformanceStore)
+	storetest.RunPlayFinishedAfterUnmark(t, newConformanceStore)
+}
+
 // TestSQLiteMarkWatchedBatch runs the batch mark-watched conformance test
 // (series/season mark-watched) against the real SQLite backend. The Postgres
 // backend runs the same suite in internal/userstore/pgstore, which is what

@@ -285,7 +285,10 @@ counts yet stops waiting when its request ends, and a failed count falls
 back to the scope's last counts, or equal weights, for a minute.
 Discover reads the profile's watched set once per request and shares it
 between its rows and the airings it blends in; Watch Tonight shares it
-between its candidates, its cold-start fallback and the handler's filter.
+between its candidates, its cold-start fallback and the handler's filter; a
+Home render shares it between its For You and Because You Watched rows. On
+the Postgres user store the set is one query planned for the profile; only a
+user store outside Postgres is walked page by page.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until

@@ -36,7 +36,7 @@ type TranslateDescriptionInput struct {
 
 // TranslateDescription names the language the viewer wants.
 type TranslateDescription struct {
-	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
+	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
 }
 
 // PeopleSearchInput is the listPeople query.
@@ -115,8 +115,8 @@ type MetadataTranslationJob struct {
 	TargetKind      string  `json:"target_kind" doc:"item, season, episode, or library (a prewarm, whose fields_done and fields_total count items)"`
 	ContentID       string  `json:"content_id"`
 	IncludeChildren bool    `json:"include_children"`
-	SourceLanguage  string  `json:"source_language"`
-	TargetLanguage  string  `json:"target_language"`
+	SourceLanguage  string  `json:"source_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Language of the base metadata (ISO 639-1); empty until the job reads it"`
+	TargetLanguage  string  `json:"target_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag of the language being filled in"`
 	Engine          string  `json:"engine"`
 	Model           string  `json:"model"`
 	Status          string  `json:"status" doc:"pending, running, completed, failed, or canceled"`
@@ -140,11 +140,11 @@ type Person struct {
 	ID             ID      `json:"id" example:"7"`
 	Name           string  `json:"name" example:"Al Pacino"`
 	Bio            string  `json:"bio,omitempty"`
-	BirthDate      *string `json:"birth_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1940-04-25"`
-	DeathDate      *string `json:"death_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	BirthDate      *string `json:"birth_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1940-04-25"`
+	DeathDate      *string `json:"death_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Birthplace     string  `json:"birthplace,omitempty"`
 	Homepage       string  `json:"homepage,omitempty"`
-	PhotoURL       string  `json:"photo_url,omitempty" doc:"Presigned photo URL; absent when the person has no photo"`
+	PhotoURL       string  `json:"photo_url,omitempty" format:"uri-reference" doc:"Presigned photo URL; absent when the person has no photo"`
 	PhotoThumbhash string  `json:"photo_thumbhash,omitempty"`
 	TmdbID         string  `json:"tmdb_id,omitempty"`
 	ImdbID         string  `json:"imdb_id,omitempty"`
@@ -184,7 +184,7 @@ type LiteraryWork struct {
 	WorkTitle       string               `json:"work_title" example:"Dune"`
 	Authors         []LiteraryWorkAuthor `json:"authors" doc:"Empty, never null"`
 	Formats         []LiteraryWorkFormat `json:"formats" doc:"The editions the viewer can see; empty, never null"`
-	PrimaryCoverURL string               `json:"primary_cover_url,omitempty"`
+	PrimaryCoverURL string               `json:"primary_cover_url,omitempty" format:"uri-reference"`
 	Metadata        LiteraryWorkMetadata `json:"metadata"`
 }
 
@@ -227,7 +227,7 @@ type LiteraryWorkMetadata struct {
 	Description   string              `json:"description,omitempty"`
 	Series        *LiteraryWorkSeries `json:"series,omitempty"`
 	Genres        []string            `json:"genres" doc:"Empty, never null"`
-	PublishedDate string              `json:"published_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	PublishedDate string              `json:"published_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	Publisher     string              `json:"publisher,omitempty"`
 }
 

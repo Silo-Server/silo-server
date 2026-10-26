@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 22;
+export const SETTINGS_REVISION = 23;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -216,6 +216,8 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Lower quality when buffering */
+  PLAYBACK_BUFFERING_QUALITY_MODE: "playback.buffering_quality_mode",
   /** Cellular maximum bitrate */
   PLAYBACK_CELLULAR_MAX_BITRATE_KBPS: "playback.cellular_max_bitrate_kbps",
   /** Cellular quality */
@@ -675,6 +677,27 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: 'Skip "previously on" recaps automatically when Silo can detect them.',
     category: "playback",
     control: "switch",
+  },
+  "playback.buffering_quality_mode": {
+    key: "playback.buffering_quality_mode",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 23,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [23, 23],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "always",
+    label: "Lower quality when buffering",
+    description:
+      "What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked.",
+    category: "playback",
+    control: "select",
+    values: [
+      { value: "never", label: "Never", introducedIn: 23 },
+      { value: "ask", label: "Ask first", introducedIn: 23 },
+      { value: "always", label: "Automatically", introducedIn: 23 },
+    ],
   },
   "playback.cellular_max_bitrate_kbps": {
     key: "playback.cellular_max_bitrate_kbps",

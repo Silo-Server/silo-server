@@ -72,7 +72,7 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 		}
 	}
 	pin := "1234"
-	if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, pin)}); err != nil {
 		t.Fatal(err)
 	}
 	stores := mappedTestUserStoreProvider{stores: map[int]userstore.UserStore{1: store}}
@@ -212,7 +212,7 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 
 	t.Run("primary without PIN sees every household run", func(t *testing.T) {
 		emptyPIN := ""
-		if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PIN: &emptyPIN}); err != nil {
+		if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, emptyPIN)}); err != nil {
 			t.Fatal(err)
 		}
 		runs, more, err := handler.ListImportRunsPageAs(t.Context(), HistoryImportActor{UserID: 1, ProfileID: "primary"}, nil, 100)

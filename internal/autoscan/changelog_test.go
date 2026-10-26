@@ -44,6 +44,10 @@ func (reasonResolver) ResolveVanishedPath(context.Context, string, string) (*sca
 	return nil, &scantrigger.RequestError{Message: "Path still exists", Reason: scantrigger.ReasonPathStillExists}
 }
 
+func (r reasonResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
+}
+
 func TestChangeLogPrefersPrimaryReasonOverStillExistsFallback(t *testing.T) {
 	event := pollOneSource(t, arrSource(),
 		[]Change{{SourcePath: "/movies/Film/Film.mkv", Scope: ChangeScopeFile}},

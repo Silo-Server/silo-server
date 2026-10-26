@@ -15,13 +15,13 @@ import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries, useScanAllLibraries } from "@/hooks/queries/admin/libraries";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Plus, RefreshCw, ScanLine } from "lucide-react";
+import { LayoutDashboard, Plus, RefreshCw, ScanLine, TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { SettingsAttention } from "@/components/admin/SettingsAttention";
-import { useSettingsAttention } from "@/hooks/admin/useSettingsHealth";
+import { useSettingsAttentionDismissals } from "@/hooks/admin/useSettingsAttentionDismissals";
 
 // Query prefixes the dashboard's stats/sessions/libraries/users refetch does
 // not already cover. Widgets fetch these themselves, so Refresh only has to
@@ -81,7 +81,7 @@ export default function AdminDashboard() {
   const lastUpdatedLabel = lastDashboardUpdatedAt
     ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
     : null;
-  const settingsAttention = useSettingsAttention();
+  const settingsAttention = useSettingsAttentionDismissals();
   const adminSearchSections = useMemo(
     () =>
       buildAdminCommandNavSections(adminInstallations, {
@@ -219,6 +219,20 @@ export default function AdminDashboard() {
         actions={
           <div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
             <div className="grid gap-2 sm:flex sm:items-center">
+              {settingsAttention.hiddenCount > 0 && (
+                <button
+                  type="button"
+                  onClick={settingsAttention.restoreAll}
+                  aria-label={`Show ${settingsAttention.hiddenCount} hidden setup ${
+                    settingsAttention.hiddenCount === 1 ? "notice" : "notices"
+                  }`}
+                  title="Show hidden setup notices"
+                  className="border-warning/35 bg-warning/8 text-warning hover:bg-warning/15 focus-visible:ring-ring/60 inline-flex cursor-pointer items-center justify-center gap-1.5 justify-self-start rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+                >
+                  <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                  {settingsAttention.hiddenCount} hidden
+                </button>
+              )}
               {lastUpdatedLabel && (
                 <span className="text-muted-foreground text-xs sm:whitespace-nowrap">
                   Updated {lastUpdatedLabel}
@@ -269,8 +283,9 @@ export default function AdminDashboard() {
       />
 
       {/* Setup the server still owes, each item linking to the page that
-          fixes it. The admin sidebar marks the broken ones too. */}
-      <SettingsAttention items={settingsAttention} />
+          fixes it. The admin sidebar marks the broken ones too. Setup the
+          admin hides here comes back from the header's "hidden" chip. */}
+      <SettingsAttention items={settingsAttention.visible} onDismiss={settingsAttention.dismiss} />
 
       {layout.isCustomizing && (
         <div className="surface-panel-subtle flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-2.5">

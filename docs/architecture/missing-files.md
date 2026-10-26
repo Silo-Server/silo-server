@@ -40,6 +40,38 @@ item that exists without any membership, whatever their age. Reconciliation
 runs first and deletes every orphan it may, so such an item is held or under
 an unreachable root, and its next orphan check needs those rows to find it.
 
+A scan never marks files missing where its walk failed: an entry it could not
+read or resolve (permission or I/O error, dangling symlink) protects what is
+cataloged at or under it, and an unreachable or suspect-empty library root
+protects its whole tree. One case is an absence, not a failure: a scan scoped
+to a folder below a library root (a monitor or webhook scan of a deleted movie
+or series folder) whose folder no longer exists (`ENOENT`) walks as empty when
+its parent is still a directory, so its titles leave the library as they would
+on a full library scan (`scopeRootVanished`). A folder whose parent is gone too,
+or that sits below a dangling symlink, stays protected, and the library root's
+own probes still apply to that scan.
+
 Arr webhooks report an upgrade as a delete followed by an import, in either
 order and possibly in separate deliveries. Neither order changes the outcome;
 the title is only hidden between the two.
+
+## Renamed and moved files
+
+A video file that appears at a new path takes over the row of the file it was
+(`Scanner.relinkMovedFile`), so everything keyed to `media_files.id` follows
+it: markers and their edits, subtitles and timing corrections, trickplay,
+analysis artifacts, and users' downloads. Two things still key on the path and
+start over: marker thumbnails (their trigger treats a new path as a new file)
+and download preparations, whose recipe fingerprint includes the source path.
+The row qualifies when it is in the same library with the same size, OSHash,
+and modification time; the new path parses to the same title (content group,
+filename hints such as season, episode, and air date, the episode range, and
+every provider ID tag on the path); and its old path is gone under a library
+root that answers and is not empty. Exactly one row may qualify. A copy whose
+original is still in place, a rename to another title, and a file under an
+offline or suspect-empty root get a new row as before, so renaming to fix a
+wrong match still matches afresh. The update is fenced on the row's path,
+bytes, and links, and `MarkMissing` only marks a row still at the path its
+caller saw, so a scan holding the old path cannot hide the moved row. OSHash
+samples the head and tail only, so the byte comparison is a strong heuristic,
+not proof.

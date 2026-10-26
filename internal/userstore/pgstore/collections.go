@@ -537,30 +537,82 @@ func (s *PostgresUserStore) ListCollectionItems(ctx context.Context, collectionI
 	return items, rows.Err()
 }
 
+// ReplaceCollectionItems makes items the collection's whole-item membership.
+// It writes only the difference: rows that left are deleted, rows that moved
+// get their new position, and new rows are inserted with added_at = now. A
+// title that stays keeps its added_at, and an unchanged list writes no rows,
+// so the item triggers leave the collection revision alone. The first
+// occurrence of a repeated media item wins. The statement count does not grow
+// with the list size.
 func (s *PostgresUserStore) ReplaceCollectionItems(ctx context.Context, collectionID string, items []userstore.CollectionItemReplacement) error {
+	ids := make([]string, 0, len(items))
+	positions := make([]int, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if _, dup := seen[item.MediaItemID]; dup {
+			continue
+		}
+		seen[item.MediaItemID] = struct{}{}
+		ids = append(ids, item.MediaItemID)
+		positions = append(positions, item.Position)
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning collection items replace: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM user_personal_collection_items WHERE user_id = $1 AND collection_id = $2 AND sub_item_id = ''`,
+	// Concurrent replaces of one collection must not interleave their diffs.
+	if err := s.lockCollectionRow(ctx, tx, collectionID); err != nil {
+		return err
+	}
+	// Lock the current members before the first write. Each item statement's
+	// trigger then holds the revision row until commit, and a provider-ID
+	// merge locks a member row before it takes that revision row. Waiting on
+	// a member after the DELETE would close that cycle into a deadlock.
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM user_personal_collection_items
+		WHERE user_id = $1 AND collection_id = $2 AND sub_item_id = ''
+		ORDER BY media_item_id
+		FOR UPDATE`,
 		s.userID, collectionID,
 	); err != nil {
-		return fmt.Errorf("clearing collection items: %w", err)
+		return fmt.Errorf("locking collection items: %w", err)
 	}
 
-	now := nowUTC()
-	for _, item := range items {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, position, added_at)
-			 VALUES ($1, $2, $3, $4, $5)
-			 ON CONFLICT DO NOTHING`,
-			s.userID, collectionID, item.MediaItemID, item.Position, now,
-		); err != nil {
-			return fmt.Errorf("inserting collection item: %w", err)
-		}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_personal_collection_items t
+		WHERE t.user_id = $1 AND t.collection_id = $2 AND t.sub_item_id = ''
+		  AND NOT EXISTS (
+		    SELECT 1 FROM unnest($3::text[]) AS desired(media_item_id)
+		    WHERE desired.media_item_id = t.media_item_id
+		  )`,
+		s.userID, collectionID, ids,
+	); err != nil {
+		return fmt.Errorf("deleting removed collection items: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_personal_collection_items t
+		SET position = desired.position
+		FROM unnest($3::text[], $4::int[]) AS desired(media_item_id, position)
+		WHERE t.user_id = $1 AND t.collection_id = $2 AND t.sub_item_id = ''
+		  AND t.media_item_id = desired.media_item_id
+		  AND t.position IS DISTINCT FROM desired.position`,
+		s.userID, collectionID, ids, positions,
+	); err != nil {
+		return fmt.Errorf("repositioning collection items: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, position, added_at)
+		SELECT $1, $2, desired.media_item_id, desired.position, $5
+		FROM unnest($3::text[], $4::int[]) AS desired(media_item_id, position)
+		ON CONFLICT DO NOTHING`,
+		s.userID, collectionID, ids, positions, nowUTC(),
+	); err != nil {
+		return fmt.Errorf("inserting collection items: %w", err)
 	}
 
 	return tx.Commit(ctx)

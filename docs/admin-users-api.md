@@ -301,9 +301,11 @@ fixed observation window and deterministic last-seen ties. Newer events do not
 move earlier groups across that cursor. Addresses are returned without CIDR masks.
 Each address carries `location`, `local` or `remote`, classified from the address
 alone: private, loopback and link-local addresses are local, everything else is
-remote. Request logs do not record the network-access route, so a request that
-reached the server through a network-access provider from a private address reads
-as `local` here even though playback treats that path as remote.
+remote. Request logs do not record the network-access route or whether the
+address was a forwarder's, so a request from a private address that reached the
+server through a network-access provider, or through a forwarder outside
+`clientip.trusted_proxies`, reads as `local` here even though playback treats it
+as remote.
 
 A profile's `last_seen_at` is the latest time any device registration reported the
 profile, and null when none has. The device collection lists every device the
@@ -317,7 +319,9 @@ empty when the profile no longer exists.
 The watch summary accepts `days` from 1 to 365 (default 30) and an optional
 `profile_id`. It totals the finalized attempts that ended at or after `since` (now
 minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
-(null when none). Those are the attempts `listAdminPlaybackHistory` lists with the
+(null when none). `watched_seconds` here is watch time: each attempt's measured
+`played_seconds`, or, for an attempt recorded before measurement, its end position
+capped at its wall-clock length. Those are the attempts `listAdminPlaybackHistory` lists with the
 same `user_id`, `profile_id` and `ended_after` set to `since`.
 
 The request usage read reports the account's effective request policy as the

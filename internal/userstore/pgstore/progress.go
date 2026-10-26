@@ -396,6 +396,7 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 	mediaItemIDs := make([]string, 0, len(targets))
 	durations := make([]float64, 0, len(targets))
 	eventDates := make([]*time.Time, 0, len(targets))
+	rewatchIDs := make([]string, 0)
 	explicitDates := false
 	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -415,6 +416,9 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 		durations = append(durations, duration)
 		eventDates = append(eventDates, target.EventAt)
 		explicitDates = explicitDates || target.EventAt != nil
+		if target.RecordRewatch {
+			rewatchIDs = append(rewatchIDs, mediaItemID)
+		}
 	}
 	if len(mediaItemIDs) == 0 {
 		return nil, nil
@@ -510,13 +514,15 @@ func (s *PostgresUserStore) markWatchedBatchTx(ctx context.Context, tx pgx.Tx, p
 			completed = TRUE,
 			updated_at = EXCLUDED.updated_at,
 			event_at = EXCLUDED.event_at
- WHERE NOT user_watch_progress.completed OR EXISTS (
+ WHERE NOT user_watch_progress.completed
+  OR (user_watch_progress.position_seconds > 0 AND user_watch_progress.media_item_id = ANY($7::text[]))
+  OR EXISTS (
   SELECT 1 FROM user_history_hidden_items hhi
   WHERE hhi.user_id = user_watch_progress.user_id AND hhi.profile_id = user_watch_progress.profile_id
   AND hhi.media_item_id = user_watch_progress.media_item_id AND user_watch_progress.updated_at <= hhi.hidden_before
  )
  RETURNING media_item_id`,
-		s.userID, profileID, mediaItemIDs, durations, now, eventDates,
+		s.userID, profileID, mediaItemIDs, durations, now, eventDates, rewatchIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("marking watched batch: %w", err)
@@ -651,8 +657,8 @@ func (s *PostgresUserStore) MarkProgressBatch(ctx context.Context, profileID str
 
 // ClearProgressBatch resets every (user, profile, media_item_id) row to
 // `completed = FALSE, position_seconds = 0` in a single UPDATE. Rows that
-// don't exist are silently skipped. (Mark-unplayed flows currently go through
-// RemoveHistoryItems; this remains on the interface for bulk resets.)
+// don't exist are silently skipped. (Mark-unplayed flows go through
+// ClearWatchedState; this remains on the interface for bulk resets.)
 func (s *PostgresUserStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
 	mediaItemIDs = compactMediaItemIDs(mediaItemIDs)
 	if len(mediaItemIDs) == 0 {
@@ -1233,7 +1239,16 @@ func (s *PostgresUserStore) addVisibleHistory(ctx context.Context, db interface 
 		INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
 		SELECT $1, $2, $3, $4, watched_at, $6, $7, $8, $9
 		FROM visible
-		ON CONFLICT (user_id, id) DO UPDATE SET completed = TRUE
+		ON CONFLICT (user_id, id) DO UPDATE SET completed = TRUE,
+			-- A play a mark unwatched kept takes the new watch's time, so the
+			-- completion counts as watched.
+			watched_at = CASE WHEN EXISTS (
+				SELECT 1 FROM user_history_hidden_items hhi
+				WHERE hhi.user_id = user_watch_history.user_id
+				  AND hhi.profile_id = user_watch_history.profile_id
+				  AND hhi.media_item_id = user_watch_history.media_item_id
+				  AND user_watch_history.watched_at <= hhi.hidden_before
+			) THEN EXCLUDED.watched_at ELSE user_watch_history.watched_at END
 		WHERE NOT user_watch_history.completed AND EXCLUDED.completed
 		RETURNING watched_at`,
 		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt,
@@ -1280,7 +1295,8 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	// the same second as a removal is kept. It is stored at the whole second
 	// ($10), as imports always were, unless that second is at or before the
 	// watermark; then it keeps its precise time to stay visible. Any row in the
-	// same second counts as the same play, whichever precision it was kept at.
+	// same second counts as the same play, whichever precision it was kept at,
+	// except a play an unmark kept in history at or before the watermark.
 	tag, err := tx.Exec(ctx, `
         WITH visible AS (
             SELECT CASE
@@ -1296,9 +1312,14 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
         SELECT $1, $2, $3, $4, visible.watched_at, $6, $7, $8, $9
         FROM visible
         WHERE NOT EXISTS (
-            SELECT 1 FROM user_watch_history
-            WHERE user_id = $2 AND profile_id = $3 AND media_item_id = $4
-              AND watched_at >= $10::timestamptz AND watched_at < $10::timestamptz + interval '1 second'
+            SELECT 1 FROM user_watch_history h
+            WHERE h.user_id = $2 AND h.profile_id = $3 AND h.media_item_id = $4
+              AND h.watched_at >= $10::timestamptz AND h.watched_at < $10::timestamptz + interval '1 second'
+              AND NOT EXISTS (
+                SELECT 1 FROM user_history_hidden_items hhi
+                WHERE hhi.user_id = h.user_id AND hhi.profile_id = h.profile_id
+                  AND hhi.media_item_id = h.media_item_id AND h.watched_at <= hhi.hidden_before
+              )
         )`,
 		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID, watchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
 		watchedAt.Truncate(time.Second))
@@ -1321,6 +1342,9 @@ func lockImportedHistory(ctx context.Context, tx pgx.Tx, userID int, profileID s
 	return nil
 }
 
+// historyListSelect lists plays from the history-listing cutoff, so a mark
+// unwatched leaves them listed. A NULL removed_before predates the column and
+// reads as hidden_before.
 const historyListSelect = `
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity::text
 		FROM user_watch_history h
@@ -1331,7 +1355,7 @@ const historyListSelect = `
 			WHERE hhi.user_id = h.user_id
 			  AND hhi.profile_id = h.profile_id
 			  AND hhi.media_item_id = h.media_item_id
-			  AND h.watched_at <= hhi.hidden_before
+			  AND h.watched_at <= COALESCE(hhi.removed_before, hhi.hidden_before)
 		  )`
 
 func (s *PostgresUserStore) ListHistory(ctx context.Context, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
@@ -1533,34 +1557,95 @@ func (s *PostgresUserStore) RemoveHistoryItems(
 	mediaItemIDs []string,
 	removedAt time.Time,
 ) error {
-	mediaItemIDs = compactMediaItemIDs(mediaItemIDs)
-	if len(mediaItemIDs) == 0 {
+	if len(compactMediaItemIDs(mediaItemIDs)) == 0 {
 		return nil
 	}
-	if removedAt.IsZero() {
-		removedAt = time.Now().UTC()
-	}
+	return s.inHistoryCutoffTx(ctx, "remove history items", func(tx pgx.Tx) error {
+		return s.removeHistoryItems(ctx, tx, profileID, mediaItemIDs, removedAt)
+	})
+}
 
+// ClearWatchedState marks the items unwatched without touching their history.
+func (s *PostgresUserStore) ClearWatchedState(
+	ctx context.Context,
+	profileID string,
+	mediaItemIDs []string,
+	clearedAt time.Time,
+) error {
+	if len(compactMediaItemIDs(mediaItemIDs)) == 0 {
+		return nil
+	}
+	return s.inHistoryCutoffTx(ctx, "clear watched state", func(tx pgx.Tx) error {
+		return s.clearWatchedState(ctx, tx, profileID, mediaItemIDs, clearedAt)
+	})
+}
+
+func (s *PostgresUserStore) inHistoryCutoffTx(ctx context.Context, op string, fn func(pgx.Tx) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("begin remove history items: %w", err)
+		return fmt.Errorf("begin %s: %w", op, err)
 	}
 	defer tx.Rollback(ctx)
-	if err := lockImportedHistory(ctx, tx, s.userID, profileID); err != nil {
+	if err := fn(tx); err != nil {
 		return err
 	}
-
-	if err := s.removeHistoryItems(ctx, tx, profileID, mediaItemIDs, removedAt); err != nil {
-		return err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit remove history items: %w", err)
+		return fmt.Errorf("commit %s: %w", op, err)
 	}
 	return nil
 }
 
+// removeHistoryItems raises both cutoffs, then deletes the plays at or before
+// the listing cutoff and the progress rows.
 func (s *PostgresUserStore) removeHistoryItems(ctx context.Context, tx pgx.Tx, profileID string, mediaItemIDs []string, removedAt time.Time) error {
+	mediaItemIDs = compactMediaItemIDs(mediaItemIDs)
+	if len(mediaItemIDs) == 0 {
+		return nil
+	}
+	if err := s.raiseHistoryCutoffs(ctx, tx, profileID, mediaItemIDs, removedAt, true); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_watch_history h
+		USING user_history_hidden_items hhi
+		WHERE h.user_id = $1
+		  AND h.profile_id = $2
+		  AND h.media_item_id = ANY($3::text[])
+		  AND hhi.user_id = h.user_id
+		  AND hhi.profile_id = h.profile_id
+		  AND hhi.media_item_id = h.media_item_id
+		  AND h.watched_at <= hhi.removed_before
+	`, s.userID, profileID, mediaItemIDs); err != nil {
+		return fmt.Errorf("deleting removed history rows: %w", err)
+	}
+	return s.deleteClearedProgress(ctx, tx, profileID, mediaItemIDs)
+}
+
+// clearWatchedState raises the watched-state cutoff and deletes the progress
+// rows. The plays stay listed in history; at or before the cutoff they no
+// longer count as watched, and an import of one is skipped.
+func (s *PostgresUserStore) clearWatchedState(ctx context.Context, tx pgx.Tx, profileID string, mediaItemIDs []string, clearedAt time.Time) error {
+	mediaItemIDs = compactMediaItemIDs(mediaItemIDs)
+	if len(mediaItemIDs) == 0 {
+		return nil
+	}
+	if err := s.raiseHistoryCutoffs(ctx, tx, profileID, mediaItemIDs, clearedAt, false); err != nil {
+		return err
+	}
+	return s.deleteClearedProgress(ctx, tx, profileID, mediaItemIDs)
+}
+
+// raiseHistoryCutoffs moves hidden_before to at, or past the newest play when
+// one is dated later, under the imported-history lock. A removal moves
+// removed_before with it. An unmark keeps the listing cutoff: a legacy NULL
+// becomes the old hidden_before it stood for, and a new row stores -infinity.
+func (s *PostgresUserStore) raiseHistoryCutoffs(ctx context.Context, tx pgx.Tx, profileID string, mediaItemIDs []string, at time.Time, removal bool) error {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	if err := lockImportedHistory(ctx, tx, s.userID, profileID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		WITH target(media_item_id) AS (
 			SELECT unnest($3::text[])
@@ -1576,30 +1661,23 @@ func (s *PostgresUserStore) removeHistoryItems(ctx context.Context, tx pgx.Tx, p
 			 AND h.media_item_id = t.media_item_id
 			GROUP BY t.media_item_id
 		)
-		INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)
-		SELECT $1, $2, media_item_id, hidden_before, $4
+		INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
+		SELECT $1, $2, media_item_id, hidden_before,
+			CASE WHEN $5::boolean THEN hidden_before ELSE '-infinity'::timestamptz END, $4
 		FROM watermark
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
 			hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
+			removed_before = GREATEST(
+				COALESCE(user_history_hidden_items.removed_before, user_history_hidden_items.hidden_before),
+				EXCLUDED.removed_before),
 			updated_at = EXCLUDED.updated_at
-	`, s.userID, profileID, mediaItemIDs, removedAt.UTC()); err != nil {
+	`, s.userID, profileID, mediaItemIDs, at.UTC(), removal); err != nil {
 		return fmt.Errorf("upserting hidden history items: %w", err)
 	}
+	return nil
+}
 
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM user_watch_history h
-		USING user_history_hidden_items hhi
-		WHERE h.user_id = $1
-		  AND h.profile_id = $2
-		  AND h.media_item_id = ANY($3::text[])
-		  AND hhi.user_id = h.user_id
-		  AND hhi.profile_id = h.profile_id
-		  AND hhi.media_item_id = h.media_item_id
-		  AND h.watched_at <= hhi.hidden_before
-	`, s.userID, profileID, mediaItemIDs); err != nil {
-		return fmt.Errorf("deleting removed history rows: %w", err)
-	}
-
+func (s *PostgresUserStore) deleteClearedProgress(ctx context.Context, tx pgx.Tx, profileID string, mediaItemIDs []string) error {
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM user_watch_progress
 		WHERE user_id = $1
@@ -1608,7 +1686,6 @@ func (s *PostgresUserStore) removeHistoryItems(ctx context.Context, tx pgx.Tx, p
 	`, s.userID, profileID, mediaItemIDs); err != nil {
 		return fmt.Errorf("deleting removed progress rows: %w", err)
 	}
-
 	return nil
 }
 

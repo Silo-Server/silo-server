@@ -269,6 +269,25 @@ func TestManagerUploadRejectsOversizedFile(t *testing.T) {
 	}
 }
 
+func TestManagerUploadRejectsUTF16FileThatGrowsPastLimit(t *testing.T) {
+	repo := newMockSubtitleRepo()
+	manager := NewManager(repo, newMockBlobStore())
+	// 2 bytes per character in UTF-16, 3 bytes once stored as UTF-8.
+	data := utf16LEWithBOM(strings.Repeat("\u5b57", (MaxUploadSize-2)/2))
+	_, err := manager.Upload(context.Background(), UploadRequest{
+		MediaFileID: 1,
+		Language:    "zh",
+		Filename:    "big.srt",
+		Data:        data,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("Upload() error = %v, want size limit error", err)
+	}
+	if len(repo.byKey) != 0 {
+		t.Fatalf("stored %d subtitles, want none", len(repo.byKey))
+	}
+}
+
 func (m *mockSubtitleRepo) GetDownloadedSubtitleByContent(_ context.Context, content *DownloadedSubtitle) (*DownloadedSubtitle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

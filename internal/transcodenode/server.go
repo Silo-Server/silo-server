@@ -65,6 +65,7 @@ type TranscodeStartRequest struct {
 	ToneMapDVRPUPresent        bool                   `json:"tone_map_dv_rpu_present,omitempty"`
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
+	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
@@ -85,7 +86,8 @@ type TranscodeStartRequest struct {
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
 	// SubtitleRendition asks the executor to emit the selected text track as
 	// the playlist's WebVTT subtitle rendition. Only nodes advertising
-	// playback.TransportFeatureHLSSubtitleRenditionV1 receive it.
+	// playback.HLSSubtitleRenditionTransportFeatureV3 for the video target
+	// receive it.
 	SubtitleRendition bool    `json:"subtitle_rendition,omitempty"`
 	TotalDuration     float64 `json:"total_duration"`
 	RequireReady      bool    `json:"require_ready,omitempty"`
@@ -129,8 +131,13 @@ type TranscodeStartResponse struct {
 	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
 	// SubtitleRendition attests that the executor emits the requested subtitle
 	// rendition. Older nodes omit it and are rejected before the plan
-	// promises a rendition their playlist does not carry.
+	// promises a rendition their playlist does not carry; nodes that predate
+	// remux renditions omit it for a copy remux.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
+	// CopyVideoMPEGTS attests that the executor packages the requested copy
+	// remux as MPEG-TS. Older nodes omit it and are rejected before an fMP4
+	// stream is published under a plan that promises MPEG-TS.
+	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -199,6 +206,20 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
 	if req.KeyframePlaylist && !response.KeyframePlaylist {
 		return ErrKeyframePlaylistAttestationMismatch
+	}
+	return nil
+}
+
+// ErrCopyVideoMPEGTSAttestationMismatch reports an executor that ignored
+// requested MPEG-TS copy packaging.
+var ErrCopyVideoMPEGTSAttestationMismatch = errors.New("transcode node mpeg-ts copy attestation mismatch")
+
+// ValidateCopyVideoMPEGTSAttestation rejects an executor that silently
+// packaged a requested MPEG-TS copy remux as fMP4. Requests without it stay
+// compatible with older nodes, which omit the field.
+func ValidateCopyVideoMPEGTSAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.CopyVideoMPEGTS && !response.CopyVideoMPEGTS {
+		return ErrCopyVideoMPEGTSAttestationMismatch
 	}
 	return nil
 }
@@ -327,7 +348,19 @@ type Server struct {
 	sessions                  map[string]*playback.TranscodeSession
 	progressiveRemuxes        map[string]progressiveRemuxRequest
 	stoppedProgressiveRemuxes map[string]time.Time
-	progressiveRemuxSequence  atomic.Uint64
+	// stoppedTranscodes records, per HLS transport id, until when a stream
+	// token may still ask this process to rebuild a transport the API stopped.
+	// Reconstruction refuses those ids, so a segment request still in flight
+	// when the stop lands, or a stale token for a retired transport, cannot
+	// restart an encode nobody is watching. Only a fresh start clears an entry;
+	// the idle reaper and a release (fence=0) record none, because a client may
+	// return to a reaped job and a released id lives on.
+	// Guarded by mu.
+	stoppedTranscodes map[string]time.Time
+	// lastStopFencePrune is when the stop-fence maps were last swept; pruning
+	// runs at most once per stopFencePruneInterval. Guarded by mu.
+	lastStopFencePrune       time.Time
+	progressiveRemuxSequence atomic.Uint64
 	// lastAccess records, per registered session id, when a manifest or segment
 	// request last touched the job (registration counts as the first access).
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
@@ -588,6 +621,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		sessions:                  make(map[string]*playback.TranscodeSession),
 		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
+		stoppedTranscodes:         make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
 	}
 	if watcher != nil {
@@ -1491,7 +1525,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	}
 	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
 		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2,
-		playback.TransportFeatureHLSSubtitleRenditionV1)
+		playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1720,6 +1754,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ToneMapDVRPUPresent:        req.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       req.VideoBitstreamFilter,
 		VideoSampleEntry:           req.VideoSampleEntry,
+		VideoRange:                 req.VideoRange,
 		CopyVideoMPEGTS:            req.CopyVideoMPEGTS,
 		KeyframePlaylist:           req.KeyframePlaylist,
 		SeekSeconds:                req.SeekSeconds,
@@ -1864,6 +1899,9 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
+	// A start is the API choosing this transport again (a Jellyfin retry or
+	// audio switch reuses the id after stopping it), so it lifts the stop fence.
+	delete(s.stoppedTranscodes, req.SessionID)
 	published = true
 	s.noteSessionAccessLocked(req.SessionID)
 	s.noteStartedAsLocked(req.SessionID, executor)
@@ -1904,6 +1942,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 		SubtitleRendition:     session.HasSubtitleRendition(),
+		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
 	})
 }
 
@@ -1976,6 +2015,10 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	// no store wired there is nothing to rebuild from, so 404.
 	if !tokenComplete && s.recipeStore == nil {
 		return nil, nil
+	}
+	// Cheap early refusal; spawnReconstruct re-checks under the lifecycle lock.
+	if s.transcodeStopped(sessionID) {
+		return nil, errTranscodeStopped
 	}
 
 	v, err, _ := s.reconstructGroup.Do(sessionID, func() (interface{}, error) {
@@ -2113,6 +2156,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	s.mu.RUnlock()
 	if ok {
 		return existing, nil
+	}
+	// A stop records its fence under this lock, so a request that found no job
+	// because the stop was tearing it down sees the fence here.
+	if s.transcodeStopped(sessionID) {
+		return nil, errTranscodeStopped
 	}
 
 	// Pace the cold-start burst only after this session owns its lifecycle lock.
@@ -2424,7 +2472,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	unlock := s.lockSessionLifecycle(transportID)
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	if s.stoppedProgressiveRemuxes[transportID].After(now) {
 		s.mu.Unlock()
 		unlock()
@@ -2489,8 +2537,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
 		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
-		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
-		Abort:                  abort,
+		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps, CopyAudioCodec: claims.CopyAudioCodec,
+		Abort: abort,
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
 			"session", transportID, "playback_session_id", claims.SessionID)
@@ -2560,12 +2608,38 @@ func (s *Server) progressiveRemuxAuthorityActive(ctx context.Context, transportI
 		stored.RoutingEgressNodeID == claims.RoutingEgressNodeID
 }
 
-func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
+// stopFencePruneInterval bounds how often a stop or remux registration sweeps
+// the fence maps under mu. Every fence lookup compares its expiry with the
+// current time, so an expired entry left until the next sweep is inert.
+const stopFencePruneInterval = time.Minute
+
+func (s *Server) pruneStopFencesLocked(now time.Time) {
+	if now.Sub(s.lastStopFencePrune) < stopFencePruneInterval {
+		return
+	}
+	s.lastStopFencePrune = now
 	for id, expiresAt := range s.stoppedProgressiveRemuxes {
 		if !expiresAt.After(now) {
 			delete(s.stoppedProgressiveRemuxes, id)
 		}
 	}
+	for id, expiresAt := range s.stoppedTranscodes {
+		if !expiresAt.After(now) {
+			delete(s.stoppedTranscodes, id)
+		}
+	}
+}
+
+// errTranscodeStopped is reconstructFromToken refusing a transport the API
+// stopped on this node; callers answer it like a denied session.
+var errTranscodeStopped = errors.New("transcode transport stopped")
+
+// transcodeStopped reports whether the API stopped transportID on this node
+// within the last stream-token lifetime and no start has reused it since.
+func (s *Server) transcodeStopped(transportID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stoppedTranscodes[transportID].After(time.Now())
 }
 
 // recipeExecutor names this node to the recipe store, so a teardown can tell
@@ -2631,7 +2705,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
 	if progressiveFound && progressive.playbackSessionID != "" {
 		playbackSessionID = progressive.playbackSessionID
@@ -2641,6 +2715,16 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 			s.stoppedProgressiveRemuxes = make(map[string]time.Time)
 		}
 		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
+	}
+	// Fence every stopped transport, found or not: a segment request already in
+	// flight, or one carrying a retired transport's token, would otherwise rebuild
+	// the job from its stream token after this stop returns. A release (the API
+	// moving the transport to another node) keeps the id rebuildable here.
+	if r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0" {
+		if s.stoppedTranscodes == nil {
+			s.stoppedTranscodes = make(map[string]time.Time)
+		}
+		s.stoppedTranscodes[sessionID] = now.Add(playback.MaxTokenTTL)
 	}
 	session, ok := s.sessions[sessionID]
 	startedAs := s.startedAs[sessionID]
@@ -2724,6 +2808,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, -1)
 		if session == nil {
+			if errors.Is(reconstructErr, errTranscodeStopped) {
+				writeStreamDenied(w)
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -2749,10 +2837,15 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)
 		return
 	}
+	playback.WarnIfPlaylistOversized(r.Context(), "transcodenode", sessionID, manifest)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Cache-Control", "no-store, no-transform, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
+	// Same reason as the API's manifest handler. The API relays a playlist
+	// requested without a stream token as-is, headers included, so the length
+	// has to start here.
+	w.Header().Set("Content-Length", strconv.Itoa(len(manifest)))
 	w.Write(manifest)
 }
 
@@ -2782,6 +2875,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
 		if session == nil {
+			if errors.Is(reconstructErr, errTranscodeStopped) {
+				writeStreamDenied(w)
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -3109,7 +3206,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 
 	s.mu.Lock()
 	now := time.Now()
-	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.pruneStopFencesLocked(now)
 	if s.stoppedProgressiveRemuxes == nil {
 		s.stoppedProgressiveRemuxes = make(map[string]time.Time)
 	}

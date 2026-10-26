@@ -253,3 +253,31 @@ func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
 		}
 	}
 }
+
+// A stored override above MaxItemLimit predates the save-time check; every
+// resolve path caps it so the fetchers never size a buffer from it.
+func TestResolveClampsStoredItemLimit(t *testing.T) {
+	huge := 1_000_000_000
+	admin := []*PageSection{
+		{ID: "1", SectionType: SectionRecentlyAdded, Title: "A", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "B", ItemLimit: huge, Config: json.RawMessage(`{}`)},
+	}
+	overrides := []ProfileSectionOverride{
+		{SectionID: "1", ItemLimit: &huge},
+		{ID: "custom-1", SectionType: "genre", Title: "Mine", ItemLimit: &huge},
+	}
+	for name, resolve := range map[string]func([]*PageSection, []ProfileSectionOverride) []ResolvedSection{
+		"Resolve":            Resolve,
+		"ResolveForSettings": ResolveForSettings,
+	} {
+		got := resolve(admin, overrides)
+		if len(got) != 3 {
+			t.Fatalf("%s: resolved %d sections, want 3", name, len(got))
+		}
+		for _, s := range got {
+			if s.ItemLimit != MaxItemLimit {
+				t.Errorf("%s: section %q ItemLimit = %d, want %d", name, s.ID, s.ItemLimit, MaxItemLimit)
+			}
+		}
+	}
+}

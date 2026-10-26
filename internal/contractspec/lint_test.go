@@ -19,6 +19,17 @@ func TestCommittedArtifactPassesLint(t *testing.T) {
 	if findings := Lint(seedDocument(t)); len(findings) != 0 {
 		t.Fatalf("seed document fails lint: %v", findings)
 	}
+	// A shapePending entry must name a member, so it can't outlive a rename.
+	var doc document
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for where := range shapePending {
+		name, member, _ := strings.Cut(strings.TrimPrefix(where, "components.schemas."), ".")
+		if s := doc.Components.Schemas[name]; s == nil || s.Properties[member] == nil {
+			t.Errorf("%s: shapePending entry names no member", where)
+		}
+	}
 }
 
 // Seeded rule tests need only the operations they mutate. The committed artifact
@@ -226,6 +237,33 @@ func TestLintSeededFailures(t *testing.T) {
 				props["extra"] = map[string]any{"type": "object"}
 			},
 			want: "components.schemas.SystemInfo.extra: object without properties or additionalProperties:false is free-form",
+		},
+		"date member without a date shape": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["air_date"] = map[string]any{"type": []any{"string", "null"}, "description": "YYYY-MM-DD"}
+			},
+			want: "components.schemas.SystemInfo.air_date: date member declares neither format date nor a YYYY-MM-DD pattern",
+		},
+		"URL items without a URI format": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["backdrop_url"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+			},
+			want: "components.schemas.SystemInfo.backdrop_url: URL member declares neither format uri nor uri-reference, nor says it is not validated as a URI",
+		},
+		"language parameter without its standard": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["parameters"] = []any{map[string]any{"name": "language", "in": "query", "description": "Language code", "schema": map[string]any{"type": "string"}}}
+			},
+			want: "GET /api/v2/system/info parameter language: language or country member does not name its standard",
+		},
+		"pending member that declares its shape": {
+			seed: func(doc map[string]any) {
+				schemas(doc)["AdminItemMetadataUpdate"] = map[string]any{"type": "object", "additionalProperties": false,
+					"properties": map[string]any{"release_date": map[string]any{"type": "string", "format": "date"}}}
+			},
+			want: "components.schemas.AdminItemMetadataUpdate.release_date: declares its shape; delete its shapePending entry",
 		},
 		"missing security scheme": {
 			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },

@@ -166,7 +166,7 @@ func (h *RecommendationsHandler) resolveCastPhotos(ctx context.Context, cards []
 			switch {
 			case member.photoPath == "" || member.photoPath == "-":
 			case isHTTPImageURL(member.photoPath):
-				member.PhotoURL = member.photoPath
+				member.PhotoURL = catalog.ImageURLOrEmpty(member.photoPath)
 			default:
 				member.PhotoURL = resolved[sizedPath(member.photoPath)].URL
 			}

@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -60,7 +61,9 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started"})
+			// Like a node from before MPEG-TS copy attestation: it echoes the
+			// copy-fMP4 recipe version but not copy_video_mpegts.
+			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
@@ -471,6 +474,35 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}
 	if got := current.starts.Load(); got != 1 {
 		t.Fatalf("starts on the node with the session's recipe = %d, want 1", got)
+	}
+}
+
+// TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS pins that a move checks the
+// MPEG-TS echo as a start does: a node that omits it would publish fMP4 under
+// a plan that promises MPEG-TS.
+func TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS(t *testing.T) {
+	legacy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(2, legacy.server.URL),
+	}, "ffmpeg")
+	previous := f.handler.PlaybackConfig
+	f.handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := previous()
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+	card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	card.PlayMethod, card.CopyFMP4RecipeVersion = streamtoken.PlayMethodCopyFMP4Transcode, playback.CopyFMP4RecipeVersion
+	card.SourceVideoCodec, card.TargetCodecVideo, card.TargetCodecAudio, card.CopyVideoMPEGTS = "h264", "copy", "copy", true
+	f.token = f.handler.signSessionToken(*card, false)
+
+	if rr := f.segment("seg_00003.ts"); rr.Code == http.StatusOK {
+		t.Fatalf("status = %d, body = %q; want the unattested node refused", rr.Code, rr.Body.String())
+	}
+	if legacy.starts.Load() != 1 || !legacy.lastStart().CopyVideoMPEGTS {
+		t.Fatalf("starts = %d, request = %+v; want one MPEG-TS start", legacy.starts.Load(), legacy.lastStart())
 	}
 }
 

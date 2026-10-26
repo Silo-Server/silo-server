@@ -222,7 +222,7 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 				return nil, fmt.Errorf("filesplit: removing stale source episode library membership: %w", err)
 			}
 		}
-		if err := catalog.RecomputeSeriesLatestEpisodeAdded(
+		if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(
 			ctx,
 			tx,
 			[]string{opts.FromContentID, opts.ToContentID},

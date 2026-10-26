@@ -1,8 +1,11 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"slices"
 	"testing"
@@ -513,11 +516,15 @@ func makeBrowseTestMediaItems(count int) []*models.MediaItem {
 type seriesRollupCountingStore struct {
 	*progressCountingStore
 	counts      map[string]userstore.SeriesWatchCounts
+	err         error
 	rollupCalls int
 }
 
 func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, _ string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
 	s.rollupCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
 	out := make(map[string]userstore.SeriesWatchCounts, len(seriesIDs))
 	for _, id := range seriesIDs {
 		if c, ok := s.counts[id]; ok {
@@ -578,6 +585,56 @@ func TestEnrichSeriesUserDataUsesSQLRollup(t *testing.T) {
 	}
 	if items[2].UserData != nil {
 		t.Fatalf("movie UserData = %+v, want nil", items[2].UserData)
+	}
+}
+
+// TestEnrichSeriesUserDataRollupFailure: a failed rollup query falls back to
+// the per-episode rollup while the request is live. Once the request is
+// canceled the fallback would fail on the same context, so it does not run,
+// and only a failure that is not the cancellation itself logs a warning.
+func TestEnrichSeriesUserDataRollupFailure(t *testing.T) {
+	rollupErr := errors.New("rollup unavailable")
+	for _, tc := range []struct {
+		name         string
+		cancel       bool
+		err          error
+		wantFallback bool
+		wantWarn     bool
+	}{
+		{name: "live request", err: rollupErr, wantFallback: true, wantWarn: true},
+		{name: "canceled request", cancel: true, err: context.Canceled},
+		{name: "real failure after cancel", cancel: true, err: rollupErr, wantWarn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			store := &seriesRollupCountingStore{progressCountingStore: &progressCountingStore{}, err: tc.err}
+			episodes := &seriesEpisodeSource{bySeries: map[string][]*models.Episode{"series-1": {{ContentID: "ep-1"}}}}
+			svc := &directContentService{
+				episodeRepo:   episodes,
+				storeProvider: &completedProgressStoreProvider{store: store},
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			if tc.cancel {
+				cancel()
+			}
+			defer cancel()
+
+			items := []upstreamListItem{{ContentID: "series-1", Type: "series", Title: "Show"}}
+			svc.EnrichSeriesUserData(ctx, &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, items)
+
+			ran := episodes.listCalls > 0 || store.listProgressCalls > 0
+			if ran != tc.wantFallback {
+				t.Fatalf("fallback ran = %v (episode lists %d, progress lists %d), want %v",
+					ran, episodes.listCalls, store.listProgressCalls, tc.wantFallback)
+			}
+			if warned := logs.Len() > 0; warned != tc.wantWarn {
+				t.Fatalf("logged at warning or above = %v, want %v: %s", warned, tc.wantWarn, logs.String())
+			}
+		})
 	}
 }
 

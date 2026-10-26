@@ -107,10 +107,12 @@ func TestMarkerServiceItemSkipsInaccessibleFile(t *testing.T) {
 
 func TestMarkerServiceValidatesWholeChangeBeforeWriting(t *testing.T) {
 	tests := map[string]MarkerChanges{
-		"invalid bounds":  {"intro": {End: new(10.0)}, "credits": nil, "preview": {Start: new(90.0), End: new(80.0)}},
-		"unknown segment": {"intro": {End: new(10.0)}, "unknown": nil},
-		"beyond duration": {"intro": {End: new(102.0)}},
-		"nonfinite":       {"intro": {End: new(math.NaN())}},
+		"invalid bounds":                        {"intro": {End: new(10.0)}, "credits": nil, "preview": {Start: new(90.0), End: new(80.0)}},
+		"unknown segment":                       {"intro": {End: new(10.0)}, "unknown": nil},
+		"beyond duration":                       {"intro": {End: new(102.0)}},
+		"nonfinite":                             {"intro": {End: new(math.NaN())}},
+		"credits at the intro":                  {"intro": {Start: new(5.0), End: new(80.0)}, "credits": {Start: new(76.0)}},
+		"credits before the end-credits window": {"credits": {Start: new(60.0)}},
 	}
 	for name, changes := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -129,7 +131,7 @@ func TestMarkerServicePresenceDefaultsAndAudit(t *testing.T) {
 	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 7, APIKeyID: 9, ImpersonatorUserID: new(8)})
 	ctx = MarkerRequestAuditContext(ctx, "marker-service-test")
 	_, err := h.SetMarkers(ctx, catalog.AccessFilter{}, MarkerTarget{FileID: 5}, MarkerChanges{
-		"intro": {End: new(10.0)}, "credits": {Start: new(90.0)}, "recap": nil,
+		"intro": {End: new(10.0)}, "credits": {Start: new(80.0)}, "recap": nil,
 	})
 	if err != nil {
 		t.Fatal(err)

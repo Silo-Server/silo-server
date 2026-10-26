@@ -26,6 +26,7 @@ import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
+import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -47,6 +48,7 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
 ];
 
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
+const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
 
 // Radix Select cannot represent "" as an item value, so the unset entry needs
 // a sentinel that never collides with a stored bitrate.
@@ -429,14 +431,19 @@ export default function PlaybackSettings() {
     : capabilities.isSuccess
       ? "legacy"
       : "unknown";
+  const supportsBuffering = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+  );
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
+      ...(supportsBuffering ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode],
+    [supportsIntroSkipMode, supportsBuffering],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
@@ -446,6 +453,8 @@ export default function PlaybackSettings() {
   // a local literal that could disagree with the server about "unset".
   const read = <T,>(key: SettingKey) =>
     (effective?.[key]?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T;
+  const ignoresLearnedLimit =
+    read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE) === "never";
 
   // Saves at profile scope and clears any device override shadowing it —
   // several of these keys are device-overridable, and without the clear the
@@ -468,7 +477,36 @@ export default function PlaybackSettings() {
         description="Each of your devices can override these, and a household manager can cap them for this profile."
       >
         <QualitySetting />
+        {supportsBuffering && (
+          <SettingRow
+            label={BUFFERING_MODE_SETTING.label}
+            description={BUFFERING_MODE_SETTING.description}
+            control={(id) => (
+              <Select
+                value={read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE)}
+                disabled={pending}
+                onValueChange={(value) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE, value)
+                }
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {optionsFor(BUFFERING_MODE_SETTING).map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        )}
+        {/* Never sends learned_limit: "ignore" on every start, so no limit applies. */}
+        {supportsBuffering && !ignoresLearnedLimit && <LearnedLimitRow />}
       </SettingsGroup>
+      {supportsBuffering && <PlaybackConnection ignoresLearnedLimit={ignoresLearnedLimit} />}
 
       <SettingsGroup title="Skipping">
         {introSkipControl === "mode" ? (

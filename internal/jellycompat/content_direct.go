@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -452,6 +453,9 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		SubtitleLanguages:       splitCommaValues([]string{params.Get("subtitle_languages")}),
 		MaxPlaybackQuality:      filter.MaxPlaybackQuality,
 	}
+	if collectionID := params.Get("collection_id"); collectionID != "" {
+		filters.RestrictToLibraryCollection(collectionID)
+	}
 	// Limit=0 wants only the total. Count directly unless played state is a
 	// profile overlay applied after the catalog query.
 	if parseBool(params.Get("count_only"), false) && isPlayedFilter == "" &&
@@ -754,7 +758,13 @@ func (s *directContentService) enrichDetailUserData(ctx context.Context, store u
 				result.UserData = catalog.SeasonUserDataFromCounts(counts[contentID])
 				return
 			}
-			slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+			// Once ctx is done the fallback would fail on it too.
+			fallBack := ctx.Err() == nil
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "series watch rollup query failed",
+				"component", "jellycompat", "error", err, "fallback", fallBack)
+			if !fallBack {
+				return
+			}
 		}
 		if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
 			episodes := episodesBySeries[contentID]
@@ -853,10 +863,11 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 				// A transient store error must not blank played/position state
 				// for the whole page at once: fall back to the per-item lookups
 				// below, which degrade one id at a time exactly like the
-				// pre-batch path did.
-				leafBatchFailed = true
-				slog.WarnContext(ctx, "jellycompat: batch leaf progress lookup failed; falling back to per-item lookups", "component", "jellycompat",
-					"error", err, "leaf_count", len(leafIDs))
+				// pre-batch path did. Not once ctx is done: they would fail on
+				// it too.
+				leafBatchFailed = ctx.Err() == nil
+				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: batch leaf progress lookup failed", "component", "jellycompat",
+					"error", err, "leaf_count", len(leafIDs), "fallback", leafBatchFailed)
 			}
 		}
 	}
@@ -1194,7 +1205,13 @@ func (s *directContentService) enrichSeriesListUserData(ctx context.Context, ses
 			}
 			return
 		}
-		slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+		// Once ctx is done the fallback would fail on it too.
+		fallBack := ctx.Err() == nil
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "series watch rollup query failed",
+			"component", "jellycompat", "error", err, "fallback", fallBack)
+		if !fallBack {
+			return
+		}
 	}
 
 	episodesBySeries, err := s.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)

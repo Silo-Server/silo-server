@@ -161,7 +161,10 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
       item's files to it and removes the provisional item (`rebindItemToExistingItem`).
     - An ambiguous item is stored as `pending`, so the match replaces its scanned title.
     - A matched item keeps its identity, even when its queue row runs again, and so does an
-      item that a split pinned as unmatched.
+      item that a split pinned as unmatched or that an admin ignored, while it stays pinned or
+      ignored. An ignored item's files also leave the matcher queues, so its override applies
+      only after the item is restored, when it is matched like any other unmatched item,
+      re-anchoring included ([unmatched items](../libraries-api.md#unmatched-items)).
     - Roots that are different titles can share a group key (two bare `Season` folders, or one
       title with no year), each on its own item. A movie or series item gets the override only
       when its present files and the group's present files are the same

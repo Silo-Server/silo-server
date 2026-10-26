@@ -67,8 +67,7 @@ type residentFixture struct {
 func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	t.Helper()
 	bin := buildResidentFixture(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	store := newFakeServiceInstallationStore(&Installation{
 		ID:          5,

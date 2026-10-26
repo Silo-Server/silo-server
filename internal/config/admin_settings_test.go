@@ -294,6 +294,8 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "defaults.ui.title_art", value: `"false"`},
 		{key: "defaults.ui.title_art", value: "1"},
 		{key: "defaults.ui.title_art", value: "null"},
+		{key: "autoscan.events_retention_days", value: "0"},
+		{key: "autoscan.events_retention_days", value: "3651"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
