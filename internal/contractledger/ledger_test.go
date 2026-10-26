@@ -958,6 +958,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"resolveCatalogIdentities":                 "V2-only read-only identity lookup carried by POST; no v1 equivalent and no persisted state.",
 	"reportPlaybackBandwidthProbe":             "V2-only connection speed observation; no v1 equivalent.",
 	"resetAdminDeviceLearnedLimit":             "V2-only device connection limit reset; no v1 equivalent.",
 	"resetPlaybackLearnedLimit":                "V2-only buffering-quality connection observation reset; no v1 equivalent.",

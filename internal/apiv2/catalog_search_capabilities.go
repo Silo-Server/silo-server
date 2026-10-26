@@ -10,6 +10,8 @@ import (
 
 type CatalogSearchCapabilities struct {
 	Capability
+	IdentityResolution    bool   `json:"identity_resolution,omitzero" doc:"resolveCatalogIdentities accepts typed batches and returns visible native cards with conflict checks and bounded continuation"`
+	MaxIdentityBatch      int    `json:"max_identity_batch,omitzero" doc:"Maximum seeds accepted by resolveCatalogIdentities"`
 	PeopleMediaScope      bool   `json:"people_media_scope,omitzero" doc:"People search accepts media_scope and filters credits by viewer access"`
 	FacetValueSearch      bool   `json:"facet_value_search,omitzero" doc:"searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q"`
 	PersonPrefetch        bool   `json:"person_prefetch,omitzero" doc:"Person reads accept prefetch=true for speculative reads that do not queue a provider refresh"`
@@ -41,12 +43,18 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 			}
 			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
+			_, identityResolution := reg.deps.CatalogBrowse.(catalogIdentityService)
+			maxIdentityBatch := 0
+			if identityResolution && reg.deps.CatalogAccess != nil {
+				maxIdentityBatch = catalogpkg.MaxIdentitySeeds
+			}
 			result, err := service.SearchContinuationCapabilities(ctx)
 			if err != nil {
 				return nil, catalogProblem(err, "query.source")
 			}
 			return &CatalogSearchCapabilitiesOutput{Body: CatalogSearchCapabilities{
 				Capability: Capability{State: StateAvailable}, Provider: result.Provider,
+				IdentityResolution: maxIdentityBatch > 0, MaxIdentityBatch: maxIdentityBatch,
 				PeopleMediaScope:   reg.deps.People != nil && reg.deps.CatalogAccess != nil,
 				PersonPrefetch:     reg.deps.People != nil,
 				FacetValueSearch:   true,

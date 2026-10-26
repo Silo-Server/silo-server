@@ -6814,6 +6814,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/catalog/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Resolve typed external identities to visible native catalog cards without scanning the library. */
+    post: operations["resolveCatalogIdentities"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/catalog/search/capabilities": {
     parameters: {
       query?: never;
@@ -20914,6 +20931,39 @@ export interface components {
       /** @description File-derived facets; absent when skip_technical=true */
       technical?: components["schemas"]["CatalogTechnicalFilters"];
     };
+    CatalogIdentityCollection: {
+      /** @description All indexed candidates for this batch have been examined across pages. False also applies to empty pages when conflicts consumed the budget. No confirmed match does not prove a title is absent from the library. */
+      complete: boolean;
+      /** @description Authorized native catalog cards; duplicates remain separate. Empty, never null. */
+      matches: components["schemas"]["CatalogIdentityMatch"][];
+      /** @description Continue with the same seeds, limit, artwork and profile. */
+      next_cursor?: string;
+    };
+    CatalogIdentityMatch: {
+      item: components["schemas"]["CatalogItem"];
+      /**
+       * Format: int64
+       * @description Zero-based request seed index
+       */
+      seed: number;
+    };
+    CatalogIdentityQuery: {
+      cursor?: string;
+      /**
+       * Format: int64
+       * @description Candidates examined per page; default 100. Conflicting candidates count toward this bound.
+       */
+      limit?: number;
+      /** @description Movie or series identities, in caller order. At least one ID is required for each seed. */
+      seeds: components["schemas"]["CatalogIdentitySeed"][];
+    };
+    CatalogIdentitySeed: {
+      imdb_id?: string;
+      tmdb_id?: string;
+      tvdb_id?: string;
+      /** @enum {string} */
+      type: "movie" | "series";
+    };
     CatalogImportPathRewrite: {
       from: string;
       to: string;
@@ -21591,8 +21641,15 @@ export interface components {
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
       facet_value_search?: boolean;
+      /** @description resolveCatalogIdentities accepts typed batches and returns visible native cards with conflict checks and bounded continuation */
+      identity_resolution?: boolean;
       /** @description queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar */
       letter_index?: boolean;
+      /**
+       * Format: int64
+       * @description Maximum seeds accepted by resolveCatalogIdentities
+       */
+      max_identity_batch?: number;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -92761,6 +92818,156 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CatalogBrowseCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resolveCatalogIdentities: {
+    parameters: {
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CatalogIdentityQuery"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogIdentityCollection"];
         };
       };
       /** @description Bad Request */

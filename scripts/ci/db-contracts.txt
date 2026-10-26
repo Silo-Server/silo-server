@@ -559,3 +559,4 @@
 # A stored collection's Jellyfin BoxSet page skips members the viewer can't see
 # without shortening the page or shifting later pages.
 ./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB
+./internal/catalog TestResolveIdentitiesVisibilityAndPagingDB

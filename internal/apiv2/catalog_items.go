@@ -625,6 +625,7 @@ const (
 )
 
 func registerCatalogItems(reg *Registry) {
+	registerCatalogIdentity(reg)
 	registerCatalogSearchCapabilities(reg)
 	registerCatalogLetters(reg)
 	registerThemeSongs(reg)

@@ -487,6 +487,7 @@ GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
 POST /api/v2/catalog/query	non-media
+POST /api/v2/catalog/resolve	non-media
 GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
@@ -1780,6 +1781,7 @@ GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
 POST /api/v2/catalog/query	non-media
+POST /api/v2/catalog/resolve	non-media
 GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media

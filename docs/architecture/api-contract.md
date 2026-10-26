@@ -1740,6 +1740,28 @@ over 100 rather than clamping; the episode, season, version, and manga-file list
 envelopes, `getSeriesSeason` answers the season itself, and `getCatalogItem` leaves `keywords`,
 `original_language`, and `status` empty because the detail service does not load them.
 
+`resolveCatalogIdentities` (`POST /api/v2/catalog/resolve`) accepts up to 48 typed
+movie or series seeds with TMDB, IMDb, and TVDB IDs. Clients check
+`getCatalogSearchCapabilities.identity_resolution` and `max_identity_batch` first.
+A positive requires one equal current ID and no contradiction in any shared known
+namespace; a missing namespace does not contradict a known match. Item columns take
+precedence over active provider rows. Rejected historical aliases do not establish
+positives. Results map zero-based seed indexes to authorized native `CatalogItem`
+cards, preserving separate native copies of a title. Metadata IDs are never native IDs.
+
+The default and maximum page budget is 100 examined, authorized candidates. Each
+indexed provider branch applies the shared library and maturity policy before its
+keyset limit. Conflicts consume this budget, so an empty page may still have a
+`next_cursor`; clients follow continuation until `complete` is true. Completion
+means the indexed candidates are exhausted, not that an unmatched title is absent.
+Candidate coverage matches the existing external-ID lookup: exact current columns
+and active provider rows. A historical TMDB column containing a slug cannot be found
+from its numeric ID alone, because the nonempty item column takes precedence.
+These unmatched seeds remain unresolved; clients must not label them not owned. Cursors bind the seeds, budget, artwork, account, profile, and effective
+access policy. Pages observe live catalog values, as ordinary catalog keysets do;
+a refresh starts a new batch. Unavailable or failed resolution supplies no absence
+information.
+
 **Section catalog-items (Phase 4), stage B.** Nine more profile-scoped operations under the
 `catalog` tag complete the section: `listSeasonEpisodes`, the capability documents
 `getTrailersCapability` (`/capabilities/trailers`) and `getMetadataAICapability`

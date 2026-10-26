@@ -739,6 +739,7 @@ export const v2Operations = {
   "POST /api/v2/catalog/letters": "queryCatalogLetters",
   "POST /api/v2/catalog/people/{id}/refresh": "refreshPerson",
   "POST /api/v2/catalog/query": "queryCatalogItems",
+  "POST /api/v2/catalog/resolve": "resolveCatalogIdentities",
   "POST /api/v2/collections": "createCollection",
   "POST /api/v2/collections/groups": "createCollectionGroup",
   "POST /api/v2/collections/import/mdblist": "importMDBListCollection",

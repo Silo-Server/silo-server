@@ -19,9 +19,10 @@ import (
 )
 
 type CatalogHandler struct {
-	resolver    *catalog.CatalogResolver
-	itemsH      *ItemsHandler
-	workSummary catalog.WorkSummaryProvider
+	resolver      *catalog.CatalogResolver
+	itemsH        *ItemsHandler
+	workSummary   catalog.WorkSummaryProvider
+	identityItems catalogIdentityItems
 }
 
 func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) *CatalogHandler {
