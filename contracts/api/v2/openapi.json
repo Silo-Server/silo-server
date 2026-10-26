@@ -26795,6 +26795,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "max_channels_by_codec": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
           "subtitles": {
             "$ref": "#/components/schemas/DeliverySubtitleCapabilitiesV3"
           },

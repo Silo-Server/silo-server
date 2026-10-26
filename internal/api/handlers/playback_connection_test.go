@@ -355,8 +355,8 @@ func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
 }
 
 // TestV1StartIgnoresBufferingQualityFields: /api/v1 is frozen and ignored
-// these fields as unknown before buffering_quality_v1 existed. A v1 start that
-// sends them without the feature still plays rather than failing with 400.
+// these fields, and max_channels_by_codec, as unknown before /api/v2 added
+// them. A v1 start that sends them still plays rather than failing with 400.
 func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
@@ -365,6 +365,9 @@ func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 	start := v3HandlerStartRequest()
 	start.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
 	start.LearnedLimit = playback.LearnedLimitClearV3
+	hls := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3]
+	hls.MaxChannelsByCodec = map[string]int{"aac": 99}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = hls
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	if rr.Code != http.StatusCreated {

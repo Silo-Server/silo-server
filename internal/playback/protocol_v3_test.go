@@ -3595,6 +3595,42 @@ func TestPlanPlaybackV3ZeroChannelCeilingIsUnset(t *testing.T) {
 	}
 }
 
+// A per-codec ceiling caps only its codec: {"aac": 2} keeps an AAC conversion
+// in stereo and refuses to copy multichannel AAC, while E-AC-3 5.1 is copied.
+func TestPlanPlaybackV3CodecChannelCeiling(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		track        models.AudioTrack
+		wantDelivery DeliveryV3
+		wantCodec    string
+		wantChannels int
+	}{
+		{name: "TrueHD 7.1 converts to stereo AAC", track: models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1", Default: true}, wantDelivery: DeliveryRemuxHLSV3, wantCodec: audioCodecAACV3, wantChannels: 2},
+		{name: "AAC 5.1 converts to stereo AAC", track: models.AudioTrack{Codec: "aac", Channels: 6, Layout: "5.1", Default: true}, wantDelivery: DeliveryRemuxHLSV3, wantCodec: audioCodecAACV3, wantChannels: 2},
+		{name: "E-AC-3 5.1 plays as is", track: models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}, wantDelivery: DeliveryOriginalHTTPV3, wantCodec: audioCodecEAC3, wantChannels: 6},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, request := androidMedia3FFmpegFixtureV3("tv", []models.AudioTrack{test.track}, []string{"aac", "eac3"}, 0)
+			for class, delivery := range request.ClientPlaybackContext.Deliveries {
+				delivery.MaxChannelsByCodec = map[string]int{"aac": 2}
+				request.ClientPlaybackContext.Deliveries[class] = delivery
+			}
+			selectAndroidAudioTrackV3(&request, file.ID, 0)
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.Plan.Delivery != test.wantDelivery {
+				t.Fatalf("result = %s, want %s", ExplainPlannerResultV3(result), test.wantDelivery)
+			}
+			recipe := result.Plan.EffectiveRecipe
+			if recipe.AudioCodec != test.wantCodec || recipe.AudioChannels == nil || *recipe.AudioChannels != test.wantChannels {
+				t.Fatalf("audio = %q %v, want %q %d", recipe.AudioCodec, recipe.AudioChannels, test.wantCodec, test.wantChannels)
+			}
+		})
+	}
+}
+
 func TestPlanPlaybackV3ProgressiveChannelCeilingAdaptsAudio(t *testing.T) {
 	for _, test := range []struct {
 		name         string
