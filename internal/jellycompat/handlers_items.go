@@ -1358,6 +1358,11 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := parseItemsQuery(r, h.codec)
+	// Latest returns a bare array with no total, so Limit=0 asks for nothing.
+	if query.countOnly {
+		writeJSON(w, http.StatusOK, []baseItemDTO{})
+		return
+	}
 
 	// Jellyfin's /Items/Latest auto-infers item types from the parent
 	// library's collection type when no explicit IncludeItemTypes is given.
