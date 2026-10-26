@@ -32,6 +32,9 @@ type Capabilities struct {
 	// v1 responses keep their original capability fields.
 	ImportRatings bool `json:"-"`
 	ExportRatings bool `json:"-"`
+	// SyncDropped means the provider can read, drop, and undrop dropped
+	// shows. Like the rating flags it is served only by /api/v2.
+	SyncDropped bool `json:"-"`
 }
 
 // ListKind identifies which personal list a sync operates on. The favorites and
@@ -126,14 +129,18 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
-// singleBatchWatchedExporter bounds one synchronization run to one provider
-// batch. This is used for plugin RPCs with independent per-call deadlines.
-type singleBatchWatchedExporter interface {
+// batchedWatchedExporter caps how many plays one ExportHistory call takes.
+// Plugin providers declare it, since each call is one RPC with its own
+// deadline.
+type batchedWatchedExporter interface {
 	ExportBatchSize() int
 }
 
-type UnwatchedExporter interface {
-	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
+// historyPrecisionExporter is implemented by providers that store watch times
+// more coarsely than to the second. History matching truncates both sides to
+// that precision, so a local play keeps matching its stored copy.
+type historyPrecisionExporter interface {
+	HistoryTimePrecision() time.Duration
 }
 
 type FavoriteImporter interface {
@@ -221,6 +228,30 @@ type RatingExportWatchGate interface {
 	RatingExportRequiresWatched(kind string) bool
 }
 
+// DroppedImporter reads the shows a provider account dropped.
+type DroppedImporter interface {
+	FetchDropped(ctx context.Context, cfg ServerConfig, conn Connection) (DroppedImportBatch, error)
+}
+
+// DroppedImportBatch is one read of a provider's dropped shows. Complete means
+// Rows is the account's full dropped set, so a series absent from it is not
+// dropped remotely. An incomplete read (a provider that skipped an unchanged
+// list, or could not confirm it read everything) leaves every absent series
+// unknown.
+type DroppedImportBatch struct {
+	Rows           []RemoteDropped
+	Complete       bool
+	UpdatedCursors map[string]string
+	Warnings       []string
+}
+
+// DroppedExporter drops and undrops shows on the provider. Both calls are
+// desired-state writes: repeating one must succeed.
+type DroppedExporter interface {
+	ExportDropped(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+	RemoveDropped(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+}
+
 type Scrobbler interface {
 	Start(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
 	Pause(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
@@ -267,6 +298,7 @@ type Connection struct {
 	ScrobbleEnabled              bool
 	ImportRatingsEnabled         bool
 	ExportRatingsEnabled         bool
+	SyncDroppedEnabled           bool
 	LastInboundSyncAt            *time.Time
 	LastProgressSyncAt           *time.Time
 	LastOutboundSyncAt           *time.Time
@@ -278,8 +310,12 @@ type Connection struct {
 	// don't burn more of the provider's request quota while still throttled.
 	RateLimitedUntil *time.Time
 	SyncCursors      map[string]string `json:"-"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// ConnectionSettings holds the values of the provider's declared
+	// connection settings that the profile changed, in the plugin contract's
+	// string encoding.
+	ConnectionSettings map[string]string `json:"-"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type SyncRun struct {
@@ -367,10 +403,17 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 
 type retryableProviderError struct {
 	message string
+	// cause, when set, is a sentinel such as ErrConnectionNotFound that
+	// callers match with errors.Is.
+	cause error
 }
 
 func (e retryableProviderError) Error() string {
 	return e.message
+}
+
+func (e retryableProviderError) Unwrap() error {
+	return e.cause
 }
 
 func isRetryableProviderError(err error) bool {
@@ -476,6 +519,9 @@ type RemoteFavorite struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	FavoritedAt   time.Time
+	// FavoritedAtGuessed marks a FavoritedAt the provider did not send, which
+	// the host filled in with the import time.
+	FavoritedAtGuessed bool
 }
 
 type RemotePlay struct {
@@ -553,6 +599,28 @@ type LocalRating struct {
 	RatedAt time.Time
 }
 
+// RemoteDropped is one show a provider reports as dropped. The embedded
+// RemoteFavorite carries the series identity. A zero DroppedAt is unknown.
+type RemoteDropped struct {
+	RemoteFavorite
+	DroppedAt time.Time
+}
+
+// DroppedSyncState records that Silo and a provider agreed a series is
+// dropped; no state means they agreed it is not. RemoteSeen records that a
+// provider read confirmed the drop. ProviderAccountID scopes the row to the
+// provider account it was agreed with.
+type DroppedSyncState struct {
+	ConnectionID      string
+	ProviderAccountID string
+	SeriesID          string
+	ProviderItemKey   string
+	RemoteSeen        bool
+	// UpdatedAt is when the agreement was last recorded. A local drop made
+	// after it is a local change the provider has not been told about.
+	UpdatedAt time.Time
+}
+
 // LocalRatingEvent reports that a profile set or cleared ratings. It carries
 // no values: the handler reads the current rating so that events processed out
 // of order never send a stale value.
@@ -576,11 +644,19 @@ type RatingSyncState struct {
 	RemoteSeen        bool
 }
 
+// LocalDroppedEvent reports that a profile dropped or undropped series. It
+// carries no state: the handler reads each series' current drop so that events
+// processed out of order never send a stale value.
+type LocalDroppedEvent struct {
+	UserID    int
+	ProfileID string
+	SeriesIDs []string
+}
+
 type LocalWatchEventKind string
 
 const (
-	LocalWatchEventMarkedWatched   LocalWatchEventKind = "marked_watched"
-	LocalWatchEventMarkedUnwatched LocalWatchEventKind = "marked_unwatched"
+	LocalWatchEventMarkedWatched LocalWatchEventKind = "marked_watched"
 )
 
 type LocalWatchEvent struct {
@@ -695,9 +771,13 @@ type ScrobbleEvent struct {
 	MediaItemID       string
 	ProviderItemKey   string
 	Kind              string
+	Title             string // Title, Year and the series pair are filled at dispatch; see Service.withScrobbleTitles.
+	Year              int
 	IMDbID            string
 	TMDBID            string
 	TVDBID            string
+	SeriesTitle       string
+	SeriesYear        int
 	SeriesIMDbID      string
 	SeriesTMDBID      string
 	SeriesTVDBID      string
@@ -707,7 +787,11 @@ type ScrobbleEvent struct {
 	PositionSeconds   float64
 	DurationSeconds   float64
 	Completed         bool
-	OccurredAt        time.Time
+	// SessionEnded marks a pause sent because the playback session itself
+	// ended without a user stop: it expired idle or was aborted. Providers
+	// that mirror live sessions, which are plugins, receive a stop instead.
+	SessionEnded bool
+	OccurredAt   time.Time
 }
 
 func (w RemoteWatch) HistoryRecord() historyimport.Record {
@@ -774,6 +858,8 @@ type ProviderSummary struct {
 	DisplayName            string                     `json:"display_name"`
 	Capabilities           Capabilities               `json:"capabilities"`
 	ConnectionConfigSchema []plugins.ConfigSchemaView `json:"connection_config_schema,omitempty"`
+	// ConnectionSettings is served only by /api/v2.
+	ConnectionSettings []ConnectionSetting `json:"-"`
 }
 
 // ConnectionVersion identifies a precise persisted connection generation.
@@ -820,6 +906,11 @@ type ConnectionStatus struct {
 	// explicitly; the frozen v1 response keeps its original fields.
 	ImportRatingsEnabled bool `json:"-"`
 	ExportRatingsEnabled bool `json:"-"`
+	SyncDroppedEnabled   bool `json:"-"`
+	// The provider's declared connection settings and their values for this
+	// connection, defaults included, are likewise served only by /api/v2.
+	ConnectionSettings      []ConnectionSetting `json:"-"`
+	ConnectionSettingValues map[string]any      `json:"-"`
 }
 
 type ConnectionUpdate struct {
@@ -837,6 +928,10 @@ type ConnectionUpdate struct {
 	ScrobbleEnabled              *bool `json:"scrobble_enabled,omitempty"`
 	ImportRatingsEnabled         *bool `json:"import_ratings_enabled,omitempty"`
 	ExportRatingsEnabled         *bool `json:"export_ratings_enabled,omitempty"`
+	SyncDroppedEnabled           *bool `json:"sync_dropped_enabled,omitempty"`
+	// ConnectionSettings sets values of the provider's declared connection
+	// settings, keyed by setting key. Settings it leaves out keep their value.
+	ConnectionSettings map[string]any `json:"connection_settings,omitempty" doc:"Values for the provider's declared connection_settings, keyed by setting key: true or false for a boolean setting. Settings left out keep their current value."`
 }
 
 // UnknownProviderError reports a provider key the registry does not know.
@@ -888,3 +983,13 @@ type ProviderCapabilityError struct {
 }
 
 func (e ProviderCapabilityError) Error() string { return fmt.Sprintf("provider %q %s", e.Key, e.What) }
+
+// InvalidConnectionInputError reports a connect request whose connection
+// configuration or other input the host or the provider rejected, as opposed
+// to a rejected credential or an internal failure. Message is sanitized of
+// the supplied secrets and safe to show the user.
+type InvalidConnectionInputError struct {
+	Message string
+}
+
+func (e InvalidConnectionInputError) Error() string { return e.Message }

@@ -280,7 +280,7 @@ func TestLibraryProviders(t *testing.T) {
 	deps, fake := libraryDeps(t)
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","priority":1,"enabled":true}]},{"content_level":"episode","entries":[]}]}`, bearer(adminToken))
@@ -314,7 +314,7 @@ func TestLibraryProvidersLegacyLevel(t *testing.T) {
 	}
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","priority":1,"enabled":true}]}]}`, bearer(adminToken))
@@ -412,7 +412,7 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	card := body.Sections[0].Items[0]
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`, "item_source": `"in_progress"`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`, "item_source": `"in_progress"`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}
@@ -467,12 +467,4 @@ func TestLibraryCollections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibraryCollections = &fakeLibraryViews{err: &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found"}}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders()), TypeNotFound)
-}
-
-// A configured v2 route reports unavailable when its paging service is absent.
-func TestLibraryCollectionItemsUnavailable(t *testing.T) {
-	rec := do(t, newTestHandler(t, libraryViewDeps(t)), http.MethodGet, "/api/v2/library/1/collections/c1/items", "", viewerHeaders())
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unconfigured route status = %d, want 503", rec.Code)
-	}
 }

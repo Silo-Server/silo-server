@@ -29,6 +29,11 @@ marks.** This reservation is expressly permitted by AGPL-3.0 §7(e).
 - **Referring to Silo truthfully** — "compatible with Silo," "a plugin for
   Silo," "built on Silo," "a fork of Silo." Use the word to refer to *our*
   project, not to brand *yours*.
+- **Showing the Silo logo or icon in a project that works with Silo** — for
+  example, to list Silo as a server type or on a "Connect to Silo" button. You
+  may include the official, unmodified asset files in your project's source
+  code and builds for this. Do not alter the artwork or use it as your own
+  project's logo or app icon.
 - **Redistributing official, unmodified builds** under the Silo name, with all
   notices kept intact.
 - **Running, modifying, and self-hosting** Silo for yourself or your
@@ -52,7 +57,7 @@ Never use the marks to promote piracy or to impersonate the project.
 ## Naming your project
 
 Give your client, plugin, or fork its own name, then mention Silo in the
-tagline or description: "Bramble — a Silo client for Android TV," "Trakt sync
+tagline or description: "Bramble — a Silo client for Android TV," "Simkl sync
 plugin for Silo." That is referential use and needs no permission.
 
 Official products use "Silo" alone, **Silo Server**, or "Silo" joined to a
@@ -65,7 +70,7 @@ need written permission:
 - "[word]Silo" names such as OpenSilo or MySilo, which read as the project
 - misspellings and look-alikes such as Sylo or Si1o
 
-Repository and package names such as `silo-plugin-trakt` are fine when "silo"
+Repository and package names such as `silo-plugin-simkl` are fine when "silo"
 only describes what the code plugs into.
 
 **Wordplay is fine, and is the exception to the rules above.** A name such as
@@ -107,8 +112,10 @@ identity.**
 
 The Silo logo, wordmark, and icon files are **© 2026 Silo Media L.L.C., all
 rights reserved**, and are **not** licensed under the AGPL or any other
-open-source license. Any redistribution or fork must **remove or replace** them.
-See the `NOTICE` file in the brand-asset directories.
+open-source license. A fork or modified redistribution of Silo must **remove or
+replace** them. Projects that work with Silo may still include the unmodified
+files to refer to Silo, as described under *Uses that are always fine*. See the
+`NOTICE` file in the brand-asset directories.
 
 ## Official sources
 

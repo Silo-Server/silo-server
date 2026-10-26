@@ -8,7 +8,7 @@ import (
 // RequiredAPIKeyCreateRefusalScenarios contains only the selected unpaired frozen cases.
 var RequiredAPIKeyCreateRefusalScenarios = []string{
 	"keys_create.bad_scope", "keys_create.missing_label", "keys_create.malformed",
-	"keys_create.demo", "keys_create.no_token",
+	"keys_create.demo", "keys_create.no_token", "keys_create.member_forbidden",
 }
 
 func APIKeyCreateRefusalAcceptance(catalogs []*Catalog) ([]*Catalog, error) {

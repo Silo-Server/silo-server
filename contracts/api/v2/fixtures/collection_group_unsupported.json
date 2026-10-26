@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/capability_unsupported",
+  "title": "Capability unsupported",
+  "status": 501,
+  "detail": "The acting account does not support collection groups",
+  "instance": "urn:silo:request:00000000000000000000010c"
+}

@@ -1,9 +1,18 @@
 {
-  "revision": "1b7ba6e0dc9e801bc0d927cd7f3880cf5a232d1e970d18d1e9360fb680d440e4",
+  "revision": "46818c56abe31ba9199327373db4f736261c04d81c0dee7d5a3c5210cd8cb0d7",
   "state": "available",
   "allowed": true,
+  "episode_still_provenance": true,
+  "extended_item_artwork": true,
   "season_list_artwork_param": "include_artwork",
   "param": "image_size",
+  "slot_width_params": {
+    "backdrop": "backdrop_width",
+    "logo": "logo_width",
+    "photo": "photo_width",
+    "poster": "poster_width",
+    "still": "still_width"
+  },
   "sizes": [
     "small",
     "medium",
@@ -14,7 +23,22 @@
     "backdrop": {
       "small": 300,
       "medium": 1920,
-      "large": 1920
+      "large": 2560
+    },
+    "banner": {
+      "small": 500,
+      "medium": 500,
+      "large": 1000
+    },
+    "clearart": {
+      "small": 500,
+      "medium": 500,
+      "large": 1000
+    },
+    "disc": {
+      "small": 300,
+      "medium": 500,
+      "large": 1000
     },
     "logo": {
       "small": 500,
@@ -24,7 +48,7 @@
     "poster": {
       "small": 300,
       "medium": 500,
-      "large": 780
+      "large": 1000
     },
     "profile": {
       "small": 300,
@@ -34,10 +58,15 @@
     "still": {
       "small": 300,
       "medium": 500,
-      "large": 780
+      "large": 1280
+    },
+    "thumb": {
+      "small": 300,
+      "medium": 500,
+      "large": 1280
     }
   },
-  "original_max_width_px": 1920,
+  "original_max_width_px": 3840,
   "storage_backend": "local",
   "delivery": "server"
 }

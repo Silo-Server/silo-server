@@ -396,6 +396,3 @@ func groupSlug(group string) string {
 	s = strings.NewReplacer("{", "", "}", "", "/", "-", "*", "wildcard").Replace(s)
 	return s
 }
-
-// GroupSlug is exported for the generator/tests.
-func GroupSlug(group string) string { return groupSlug(group) }

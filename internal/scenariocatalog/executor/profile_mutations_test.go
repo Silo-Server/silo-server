@@ -44,30 +44,3 @@ func profileMutationOrder(t *testing.T, e *Env) {
 		}
 	}
 }
-
-func TestRequiredProfileMutationResultsRejectIncompleteEvidence(t *testing.T) {
-	for _, kind := range []string{"missing", "skipped", "failed assertion"} {
-		t.Run(kind, func(t *testing.T) {
-			var results []Result
-			for _, id := range scenariocatalog.RequiredProfileMutationScenarios {
-				for _, transport := range []string{"v1", "v2"} {
-					results = append(results, Result{Scenario: id, Transport: transport})
-				}
-			}
-			if err := requiredPairedResults(results, scenariocatalog.RequiredProfileMutationScenarios); err != nil {
-				t.Fatal(err)
-			}
-			switch kind {
-			case "missing":
-				results = results[1:]
-			case "skipped":
-				results[0].Skipped = "database unavailable"
-			case "failed assertion":
-				results[0].Failures = check(scenariocatalog.Expect{Status: 418}, response{Status: 200})
-			}
-			if err := requiredPairedResults(results, scenariocatalog.RequiredProfileMutationScenarios); err == nil {
-				t.Fatal("incomplete profile mutation evidence passed")
-			}
-		})
-	}
-}

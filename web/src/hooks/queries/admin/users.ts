@@ -4,7 +4,11 @@ import {
   deleteAdminSettingValue,
   captureAdminSettingAuthority,
 } from "@/api/v2/adminAccountSettings";
-import { listAdminDevices, getAdminDevice } from "@/api/v2/adminDevices";
+import {
+  listAdminDevices,
+  getAdminDevice,
+  resetAdminDeviceLearnedLimit,
+} from "@/api/v2/adminDevices";
 import { V2ProblemError } from "@/api/v2/request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -14,13 +18,16 @@ import {
   adminUserScope,
   captureAdminUserAuthority,
   listAdminUsers,
-  getAdminUser,
+  getAdminUserSnapshot,
+  isStrongTag,
   createAdminUser,
   updateAdminUser,
   deleteAdminUser,
   impersonateAdminUser,
   issueAdminPasswordReset,
+  transferAdminUserOwnership,
   getAdminUserCapabilities,
+  getAdminUserPolicyDefaults,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
@@ -67,12 +74,13 @@ export interface AdminSettingIdentity {
   seriesId?: string;
 }
 
-/** One non-device setting row, string-valued for the admin controls. */
+/** One stored setting row at any scope, string-valued for the admin controls. */
 export interface AdminUserSettingEntry {
   key: string;
   scope: AdminSettingScope;
   profile_id?: string;
   client_family?: AdminSettingClientFamily;
+  device_id?: string;
   library_id?: number;
   series_id?: string;
   value: string;
@@ -187,12 +195,14 @@ export function useAdminUser(id: number) {
   const context = captureProfileRequestContext();
   const query = useQuery({
     queryKey: [...adminUsersKey(adminUserScope(context)), "detail", id],
-    queryFn: () => getAdminUser(id, context ?? captureAdminUserAuthority()),
+    queryFn: () => getAdminUserSnapshot(id, context ?? captureAdminUserAuthority()),
     enabled: context !== null && Number.isSafeInteger(id) && id > 0,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
   });
-  return { ...query, editor: query.data, data: query.data?.user };
+  // A proxy that strips the ETag leaves the account readable but not editable.
+  const editor = query.data && isStrongTag(query.data.etag) ? query.data : undefined;
+  return { ...query, editor, data: query.data?.user };
 }
 export function useAdminUserCapabilities() {
   const context = captureProfileRequestContext();
@@ -202,6 +212,17 @@ export function useAdminUserCapabilities() {
     enabled: context !== null,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+// The values change only with a server upgrade.
+export function useAdminPolicyDefaults() {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...adminKeys.policyDefaults(), adminUserScope(context)],
+    queryFn: () => getAdminUserPolicyDefaults(context ?? captureAdminUserAuthority()),
+    enabled: context !== null,
+    retry: false,
+    staleTime: Infinity,
   });
 }
 export function useCreateUser() {
@@ -249,26 +270,43 @@ export function useDeleteUser() {
 }
 
 /**
- * The target user's non-device settings: everything the settings tab shows.
- * Device overrides live in useAdminUserDeviceSettings, matching the old
- * two-endpoint split the UI is built around.
+ * How many settings the account stores, split into account/profile scopes and
+ * per-device overrides. Reads only this account's values, unlike
+ * useAdminUserDeviceSettings, which also loads every device to name them.
+ */
+export function useAdminUserSettingCounts(userId: number) {
+  const values = useAdminUserSettingValues(userId);
+  return useMemo(() => {
+    const rows = values.data ?? [];
+    const device = rows.filter((row) => row.scope === "profile_device").length;
+    return {
+      account: rows.length - device,
+      device,
+      isLoading: values.isLoading,
+      isError: values.isError,
+    };
+  }, [values.data, values.isLoading, values.isError]);
+}
+
+/**
+ * Every setting the target user stores, at every scope (device rows included),
+ * from this account's own values alone: no device or fleet reads.
  */
 export function useAdminUserSettings(userId: number) {
   const values = useAdminUserSettingValues(userId);
   const data = useMemo<AdminUserSettingEntry[]>(
     () =>
-      (values.data ?? [])
-        .filter((row) => row.scope !== "profile_device")
-        .map((row) => ({
-          key: row.key,
-          scope: row.scope,
-          profile_id: row.profile_id,
-          client_family: row.client_family,
-          library_id: row.library_id,
-          series_id: row.series_id,
-          value: settingValueToString(row.value),
-          updated_at: row.updated_at,
-        })),
+      (values.data ?? []).map((row) => ({
+        key: row.key,
+        scope: row.scope,
+        profile_id: row.profile_id,
+        client_family: row.client_family,
+        device_id: row.device_id,
+        library_id: row.library_id,
+        series_id: row.series_id,
+        value: settingValueToString(row.value),
+        updated_at: row.updated_at,
+      })),
     [values.data],
   );
   return { data, isLoading: values.isLoading, isError: values.isError };
@@ -563,6 +601,25 @@ export function useIssuePasswordReset() {
   });
 }
 
+/** Makes another enabled admin the server Owner, then refreshes the account list
+ * so the Owner badge and the actions it gates follow. */
+export function useTransferOwnership() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: ({
+      id,
+      profileContext,
+    }: {
+      id: number;
+      profileContext: ReturnType<typeof captureAdminUserAuthority>;
+    }) => transferAdminUserOwnership(id, profileContext),
+    onSuccess: (_data, { profileContext }) => {
+      void client.invalidateQueries({ queryKey: adminUsersKey(adminUserScope(profileContext)) });
+    },
+  });
+}
+
 export function useImpersonateUser() {
   return useMutation({
     retry: false,
@@ -574,5 +631,28 @@ export function useImpersonateUser() {
       profileContext: ReturnType<typeof captureAdminUserAuthority>;
     }) => impersonateAdminUser(id, profileContext),
     gcTime: 0,
+  });
+}
+
+export function useResetAdminDeviceLearnedLimit() {
+  const queryClient = useQueryClient();
+  const authority = captureAdminUserAuthority();
+  return useMutation({
+    retry: false,
+    mutationFn: ({
+      userId,
+      deviceId,
+      connectionId,
+    }: {
+      userId: number;
+      deviceId: string;
+      connectionId: string;
+    }) => resetAdminDeviceLearnedLimit(userId, deviceId, connectionId, authority),
+    // Returned so the button stays disabled until the refreshed detail lands.
+    onSuccess: (_data, variables) =>
+      queryClient.invalidateQueries({
+        queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
+      }),
+    onError: () => toast.error("Failed to clear learned limit"),
   });
 }

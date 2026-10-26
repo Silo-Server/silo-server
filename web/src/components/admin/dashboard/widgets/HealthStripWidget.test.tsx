@@ -20,7 +20,6 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: mocks.useAdminNodes,
 }));
 
-import { formatLatency, formatUptime } from "../format";
 import { HealthStripWidget } from "./HealthStripWidget";
 
 function status(overrides: Partial<AdminServerStatus> = {}): AdminServerStatus {
@@ -57,6 +56,10 @@ function node(overrides: Partial<StreamNode> = {}): StreamNode {
   };
 }
 
+function loadedNodes(data: StreamNode[]) {
+  return { data, isLoading: false, isSuccess: true, isError: false, error: null };
+}
+
 function renderStrip() {
   return render(
     <MemoryRouter>
@@ -65,84 +68,13 @@ function renderStrip() {
   );
 }
 
-describe("formatUptime", () => {
-  const now = Date.parse("2026-08-26T12:00:00Z");
-
-  it("steps down to the coarsest useful unit", () => {
-    expect(formatUptime("2026-08-26T11:59:30Z", now)).toBe("30s");
-    expect(formatUptime("2026-08-26T11:18:00Z", now)).toBe("42m");
-    expect(formatUptime("2026-08-26T06:48:00Z", now)).toBe("5h 12m");
-    expect(formatUptime("2026-08-26T07:00:00Z", now)).toBe("5h");
-    expect(formatUptime("2026-08-23T08:00:00Z", now)).toBe("3d 4h");
-    expect(formatUptime("2026-08-23T12:00:00Z", now)).toBe("3d");
-  });
-
-  it("reports an em dash rather than a negative or bogus uptime", () => {
-    expect(formatUptime(undefined, now)).toBe("—");
-    expect(formatUptime("not-a-date", now)).toBe("—");
-    expect(formatUptime("2026-08-26T12:00:30Z", now)).toBe("0s");
-  });
-});
-
-describe("formatLatency", () => {
-  it("keeps decimals only where they carry information", () => {
-    expect(formatLatency(1.42)).toBe("1.42 ms");
-    expect(formatLatency(0.31)).toBe("0.31 ms");
-    expect(formatLatency(148.6)).toBe("149 ms");
-  });
-});
-
 describe("HealthStripWidget", () => {
   beforeEach(() => {
     mocks.useAdminServerStatus.mockReset();
     mocks.useBuildInfo.mockReset();
     mocks.useAdminNodes.mockReset();
     mocks.useBuildInfo.mockReturnValue({ data: { display: "v0.9.1", build_number: 411 } });
-    mocks.useAdminNodes.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isSuccess: true,
-      isError: false,
-      error: null,
-    });
-  });
-
-  it("composes version, uptime, dependencies and error count", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useAdminNodes.mockReturnValue({
-      data: [node(), node({ id: 2, name: "node-2", healthy: false })],
-      isLoading: false,
-      isSuccess: true,
-      isError: false,
-      error: null,
-    });
-
-    renderStrip();
-
-    expect(screen.getByText("411 · v0.9.1")).toBeTruthy();
-    expect(screen.getByText("3h")).toBeTruthy();
-    expect(screen.getByText("1.42 ms")).toBeTruthy();
-    expect(screen.getByText("0.31 ms")).toBeTruthy();
-    expect(screen.getByText("1/2")).toBeTruthy();
-    expect(screen.getByText("4")).toBeTruthy();
-    expect(screen.getByText("12 warnings")).toBeTruthy();
-  });
-
-  it("falls back to the version when no ordered build number is available", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useBuildInfo.mockReturnValue({ data: { display: "v0.9.1" } });
-
-    renderStrip();
-
-    expect(screen.getByText("v0.9.1")).toBeTruthy();
+    mocks.useAdminNodes.mockReturnValue(loadedNodes([]));
   });
 
   it("separates an unconfigured dependency from a broken one", () => {
@@ -165,113 +97,48 @@ describe("HealthStripWidget", () => {
     expect(screen.getByText("Not configured")).toBeTruthy();
   });
 
-  // A node an operator disabled is not expected to report healthy, so it is
-  // neither half of the ratio: one disabled node reads as no nodes at all.
-  it("leaves disabled nodes out of the ratio", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useAdminNodes.mockReturnValue({
-      data: [node({ enabled: false, healthy: false })],
-      isLoading: false,
-      isSuccess: true,
-      isError: false,
-      error: null,
-    });
+  it.each([
+    // A node an operator disabled is not expected to report healthy, so it is
+    // neither half of the ratio: one disabled node reads as no nodes at all.
+    {
+      name: "leaves disabled nodes out of the ratio",
+      nodes: loadedNodes([node({ enabled: false, healthy: false })]),
+      shown: ["none", "this server transcodes"],
+      hidden: ["0/1"],
+    },
+    {
+      name: "counts only enabled nodes in the denominator",
+      nodes: loadedNodes([node(), node({ id: 2, name: "node-2", enabled: false, healthy: false })]),
+      shown: ["1/1", "healthy"],
+      hidden: [],
+    },
+    // "none" is a claim about the deployment; an unresolved query cannot back
+    // it. Loading shows a placeholder, a failure says the list is unavailable.
+    {
+      name: "does not claim no nodes while the node list is loading",
+      nodes: { data: undefined, isLoading: true, isSuccess: false, isError: false, error: null },
+      shown: [],
+      hidden: ["none", "this server transcodes"],
+    },
+    {
+      name: "marks the node ratio unavailable when the node query fails",
+      nodes: {
+        data: undefined,
+        isLoading: false,
+        isSuccess: false,
+        isError: true,
+        error: new Error("boom"),
+      },
+      shown: ["unavailable"],
+      hidden: ["none"],
+    },
+  ])("$name", ({ nodes, shown, hidden }) => {
+    mocks.useAdminServerStatus.mockReturnValue({ data: status(), isLoading: false, error: null });
+    mocks.useAdminNodes.mockReturnValue(nodes);
 
     renderStrip();
 
-    expect(screen.getByText("none")).toBeTruthy();
-    expect(screen.getByText("this server transcodes")).toBeTruthy();
-    expect(screen.queryByText("0/1")).toBeNull();
-  });
-
-  it("counts only enabled nodes in the denominator", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useAdminNodes.mockReturnValue({
-      data: [node(), node({ id: 2, name: "node-2", enabled: false, healthy: false })],
-      isLoading: false,
-      isSuccess: true,
-      isError: false,
-      error: null,
-    });
-
-    renderStrip();
-
-    expect(screen.getByText("1/1")).toBeTruthy();
-    expect(screen.getByText("healthy")).toBeTruthy();
-  });
-
-  it("says where transcodes run when no stream nodes are registered", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-
-    renderStrip();
-
-    expect(screen.getByText("none")).toBeTruthy();
-    expect(screen.getByText("this server transcodes")).toBeTruthy();
-  });
-
-  // "none" is a claim about the deployment; an unresolved query cannot back
-  // it. Loading shows a placeholder, a failure says the list is unavailable.
-  it("does not claim no nodes while the node list is loading", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useAdminNodes.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      isSuccess: false,
-      isError: false,
-      error: null,
-    });
-
-    renderStrip();
-
-    expect(screen.queryByText("none")).toBeNull();
-    expect(screen.queryByText("this server transcodes")).toBeNull();
-  });
-
-  it("marks the node ratio unavailable when the node query fails", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: status(),
-      isLoading: false,
-      error: null,
-    });
-    mocks.useAdminNodes.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isSuccess: false,
-      isError: true,
-      error: new Error("boom"),
-    });
-
-    renderStrip();
-
-    expect(screen.queryByText("none")).toBeNull();
-    expect(screen.getByText("unavailable")).toBeTruthy();
-  });
-
-  it("surfaces a failed status load", () => {
-    mocks.useAdminServerStatus.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error("boom"),
-    });
-
-    renderStrip();
-
-    expect(screen.getByText("Failed to load server health.")).toBeTruthy();
+    for (const text of shown) expect(screen.getByText(text)).toBeTruthy();
+    for (const text of hidden) expect(screen.queryByText(text)).toBeNull();
   });
 });

@@ -128,7 +128,8 @@ func matchesCreation(node *Node, input CreateNodeInput) bool {
 		reflect.DeepEqual(node.Group, normalizeGroup(input.Group)) &&
 		reflect.DeepEqual(node.MaxJobs, normalizeCap(input.MaxJobs)) &&
 		reflect.DeepEqual(node.MaxBandwidthKbps, normalizeCap(input.MaxBandwidthKbps)) &&
-		node.HWAccelOverride == nil && node.HWDeviceOverride == nil
+		node.HWAccelOverride == nil && node.HWDeviceOverride == nil &&
+		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil
 }
 
 // Update evaluates the original-version guard while holding the row lock. The

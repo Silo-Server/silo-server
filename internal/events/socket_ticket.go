@@ -29,6 +29,9 @@ type SocketIdentity struct {
 	ProfileToken       string    `json:"profile_token"`
 	AccessExpiresAt    time.Time `json:"access_expires_at"`
 	TicketExpiresAt    time.Time `json:"ticket_expires_at"`
+	// DeviceID is the minting request's X-Silo-Device-Id, which the
+	// acting-admin decision reads as the HTTP admin gate does.
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 var ErrSocketTicket = errors.New("invalid or unavailable realtime credential")

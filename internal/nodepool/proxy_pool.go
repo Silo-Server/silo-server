@@ -88,7 +88,15 @@ func (p *ProxyPool) Nodes() []*Node {
 func (p *ProxyPool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
+	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, nil, checkedAt)
+}
+
+// ApplyHealthReport is ApplyHealth for a whole report, drain state included.
+func (p *ProxyPool) ApplyHealthReport(id int, checkedURL string, report HealthReport, checkedAt time.Time) {
+	drainState := report.DrainState.normalized()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	applyNodeHealth(p.nodes, id, checkedURL, report.Healthy, report.ActiveJobs, report.EgressKbps, report.CapabilitiesHash, report.LastStats, report.NetworkAccess, &drainState, checkedAt)
 }
 
 // ApplyCapabilities records a freshly fetched capability report by swapping the

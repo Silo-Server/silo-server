@@ -1,0 +1,13 @@
+{
+  "movie": {
+    "id": 44,
+    "title": "Example Movie",
+    "year": 2024,
+    "folderPath": "/data/movies/Example Movie (2024)",
+    "tmdbId": 654321
+  },
+  "deletedFiles": false,
+  "movieFolderSize": 4294967296,
+  "eventType": "MovieDelete",
+  "instanceName": "Radarr"
+}

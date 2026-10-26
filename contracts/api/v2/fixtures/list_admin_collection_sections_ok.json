@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "s-hero",
+      "scope": "home",
+      "library_id": null,
+      "section_type": "collection",
+      "title": "Starter pack hero",
+      "featured": true,
+      "enabled": true,
+      "position": 0,
+      "page_row_count": 9
+    },
+    {
+      "id": "s-home",
+      "scope": "home",
+      "library_id": null,
+      "section_type": "collection",
+      "title": "On Home",
+      "featured": false,
+      "enabled": true,
+      "position": 4,
+      "page_row_count": 9
+    },
+    {
+      "id": "s-kids",
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "collection",
+      "title": "Kids",
+      "featured": false,
+      "enabled": false,
+      "position": 2,
+      "page_row_count": 3
+    }
+  ]
+}

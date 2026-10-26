@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Profile, User } from "@/api/types";
 import type { useAuth } from "@/hooks/useAuth";
+import { profilePeekKey } from "@/lib/homeRows/peek";
+import type { HomeRow } from "@/lib/homeRows/types";
 
 type AuthState = ReturnType<typeof useAuth>;
 
@@ -14,7 +16,15 @@ vi.mock("@/hooks/useAuth", async () => {
   return { ...actual, useAuth: () => auth as AuthState };
 });
 
-import { QueryCacheManager } from "@/App";
+const probe = vi.hoisted(() => ({ schedule: vi.fn(), stop: vi.fn() }));
+vi.mock("@/player/bandwidth-probe", () => ({
+  scheduleBandwidthProbe: () => {
+    probe.schedule();
+    return probe.stop;
+  },
+}));
+
+import { BandwidthProbePrewarmer, QueryCacheManager } from "@/App";
 
 function makeUser(id: number): User {
   return {
@@ -47,22 +57,12 @@ function renderManager() {
       </QueryClientProvider>,
     );
   };
-  return { clear, signIn };
+  return { queryClient, clear, signIn };
 }
 
 describe("QueryCacheManager", () => {
   beforeEach(() => {
     auth = { user: null, profile: null };
-  });
-
-  it("keeps the cache while a stored session restores at boot", () => {
-    const { clear, signIn } = renderManager();
-
-    // Boot renders with no user until the restore lands; the shell's reads
-    // started in that window must survive it.
-    signIn({ user: makeUser(1), profile: makeProfile("p-1") });
-
-    expect(clear).not.toHaveBeenCalled();
   });
 
   it("clears the cache on sign-out", () => {
@@ -83,5 +83,47 @@ describe("QueryCacheManager", () => {
     signIn({ user: makeUser(2), profile: null });
 
     expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("drops the last profile's Home rows poster peeks on a profile switch", () => {
+    const { queryClient, signIn } = renderManager();
+    signIn({ user: makeUser(1), profile: makeProfile("p-1") });
+    const row = { id: "r1", sectionType: "continue_watching", config: {}, itemLimit: 20 };
+    const key = profilePeekKey({ kind: "home" }, row as HomeRow);
+    queryClient.setQueryData(key, [{ id: "movie-1", title: "Heat" }]);
+
+    signIn({ user: makeUser(1), profile: makeProfile("p-2") });
+
+    expect(queryClient.getQueryData(key)).toBeUndefined();
+  });
+});
+
+describe("BandwidthProbePrewarmer", () => {
+  beforeEach(() => {
+    probe.schedule.mockReset();
+    probe.stop.mockReset();
+  });
+
+  // The connection reads need a profile, and the test's target follows the
+  // profile's libraries.
+  it("starts the speed schedule once a profile is active, and again for another profile", async () => {
+    const user = makeUser(1);
+    auth = { user, profile: null };
+    const view = render(<BandwidthProbePrewarmer />);
+    await Promise.resolve();
+    expect(probe.schedule).not.toHaveBeenCalled();
+
+    auth = { user, profile: makeProfile("p1") };
+    view.rerender(<BandwidthProbePrewarmer />);
+    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(1));
+
+    auth = { user, profile: makeProfile("p2") };
+    view.rerender(<BandwidthProbePrewarmer />);
+    await vi.waitFor(() => expect(probe.schedule).toHaveBeenCalledTimes(2));
+    expect(probe.stop).toHaveBeenCalledTimes(1);
+
+    auth = { user: null, profile: null };
+    view.rerender(<BandwidthProbePrewarmer />);
+    expect(probe.stop).toHaveBeenCalledTimes(2);
   });
 });

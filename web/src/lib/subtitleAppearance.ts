@@ -7,6 +7,8 @@ export interface SubtitleAppearance {
   fontSize: "small" | "medium" | "large" | "xlarge" | "xxlarge";
   fontFamily: "sans-serif" | "serif" | "monospace";
   fontColor: string;
+  /** Opacity of the subtitle text itself, 1-100. Independent of backgroundOpacity. */
+  textOpacity: number;
   backgroundColor: string;
   backgroundStyle: "box" | "shadow" | "outline" | "none";
   backgroundOpacity: number;
@@ -21,6 +23,7 @@ export const DEFAULT_SUBTITLE_APPEARANCE: SubtitleAppearance = {
   fontSize: "large",
   fontFamily: "sans-serif",
   fontColor: "#ffffff",
+  textOpacity: 100,
   backgroundColor: "#000000",
   backgroundStyle: "box",
   backgroundOpacity: 75,
@@ -73,6 +76,7 @@ export const FONT_COLOR_PALETTE: ColorSwatch[] = [
   { hex: "#d946ef", label: "Magenta" },
   { hex: "#ef4444", label: "Red" },
   { hex: "#3b82f6", label: "Blue" },
+  { hex: "#9ca3af", label: "Gray" },
   { hex: "#000000", label: "Black" },
 ];
 
@@ -121,6 +125,13 @@ export function parseSubtitleAppearance(value: unknown): SubtitleAppearance {
         typeof p.fontColor === "string" && /^#[0-9a-fA-F]{6}$/.test(p.fontColor)
           ? p.fontColor
           : DEFAULT_SUBTITLE_APPEARANCE.fontColor,
+      textOpacity:
+        typeof p.textOpacity === "number" &&
+        Number.isInteger(p.textOpacity) &&
+        p.textOpacity >= 1 &&
+        p.textOpacity <= 100
+          ? p.textOpacity
+          : DEFAULT_SUBTITLE_APPEARANCE.textOpacity,
       backgroundColor:
         typeof p.backgroundColor === "string" && /^#[0-9a-fA-F]{6}$/.test(p.backgroundColor)
           ? p.backgroundColor
@@ -231,7 +242,10 @@ export function computeSubtitleStyles(settings: SubtitleAppearance, fontScale = 
   // Font
   cueStyle.fontSize = computeSubtitleFontSize(settings.fontSize, fontScale);
   cueStyle.fontFamily = settings.fontFamily;
-  cueStyle.color = settings.fontColor;
+  {
+    const { r, g, b } = hexToRgb(settings.fontColor);
+    cueStyle.color = `rgba(${r}, ${g}, ${b}, ${settings.textOpacity / 100})`;
+  }
 
   // Background
   if (settings.backgroundStyle === "box") {

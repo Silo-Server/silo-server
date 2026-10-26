@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // upstream types represent the intermediate data model used between
@@ -16,6 +17,8 @@ type upstreamUserLibrary struct {
 	Type       string `json:"type"`
 	PosterURL  string `json:"poster_url,omitempty"`
 	PosterPath string `json:"-"`
+	// RealtimeMonitoring is the library's own real-time monitoring switch.
+	RealtimeMonitoring bool `json:"-"`
 }
 
 type upstreamListItem struct {
@@ -67,6 +70,14 @@ type upstreamListItem struct {
 	// item. nil means unknown (the producing query did not check); the mapper
 	// then keeps the historical LocationType=FileSystem default.
 	HasMediaFiles *bool `json:"-"`
+	// Cached paths of the banner, thumb, clear art, disc art and the
+	// backdrops after the primary. They decide which image tags an item
+	// advertises and seed them.
+	BannerPath         string   `json:"-"`
+	ThumbPath          string   `json:"-"`
+	ClearArtPath       string   `json:"-"`
+	DiscPath           string   `json:"-"`
+	ExtraBackdropPaths []string `json:"-"`
 }
 
 type upstreamBrowseResponse struct {
@@ -101,6 +112,11 @@ type upstreamItemDetail struct {
 	BackdropPath      string                  `json:"-"`
 	BackdropThumbhash string                  `json:"-"`
 	LogoPath          string                  `json:"-"`
+	BannerURL         string                  `json:"-"`
+	ThumbURL          string                  `json:"-"`
+	ClearArtURL       string                  `json:"-"`
+	DiscURL           string                  `json:"-"`
+	BackdropURLs      []string                `json:"-"` // every backdrop, BackdropURL first
 	UpdatedAt         time.Time               `json:"-"`
 	Studios           []string                `json:"studios"`
 	Countries         []string                `json:"countries"`
@@ -124,6 +140,16 @@ type upstreamItemDetail struct {
 	SubtitleMode        string `json:"-"`
 	SubtitleModeSet     bool   `json:"-"`
 	ShowForcedSubtitles bool   `json:"-"`
+	// SubtitleTrackSignature is the track the viewer last picked for this
+	// series, or nil.
+	SubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"-"`
+	// Cached paths of the banner, thumb, clear art, disc art and the
+	// backdrops after the primary; they seed the image tags.
+	BannerPath         string   `json:"-"`
+	ThumbPath          string   `json:"-"`
+	ClearArtPath       string   `json:"-"`
+	DiscPath           string   `json:"-"`
+	ExtraBackdropPaths []string `json:"-"`
 }
 
 type upstreamSeason struct {

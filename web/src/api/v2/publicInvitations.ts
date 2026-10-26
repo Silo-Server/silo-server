@@ -18,6 +18,9 @@ export async function lookupPublicInvitation(token: string, signal: AbortSignal)
   if (
     !result ||
     typeof result.email !== "string" ||
+    typeof result.email_required !== "boolean" ||
+    (!result.email_required && !result.email) ||
+    typeof result.note !== "string" ||
     typeof result.server_name !== "string" ||
     typeof result.inviter_name !== "string" ||
     typeof result.show_tour !== "boolean" ||
@@ -29,15 +32,19 @@ export async function lookupPublicInvitation(token: string, signal: AbortSignal)
   return result;
 }
 
-/** This effect is never replayed, including on an authentication failure. */
+/**
+ * This effect is never replayed, including on an authentication failure.
+ * `email` is the address entered for a link invitation; omit it otherwise.
+ */
 export async function acceptPublicInvitation(
   token: string,
   password: string,
   signal: AbortSignal,
+  email?: string,
 ): Promise<InvitationAcceptance> {
   const result = await v2("POST /api/v2/invitations/{token}/accept", {
     path: { token },
-    body: { password },
+    body: email === undefined ? { password } : { email, password },
     signal,
     retryAuthentication: false,
   });

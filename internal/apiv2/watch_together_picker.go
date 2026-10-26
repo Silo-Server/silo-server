@@ -6,6 +6,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 )
 
@@ -76,19 +77,20 @@ func registerWatchTogetherPicker(reg *Registry) {
 		}
 		out := &WatchTogetherPickerOutput{CacheControl: adminLogsSocketCacheControl}
 		out.Body.Members = watchTogetherMembersOf(view.Members)
-		out.Body.ContinueTogether = watchTogetherPickerEntriesOf(view.ContinueTogether)
-		out.Body.WatchlistUnion = watchTogetherPickerEntriesOf(view.WatchlistUnion)
+		sel := reg.ratingSelection(ctx)
+		out.Body.ContinueTogether = watchTogetherPickerEntriesOf(view.ContinueTogether, sel)
+		out.Body.WatchlistUnion = watchTogetherPickerEntriesOf(view.WatchlistUnion, sel)
 		return out, nil
 	})
 }
 
-func watchTogetherPickerEntriesOf(rows []watchtogether.PickerViewEntry) []WatchTogetherPickerEntry {
+func watchTogetherPickerEntriesOf(rows []watchtogether.PickerViewEntry, sel ratingsources.Selection) []WatchTogetherPickerEntry {
 	out := make([]WatchTogetherPickerEntry, 0, len(rows))
 	for _, row := range rows {
 		if row.Item == nil {
 			continue
 		}
-		entry := WatchTogetherPickerEntry{Item: catalogItemDetailOf(row.Item).CatalogItem, Members: make([]WatchTogetherPickerMember, 0, len(row.Members))}
+		entry := WatchTogetherPickerEntry{Item: withShownRatings(catalogItemCardOf(row.Item), sel), Members: make([]WatchTogetherPickerMember, 0, len(row.Members))}
 		for _, m := range row.Members {
 			entry.Members = append(entry.Members, WatchTogetherPickerMember{UserID: IDFromInt(int64(m.UserID)), ProfileID: m.ProfileID, DisplayName: m.DisplayName, PositionSeconds: m.PositionSeconds, DurationSeconds: m.DurationSeconds})
 		}

@@ -12,17 +12,6 @@ func newSnapshot(name string) Snapshot {
 	return Snapshot{ServerName: name, assets: map[AssetKind]string{}}
 }
 
-func TestRenderIndexHTMLReplacesTitle(t *testing.T) {
-	in := []byte(`<html><head><title>Silo</title></head><body></body></html>`)
-	out := string(RenderIndexHTML(in, newSnapshot("Acme Media")))
-	if !strings.Contains(out, "<title>Acme Media</title>") {
-		t.Fatalf("title not replaced: %q", out)
-	}
-	if strings.Contains(out, "<title>Silo</title>") {
-		t.Fatalf("default title still present: %q", out)
-	}
-}
-
 func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	in := []byte(`<title>Silo</title></head>`)
 	out := string(RenderIndexHTML(in, newSnapshot(`A&B<script>`)))
@@ -34,74 +23,14 @@ func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	}
 }
 
-func TestRenderIndexHTMLRewritesFaviconWhenSet(t *testing.T) {
-	in := []byte(indexFaviconLink + "</head>")
-	snap := Snapshot{ServerName: "X", assets: map[AssetKind]string{KindFavicon: "abc123.png"}}
-	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `href="/api/v2/branding/assets/favicon?v=abc123.png"`) {
-		t.Fatalf("favicon not rewritten: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLKeepsDefaultFaviconWhenUnset(t *testing.T) {
-	in := []byte(indexFaviconLink + "</head>")
-	out := string(RenderIndexHTML(in, newSnapshot("X")))
-	if !strings.Contains(out, indexFaviconLink) {
-		t.Fatalf("default favicon link should be preserved: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
-	in := []byte("<head></head>")
-	if out := string(RenderIndexHTML(in, newSnapshot("X"))); strings.Contains(out, "theme-color") {
-		t.Fatalf("theme-color should not be injected without accent: %q", out)
-	}
-	snap := newSnapshot("X")
-	snap.AccentColor = "#5bc39d"
-	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `<meta name="theme-color" content="#5bc39d" />`) {
-		t.Fatalf("theme-color meta not injected: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLStampsDefaultThemeOnlyWhenSet(t *testing.T) {
+func TestRenderIndexHTMLDoesNotStampADefaultTheme(t *testing.T) {
 	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
-	if out := string(RenderIndexHTML(in, newSnapshot("X"))); strings.Contains(out, "data-default-theme") {
-		t.Fatalf("default theme should not be stamped when unset: %q", out)
+	out := string(RenderIndexHTML(in, newSnapshot("X")))
+	if strings.Contains(out, "data-default-theme") {
+		t.Fatalf("the shell has one theme and carries no default-theme attribute: %q", out)
 	}
-	snap := newSnapshot("X")
-	snap.DefaultTheme = "cinema-light"
-	out := string(RenderIndexHTML(in, snap))
-	want := `<!doctype html><html data-default-theme="cinema-light" lang="en" data-theme="midnight-cinema">`
-	if !strings.HasPrefix(out, want) {
-		t.Fatalf("default theme not stamped on <html>: %q", out)
-	}
-	// The static data-theme stays: the boot script decides what paints, and a
-	// stale id stored here must never leave the page without a theme.
-	if strings.Count(out, "data-theme=") != 1 {
+	if !strings.Contains(out, `<html lang="en" data-theme="midnight-cinema">`) {
 		t.Fatalf("static data-theme should be left alone: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLEscapesDefaultTheme(t *testing.T) {
-	in := []byte(`<html lang="en"><head></head></html>`)
-	snap := newSnapshot("X")
-	snap.DefaultTheme = `x" onload="alert(1)`
-	out := string(RenderIndexHTML(in, snap))
-	if strings.Contains(out, `onload="alert`) {
-		t.Fatalf("default theme not escaped: %q", out)
-	}
-	if !strings.Contains(out, `data-default-theme="x&#34; onload=&#34;alert(1)"`) {
-		t.Fatalf("expected escaped default theme, got: %q", out)
-	}
-}
-
-func TestRenderKeyIncludesDefaultTheme(t *testing.T) {
-	snap := newSnapshot("Acme")
-	baseline := snap.RenderKey()
-	snap.DefaultTheme = "cinema-light"
-	if got := snap.RenderKey(); got == baseline {
-		t.Fatal("RenderKey did not change when the default theme changed")
 	}
 }
 
@@ -111,15 +40,6 @@ func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
 	snap.assets[KindWordmarkLight] = "wordmark-light.webp"
 	if got := snap.RenderKey(); got == baseline {
 		t.Fatal("RenderKey did not change when wordmark_light ref changed")
-	}
-}
-
-func TestRenderKeyIncludesMarkLight(t *testing.T) {
-	snap := newSnapshot("Acme")
-	baseline := snap.RenderKey()
-	snap.assets[KindMarkLight] = "mark-light.webp"
-	if got := snap.RenderKey(); got == baseline {
-		t.Fatal("RenderKey did not change when mark_light ref changed")
 	}
 }
 
@@ -137,40 +57,13 @@ func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
 	if !strings.Contains(string(data), indexFaviconLink) {
 		t.Fatalf("web/index.html no longer contains the expected favicon link %q; update indexFaviconLink", indexFaviconLink)
 	}
-	if !strings.Contains(string(data), indexHTMLOpen) {
-		t.Fatalf("web/index.html no longer contains the expected %q; update indexHTMLOpen", indexHTMLOpen)
-	}
-	snap := Snapshot{ServerName: "Acme", DefaultTheme: "cinema-light", assets: map[AssetKind]string{KindFavicon: "f00.png"}}
+	snap := Snapshot{ServerName: "Acme", assets: map[AssetKind]string{KindFavicon: "f00.png"}}
 	out := string(RenderIndexHTML(data, snap))
-	if !strings.Contains(out, `<html data-default-theme="cinema-light" `) {
-		t.Fatalf("default theme not stamped on <html> in real shell")
-	}
 	if !strings.Contains(out, "<title>Acme</title>") {
 		t.Fatalf("title not replaced in real shell")
 	}
 	if !strings.Contains(out, "/api/v2/branding/assets/favicon?v=f00.png") {
 		t.Fatalf("favicon not rewritten in real shell")
-	}
-}
-
-func TestRenderManifestDefaults(t *testing.T) {
-	var m map[string]any
-	if err := json.Unmarshal(RenderManifest(newSnapshot("Acme TV")), &m); err != nil {
-		t.Fatalf("invalid manifest JSON: %v", err)
-	}
-	if m["name"] != "Acme TV" || m["short_name"] != "Acme TV" {
-		t.Fatalf("unexpected name: %v / %v", m["name"], m["short_name"])
-	}
-	if m["theme_color"] != DefaultThemeColor {
-		t.Fatalf("expected default theme color, got %v", m["theme_color"])
-	}
-	icons, _ := m["icons"].([]any)
-	if len(icons) != 3 {
-		t.Fatalf("expected 3 default icons, got %d", len(icons))
-	}
-	first, _ := icons[0].(map[string]any)
-	if !strings.HasPrefix(first["src"].(string), "/web-app-icon") {
-		t.Fatalf("expected bundled icon default, got %v", first["src"])
 	}
 }
 

@@ -76,3 +76,51 @@ it.each(["profile", "close"])(
     expect(mocks.v2).toHaveBeenCalledTimes(2);
   },
 );
+
+it("hands the stored subtitle, including its pending sync, to the player", async () => {
+  const config: PlayerConfig = {
+    apiBaseUrl: "/api/v1",
+    getAccessToken: () => "synthetic",
+    getProfileId: () => "profile-1",
+    getDeviceId: () => "synthetic-device",
+  };
+  const subtitle = {
+    id: "7",
+    media_file_id: "42",
+    timing: { offset_ms: 0, scale: 1 },
+    sync: { id: "1", subtitle_id: "7", status: "pending", trigger: "auto" },
+  };
+  mocks.v2
+    .mockResolvedValueOnce({
+      results: [
+        {
+          provider: "example",
+          id: "opaque",
+          language: "en",
+          release_name: "Synthetic selection",
+          format: "srt",
+          score: 80,
+          hearing_impaired: false,
+          downloads: 1,
+        },
+      ],
+      warnings: [],
+    })
+    .mockResolvedValueOnce({ subtitle });
+  const onSubtitleDownloaded = vi.fn();
+  render(
+    <SubtitleSearchModal
+      playerConfig={config}
+      mediaFileId={42}
+      isOpen
+      onSubtitleDownloaded={onSubtitleDownloaded}
+      onClose={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  const result = await screen.findByRole("button", { name: /Synthetic selection/ });
+  await act(async () => {
+    fireEvent.click(result);
+  });
+  expect(onSubtitleDownloaded).toHaveBeenCalledExactlyOnceWith(subtitle);
+});

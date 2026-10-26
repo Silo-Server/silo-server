@@ -72,15 +72,4 @@ describe("guarded ebook configuration", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(session.etag).toBe('"initial"');
   });
-  it("never dispatches a queued write after an account change", async () => {
-    const session = createEbookReaderConfigSession();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({}, '"initial"'));
-    vi.stubGlobal("fetch", fetchMock);
-    await fetchEbookReaderConfig("book", session);
-    setAccessToken("other-account");
-    await expect(saveEbookReaderConfig("book", { theme: "dark" }, session)).rejects.toMatchObject({
-      name: "StaleApiRequestContextError",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
 });

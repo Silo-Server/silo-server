@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { SettingsSectionEntry } from "@/api/types";
+import { V2ProblemError } from "@/api/v2/request";
 
 import {
   applySectionDeletion,
-  canMutateSectionSettings,
   buildSectionOverrides,
-  buildProfileGallerySection,
+  canMutateSectionSettings,
+  createOverrideIdSource,
   hydrateRemovedSystemSections,
-  shouldRestoreLatestSaveFailure,
-  shouldRestoreSelectionState,
-} from "./HomeScreenSettings";
+  sectionSaveErrorMessage,
+} from "@/lib/homeRows/profileOverrides";
 
 function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSectionEntry {
   return {
@@ -28,73 +28,33 @@ function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSec
 }
 
 describe("HomeScreenSettings helpers", () => {
-  it("serializes featured section overrides for persistence", () => {
-    const overrides = buildSectionOverrides([
-      makeSection({ id: "admin-1", featured: true }),
-      makeSection({ id: "custom-1", is_custom: true, featured: true, section_type: "genre" }),
-    ]);
-
-    expect(overrides).toEqual([
-      expect.objectContaining({
-        section_id: "admin-1",
-        featured: true,
-      }),
-      expect.objectContaining({
-        id: "custom-1",
-        section_type: "genre",
-        featured: true,
-      }),
-    ]);
-  });
-
-  it("serializes custom gallery sections as profile-owned overrides without enabled state", () => {
-    const section = buildProfileGallerySection(
-      {
-        section_type: "hidden_gems",
-        title: "Hidden Gems",
-        item_limit: 18,
-        featured: true,
-        enabled: false,
-        config: { mood: "underrated" },
-      },
-      3,
-    );
-    const [override] = buildSectionOverrides([section]);
-
-    expect(section).toMatchObject({
-      section_type: "hidden_gems",
-      title: "Hidden Gems",
-      featured: true,
-      is_custom: true,
-      position: 3,
-      config: { mood: "underrated" },
-    });
-    expect(override).toMatchObject({
-      id: section.id,
-      section_type: "hidden_gems",
-      title: "Hidden Gems",
-      featured: true,
-      item_limit: 18,
-      config: { mood: "underrated" },
-    });
-    expect(override).not.toHaveProperty("enabled");
-  });
-
-  it("serializes removed system sections as removed overrides", () => {
+  it("keeps saved override IDs on admin sections and gives the others new ones", () => {
     const overrides = buildSectionOverrides(
       [
-        makeSection({ id: "admin-1", title: "Recently Added" }),
-        makeSection({ id: "custom-1", is_custom: true, title: "Custom Picks" }),
+        makeSection({ id: "admin-1", featured: true }),
+        makeSection({ id: "admin-2" }),
+        makeSection({ id: "custom-1", is_custom: true }),
       ],
-      [{ id: "admin-2" }],
+      [{ id: "admin-3" }, { id: "admin-4" }],
+      {
+        savedOverrides: [
+          { id: "stale", section_id: "admin-1" },
+          { id: "saved-1", section_id: "admin-1", position: 0 },
+          { id: "saved-3", section_id: "admin-3", removed: true },
+          { id: "custom-1", position: 1 },
+        ],
+        newId: (sectionId) => `new-${sectionId}`,
+      },
     );
 
-    expect(overrides).toContainEqual(
-      expect.objectContaining({
-        section_id: "admin-2",
-        removed: true,
-      }),
-    );
+    expect(overrides[0]).toMatchObject({ section_id: "admin-1", featured: true });
+    expect(overrides.map(({ id, section_id }) => ({ id, section_id }))).toEqual([
+      { id: "saved-1", section_id: "admin-1" },
+      { id: "new-admin-2", section_id: "admin-2" },
+      { id: "custom-1", section_id: undefined },
+      { id: "saved-3", section_id: "admin-3" },
+      { id: "new-admin-4", section_id: "admin-4" },
+    ]);
   });
 
   it("removes a deleted custom section from visible rows without adding a removed override", () => {
@@ -112,19 +72,13 @@ describe("HomeScreenSettings helpers", () => {
     expect(result.removedSystemSections).toEqual([]);
   });
 
-  it("removes a deleted system section from visible rows while retaining a removed override", () => {
-    const result = applySectionDeletion(
-      [
-        makeSection({ id: "admin-1", title: "Recently Added" }),
-        makeSection({ id: "custom-1", is_custom: true, title: "Custom Picks" }),
-        makeSection({ id: "admin-2", title: "Continue Watching" }),
-      ],
-      [],
-      "admin-2",
-    );
+  it("gives each admin section one new override ID per source", () => {
+    const first = createOverrideIdSource();
+    const id = first("admin-1");
 
-    expect(result.sections.map((section) => section.id)).toEqual(["admin-1", "custom-1"]);
-    expect(result.removedSystemSections).toEqual([{ id: "admin-2" }]);
+    expect(first("admin-1")).toBe(id);
+    expect(first("admin-2")).not.toBe(id);
+    expect(createOverrideIdSource()("admin-1")).not.toBe(id);
   });
 
   it("hydrates removed system sections from raw overrides and reserializes them after a fresh load", () => {
@@ -172,16 +126,116 @@ describe("HomeScreenSettings helpers", () => {
       ),
     ).toBe(true);
   });
+});
 
-  it("only restores rollback state when the selection identity still matches", () => {
-    expect(shouldRestoreSelectionState("library:1", "library:1")).toBe(true);
-    expect(shouldRestoreSelectionState("library:2", "library:1")).toBe(false);
-    expect(shouldRestoreSelectionState("home", "library:1")).toBe(false);
+describe("HomeScreenSettings save refusals", () => {
+  it("explains a permission denial with the server's stated cause", () => {
+    const refused = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+      title: "Permission denied",
+      status: 403,
+      detail: "Only an admin can add an Editor's picks row.",
+      instance: "test",
+    });
+    const invalid = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+      title: "Invalid",
+      status: 422,
+      detail: "library_ids: at least one",
+      instance: "test",
+    });
+
+    const demo = new V2ProblemError("replaceProfileSectionOverrides", {
+      type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+      title: "Permission denied",
+      status: 403,
+      detail: "This action is not available in demo mode.",
+      instance: "test",
+    });
+
+    expect(sectionSaveErrorMessage(refused)).toBe(
+      "Could not save your rows: Only an admin can add an Editor's picks row.",
+    );
+    expect(sectionSaveErrorMessage(demo)).toBe(
+      "Could not save your rows: This action is not available in demo mode.",
+    );
+    expect(sectionSaveErrorMessage(invalid)).toBe("Could not save your rows");
+    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Could not save your rows");
+  });
+});
+
+// Characterization for the Home rows redesign: the exact override set each
+// page edit saves today, built the way the page's handlers build it.
+describe("override set saved by each Home Screen edit", () => {
+  const page = [
+    makeSection({ id: "admin-a", title: "Recently Added", position: 0 }),
+    makeSection({
+      id: "admin-b",
+      section_type: "continue_watching",
+      title: "Continue Watching",
+      position: 1,
+      config: { continue_type: "watching" },
+    }),
+    makeSection({
+      id: "own-c",
+      section_type: "collection",
+      title: "Mine",
+      is_custom: true,
+      customized: true,
+      position: 2,
+      config: { user_collection_id: "user-1" },
+    }),
+  ];
+  const ids = {
+    savedOverrides: [{ id: "saved-a", section_id: "admin-a", position: 0 }],
+    newId: (sectionId: string) => `new-${sectionId}`,
+  };
+  const adminA = {
+    section_id: "admin-a",
+    id: "saved-a",
+    hidden: false,
+    title: "Recently Added",
+    featured: false,
+    item_limit: 20,
+    section_type: undefined,
+    config: { media_scope: "movie" },
+  };
+  const adminB = {
+    section_id: "admin-b",
+    id: "new-admin-b",
+    hidden: false,
+    title: "Continue Watching",
+    featured: false,
+    item_limit: 20,
+    section_type: undefined,
+    config: { continue_type: "watching" },
+  };
+  const ownC = {
+    section_id: undefined,
+    id: "own-c",
+    hidden: false,
+    title: "Mine",
+    featured: false,
+    item_limit: 20,
+    section_type: "collection",
+    config: { user_collection_id: "user-1" },
+  };
+
+  it("moves a row", () => {
+    const next = [page[2]!, page[0]!, page[1]!];
+    expect(buildSectionOverrides(next, [], ids)).toEqual([
+      { ...ownC, position: 0 },
+      { ...adminA, position: 1 },
+      { ...adminB, position: 2 },
+    ]);
   });
 
-  it("only restores rollback state for the latest save attempt in the current selection", () => {
-    expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 3, 3)).toBe(true);
-    expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 4, 3)).toBe(false);
-    expect(shouldRestoreLatestSaveFailure("library:2", "library:1", 3, 3)).toBe(false);
+  it("removes a server row", () => {
+    const next = applySectionDeletion(page, [], "admin-a");
+    expect(buildSectionOverrides(next.sections, next.removedSystemSections, ids)).toEqual([
+      { ...adminB, position: 0 },
+      { ...ownC, position: 1 },
+      { section_id: "admin-a", id: "saved-a", removed: true },
+    ]);
   });
 });

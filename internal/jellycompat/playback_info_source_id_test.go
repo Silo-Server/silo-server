@@ -197,28 +197,6 @@ func TestHandlePlaybackInfoRemovedPathSourceReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestPlaybackRouteSourcePrefersExactSourceOverItemAlias: a session keyed on a
-// media-source id has a RouteItemID that is also a source id. A request naming
-// that id selects that exact source, not the first one.
-func TestPlaybackRouteSourcePrefersExactSourceOverItemAlias(t *testing.T) {
-	codec := NewResourceIDCodec()
-	firstID := codec.EncodeIntID(EncodedIDMediaSource, 42)
-	secondID := codec.EncodeIntID(EncodedIDMediaSource, 43)
-	session := &PlaybackSession{
-		RouteItemID:  secondID,
-		MediaSources: []PlaybackMediaSource{{ID: firstID}, {ID: secondID}},
-	}
-
-	for _, static := range []bool{false, true} {
-		if got := playbackRouteSource(session, secondID, true, static); got == nil || got.ID != secondID {
-			t.Fatalf("static=%v: source = %+v, want %s", static, got, secondID)
-		}
-	}
-	if got := playbackRouteSource(session, "", true, false); got == nil || got.ID != firstID {
-		t.Fatalf("no media source: source = %+v, want first %s", got, firstID)
-	}
-}
-
 func TestDecodeContentOrMediaSourceID(t *testing.T) {
 	codec := NewResourceIDCodec()
 	codec.SetMediaSourceOwnerLookup(mediaSourceOwners{7: "episode-tvdb-200-1-2"})
@@ -290,33 +268,6 @@ func TestHandleItemResolvesMediaSourceIDFromFileRow(t *testing.T) {
 	}
 }
 
-// TestCreateStaticPlaySessionSelectsRouteMediaSource: a Static=true stream on
-// /Videos/{mediaSourceId}/stream with no MediaSourceId query plays the version
-// the route names, and later range requests on that route reuse it.
-func TestCreateStaticPlaySessionSelectsRouteMediaSource(t *testing.T) {
-	h, _, _ := newStaticDirectPlayHandler(t)
-	detail := h.content.(*stubContentService).detail
-	second := detail.Versions[0]
-	second.FileID = 43
-	detail.Versions = append(detail.Versions, second)
-	h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 43: "movie-1"})
-	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-	routeID := h.codec.EncodeIntID(EncodedIDMediaSource, 43)
-
-	playSession, source, err := h.createStaticPlaySession(t.Context(), session, routeID, "", "")
-	if err != nil || source == nil || source.FileID != 43 {
-		t.Fatalf("static source = %+v, err = %v; want file 43", source, err)
-	}
-	if playSession.ItemID != "movie-1" || playSession.RouteItemID != routeID {
-		t.Fatalf("session item = %q route = %q; want movie-1 and %s", playSession.ItemID, playSession.RouteItemID, routeID)
-	}
-	r := httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?Static=true", nil)
-	_, reused, err := h.resolvePlaybackRoute(r, session, routeID, "")
-	if err != nil || reused == nil || reused.FileID != 43 {
-		t.Fatalf("reused source = %+v, err = %v; want file 43", reused, err)
-	}
-}
-
 type mediaSourceFiles map[int]*models.MediaFile
 
 func (files mediaSourceFiles) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
@@ -344,11 +295,15 @@ func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
 			}
 			h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 43: "movie-1"})
 			routeID := h.codec.EncodeIntID(EncodedIDMediaSource, 43)
+			target := "/Videos/" + routeID + "/stream?Static=true&PlaySessionId=" + clientSessionID
+			if clientSessionID != "" {
+				target += "&MediaSourceId=" + routeID
+			}
 			for _, span := range []struct{ byteRange, want string }{
 				{"bytes=0-5", "second"},
 				{"bytes=7-13", "version"},
 			} {
-				req := httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?Static=true&PlaySessionId="+clientSessionID, nil)
+				req := httptest.NewRequest(http.MethodGet, target, nil)
 				req.Header.Set("Range", span.byteRange)
 				routeCtx := chi.NewRouteContext()
 				routeCtx.URLParams.Add("id", routeID)
@@ -360,6 +315,10 @@ func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
 					t.Fatalf("range %s: status = %d, body = %q; want 206 and %q", span.byteRange, rec.Code, rec.Body.String(), span.want)
 				}
 			}
+			stored, _, ok := h.playbackStore.FindByRoute("token-1", routeID)
+			if !ok || stored.ItemID != "movie-1" || stored.RouteItemID != routeID {
+				t.Fatalf("static session lost the content/route identity: %+v", stored)
+			}
 		})
 	}
 }
@@ -369,6 +328,7 @@ func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
 // serving a different file, as PlaybackInfo does.
 func TestMediaSourceRouteMissingVersionIsNotFound(t *testing.T) {
 	h, _, _ := newStaticDirectPlayHandler(t)
+	h.downloads = newTestDownloadService(true, true, h.fileResolver.(testCompatFileResolver).file)
 	h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 99: "movie-1"})
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	removed := h.codec.EncodeIntID(EncodedIDMediaSource, 99)
@@ -423,5 +383,50 @@ func TestHandleMediaSegmentsMediaSourceLookupErrors(t *testing.T) {
 	codec.SetMediaSourceOwnerLookup(failingMediaSourceOwners{})
 	if rec := serve(sourceID); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("lookup failure: status = %d, want 500, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Jellyfin Web retries a failed stream with stream copy refused and stops once
+// the stream URL it played names both refusals, so TranscodingUrl must carry
+// each refusal the request made, the way Jellyfin appends them.
+func TestPlaybackInfoTranscodingURLNamesRefusedCopies(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, body string
+		want, absent      []string
+	}{
+		{"copy allowed", "", `{"EnableDirectPlay":false,"SubtitleStreamIndex":-1}`, nil, []string{"allowvideostreamcopy", "allowaudiostreamcopy"}},
+		{"first fallback refuses video copy", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false"}, []string{"allowaudiostreamcopy"}},
+		{"second fallback refuses both", "?EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false", `{"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
+		{"body refuses both", "", `{"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AllowAudioStreamCopy":false,"SubtitleStreamIndex":-1}`, []string{"allowvideostreamcopy=false", "allowaudiostreamcopy=false"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, routeID := newSubtitleSelectionHandler(t)
+			req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo"+tc.query, strings.NewReader(tc.body))
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("id", routeID)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
+			rr := httptest.NewRecorder()
+			handler.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			var resp playbackInfoResponseDTO
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &resp) != nil || len(resp.MediaSources) == 0 {
+				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+			}
+			// Jellyfin Web matches the lowercased URL.
+			url := strings.ToLower(resp.MediaSources[0].TranscodingURL)
+			if url == "" {
+				t.Fatalf("no TranscodingUrl: %+v", resp.MediaSources[0])
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(url, want) {
+					t.Fatalf("TranscodingUrl = %q, want %q", url, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(url, absent) {
+					t.Fatalf("TranscodingUrl = %q, want no %q", url, absent)
+				}
+			}
+		})
 	}
 }

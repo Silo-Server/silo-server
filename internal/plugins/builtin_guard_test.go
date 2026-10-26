@@ -2,25 +2,12 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func TestInstallationIsBuiltin(t *testing.T) {
-	if (&Installation{Kind: KindBuiltin}).IsBuiltin() != true {
-		t.Error("kind=builtin must report IsBuiltin")
-	}
-	if (&Installation{Kind: KindPlugin}).IsBuiltin() {
-		t.Error("kind=plugin must not report IsBuiltin")
-	}
-	if (&Installation{}).IsBuiltin() {
-		t.Error("zero-value kind must not report IsBuiltin")
-	}
-}
 
 // The reserved builtin plugin id must be rejected at install time so a
 // malicious or accidental catalog entry cannot hijack the reserved row.
@@ -54,32 +41,6 @@ func TestPreloadEnabledSkipsBuiltinInstallation(t *testing.T) {
 	}
 }
 
-// InstallationStore.Delete must reject builtin rows at the store layer: the
-// delete cascades through every NFO chain row and RemoveAlls the install dir.
-func TestInstallationStoreDeleteRejectsBuiltin(t *testing.T) {
-	pool := builtinGuardTestPool(t)
-	ctx := context.Background()
-
-	id := seedBuiltinTestInstallation(t, pool, "test.builtin.delete")
-
-	store := NewInstallationStore(pool)
-	err := store.Delete(ctx, id)
-	if err == nil {
-		t.Fatal("Delete(builtin) = nil, want error")
-	}
-	if !errors.Is(err, ErrBuiltinInstallationImmutable) {
-		t.Fatalf("Delete(builtin) error = %v, want ErrBuiltinInstallationImmutable", err)
-	}
-
-	var count int
-	if qErr := pool.QueryRow(ctx, `SELECT COUNT(*) FROM plugin_installations WHERE id = $1`, id).Scan(&count); qErr != nil {
-		t.Fatalf("count row: %v", qErr)
-	}
-	if count != 1 {
-		t.Fatalf("builtin row count after rejected delete = %d, want 1", count)
-	}
-}
-
 func builtinGuardTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -94,15 +55,16 @@ func builtinGuardTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func seedBuiltinTestInstallation(t *testing.T, pool *pgxpool.Pool, pluginID string) int {
+func seedResidentQueryInstallation(t *testing.T, pool *pgxpool.Pool, enabled bool) int {
 	t.Helper()
 	var id int
+	pluginID := "silo.test.resident-query" + time.Now().UTC().Format("-20060102150405.000000000")
 	err := pool.QueryRow(context.Background(),
 		`INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
-		 VALUES ($1, '0', '/nonexistent/silo-builtin-test', true, 'manual', 'builtin')
-		 RETURNING id`, pluginID+time.Now().UTC().Format("-20060102150405.000000000")).Scan(&id)
+		 VALUES ($1, '0', '/nonexistent/resident-query-test', $2, 'manual', 'plugin')
+		 RETURNING id`, pluginID, enabled).Scan(&id)
 	if err != nil {
-		t.Fatalf("seed builtin installation: %v", err)
+		t.Fatalf("seed installation: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)

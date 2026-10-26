@@ -25,30 +25,6 @@ func (fakeMarkerStatsSubmitter) FetchUserStats(context.Context) (markers.UserSta
 	return markers.UserStats{Total: 10, Accepted: 7, Pending: 2, Rejected: 1, AcceptanceRate: 0.7, CurrentStreak: 3, BestStreak: 5}, nil
 }
 
-func TestValidateMarkerProviderUsesSnakeCaseStats(t *testing.T) {
-	reg := markers.NewRegistry(nil)
-	if err := reg.Register(fakeMarkerStatsSubmitter{}); err != nil {
-		t.Fatalf("register provider: %v", err)
-	}
-	h := NewAdminMarkerProvidersHandler(reg, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/markers/providers/introdb/validate", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("provider", "introdb")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	rec := httptest.NewRecorder()
-	h.HandleValidateProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `"acceptance_rate":0.7`) || strings.Contains(body, "AcceptanceRate") {
-		t.Fatalf("unexpected stats response shape: %s", body)
-	}
-}
-
 type fakePluginMarkerSubmitter struct{ fakeMarkerStatsSubmitter }
 
 func (fakePluginMarkerSubmitter) ID() string { return "plugin:6:introdb" }
@@ -74,6 +50,10 @@ func TestValidateMarkerProviderDecodesEncodedID(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"valid":true`) {
 		t.Fatalf("unexpected response: %s", rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"acceptance_rate":0.7`) || strings.Contains(body, "AcceptanceRate") {
+		t.Fatalf("unexpected stats response shape: %s", body)
 	}
 }
 

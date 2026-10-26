@@ -5,6 +5,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/worker"
 )
 
+// buildLiveSessionSyncs builds the live admin snapshot for a node. A play the
+// client reported stopped without an ID that could end it stays out of the
+// snapshot, while its session keeps its pause state and idle grace (#1454).
+func buildLiveSessionSyncs(sessions []*playback.Session, reportingNode string) []worker.SessionSync {
+	syncs := make([]worker.SessionSync, 0, len(sessions))
+	for _, s := range sessions {
+		if s == nil || s.StopReported {
+			continue
+		}
+		syncs = append(syncs, buildLiveSessionSync(s, reportingNode))
+	}
+	return syncs
+}
+
 // buildLiveSessionSync converts an in-memory playback session into the shared
 // live admin session snapshot. For live admin views, play_method tracks the
 // current transport method rather than the preserved semantic/base method used

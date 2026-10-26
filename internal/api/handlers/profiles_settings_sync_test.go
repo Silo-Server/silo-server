@@ -47,58 +47,6 @@ func storedProfileSetting(t *testing.T, store userstore.UserStore, key, profileI
 	return value
 }
 
-// TestUpdateProfileSyncsCanonicalMetadataLanguage replays the cutover bug: a
-// backfilled canonical row said "fr", the user changes the metadata language
-// to "de" through the legacy profile endpoint, and access-scope resolution
-// must see "de" — not the stale "fr" the one-time backfill left behind.
-func TestUpdateProfileSyncsCanonicalMetadataLanguage(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	// The one-time backfill stored the pre-cutover column value.
-	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       settingskeys.CatalogMetadataLanguage,
-		Scope:     settingscontract.ScopeProfile,
-		ProfileID: "profile-1",
-	}, json.RawMessage(`"fr"`)); err != nil {
-		t.Fatalf("seeding backfilled row: %v", err)
-	}
-
-	rr := updateProfileVia(t, handler, "profile-1", `{"preferred_metadata_language":"de"}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// The SQLite per-user schema never grew a preferred_metadata_language
-	// column, so the canonical row is the only storage this write has — which
-	// is exactly why the sync must exist.
-	if got := access.PreferredMetadataLanguage(context.Background(), store, "profile-1"); got != "de" {
-		t.Errorf("canonical metadata language = %q after profile update, want %q", got, "de")
-	}
-}
-
-// TestUpdateProfileSyncsCanonicalAudioLanguage is the playback-start half: a
-// profile that never had a backfilled row chooses a spoken language, and the
-// canonical store — which preferredAudioTrackIndexV3 resolves when a start omits
-// the audio track — must carry it.
-func TestUpdateProfileSyncsCanonicalAudioLanguage(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	rr := updateProfileVia(t, handler, "profile-1", `{"language":"de"}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
-	}
-
-	value := storedProfileSetting(t, store, settingskeys.PlaybackAudioLanguage, "profile-1")
-	if value == nil {
-		t.Fatal("no canonical playback.audio_language row after the profile update")
-	}
-	if string(value.Value) != `"de"` {
-		t.Errorf("canonical audio language = %s, want \"de\"", value.Value)
-	}
-}
-
 // TestUpdateProfileClearingLanguageClearsCanonicalRow: the legacy empty
 // string means "no preference", spelled canonically as no row at all.
 func TestUpdateProfileClearingLanguageClearsCanonicalRow(t *testing.T) {
@@ -119,35 +67,6 @@ func TestUpdateProfileClearingLanguageClearsCanonicalRow(t *testing.T) {
 	}
 	if got := access.PreferredMetadataLanguage(context.Background(), store, "profile-1"); got != "" {
 		t.Errorf("resolved metadata language = %q after clearing, want \"\"", got)
-	}
-}
-
-// TestUpdateProfileSyncsSubtitlePreferences covers the triple the player's
-// subtitle picker still saves through PUT /profiles, resolved canonically by
-// catalog detail since the earlier cutover.
-func TestUpdateProfileSyncsSubtitlePreferences(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	rr := updateProfileVia(t, handler, "profile-1",
-		`{"subtitle_language":"ja","subtitle_mode":"always","show_forced_subtitles":false}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
-	}
-
-	for key, want := range map[string]string{
-		settingskeys.PlaybackSubtitleLanguage:    `"ja"`,
-		settingskeys.PlaybackSubtitleMode:        `"always"`,
-		settingskeys.PlaybackShowForcedSubtitles: `false`,
-	} {
-		value := storedProfileSetting(t, store, key, "profile-1")
-		if value == nil {
-			t.Errorf("no canonical %s row after the profile update", key)
-			continue
-		}
-		if string(value.Value) != want {
-			t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
-		}
 	}
 }
 
@@ -198,40 +117,6 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 			t.Errorf("an omitted field wrote %s", value.Value)
 		}
 	})
-}
-
-// TestUpdateProfileSyncsIntroSkipMode covers both directions of the legacy
-// switch, including the one an untouched-looking false has to produce: "ask" is
-// the mode that reproduces what auto_skip_intro=false always did, and a profile
-// route that wrote only the boolean would leave the enum saying something else.
-func TestUpdateProfileSyncsIntroSkipMode(t *testing.T) {
-	for _, tc := range []struct{ body, wantMode, wantBool string }{
-		{`{"auto_skip_intro":true}`, `"always"`, `true`},
-		{`{"auto_skip_intro":false}`, `"ask"`, `false`},
-	} {
-		t.Run(tc.body, func(t *testing.T) {
-			store := newProfileTestStore(t)
-			handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-			if rr := updateProfileVia(t, handler, "profile-1", tc.body); rr.Code != http.StatusOK {
-				t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
-			}
-
-			for key, want := range map[string]string{
-				settingskeys.PlaybackIntroSkipMode: tc.wantMode,
-				settingskeys.PlaybackAutoSkipIntro: tc.wantBool,
-			} {
-				value := storedProfileSetting(t, store, key, "profile-1")
-				if value == nil {
-					t.Errorf("no canonical %s row after the profile update", key)
-					continue
-				}
-				if string(value.Value) != want {
-					t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
-				}
-			}
-		})
-	}
 }
 
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical
@@ -525,34 +410,6 @@ func TestListProfilesServesCanonicalWrite(t *testing.T) {
 	}
 }
 
-// TestListProfilesFallsBackToContractDefaults: a profile with neither a
-// canonical row nor column data serves the contract's defaults, not the
-// columns' schema defaults. subtitle_mode is the one that shows the
-// difference is real — the column defaults to 'auto' and so does the
-// contract, so show_forced_subtitles and the languages carry the assertion.
-func TestListProfilesFallsBackToContractDefaults(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	got := profileFromList(t, listProfilesVia(t, handler), "profile-1")
-	if got.Language != "" {
-		t.Errorf("language = %q, want the contract default \"\"", got.Language)
-	}
-	if got.PreferredMetadataLanguage != "" {
-		t.Errorf("preferred_metadata_language = %q, want the contract default \"\"",
-			got.PreferredMetadataLanguage)
-	}
-	if got.SubtitleLanguage != "" {
-		t.Errorf("subtitle_language = %q, want the contract default \"\"", got.SubtitleLanguage)
-	}
-	if got.SubtitleMode != "auto" {
-		t.Errorf("subtitle_mode = %q, want the contract default %q", got.SubtitleMode, "auto")
-	}
-	if !got.ShowForcedSubtitles {
-		t.Error("show_forced_subtitles = false, want the contract default true")
-	}
-}
-
 // TestListProfilesRoundTripsLegacyWrite: the legacy write path still works
 // end to end. The columns are no longer read, so this only passes because the
 // write mirrors into the canonical rows — which is the whole cutover shape,
@@ -560,6 +417,13 @@ func TestListProfilesFallsBackToContractDefaults(t *testing.T) {
 func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       settingskeys.CatalogMetadataLanguage,
+		Scope:     settingscontract.ScopeProfile,
+		ProfileID: "profile-1",
+	}, json.RawMessage(`"fr"`)); err != nil {
+		t.Fatalf("seed stale canonical language: %v", err)
+	}
 
 	rr := updateProfileVia(t, handler, "profile-1",
 		`{"language":"es","preferred_metadata_language":"it","subtitle_language":"ko",`+
@@ -593,6 +457,22 @@ func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 	if listed.ShowForcedSubtitles {
 		t.Error("show_forced_subtitles = true, want false")
 	}
+	for key, want := range map[string]string{
+		settingskeys.PlaybackAudioLanguage:       `"es"`,
+		settingskeys.CatalogMetadataLanguage:     `"it"`,
+		settingskeys.PlaybackSubtitleLanguage:    `"ko"`,
+		settingskeys.PlaybackSubtitleMode:        `"off"`,
+		settingskeys.PlaybackShowForcedSubtitles: `false`,
+	} {
+		value := storedProfileSetting(t, store, key, "profile-1")
+		if value == nil || string(value.Value) != want {
+			t.Errorf("canonical %s = %v, want %s", key, value, want)
+		}
+	}
+	if got := access.PreferredMetadataLanguage(context.Background(), store, "profile-1"); got != "it" {
+		t.Errorf("resolved metadata language = %q, want it instead of stale fr", got)
+	}
+
 }
 
 // TestListProfilesResolvesHouseholdInOneRead: the list serves several

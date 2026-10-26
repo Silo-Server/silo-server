@@ -18,6 +18,15 @@ const (
 	Remux
 	Probe
 	Plugin
+	// Analysis is an ffmpeg run that decodes media for analysis features,
+	// such as intro fingerprints and silence, through internal/mediasample.
+	Analysis
+	// Thumbnail is an ffmpeg run that extracts a still image, such as a
+	// chapter thumbnail, through internal/mediasample.
+	Thumbnail
+	// Trickplay is an ffmpeg run that samples a file's keyframes into
+	// seek-bar preview sheets, through internal/mediasample.
+	Trickplay
 )
 
 func (w Workload) label() string {
@@ -30,6 +39,12 @@ func (w Workload) label() string {
 		return "probe"
 	case Plugin:
 		return "plugin"
+	case Analysis:
+		return "analysis"
+	case Thumbnail:
+		return "thumbnail"
+	case Trickplay:
+		return "trickplay"
 	default:
 		return "other"
 	}

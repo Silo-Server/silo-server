@@ -18,11 +18,11 @@ func (s atomicFavoriteOnlyStore) ApplyJellycompatProgress(ctx context.Context, p
 	}
 	return writer.ApplyJellycompatProgress(ctx, profile, edit)
 }
-func (atomicFavoriteOnlyStore) AddFavorite(context.Context, string, string) error {
-	return errors.New("separate favorite addition forbidden")
+func (atomicFavoriteOnlyStore) AddFavorite(context.Context, string, string) (bool, error) {
+	return false, errors.New("separate favorite addition forbidden")
 }
-func (atomicFavoriteOnlyStore) RemoveFavorite(context.Context, string, string) error {
-	return errors.New("separate favorite removal forbidden")
+func (atomicFavoriteOnlyStore) RemoveFavorite(context.Context, string, string) (bool, error) {
+	return false, errors.New("separate favorite removal forbidden")
 }
 
 func TestUserDataCombinedFavoriteUsesOneTransaction(t *testing.T) {
@@ -43,12 +43,9 @@ func TestUserDataCombinedFavoriteUsesOneTransaction(t *testing.T) {
 		if err != nil || p == nil || p.Completed != favorite || p.PositionSeconds != 77 {
 			t.Fatalf("progress=%+v error=%v", p, err)
 		}
+		// The played mark records one play; the unplayed mark keeps it.
 		history, err := store.ListHistory(t.Context(), session.ProfileID, 10, 0)
-		expected := 0
-		if favorite {
-			expected = 1
-		}
-		if err != nil || len(history) != expected {
+		if err != nil || len(history) != 1 {
 			t.Fatalf("history=%+v error=%v", history, err)
 		}
 	}

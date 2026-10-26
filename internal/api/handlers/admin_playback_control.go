@@ -193,7 +193,7 @@ func (h *AdminPlaybackControlHandler) handleSessionCommand(w http.ResponseWriter
 
 	fallback := func() {
 		h.playback.forgetRealtimeCommand(commandID)
-		_ = h.playback.stopPlaybackSessionByID(context.Background(), sessionID, true)
+		_ = h.endSessionForAdmin(sessionID)
 	}
 
 	h.playback.rememberRealtimeCommand(commandID, sessionID, name)
@@ -246,4 +246,18 @@ func boundedPlaybackControlDeadline(deadlineMS int) time.Duration {
 		return maxPlaybackControlDeadline
 	}
 	return deadline
+}
+
+// endSessionForAdmin is the fallback when the player does not confirm an
+// administrator command in time: the session stops here and its attempt is
+// stopped as ended by an administrator, so a player that missed the command
+// is told to exit (410) when it next reports progress or replans, instead of
+// renewing into a fresh session.
+func (h *AdminPlaybackControlHandler) endSessionForAdmin(sessionID string) error {
+	ctx := context.Background()
+	err := h.playback.stopPlaybackSessionByID(ctx, sessionID, true)
+	if err == nil || errors.Is(err, playback.ErrSessionNotFound) {
+		h.playback.markAttemptStoppedByAdmin(ctx, sessionID)
+	}
+	return err
 }

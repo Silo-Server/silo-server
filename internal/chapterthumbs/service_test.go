@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -43,35 +44,6 @@ func TestChapterCaptureTime(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildFrameExtractArgs(t *testing.T) {
-	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "qsv", "/dev/dri/renderD128", false, "")
-		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
-		}
-		if !slices.Contains(args, "-init_hw_device") || !slices.Contains(args, "qsv=qs@va") {
-			t.Fatalf("qsv args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "vaapi", "/dev/dri/renderD128", false, "")
-		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
-		}
-		if !slices.Contains(args, "-hwaccel") || !slices.Contains(args, "vaapi") {
-			t.Fatalf("vaapi args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false, "")
-		if err == nil || !strings.Contains(err.Error(), "does not support") {
-			t.Fatalf("buildFrameExtractArgs() error = %v, want unsupported accelerator error", err)
-		}
-	})
 }
 
 func TestQueueFileIDsDedupes(t *testing.T) {
@@ -153,8 +125,20 @@ func (r *testFileRepo) GetByID(_ context.Context, id int) (*models.MediaFile, er
 	return r.cloneFile(), nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int) ([]*models.MediaFile, error) {
+func (r *testFileRepo) TryLockChapterThumbnails(ctx context.Context, _ int) (context.Context, func(), bool, error) {
+	return ctx, func() {}, true, nil
+}
+
+func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int, string) ([]*models.MediaFile, error) {
 	return nil, nil
+}
+
+func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, string, int, bool) ([]*models.MediaFile, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
+func (r *testFileRepo) ChapterThumbnailLibraryKey(context.Context) (string, error) {
+	return "test-libraries", nil
 }
 
 func (r *testFileRepo) UpdateChapterThumbnailState(
@@ -320,7 +304,7 @@ func TestProcessPriorityRequestSelectsNearestChaptersAndRequeuesRemainder(t *tes
 		},
 		uploadChapterThumbnailFunc: func(_ context.Context, _ int, chapterIndex int, _ []byte) (string, string, error) {
 			uploaded = append(uploaded, chapterIndex)
-			return "chapter-images/42/original.webp", "thumbhash", nil
+			return "chapter-images/42/2/w300.webp", "thumbhash", nil
 		},
 	}
 
@@ -348,6 +332,47 @@ func TestProcessPriorityRequestSelectsNearestChaptersAndRequeuesRemainder(t *tes
 	}
 	if fileRepo.file.Chapters[0].ThumbnailPath != "" || fileRepo.file.Chapters[4].ThumbnailPath != "" {
 		t.Fatalf("expected chapters 0 and 4 to remain missing")
+	}
+}
+
+func TestProcessRequestRecordsUploadFailureAndChapterRetry(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fileRepo := &testFileRepo{file: &models.MediaFile{
+		ID: 42, MediaFolderID: 9,
+		Chapters: []models.MediaChapter{{Index: 0, StartSeconds: 0, EndSeconds: 10}},
+	}}
+	uploads := 0
+	service := &Service{
+		fileRepo:   fileRepo,
+		folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+		clock:      func() time.Time { return now },
+		extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+			return []byte("frame"), "", nil
+		},
+		uploadChapterThumbnailFunc: func(context.Context, int, int, []byte) (string, string, error) {
+			uploads++
+			return "", "", errors.New("S3 PutObject: AccessDenied")
+		},
+	}
+
+	for range 2 {
+		requeue, err := service.processRequest(t.Context(), ChapterThumbnailRequest{FileID: 42}, false)
+		if err != nil || requeue {
+			t.Fatalf("processRequest() = %v, %v, want false, nil", requeue, err)
+		}
+	}
+	chapter := fileRepo.file.Chapters[0]
+	if chapter.ThumbnailLastError != "chapter_upload_failed: S3 PutObject: AccessDenied" {
+		t.Fatalf("ThumbnailLastError = %q", chapter.ThumbnailLastError)
+	}
+	if chapter.ThumbnailRetryAfter == nil || !chapter.ThumbnailRetryAfter.Equal(now.Add(chapterThumbnailRetrySchedule[0])) {
+		t.Fatalf("ThumbnailRetryAfter = %v", chapter.ThumbnailRetryAfter)
+	}
+	if uploads != 1 || fileRepo.updateCalls != 1 {
+		t.Fatalf("uploads = %d, updates = %d, want one each during cooldown", uploads, fileRepo.updateCalls)
+	}
+	if fileRepo.file.ChapterThumbnailFailureCount != 0 || fileRepo.file.ChapterThumbnailRetryAfter != nil {
+		t.Fatal("upload failure unexpectedly applied file-wide cooldown")
 	}
 }
 
@@ -600,52 +625,6 @@ func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *te
 	}
 }
 
-func TestExtractFrameCPUFallbackGetsFreshDeadline(t *testing.T) {
-	service := &Service{
-		hwAccel:  "vaapi",
-		hwDevice: "/dev/dri/renderD128",
-	}
-	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
-
-	callCount := 0
-	var hwRemaining time.Duration
-	var cpuRemaining time.Duration
-	service.runFFmpegFrameExtractFunc = func(ctx context.Context, _ string, _ []string) ([]byte, error) {
-		callCount++
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatalf("expected deadline on attempt %d", callCount)
-		}
-		remaining := time.Until(deadline)
-		if callCount == 1 {
-			hwRemaining = remaining
-			return nil, errors.New("signal: killed")
-		}
-		cpuRemaining = remaining
-		return []byte("frame"), nil
-	}
-
-	data, reason, err := service.extractFrame(context.Background(), file, 5, chapterThumbnailHDRPolicyBestEffort)
-	if err != nil {
-		t.Fatalf("extractFrame() error = %v", err)
-	}
-	if reason != "" {
-		t.Fatalf("extractFrame() reason = %q, want empty", reason)
-	}
-	if string(data) != "frame" {
-		t.Fatalf("extractFrame() data = %q, want frame", string(data))
-	}
-	if callCount != 2 {
-		t.Fatalf("callCount = %d, want 2", callCount)
-	}
-	if hwRemaining < 7*time.Second || hwRemaining > 9*time.Second {
-		t.Fatalf("hw deadline = %s, want about 8s", hwRemaining)
-	}
-	if cpuRemaining < 9*time.Second || cpuRemaining > 11*time.Second {
-		t.Fatalf("cpu deadline = %s, want about 10s", cpuRemaining)
-	}
-}
-
 func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
 	service := &Service{
@@ -654,7 +633,7 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 			authJWTSecretSetting:             "secret",
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor:    remote,
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -690,7 +669,8 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 		settingValue string
 		wantAllowed  bool
 	}{
-		{name: "disabled by default", wantAllowed: false},
+		{name: "enabled by default", wantAllowed: true},
+		{name: "explicitly disabled", settingValue: "false", wantAllowed: false},
 		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
 	}
 
@@ -702,12 +682,12 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 				authJWTSecretSetting:             "secret",
 			}
 			if tt.settingValue != "" {
-				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+				settings[config.ChapterThumbnailSoftwareToneMapSettingKey] = tt.settingValue
 			}
 			service := &Service{
 				settings:           testSettingsReader{values: settings},
 				transcodePool:      &nodepool.TranscodePool{},
-				remoteReservations: make(map[string]int),
+				remoteReservations: &nodepool.Reservations{},
 				remoteExtractor:    remote,
 			}
 			service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -744,9 +724,11 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
 			authJWTSecretSetting:             "secret",
+			// Skip auto-detection, which probes the host's real ffmpeg.
+			playbackHWAccelSetting: hwAccelNone,
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor: &testRemoteFrameExtractor{
 			reason: chapterThumbnailNodeUnavailableReason,
 			err:    errors.New("node unavailable"),
@@ -787,9 +769,9 @@ func TestExtractFrameRequiresRemoteCapacityWhenConfigured(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 		runFFmpegFrameExtractFunc: func(context.Context, string, []string) ([]byte, error) {
 			t.Fatalf("local extractor should not run in transcode_nodes_only mode")
@@ -824,9 +806,9 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{

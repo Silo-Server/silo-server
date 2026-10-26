@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 
@@ -17,6 +22,11 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
+
+// metaAttachSession marks a public operation whose answer depends on
+// whether a signed-in person asks: after its limiter, the gate chain attaches
+// the claims of a valid login session (AttachSession) and never refuses.
+const metaAttachSession = "silo.attach_session"
 
 // Legacy v1 error codes the gates translate that have no v2 problem type of
 // their own (the others reuse the matching ProblemType's ID).
@@ -37,10 +47,17 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		permission, _ := op.Metadata[metaPermission].(string)
 		demoRestricted, _ := op.Metadata[metaDemoRestricted].(bool)
 		profileOptional, _ := op.Metadata[metaProfileOptional].(bool)
+		household, _ := op.Metadata[metaHouseholdGate].(bool)
 		bucket, _ := op.Metadata[metaRateLimitBucket].(string)
-		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, bucket)
+		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, household, bucket)
 		if op.OperationID == notificationApplePushDisplayOperation {
 			chain, missing = notificationDisplayGateChain(deps)
+		}
+		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
+			chain = directDownloadGateChain(deps, chain)
+		}
+		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
+			chain = append(chain, deps.Auth.AttachSession)
 		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
@@ -62,8 +79,12 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 // runs it for, so a PIN-locked or unknown profile is judged the same way on
 // both surfaces. An operation naming a rate-limit bucket runs v1's
 // per-endpoint limiter (AuthEndpointHandler) in the limiter's slot; see
-// rateLimiter. The second result names the first gate the wiring lacks.
-func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional bool, bucket string) ([]func(http.Handler) http.Handler, string) {
+// rateLimiter. An operation declaring the household profile gate runs it
+// right after viewer access, where v1 mounts HouseholdProfileGate, so a
+// request without X-Profile-Id on a household with a limited profile is
+// refused before any permission gate or handler sees it. The second result
+// names the first gate the wiring lacks.
+func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional, household bool, bucket string) ([]func(http.Handler) http.Handler, string) {
 	if class == ClassPublic {
 		// A public operation with a named budget runs the per-endpoint
 		// limiter and nothing else; a missing limiter leaves it unlimited,
@@ -91,25 +112,45 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 	if deps.ViewerAccess == nil {
 		return nil, "viewer access"
 	}
+	if household && deps.HouseholdProfile == nil {
+		return nil, "household profile gate"
+	}
 	switch class {
 	case ClassProfileScoped:
 		chain = append(chain, deps.ViewerAccess.RequireViewerAccess)
 		if !profileOptional {
 			chain = append(chain, apimw.RequireProfile)
+		} else if household {
+			chain = append(chain, deps.HouseholdProfile)
 		}
 	case ClassActingAdmin:
 		if deps.ActingAdmin == nil {
 			return nil, "acting admin"
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, deps.ActingAdmin)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, apimw.RequireActingAdminWith(deps.ActingAdmin))
 	case ClassPermissionGated:
 		gate := deps.PermissionGates[permission]
 		if gate == nil {
 			return nil, "permission " + permission
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, gate)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess)
+		if household {
+			chain = append(chain, deps.HouseholdProfile)
+		}
+		chain = append(chain, gate)
 	}
 	return chain, ""
+}
+
+// directDownloadGateChain swaps the account authentication at the head of a
+// direct-download route's chain for RequireDirectDownloadAuth, which accepts a
+// `dl` link token as well. Every later gate is unchanged: the link rewrites
+// X-Profile-Id to its own profile, so viewer access resolves that profile's
+// limits and the household gate passes on a named profile.
+func directDownloadGateChain(deps Dependencies, chain []func(http.Handler) http.Handler) []func(http.Handler) http.Handler {
+	out := slices.Clone(chain)
+	out[0] = deps.Auth.RequireDirectDownloadAuth
+	return out
 }
 
 // rateLimiter is the limiter a gated operation runs: the per-endpoint budget
@@ -210,8 +251,8 @@ func (d *denialWriter) Write(p []byte) (int, error) {
 // code, and on the reason the gate recorded where one code covers denials v2
 // must tell apart (internal/api/middleware, Reason* constants, pinned by
 // TestDenialCodesAreStable there). A human message is never parsed.
-// Retry-After is carried over; the legacy X-RateLimit-* fields are not part of
-// v2 and are dropped.
+// Retry-After is carried over on 429 and 503; the legacy X-RateLimit-* fields
+// are not part of v2 and are dropped.
 func (d *denialWriter) problem() *Problem {
 	var legacy struct {
 		Error   string `json:"error"`
@@ -243,6 +284,20 @@ func (d *denialWriter) problem() *Problem {
 		} else {
 			p = p.WithRetryAfter(1)
 		}
+	case apimw.CodeServiceUnavailable:
+		// The credential could not be checked (the session store did not
+		// answer), or the viewer's access policy ran out of time. Not a 401
+		// or 403: the client keeps its session and retries.
+		detail := "The sign-in could not be checked right now; retry after the Retry-After delay."
+		if d.reason == apimw.ReasonViewerAccessUnavailable {
+			detail = "The viewer's access could not be resolved right now; retry after the Retry-After delay."
+		}
+		p = NewProblem(TypeDependencyUnavailable, detail)
+		if ra := d.header.Get("Retry-After"); ra != "" {
+			p = p.WithHeader("Retry-After", ra)
+		} else {
+			p = p.WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
+		}
 	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)
 	case TypeInternalError.ID:
@@ -263,6 +318,10 @@ func unauthorizedProblem(reason string) *Problem {
 	switch reason {
 	case apimw.ReasonSessionInvalid:
 		return NewProblem(TypeSessionExpired, "The session is no longer valid; sign in again.")
+	case apimw.ReasonTokenRefreshRequired:
+		// The session is still valid: the client refreshes it and retries
+		// once, and must not sign out.
+		return NewProblem(TypeTokenRefreshRequired, "The account's role changed; refresh the session and retry the request.")
 	case apimw.ReasonInvalidCredential, apimw.ReasonAccountDisabled:
 		// account_disabled shares invalid_token today: the credential no
 		// longer authenticates anyone and the corrective action is the same.
@@ -391,6 +450,17 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 		next(ctx)
 		return
 	}
+	if blankOK, _ := op.Metadata[metaBlankBodyAbsent].(bool); blankOK && !op.RequestBody.Required {
+		blank, problem := readBlankBody(ctx, r, op)
+		if problem != nil {
+			writeProblem(w, r, problem)
+			return
+		}
+		if blank {
+			next(ctx)
+			return
+		}
+	}
 	if op.RequestBody.Content[mediaTypeBinary] != nil && len(op.RequestBody.Content) == 1 {
 		media, _, err := mime.ParseMediaType(ct)
 		if err != nil || media != mediaTypeBinary {
@@ -440,6 +510,53 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 	// everything the accepted header said.
 	r.Header.Set("Content-Type", mediaTypeJSON)
 	next(ctx)
+}
+
+// readBlankBody applies dropBlankBody under the operation's body-read
+// deadline, turning a failed read into its problem.
+func readBlankBody(ctx huma.Context, r *http.Request, op *huma.Operation) (bool, *Problem) {
+	if op.BodyReadTimeout > 0 {
+		_ = ctx.SetReadDeadline(time.Now().Add(op.BodyReadTimeout))
+	}
+	blank, err := dropBlankBody(r, operationBodyLimit(op))
+	switch {
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		return false, NewProblem(TypeRequestTimeout, "The request body was not received in time.")
+	case err != nil:
+		return false, NewProblem(TypeMalformedRequest, "The request body could not be read.")
+	}
+	return blank, nil
+}
+
+// dropBlankBody reads up to limit+1 bytes of r's body. A body that is empty
+// or only JSON whitespace is replaced by no body at all, Content-Type
+// included, and dropBlankBody reports true. Any other body is put back
+// unchanged for the usual media-type and size rules.
+func dropBlankBody(r *http.Request, limit int64) (bool, error) {
+	if r.Body == nil || r.Body == http.NoBody {
+		r.Header.Del("Content-Type")
+		return true, nil
+	}
+	if r.ContentLength > limit {
+		// Too large to be blank: leave it to the size check unread.
+		return false, nil
+	}
+	head, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return false, err
+	}
+	if len(bytes.Trim(head, " \t\r\n")) == 0 && int64(len(head)) <= limit {
+		_ = r.Body.Close()
+		r.Body = http.NoBody
+		r.ContentLength = 0
+		r.Header.Del("Content-Type")
+		return true, nil
+	}
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(head), r.Body), r.Body}
+	return false, nil
 }
 
 // mediaTypeMultipart is accepted only on operations that declare a multipart

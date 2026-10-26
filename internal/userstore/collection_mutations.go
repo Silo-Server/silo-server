@@ -14,7 +14,7 @@ type CollectionMutationStore interface {
 	DeleteCollectionIfRevision(context.Context, string, int64) error
 	ReorderCollectionItemsIfRevision(context.Context, string, []string, int64) error
 	CollectionOrderRevision(context.Context) (int64, error)
-	ReorderCollectionsIfRevision(context.Context, string, *string, []string, int64) error
+	ReorderCollectionsIfRevision(context.Context, string, []string, int64) error
 	UpdateCollectionGroupIfRevision(context.Context, string, *string, *string, *GroupSortMode, int64) (*CollectionGroup, error)
 	DeleteCollectionGroupIfRevision(context.Context, string, int64) error
 	ReorderCollectionGroupsIfRevision(context.Context, []string, int64) error

@@ -5,10 +5,12 @@ import "context"
 
 // SubtitleMetadataUpdate contains mutable fields for a downloaded subtitle record.
 type SubtitleMetadataUpdate struct {
-	Language         *string
-	ReleaseName      *string
-	HearingImpaired  *bool
-	ContentSHA256    string
+	Language        *string
+	ReleaseName     *string
+	HearingImpaired *bool
+	ContentSHA256   string
+	// Timing replaces both stored timing columns when non-nil.
+	Timing           *Timing
 	ExpectedRevision *int64
 }
 

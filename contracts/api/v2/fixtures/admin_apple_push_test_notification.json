@@ -1,0 +1,8 @@
+{
+  "attempt_id": "attempt-1",
+  "push_device_id": "device-1",
+  "server_device_id": "target-device",
+  "delivery_id": "delivery-1",
+  "outcome": "delivered",
+  "upstream_status": 200
+}

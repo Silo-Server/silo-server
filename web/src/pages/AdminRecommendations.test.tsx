@@ -15,6 +15,16 @@ const mocks = vi.hoisted(() => ({
   triggerTasteProfilesMutate: vi.fn(),
   triggerCowatchMutate: vi.fn(),
   triggerRecommendationsMutate: vi.fn(),
+  resetMutateAsync: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => mocks.toastSuccess(...args),
+    error: (...args: unknown[]) => mocks.toastError(...args),
+  },
 }));
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
@@ -49,9 +59,29 @@ vi.mock("@/hooks/queries/admin/recommendations", () => ({
     isPending: false,
     mutate: (...args: unknown[]) => mocks.triggerRecommendationsMutate(...args),
   }),
+  useResetEmbeddings: () => ({
+    isPending: false,
+    mutateAsync: (...args: unknown[]) => mocks.resetMutateAsync(...args),
+  }),
 }));
 
 import AdminRecommendations from "./AdminRecommendations";
+
+function idleJob(count: number) {
+  return { running: false, count };
+}
+
+function statusWith(overrides: Record<string, unknown> = {}) {
+  return {
+    embeddings: { ...idleJob(3), total: 10 },
+    taste_profiles: idleJob(4),
+    cowatch: idleJob(6),
+    recommendations: idleJob(5),
+    stale_sweep: { pending: 0 },
+    lock_conflict: "",
+    ...overrides,
+  };
+}
 
 function findButton(container: HTMLElement, label: string) {
   return Array.from(container.querySelectorAll("button")).find((button) =>
@@ -98,16 +128,7 @@ describe("AdminRecommendations", () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    mocks.useAdminServerSettings.mockReset();
-    mocks.useAdminSensitiveStatus.mockReset();
-    mocks.useRecommendationsStatus.mockReset();
-    mocks.checkConnectionMutateAsync.mockReset();
-    mocks.updateMutate.mockReset();
-    mocks.updateMutateAsync.mockReset();
-    mocks.triggerEmbeddingsMutate.mockReset();
-    mocks.triggerTasteProfilesMutate.mockReset();
-    mocks.triggerCowatchMutate.mockReset();
-    mocks.triggerRecommendationsMutate.mockReset();
+    for (const mock of Object.values(mocks)) mock.mockReset();
 
     mocks.useAdminServerSettings.mockReturnValue({
       data: {
@@ -194,5 +215,102 @@ describe("AdminRecommendations", () => {
         dirty_keys: ["recommendations.embedding_auth_token"],
       },
     });
+  });
+
+  it("shows each job's last run, the newest cached row and a lock conflict", async () => {
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    mocks.useRecommendationsStatus.mockReturnValue({
+      data: statusWith({
+        embeddings: {
+          ...idleJob(0),
+          total: 10,
+          last_run: {
+            status: "failed",
+            started_at: minutesAgo(12),
+            completed_at: minutesAgo(10),
+            error: "recommendations reset required: embedding model changed",
+            result: { embedded: 0 },
+          },
+          last_partial_run: {
+            status: "completed",
+            started_at: minutesAgo(4),
+            completed_at: minutesAgo(3),
+            result: { missing_only: true, embedded: 2 },
+          },
+        },
+        recommendations: {
+          ...idleJob(5),
+          last_run: {
+            status: "completed",
+            started_at: minutesAgo(70),
+            completed_at: minutesAgo(60),
+          },
+        },
+        stale_sweep: {
+          pending: 7,
+          last_run: {
+            status: "completed",
+            started_at: minutesAgo(2),
+            completed_at: minutesAgo(2),
+            result: { stale: 3, refreshed: 2, failed: 1 },
+          },
+        },
+        cache_refreshed_at: minutesAgo(5),
+        lock_conflict: 'Embeddings were created with model "a", not "b".',
+      }),
+    });
+    await render();
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("Last run failed 10m ago");
+    // A later catch-up shows beside the failed full run, not instead of it.
+    expect(text).toContain("Last catch-up completed 3m ago");
+    expect(text).toContain("recommendations reset required: embedding model changed");
+    expect(text).toContain("Last run completed 1h ago");
+    expect(text).toContain("No finished run recorded");
+    expect(text).toContain("Newest cached row written 5m ago");
+    expect(text).toContain("7 profiles wait for a rebuild");
+    expect(text).toContain("Last stale sweep completed 2m ago");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Embeddings were created with model "a", not "b".',
+    );
+  });
+
+  it("resets embeddings only after confirmation and reports the result", async () => {
+    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
+    mocks.resetMutateAsync.mockResolvedValue({
+      embeddings: 1200,
+      taste_profiles: 3,
+      taste_clusters: 9,
+      cached_rows: 41,
+    });
+    await render();
+
+    await click(findButton(container, "Reset embeddings"));
+    expect(mocks.resetMutateAsync).not.toHaveBeenCalled();
+    const dialog = document.body.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Reset embeddings?");
+
+    await click(findButton(dialog as HTMLElement, "Reset embeddings"));
+    expect(mocks.resetMutateAsync).toHaveBeenCalledOnce();
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      expect.stringContaining("deleted 1,200 embeddings and cleared 3 taste profiles"),
+    );
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["embeddings", true],
+    ["taste_profiles", true],
+    ["recommendations", true],
+    // The reset stays available while only co-watch runs.
+    ["cowatch", false],
+  ] as const)("while the %s job runs, the reset's disabled state is %s", async (job, disabled) => {
+    mocks.useRecommendationsStatus.mockReturnValue({
+      data: statusWith({ [job]: { running: true, count: 1 } }),
+    });
+    await render();
+
+    expect(findButton(container, "Reset embeddings")?.disabled).toBe(disabled);
   });
 });

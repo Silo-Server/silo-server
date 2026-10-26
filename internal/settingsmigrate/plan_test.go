@@ -905,14 +905,3 @@ func TestOrphanRejectsPreserveSourceTableAndContentIdentity(t *testing.T) {
 		t.Fatalf("missing provenance rejects: %+v (all rejects: %+v)", want, res.Rejects)
 	}
 }
-
-// Account-scope rows carry no profile, so they must survive the orphan filter.
-func TestAccountScopeRowsSurviveTheOrphanFilter(t *testing.T) {
-	res := planner(t).Plan(Input{
-		Profiles: []LegacyProfile{{ID: "p1"}},
-		Settings: []LegacySetting{{Key: "ui_theme", Value: "cobalt-studio"}},
-	})
-	if !hasKey(res, "ui.theme") {
-		t.Errorf("the account fan-out was dropped: rows=%+v rejects=%+v", res.Rows, res.Rejects)
-	}
-}

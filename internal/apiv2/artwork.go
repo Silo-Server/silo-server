@@ -82,7 +82,7 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, blobstore.ErrNotFound) {
 			if artworkkey.Revision(key) != "" && reg.deps.ArtworkRepair != nil {
-				_, _ = reg.deps.ArtworkRepair.EnqueueArtworkRepair(r.Context(), []string{originalRepairKey(key)}, 1)
+				_, _ = reg.deps.ArtworkRepair.EnqueueArtworkRepair(r.Context(), []string{artworkkey.OriginalOf(key)}, 1)
 			}
 			writeProblem(w, r, NewProblem(TypeNotFound, "Artwork not found."))
 			return
@@ -168,19 +168,4 @@ func (f *forwardSeeker) Seek(offset int64, whence int) (int64, error) {
 	}
 	f.pos = target
 	return target, nil
-}
-
-func originalRepairKey(key string) string {
-	dir := artworkkey.Directory(key)
-	if dir == "" {
-		return key
-	}
-	base := path.Base(key)
-	ext := path.Ext(base)
-	stem := base[:len(base)-len(ext)]
-	dot := strings.IndexByte(stem, '.')
-	if dot < 0 {
-		return key
-	}
-	return dir + "original" + stem[dot:] + ext
 }

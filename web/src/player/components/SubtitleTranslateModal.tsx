@@ -6,6 +6,7 @@ import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerV2 } from "../player-v2";
 import { PlayerFetchError } from "../player-fetch";
 import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
+import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import {
   buildSubtitleTranslateRequest,
   isTranslatableSource,
@@ -22,16 +23,64 @@ interface SubtitleTranslateModalProps {
   translateEnabled?: boolean;
   transcribeEnabled?: boolean;
   isOpen: boolean;
-  onSubtitleJobAccepted?: (jobId: string) => void;
+  onSubtitleJobAccepted?: (jobId: string, resultSubtitleId?: string) => void;
   sessionId?: string;
   getStartPosition?: () => number;
   onClose: () => void;
 }
 
-function sourceLabel(track: PlayerSubtitleInfo): string {
+// titleNames reports whether a track title already states a flag, so the flag
+// is not repeated. A negated mention ("Non-forced", "Not SDH") does not count.
+function titleNames(title: string, words: string): boolean {
+  return (
+    new RegExp(`\\b(?:${words})\\b`, "i").test(title) &&
+    !new RegExp(`\\b(?:non|not)[\\s-]*(?:${words})\\b`, "i").test(title)
+  );
+}
+
+// sourceLabel names a translation source so full, SDH and forced tracks in one
+// language can be told apart: the track title when it says more than the
+// language or format (as the subtitle menu shows it), then Forced and SDH when
+// the title does not already say so, then where the track comes from.
+export function sourceLabel(track: PlayerSubtitleInfo): string {
   const lang = getLanguageName(track.language) || track.language || "Unknown";
-  const origin = track.source ? ` · ${track.source}` : "";
-  return `${lang}${origin}`;
+  const title = track.label?.trim() ?? "";
+  const hasDetail =
+    title !== "" &&
+    title !== track.language &&
+    title !== lang &&
+    !isSubtitleFormatLabel(title, track.codec);
+  const parts = [lang];
+  if (hasDetail) parts.push(title);
+  if (track.forced && !titleNames(title, "forced")) parts.push("Forced");
+  if (track.hearing_impaired && !titleNames(title, "sdh|cc|hearing")) parts.push("SDH");
+  if (track.source) parts.push(track.source);
+  return parts.join(" · ");
+}
+
+// sourceLabels labels every source track so each option in the picker is
+// distinct. Tracks whose labels would read the same get their track number,
+// and a numbered label that still matches another option gets a counter.
+export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
+  const base = tracks.map((track) => ({ index: track.index, label: sourceLabel(track) }));
+  const counts = new Map<string, number>();
+  for (const { label } of base) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const used = new Set(
+    base.filter(({ label }) => counts.get(label) === 1).map(({ label }) => label),
+  );
+  const labels = new Map<number, string>();
+  for (const { index, label } of base) {
+    if (counts.get(label) === 1) {
+      labels.set(index, label);
+      continue;
+    }
+    const numbered = `${label} · track ${index + 1}`;
+    let candidate = numbered;
+    for (let n = 2; used.has(candidate); n++) candidate = `${numbered} (${n})`;
+    used.add(candidate);
+    labels.set(index, candidate);
+  }
+  return labels;
 }
 
 function audioLabel(track: PlayerAudioTrack, i: number): string {
@@ -67,6 +116,7 @@ export function SubtitleTranslateModal({
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
+  const sourceOptionLabels = useMemo(() => sourceLabels(sourceTracks), [sourceTracks]);
   const canTranslate = translateEnabled && sourceTracks.length > 0;
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
@@ -166,6 +216,7 @@ export function SubtitleTranslateModal({
         audioTracks,
         audioIndex,
         targetLang,
+        translateTranscript: translateEnabled,
         sessionId,
         startPosition: getStartPosition?.() ?? 0,
       });
@@ -182,8 +233,14 @@ export function SubtitleTranslateModal({
       ) {
         throw new Error("Subtitle processing returned an invalid job.");
       }
-      onSubtitleJobAccepted?.(res.job.id);
-      if (!res.live_delivery_attached) {
+      // A request the server had already finished returns the completed job;
+      // its stored track is selected directly, with no job left to report.
+      const reusedSubtitleId =
+        res.job.status === "completed" ? (res.job.result_subtitle_id ?? undefined) : undefined;
+      onSubtitleJobAccepted?.(res.job.id, reusedSubtitleId);
+      if (reusedSubtitleId) {
+        toast.info("These subtitles were already created, so the saved track is selected.");
+      } else if (!res.live_delivery_attached) {
         toast.info("Your subtitle job is underway. The track will appear when it's ready.");
       }
       handleClose();
@@ -216,6 +273,7 @@ export function SubtitleTranslateModal({
     audioIndex,
     mediaFileId,
     targetLang,
+    translateEnabled,
     sessionId,
     getStartPosition,
     playerConfig,
@@ -299,7 +357,7 @@ export function SubtitleTranslateModal({
                   >
                     {sourceTracks.map((track) => (
                       <option key={track.index} value={track.index}>
-                        {sourceLabel(track)}
+                        {sourceOptionLabels.get(track.index)}
                       </option>
                     ))}
                   </select>
@@ -322,23 +380,30 @@ export function SubtitleTranslateModal({
                 </label>
               )}
 
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-white/60">
-                  {mode === "audio" ? "Subtitle language" : "Translate to"}
-                </span>
-                <select
-                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                  value={targetLang}
-                  onChange={(e) => setTargetLang(e.target.value)}
-                  disabled={submitting}
-                >
-                  {LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {mode === "audio" && !translateEnabled ? (
+                <p className="text-xs leading-relaxed text-white/60">
+                  Subtitles are written in the spoken language. AI translation is turned off on this
+                  server.
+                </p>
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-white/60">
+                    {mode === "audio" ? "Subtitle language" : "Translate to"}
+                  </span>
+                  <select
+                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                    disabled={submitting}
+                  >
+                    {LANGUAGES.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {mode === "audio" && quota && (
                 <p
@@ -382,7 +447,9 @@ export function SubtitleTranslateModal({
 
               <p className="text-[11px] leading-relaxed text-white/35">
                 {mode === "audio"
-                  ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
+                  ? translateEnabled
+                    ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
+                    : "The audio is transcribed on the server — longer files take a while. The finished track is saved for everyone."
                   : "Playback pauses while the first lines are translated, then resumes with subtitles streaming in. The finished track is saved for everyone."}
               </p>
             </>

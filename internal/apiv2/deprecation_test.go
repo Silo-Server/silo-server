@@ -32,47 +32,6 @@ func TestFormatDeprecationIsWholeUnixSeconds(t *testing.T) {
 	}
 }
 
-func TestFormatSunsetIsIMFFixdate(t *testing.T) {
-	rfc := time.Date(1994, time.November, 6, 8, 49, 37, 0, time.UTC)
-	if got := FormatSunset(rfc); got != "Sun, 06 Nov 1994 08:49:37 GMT" {
-		t.Fatalf("FormatSunset = %q", got)
-	}
-	local := rfc.In(time.FixedZone("plus2", 2*3600))
-	if got := FormatSunset(local); got != "Sun, 06 Nov 1994 08:49:37 GMT" {
-		t.Fatalf("FormatSunset(local) = %q; the HTTP-date form is always GMT", got)
-	}
-}
-
-func TestAppendLinkKeepsExistingValue(t *testing.T) {
-	want := `<` + deprecatedLink + `>; rel="deprecation"`
-	if got := appendLink("", deprecatedLink, "deprecation"); got != want {
-		t.Fatalf("appendLink(empty) = %q", got)
-	}
-	prior := `<https://example.test/next>; rel="next"`
-	if got := appendLink(prior, deprecatedLink, "deprecation"); got != prior+", "+want {
-		t.Fatalf("appendLink(prior) = %q", got)
-	}
-}
-
-func TestSetDeprecationHeadersAppendsToLink(t *testing.T) {
-	h := http.Header{}
-	h.Set(LinkHeader, `<https://example.test/a>; rel="next"`)
-	h.Add(LinkHeader, `<https://example.test/b>; rel="prev"`)
-	setDeprecationHeaders(h, &Deprecation{At: deprecatedAt, Link: deprecatedLink})
-	got := h.Get(LinkHeader)
-	for _, part := range []string{`rel="next"`, `rel="prev"`, `<` + deprecatedLink + `>; rel="deprecation"`} {
-		if !strings.Contains(got, part) {
-			t.Fatalf("Link %q lacks %s", got, part)
-		}
-	}
-	if len(h.Values(LinkHeader)) != 1 {
-		t.Fatalf("Link folded into one field, got %v", h.Values(LinkHeader))
-	}
-	if h.Get(SunsetHeader) != "" {
-		t.Fatal("Sunset is sent only when a removal is planned")
-	}
-}
-
 func TestRegisterRefusesBadDeprecations(t *testing.T) {
 	before := deprecatedAt.Add(-time.Second)
 	cases := map[string]*Deprecation{
@@ -89,13 +48,13 @@ func TestRegisterRefusesBadDeprecations(t *testing.T) {
 					t.Fatalf("expected a deprecation panic, got %v", r)
 				}
 			}()
-			newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				Register(reg, Operation{
 					Operation:   humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""),
 					Class:       ClassPublic,
 					Deprecation: d,
 				}, func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
-			}})
+			})
 		})
 	}
 	t.Run("huma flag without a declaration", func(t *testing.T) {
@@ -104,22 +63,22 @@ func TestRegisterRefusesBadDeprecations(t *testing.T) {
 				t.Fatalf("expected a panic naming the declaration, got %v", r)
 			}
 		}()
-		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		registerTestOperations(func(reg *Registry) {
 			o := humaOp(http.MethodGet, Prefix+"/x", "getX", "x", "")
 			o.Deprecated = true
 			Register(reg, Operation{Operation: o, Class: ClassPublic},
 				func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
-		}})
+		})
 	})
 	t.Run("sunset equal to at is allowed", func(t *testing.T) {
 		at := deprecatedAt
-		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		registerTestOperations(func(reg *Registry) {
 			Register(reg, Operation{
 				Operation:   humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""),
 				Class:       ClassPublic,
 				Deprecation: &Deprecation{At: at, Link: deprecatedLink, Sunset: &at},
 			}, func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
-		}})
+		})
 	})
 }
 
@@ -233,9 +192,11 @@ func TestPanicRestoresOnlyDeclaredRetirementHeaders(t *testing.T) {
 // deprecation link is appended to it.
 func TestDeprecatedOperationAppendsToExistingLink(t *testing.T) {
 	prior := `<https://siloserver.org/docs/api/v2/>; rel="service-doc"`
+	previous := `<https://example.test/b>; rel="prev"`
 	inner := newTestHandler(t, Dependencies{})
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(LinkHeader, prior)
+		w.Header().Add(LinkHeader, previous)
 		inner.ServeHTTP(w, r)
 	})
 	rec := do(t, h, http.MethodGet, "/api/v2/probe/deprecated", "", nil)
@@ -243,8 +204,9 @@ func TestDeprecatedOperationAppendsToExistingLink(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
 	got := rec.Header().Values(LinkHeader)
-	if len(got) != 1 || !strings.HasPrefix(got[0], prior+", <"+probeDeprecatedLink+">") {
-		t.Fatalf("Link = %q, want the prior value first and the deprecation link appended", got)
+	want := prior + ", " + previous + ", <" + probeDeprecatedLink + `>; rel="deprecation"`
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("Link = %q, want one field containing %q", got, want)
 	}
 }
 

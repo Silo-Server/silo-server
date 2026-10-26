@@ -22,7 +22,7 @@ func (v claimsValidator) ValidateToken(string) (*auth.Claims, error) {
 func TestRequireAuthConfinesTemporaryPasswordSessions(t *testing.T) {
 	restricted := auth.Claims{UserID: 42, Role: "user", SessionID: "sess", TokenType: auth.TokenTypeAccess, PasswordChangeRequired: true}
 	serve := func(claims auth.Claims, method, path string) (*httptest.ResponseRecorder, *activitylog.LogContext) {
-		am := NewAuthMiddleware(claimsValidator{claims}, &fakeSessionValidator{valid: map[string]bool{"sess": true}}, nil, nil)
+		am := NewAuthMiddleware(claimsValidator{claims}, &fakeSessionValidator{roles: map[string]string{"sess": "user"}}, nil, nil)
 		h := am.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 		lc := &activitylog.LogContext{}
 		req := httptest.NewRequest(method, path, nil)

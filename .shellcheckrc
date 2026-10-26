@@ -1,0 +1,2 @@
+# Infer the dialect from each tracked file's shebang; inspect every severity.
+# SC2029 is suppressed only at on_host's intentional caller-expansion site.

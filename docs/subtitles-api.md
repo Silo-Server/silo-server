@@ -21,6 +21,18 @@ provider settings remains on the bridge until guarded configuration updates and
 live application across nodes are implemented. No native provider-administration
 consumer or Jellyfin counterpart is changed by these inspection operations.
 
+## Profile header on media-file operations
+
+`X-Profile-Id` is optional on the subtitle operations, as on the bridge API,
+with one narrowing. The operations that act on one media file or stored
+subtitle (stored-track listing, search, download, upload, AI job creation,
+reads and cancellation, sync and timing, and the stored-subtitle metadata read
+and delete) refuse a request without the header when any profile on the account
+is PIN-protected or access-restricted. The refusal is `422 validation_failed`
+with an error at `header.x-profile-id`, as on profile-required operations. An
+empty header counts as absent; API keys are exempt. The capability probes, the
+account quota and language detection keep account scope.
+
 ## Subtitle AI state
 
 GET `/api/v2/subtitles/ai/jobs?media_file_id=<string ID>` returns `jobs[]` for up to
@@ -110,8 +122,8 @@ string and `languages` as an array, and returns `results` and `warnings`. Search
 is read-only and can be retried; a retry makes a fresh query and can return
 different provider results. The request allows at most 100 languages.
 
-Both operations require the same account and optional-profile access as the
-capability probes. They authorize the file and its parent item before accessing
+Both operations require an authenticated account and follow the profile-header
+rule above. They authorize the file and its parent item before accessing
 stored tracks or contacting providers. Missing and inaccessible files return
 404. Missing subtitle dependencies return 503. Invalid identifiers return 422.
 
@@ -119,7 +131,9 @@ Stored subtitle IDs and file IDs are strings. Search result IDs remain opaque
 provider identifiers. Timestamps use UTC with millisecond precision; an unknown
 search upload date is omitted. Arrays are empty rather than null. Stored object
 keys and uploader identities are not exposed. Provider failures preserve partial
-results with a generic warning; their raw error details are not part of v2.
+results with a generic warning; their raw error details are not part of v2. The
+`/api/v1` bridge names each failed provider as `<provider>: search failed`, and
+the server log keeps the cause with credentials masked.
 
 Search accepts compatibility inputs including ISO 639-2 aliases (`ara`), case
 and underscore variants, and legacy English display names (`Arabic`). The
@@ -151,7 +165,16 @@ Success returns `200` with `subtitle`, using the same public stored-track fields
 as `GET /api/v2/subtitles/{media_file_id}`. Stored IDs are strings and timestamps
 are canonical instants. Object keys, uploader identity, and upstream failure
 diagnostics are not returned. Failures use the standard native Problem Details
-contract.
+contract. A `subtitle_id` that is not in the shape the provider's search returns
+is refused with `422` `validation_failed` at `body.subtitle_id` before the
+provider is contacted. SubSource and OpenSubtitles API requests do not follow
+redirects to another host, so the SubSource API key and the OpenSubtitles login
+are sent only to the provider. SubDL result files are fetched only from the SubDL
+download host, and SubDL requests do not follow redirects to another host.
+OpenSubtitles result files are fetched only from public addresses, including
+every redirect; a file link on the server's own network fails the download like
+any other provider error (see
+[outbound address guard](architecture/outbound-address-guard.md#subtitle-downloads)).
 
 This operation is `non_retryable`. Each request contacts the provider before
 stored-content deduplication. Deduplication can reuse identical content but does
@@ -175,6 +198,16 @@ The file is limited to 5 MiB; the whole form is limited to 5 MiB plus 256 KiB fo
 framing and other fields. Supported filename extensions are SRT, VTT, ASS, SSA,
 and SUB. The filename determines format; the file part can use
 `application/octet-stream`.
+
+The file must hold at least one cue the format can carry: an SRT or WebVTT
+timing line with text, a displayed ASS/SSA `Dialogue` event, or a MicroDVD or
+SubViewer cue for SUB. A renamed document, binary data, or plain text is
+refused with `400` and the detail "This file doesn't contain readable
+subtitles. Upload an SRT, VTT, ASS, SSA or SUB subtitle file." before anything
+is stored. Legacy single-byte encodings and UTF-16 with a byte-order mark pass
+the check. UTF-16 files are stored converted to UTF-8, and the 5 MiB limit
+also applies to the converted file; other bytes are stored as uploaded. The v1
+bridge shares this check.
 
 Authentication and profile gates precede multipart parsing. The shared service
 checks file and parent-item access before storage and derives uploader identity
@@ -282,6 +315,16 @@ The response is `202` with `job` in the existing v2 job projection (string IDs)
 and `live_delivery_attached`. That boolean reports whether this request attached
 its live notifier to a newly created job. It does not acknowledge socket delivery.
 An existing active job is returned without attaching another viewer's stream.
+A `translate` request for the same file, source track, target language and model
+as a completed job whose track is still stored returns that completed job, with
+its `result_subtitle_id`, and does not call the provider again. The source track
+is matched by its content, not by `source_index`, which shifts when sidecars or
+stored subtitles change: a sidecar or stored subtitle by its bytes with any saved
+timing correction applied, an embedded track by its container stream and the media
+file's hash, size and modification time. Editing a sidecar, correcting its timing or
+replacing the media file starts a new translation. The returned job's
+`source_index` is the one the request sent. Deleting the track allows a fresh
+translation. Transcription requests always start a new job.
 Clients should poll the returned job or refresh the file's subtitle inventory.
 
 Creation is `non_retryable`: send once, with no automatic authentication replay
@@ -430,10 +473,178 @@ before ordinary ratification.
 
 ### Viewer stored subtitle deletion
 
-`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or effective administrator authority. A primary household profile alone grants no administrator permission. Storage keys and downloading-account identities are omitted.
+`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or the acting admin (see [api-contract.md](architecture/api-contract.md)): an admin account acting through its primary profile, an admin API key, or an admin login session with no profile while no profile on the account has a PIN or an access limit. A primary household profile alone grants no administrator permission, and another profile on an admin's account has none either. `DELETE /api/v1/subtitles/{id}` applies the same rule. Storage keys and downloading-account identities are omitted.
 
 DELETE requires `If-Match`: missing validators return 428, stale validators or a revision race return 412, and absent metadata returns 404. Authority is checked again before deletion. Even explicit `If-Match: *` retains the freshly authorized revision in the SQL comparison; a concurrent replacement requires a fresh authorized observation. Reads support `If-Match` and `If-None-Match` with 304 for an unchanged representation.
 
 A 204 confirms metadata removal only. Object cleanup is best effort using the accepted immutable-object deletion service. An uncertain database response never triggers cleanup or proves that metadata survived. This operation is non-retryable: there is no durable receipt, automatic replay, physical-erasure guarantee, or orphan reconciler. Inspect current metadata after uncertainty before deciding on another attempt; even absence is not proof of physical cleanup. Missing dependencies return 503 and unexpected errors are redacted.
 
 The bundled viewer subtitle search dialogs and track selector have no stored-subtitle deletion action. Administrator deletion and subtitle-preference removal are separate caller families. Native viewer-deletion inventories remain a coordination prerequisite; no new viewer deletion UI or Jellyfin behavior is introduced.
+
+## Text encoding
+
+Every text subtitle a client receives is UTF-8, as its `charset=utf-8` content
+type says: the playback subtitle routes, the Jellyfin subtitle stream, offline
+downloads, and the source of an AI translation. Sidecars and stored subtitles
+saved in a legacy code page (Windows-1251 Russian, Windows-1250 Polish,
+UTF-16, and so on) are decoded on delivery, with the code page chosen from the
+subtitle's language and, among a language's common code pages, from the bytes
+(`subtitles.DecodeText`). UTF-8 is delivered unchanged. Text the server cannot
+place safely, such as Chinese tagged without a script or region, or untagged
+text that is not Latin, is delivered as stored. The administrator attachment
+returns the stored bytes unchanged.
+
+## Subtitle sync
+
+Sync aligns a subtitle to its file's audio and stores a timing correction that
+every delivery path applies; the subtitle's bytes never change. It works on
+stored subtitles and on subtitle files next to the media (sidecars), which
+Silo never writes. See [subtitle sync](architecture/subtitle-sync.md) for the
+algorithm and job model. Anyone with access to the file may sync a subtitle or
+set its timing; demo mode refuses both.
+
+### Finding a subtitle to sync
+
+Each playback inventory track that can be synced carries a `sync_key`
+(external and downloaded SRT, WebVTT, ASS, and SSA tracks): `stored-{id}` for a
+stored subtitle, `external-{hash}` for a sidecar. Treat it as opaque. The
+operations below take the media file and the key.
+
+`GET /api/v2/subtitles/sync/status` (`getSubtitleSyncStatus`) is the capability
+probe: `state` says whether sync is available, `auto_sync` whether subtitles
+are synced automatically (server setting `subtitles.auto_sync`, on by
+default), and `external` whether sidecars can be synced.
+
+With `auto_sync` on, nobody has to ask. A downloaded or uploaded subtitle is
+synced when it is added. Any other subtitle that was never synced, a sidecar or
+a stored one, is synced the first time a player is served it, through any
+playback or Jellyfin subtitle route. Its job has `trigger: auto` and no
+requester. A subtitle someone already synced or retimed is left as it is.
+
+### Operations
+
+| Operation | Route | Notes |
+|---|---|---|
+| `listSubtitleSync` | `GET /api/v2/subtitles/{media_file_id}/sync` | Every syncable subtitle of the file: stored ones, then sidecars. A sidecar that cannot be read is left out. |
+| `getSubtitleSync` | `GET /api/v2/subtitles/{media_file_id}/sync/{key}` | One subtitle, and the `ETag` that `setSubtitleTiming` takes. The validator follows the timing, not job progress, so the read does not answer `If-None-Match`. |
+| `startSubtitleSync` | `POST /api/v2/subtitles/{media_file_id}/sync/{key}` | `202` with the subtitle and its job: a new one, or the active one (coalescing). A request after the job finished starts another, which reaches the same timing. |
+| `setSubtitleTiming` | `PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing` | Replaces the correction; `{offset_ms: 0, scale: 1}` restores the original timing. Needs `If-Match` (`428` without, `412` when stale). |
+
+Each returns `SubtitleSyncState`: `key`, `media_file_id`, `source`
+(`downloaded` or `external`), `stored_subtitle_id` for a stored subtitle,
+`language`, `format`, `label` (the release name, or the sidecar's file name),
+`timing` (`{offset_ms, scale}`: original time `t` plays at `t * scale +
+offset_ms`), and `sync`, the latest job, when it has one. A key the file does
+not have returns `404`.
+
+### Jobs
+
+A job (`SubtitleSyncJobState`) has `id`, `status`, `trigger` (`auto` or
+`manual`), `created_at`, and, once finished, `finished_at`, `confidence` (0..1,
+the share of sampled audio windows that agree), and `result` (the correction
+found). While it is active it also has `phase` and `progress` (0..1); a failed
+job has `failure`.
+
+| Status | Meaning |
+|---|---|
+| `pending`, `running` | Queued or aligning; see `phase`. |
+| `synced` | Applied `result` to the subtitle. |
+| `already_synced` | The current timing is right; nothing changed. |
+| `no_match` | No correction lines the subtitle up with the audio; it most likely belongs to another release or title. Timing unchanged. |
+| `failed` | The job could not finish. Timing unchanged. |
+
+| Phase | Meaning |
+|---|---|
+| `queued` | Waiting for a free worker. |
+| `analyzing` | Reading the file's speech; most of a job's time. Skipped when the speech is cached. |
+| `matching` | Aligning the subtitle's cues with the speech; under a second. |
+
+| Failure | Meaning |
+|---|---|
+| `subtitle_changed` | The subtitle, its file on disk, or its timing changed while the job ran. |
+| `no_audio` | The media file has no audio the server can read. |
+| `unavailable` | No server or node could analyze the audio now; try again later. |
+| `error` | Anything else. |
+
+### Following a sync
+
+Playback sessions of the file receive two realtime events, on every API server
+when an event bus is configured. Both are best effort; the operations above are
+authoritative.
+
+- `subtitle_sync_updated` (`session_id`, `file_id`, `sync_key`, `subtitle_id`
+  for a stored subtitle, `timing`, `job`) at each step of a job: queued, every
+  progress update, and the outcome. `job` has the `SubtitleSyncJobState`
+  shape. `timing` is the subtitle's correction when the update is sent,
+  including one another viewer set while the job ran.
+- `subtitle_timing_changed` (`session_id`, `file_id`, `sync_key`,
+  `subtitle_id` for a stored subtitle, optional `track`) whenever a subtitle's
+  timing changed: an applied sync, or a timing set or reset.
+
+A synced job has applied its result by the time it reports `synced`: the
+track's URL already serves the new timing. A client shows the change as applied
+once it has fetched the track again and its new cues are on screen. A suggested
+flow:
+
+1. `startSubtitleSync`, and show the job as in progress.
+2. Update the progress from `subtitle_sync_updated`; without realtime, poll
+   `getSubtitleSync` every few seconds while the job is `pending` or `running`.
+3. On `synced`, fetch the track again if it is on screen, then say it is
+   synced, with the correction. On `already_synced`, `no_match`, or `failed`,
+   say so; the timing did not change.
+4. On `subtitle_timing_changed` for the track on screen, fetch it again.
+
+An automatic sync of the track on screen should go unnoticed: show no progress
+for an `auto` job the viewer did not start, keep the current cues on screen
+until the refetched ones are loaded, and say nothing when they swap in. The
+subtitle menu can still show the result and offer a reset.
+
+Corrected bytes reach every delivery path: playback subtitle routes, the
+Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
+and AI translation sources. Those responses are `Cache-Control: private,
+no-cache`, since the bytes change behind the same URL. The player's subtitle
+offset (`player.subtitle_sync_ms`, a profile value a device can override from
+settings manifest revision 19) still applies on top. The frozen v1 bridge exposes
+neither timing nor sync but serves corrected bytes.
+
+Replacing the media file (a new file hash or size at the same path) resets the
+timing of every stored subtitle of that file, removes its sidecar corrections,
+and removes its sync history: a correction measured against one release's
+audio does not fit another.
+
+## Stored subtitle sync
+
+The stored-subtitle operations below predate sidecar sync and keep working for
+stored subtitles; `stored-{id}` with the operations above is equivalent.
+
+Every stored-subtitle projection (`GET /api/v2/subtitles/{media_file_id}`,
+provider download, upload, viewer metadata) carries `timing`
+(`{offset_ms, scale}`: original time `t` plays at `t * scale + offset_ms`;
+`{0, 1}` when uncorrected) and, when the subtitle has one, `sync`: its latest
+job (`SubtitleSyncJob`: the job fields above plus `subtitle_id`).
+Viewer metadata (`getViewerSubtitleMetadata`) omits `sync`: its validator
+follows the subtitle's revision, which job progress does not change.
+
+`POST /api/v2/subtitles/stored/{id}/sync` (`syncStoredSubtitle`) returns `202`
+with `job`: a new job, or the subtitle's active one. It requires file access
+only: the stored bytes never change, and anyone who can play the file can reset
+the timing. Formats other than SRT, WebVTT, ASS, and SSA return `422`.
+Demo mode refuses it. It coalesces on the subtitle's active job: a repeated
+request returns that job. A request repeated after it finished starts another
+job, which aligns the same stored bytes and reaches the same timing.
+
+`GET /api/v2/subtitles/stored/{id}/sync` (`getStoredSubtitleSync`) returns
+`subtitle` with `timing` and `sync` and needs file access only. Poll it while a
+job is `pending` or `running`. Its `ETag` is the validator for
+`setStoredSubtitleTiming`; it follows the subtitle's revision rather than job
+progress, so the read does not answer `If-None-Match`.
+
+`PUT /api/v2/subtitles/stored/{id}/timing` (`setStoredSubtitleTiming`) replaces
+the correction, for a manual adjustment or a reset to `{offset_ms: 0, scale: 1}`.
+It requires file access and `If-Match` with the validator from
+`getStoredSubtitleSync` (`getViewerSubtitleMetadata` returns the same one).
+`offset_ms` is within ±600000 and `scale` within 0.9..1.1. It returns the
+updated `subtitle` and its new `ETag`; a missing validator returns `428` and a
+stale one `412`.
+
+The administrator download returns the stored bytes, without the correction.

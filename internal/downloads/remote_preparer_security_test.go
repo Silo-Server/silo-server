@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -28,9 +28,9 @@ func TestNodeAwarePreparerCapabilityProbeDoesNotForwardJWTOnRedirect(t *testing.
 	}))
 	defer redirectTarget.Close()
 
-	var sourceAuthorization atomic.Value
+	var sourceSigned atomic.Bool
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sourceAuthorization.Store(r.Header.Get("Authorization"))
+		sourceSigned.Store(nodeauthtest.Signed(r, jwt))
 		http.Redirect(w, r, redirectTarget.URL+"/hw-capabilities", http.StatusFound)
 	}))
 	defer source.Close()
@@ -46,8 +46,8 @@ func TestNodeAwarePreparerCapabilityProbeDoesNotForwardJWTOnRedirect(t *testing.
 	preparer.probeClient = injectedClient
 
 	_, err := preparer.toneMapCapabilitiesForNode(context.Background(), source.URL)
-	if got, want := sourceAuthorization.Load(), "Bearer "+jwt; got != want {
-		t.Fatalf("source Authorization = %#v, want %q", got, want)
+	if !sourceSigned.Load() {
+		t.Fatal("source request was not signed with the shared secret")
 	}
 	if got := redirectTargetHits.Load(); got != 0 {
 		t.Fatalf("redirect target requests = %d, Authorization = %#v; want no redirect request", got, redirectTargetAuthorization.Load())
@@ -88,83 +88,46 @@ func TestNodeAwarePreparerCapabilityProbeRejectsOversizedResponse(t *testing.T) 
 }
 
 func TestNodeAwarePreparerCoalescesConcurrentColdCapabilityProbes(t *testing.T) {
-	const callers = 8
-	payload, err := json.Marshal(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var requests atomic.Int32
-	firstStarted := make(chan struct{})
-	duplicateStarted := make(chan struct{})
-	release := make(chan struct{})
-	var firstOnce sync.Once
-	var duplicateOnce sync.Once
-	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		count := requests.Add(1)
-		firstOnce.Do(func() { close(firstStarted) })
-		if count > 1 {
-			duplicateOnce.Do(func() { close(duplicateStarted) })
+	synctest.Test(t, func(t *testing.T) {
+		const callers = 8
+		payload, err := json.Marshal(playback.HWAccelInfo{ToneMapCapabilities: softwarePQToneMap()})
+		if err != nil {
+			t.Fatal(err)
 		}
-		<-release
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(string(payload))),
-			Request:    request,
-		}, nil
-	})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "cluster-jwt-secret"
-	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
-	preparer.probeClient = &http.Client{Transport: transport}
-
-	type result struct {
-		capabilities tonemap.Capabilities
-		err          error
-	}
-	start := make(chan struct{})
-	ready := sync.WaitGroup{}
-	ready.Add(callers)
-	results := make(chan result, callers)
-	for range callers {
-		go func() {
-			ready.Done()
-			<-start
-			capabilities, probeErr := preparer.toneMapCapabilitiesForNode(context.Background(), "https://node.example")
-			results <- result{capabilities: capabilities, err: probeErr}
-		}()
-	}
-	ready.Wait()
-	close(start)
-	select {
-	case <-firstStarted:
-	case <-time.After(time.Second):
+		var requests atomic.Int32
+		release := make(chan struct{})
+		transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			requests.Add(1)
+			<-release
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(payload))), Request: request}, nil
+		})
+		cfg := &config.Config{}
+		cfg.Auth.JWTSecret = "cluster-jwt-secret"
+		preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+		preparer.probeClient = &http.Client{Transport: transport}
+		type result struct {
+			capabilities tonemap.Capabilities
+			err          error
+		}
+		results := make(chan result, callers)
+		for range callers {
+			go func() {
+				capabilities, probeErr := preparer.toneMapCapabilitiesForNode(context.Background(), "https://node.example")
+				results <- result{capabilities: capabilities, err: probeErr}
+			}()
+		}
+		// Every caller is blocked while the cold probe remains unfinished.
+		synctest.Wait()
+		inFlight := requests.Load()
 		close(release)
-		t.Fatal("first capability probe did not start")
-	}
-	duplicate := false
-	select {
-	case <-duplicateStarted:
-		duplicate = true
-	case <-time.After(150 * time.Millisecond):
-	}
-	close(release)
-
-	for range callers {
-		select {
-		case got := <-results:
+		for range callers {
+			got := <-results
 			if got.err != nil || !got.capabilities.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
 				t.Fatalf("capability result = %#v, %v", got.capabilities, got.err)
 			}
-		case <-time.After(time.Second):
-			t.Fatal("coalesced capability caller did not return")
 		}
-	}
-	if duplicate || requests.Load() != 1 {
-		t.Fatalf("capability HTTP requests = %d, want one coalesced probe", requests.Load())
-	}
+		if inFlight != 1 || requests.Load() != 1 {
+			t.Fatalf("capability HTTP requests = %d in flight, %d total; want one coalesced probe", inFlight, requests.Load())
+		}
+	})
 }

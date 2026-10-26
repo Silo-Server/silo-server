@@ -27,6 +27,9 @@ export function useKeyboardShortcuts(
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
         return;
       }
+      // An open player menu owns the keyboard: Space and Enter choose the
+      // focused item instead of toggling playback.
+      if (target.closest?.('[role="menu"]')) return;
 
       const video = videoRef.current;
       if (!video) return;

@@ -25,25 +25,13 @@ func TestRenderLayoutEscapesAndPlacesContent(t *testing.T) {
 	if !strings.Contains(out, `<span id="footer-marker">fine print</span>`) {
 		t.Fatalf("footer HTML not passed through:\n%s", out)
 	}
-	if !strings.Contains(out, "SILO") {
-		t.Fatalf("wordmark missing:\n%s", out)
-	}
-}
-
-// Some emails must render fully link-free when no external URL is configured;
-// the shell itself must therefore never contribute one.
-func TestRenderLayoutAddsNoLinks(t *testing.T) {
-	out := RenderLayout(LayoutOptions{Title: "Hello", BodyHTML: "<p>hi</p>"})
-	if strings.Contains(out, "href=") {
-		t.Fatalf("layout shell added a link:\n%s", out)
-	}
-	if strings.Contains(out, "<h1") && strings.Contains(RenderLayout(LayoutOptions{BodyHTML: "x"}), "<h1") {
-		t.Fatalf("empty title should not render an <h1>")
+	if !strings.Contains(out, `src="cid:silo-logo"`) || !strings.Contains(out, `alt="Silo"`) {
+		t.Fatalf("default logo missing:\n%s", out)
 	}
 }
 
 func TestEmailButtonEscapes(t *testing.T) {
-	out := EmailButton(`Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
+	out := EmailButton(Brand{}, `Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
 	if !strings.Contains(out, `href="https://example.com/?a=1&amp;b=&lt;2&gt;"`) {
 		t.Fatalf("href not escaped: %s", out)
 	}

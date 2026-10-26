@@ -3,6 +3,7 @@ package pluginhost_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,31 +21,63 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-// buildExitingPlugin compiles testdata/exitingplugin into a temp dir and
-// returns the binary path with the manifest the binary reports (checksum
-// included), which is what Host.Start compares against the live manifest.
-func buildExitingPlugin(t *testing.T) (string, *pluginv1.PluginManifest) {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "exitingplugin")
+type exitingFixtureData struct{ binary, manifest []byte }
+
+// Keep immutable compiler outputs; every test gets fresh files and manifest state.
+var exitingFixtureBuild = sync.OnceValues(func() (exitingFixtureData, error) {
+	dir, err := os.MkdirTemp("", "silo-exiting-fixture-")
+	if err != nil {
+		return exitingFixtureData{}, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	bin := filepath.Join(dir, "exitingplugin")
 	build := exec.Command("go", "build", "-o", bin, "./testdata/exitingplugin")
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build exitingplugin: %v\n%s", err, out)
+		return exitingFixtureData{}, fmt.Errorf("build exitingplugin: %w\n%s", err, out)
 	}
 	raw, err := exec.Command(bin, "manifest").Output()
 	if err != nil {
-		t.Fatalf("read fixture manifest: %v", err)
+		return exitingFixtureData{}, fmt.Errorf("read fixture manifest: %w", err)
+	}
+	binary, err := os.ReadFile(bin)
+	return exitingFixtureData{binary: binary, manifest: raw}, err
+})
+
+func buildExitingPlugin(t *testing.T) (string, *pluginv1.PluginManifest) {
+	t.Helper()
+	fixture, err := exitingFixtureBuild()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "exitingplugin")
+	if err := os.WriteFile(bin, fixture.binary, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	manifest := &pluginv1.PluginManifest{}
-	if err := protojson.Unmarshal(raw, manifest); err != nil {
+	if err := protojson.Unmarshal(fixture.manifest, manifest); err != nil {
 		t.Fatalf("decode fixture manifest: %v", err)
 	}
 	return bin, manifest
 }
 
+// A plugin process gets the plugin environment, not the server's: the fixture
+// exits at startup when it can see SILO_TEST_HOST_ONLY.
+func TestHostStartWithholdsServerEnvironment(t *testing.T) {
+	bin, manifest := buildExitingPlugin(t)
+	t.Setenv("SILO_TEST_HOST_ONLY", "secret")
+
+	host := pluginhost.NewHost(pluginhost.Config{Logger: hclog.NewNullLogger()})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := host.Start(ctx, pluginhost.StartRequest{InstallationID: 6, BinaryPath: bin, Manifest: manifest}); err != nil {
+		t.Fatalf("host.Start with SILO_TEST_HOST_ONLY set on the server: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Stop(6) })
+}
+
 func TestHostExitWatcherReportsCrash(t *testing.T) {
 	bin, manifest := buildExitingPlugin(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	host := pluginhost.NewHost(pluginhost.Config{
 		Logger:            hclog.NewNullLogger(),
@@ -86,8 +119,7 @@ func TestHostExitWatcherReportsCrash(t *testing.T) {
 
 func TestHostExitWatcherIgnoresDeliberateStop(t *testing.T) {
 	bin, manifest := buildExitingPlugin(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	host := pluginhost.NewHost(pluginhost.Config{
 		Logger:            hclog.NewNullLogger(),

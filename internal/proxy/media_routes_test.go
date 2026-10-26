@@ -86,14 +86,7 @@ func TestProxyTokenRoutesEnforceCommittedProxyEgress(t *testing.T) {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 	base := streamtoken.Claims{
 		SessionID: "route-bound", MediaPath: mediaPath, PlayMethod: string(playback.PlayDirect),
 		UserID: 7, ProfileID: "profile-1", MediaFileID: 42,

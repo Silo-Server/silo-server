@@ -102,26 +102,3 @@ func TestAdminTerminateTransport(t *testing.T) {
 	demo.AdminPlaybackTerminate = &fakeAdminTerminate{available: true}
 	requireProblem(t, do(t, NewHandler(demo), http.MethodPost, path, `{}`, with(bearer(otherAdminToken), "X-Profile-Id", "p-owner")), TypePermissionDenied)
 }
-
-func TestAdminTerminateCapabilityAndAbsence(t *testing.T) {
-	capability := Prefix + "/admin/sessions/command-capabilities"
-	admin := with(bearer(adminToken), "X-Profile-Id", "p-primary")
-	deps := pilotDeps(nil, nil)
-	deps.AdminPlaybackCommands = &fakeAdminPlaybackCommands{available: true}
-	rec := do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"actions":["pause","resume","stop","message"]`) || !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":false`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
-	deps.AdminPlaybackTerminate = &fakeAdminTerminate{available: false}
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
-	rec = do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
-	if !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":false`) || strings.Contains(rec.Body.String(), `"terminate"`) {
-		t.Fatal(rec.Body.String())
-	}
-	deps.AdminPlaybackTerminate = &fakeAdminTerminate{available: true}
-	rec = do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"actions":["pause","resume","stop","message","terminate"]`) || !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":true`) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-}

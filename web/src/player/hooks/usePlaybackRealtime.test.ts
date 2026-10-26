@@ -89,7 +89,7 @@ it.each([404, 503, 403])("never opens bridge control after ticket failure %s", a
   expect(onCommand).not.toHaveBeenCalled();
 });
 
-it.each(["stop", "terminate"])(
+it.each(["stop", "terminate", "server_restarting"])(
   "delivers an explicit %s only for the captured session and acknowledges it once",
   async (name) => {
     const onCommand = vi.fn().mockResolvedValue(undefined);
@@ -99,7 +99,13 @@ it.each(["stop", "terminate"])(
     socket.readyState = Socket.OPEN;
     act(() => socket.dispatchEvent(new Event("open")));
     socket.send.mockClear();
-    const command = { type: "command", session_id: "session", command_id: "terminal", name };
+    const command = {
+      type: "command",
+      session_id: "session",
+      command_id: "terminal",
+      name,
+      payload: name === "server_restarting" ? { message: "Restarting soon" } : {},
+    };
     const receive = (value: typeof command) =>
       socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(value) }));
 

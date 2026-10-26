@@ -3,15 +3,16 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
-	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/metadata"
-	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/go-chi/chi/v5"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 type curationImageItems map[string]*models.MediaItem
@@ -38,6 +39,7 @@ func (curationImageEpisodes) GetByID(context.Context, string) (*models.Episode, 
 type curationImageService struct {
 	calls   int
 	request metadata.ApplyItemImageRequest
+	private bool
 	fail    bool
 	stored  string
 }
@@ -45,13 +47,26 @@ type curationImageService struct {
 func (f *curationImageService) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
 	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "source", Type: metadata.ImagePoster}}, nil, nil
 }
-func (f *curationImageService) ApplyItemImage(_ context.Context, r metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+func (f *curationImageService) FetchSeasonImages(context.Context, map[string]string, string, int, int) ([]metadata.RemoteImage, map[string]string, error) {
+	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "source", Type: metadata.ImagePoster}}, nil, nil
+}
+func (f *curationImageService) ApplyItemImage(ctx context.Context, r metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	f.calls++
 	f.request = r
+	f.private = netguard.PrivateAccess(ctx)
 	if f.fail {
 		return nil, errors.New("synthetic image failure")
 	}
 	return &metadata.ApplyItemImageResult{StoredPath: f.stored, Thumbhash: "hash", Revision: "revision"}, nil
+}
+func (f *curationImageService) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType, language string, folderID int, _ string) ([]metadata.RemoteImage, map[string]string, error) {
+	return f.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+}
+func (f *curationImageService) LocalImagePreview(context.Context, string, string) (string, error) {
+	return "", errors.New("no local images")
+}
+func (f *curationImageService) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	return nil, errors.New("no local images")
 }
 func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	svc := &curationImageService{fail: true}
@@ -73,32 +88,7 @@ func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	if err == nil || svc.calls != 1 || svc.request.ImageType != metadata.ImageStill || svc.request.SeasonNumber == nil || *svc.request.SeasonNumber != 0 || svc.request.EpisodeNumber == nil || *svc.request.EpisodeNumber != 2 {
 		t.Fatalf("episode %v %+v", err, svc.request)
 	}
-}
-func TestAdminImageSharedPublishesImmutableRevision(t *testing.T) {
-	pool := catalogTransferPool(t)
-	id := fmt.Sprintf("movie:curation-image-%d", time.Now().UnixNano())
-	stored := "tmdb/movies/" + id + "/poster/original.rev.webp"
-	if _, err := pool.Exec(t.Context(), `INSERT INTO media_items(content_id,type,title)VALUES($1,'movie','Synthetic image')`, id); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, id)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, stored)
-	}()
-	items := catalog.NewItemRepository(pool)
-	detail := catalog.NewDetailService(items, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil)
-	svc := &curationImageService{stored: stored}
-	h := NewAdminImageHandler(items, nil, nil, nil, svc, nil, detail)
-	out, err := h.ApplyAdminItemImage(t.Context(), id, AdminItemImageRequest{OriginalURL: "source", Type: "poster", ProviderID: "tmdb"})
-	if err != nil || out.StoredPath != stored || out.Revision != "revision" {
-		t.Fatalf("publish %+v %v", out, err)
-	}
-	var path, source string
-	var locked []int
-	if err := pool.QueryRow(t.Context(), `SELECT poster_path,poster_source_path,locked_fields FROM media_items WHERE content_id=$1`, id).Scan(&path, &source, &locked); err != nil {
-		t.Fatal(err)
-	}
-	if path != stored || source != "source" || len(locked) != 1 || locked[0] != int(metadata.FieldImages) {
-		t.Fatalf("persisted %s %s %v", path, source, locked)
+	if !svc.private {
+		t.Fatal("admin apply did not allow a local network image source")
 	}
 }

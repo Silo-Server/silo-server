@@ -127,6 +127,28 @@ func (d *StreamDeny) Denied(ctx context.Context, sessionID string) bool {
 	return denied
 }
 
+// Lookup reads sessionID's marker from Redis, skipping the local cache, and
+// keeps the read failure. A writer that must not act on a session another
+// replica has just stopped uses it: the cache can hold a "not denied" answer
+// for up to streamDenyCacheTTL after the stop. A nil store reports false.
+func (d *StreamDeny) Lookup(ctx context.Context, sessionID string) (bool, error) {
+	if d == nil || sessionID == "" {
+		return false, nil
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, streamDenyLookupTimeout)
+	defer cancel()
+	err := d.client.Get(lookupCtx, StreamDenyKey(sessionID)).Err()
+	switch {
+	case err == nil:
+		d.remember(sessionID, true)
+		return true, nil
+	case errors.Is(err, redis.Nil):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
 func (d *StreamDeny) cached(sessionID string) (denied, ok bool) {
 	now := d.now()
 	d.mu.Lock()

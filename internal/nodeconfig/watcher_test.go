@@ -98,6 +98,30 @@ func TestApplySettingsReappliesBootstrapOverrides(t *testing.T) {
 	}
 }
 
+func TestApplySettingsAppliesRedisDBToTheSavedURLOnly(t *testing.T) {
+	settings := map[string]string{
+		"redis.url": "redis://db-host:6379/3",
+		"redis.db":  "5",
+	}
+
+	saved := newTestWatcher(t, BootstrapOverrides{})
+	if err := saved.applySettings(context.Background(), settings); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if db, ok := saved.Config().Redis.Database(); !ok || db != 5 {
+		t.Errorf("database number = (%d, %v), want redis.db's 5 on the saved URL", db, ok)
+	}
+
+	// REDIS_URL names the whole connection, database number included.
+	fromEnv := newTestWatcher(t, BootstrapOverrides{RedisURL: "redis://env-host:6379/1"})
+	if err := fromEnv.applySettings(context.Background(), settings); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if db, ok := fromEnv.Config().Redis.Database(); !ok || db != 1 {
+		t.Errorf("database number = (%d, %v), want the 1 in REDIS_URL", db, ok)
+	}
+}
+
 func TestRequestReloadCoalesces(t *testing.T) {
 	w := newTestWatcher(t, BootstrapOverrides{})
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 func TestBuildSubtitleInventoryV3_OrdinalsAreDenseAcrossAllThreeRanges(t *testing.T) {
@@ -198,29 +199,6 @@ func TestSubtitleInventoryItemAtV3(t *testing.T) {
 	}
 }
 
-func TestBuildSubtitleInventoryV3_NilFile(t *testing.T) {
-	if items := BuildSubtitleInventoryV3(nil, nil); items != nil {
-		t.Errorf("expected nil inventory for a nil file, got %+v", items)
-	}
-}
-
-func TestSubtitleURLExtV3(t *testing.T) {
-	cases := map[string]string{
-		"ass":               ".ass",
-		"ssa":               ".ass",
-		"pgs":               ".sup",
-		"hdmv_pgs_subtitle": ".sup",
-		"subrip":            ".vtt",
-		"srt":               ".vtt",
-		"":                  ".vtt",
-	}
-	for codec, want := range cases {
-		if got := SubtitleURLExtV3(codec); got != want {
-			t.Errorf("SubtitleURLExtV3(%q) = %q, want %q", codec, got, want)
-		}
-	}
-}
-
 func TestSubtitleSidecarExtV3OffersOriginalSubRipOnlyWhenNegotiated(t *testing.T) {
 	negotiated := []string{FeatureSubripSidecarV3}
 	for _, tc := range []struct {
@@ -320,5 +298,28 @@ func TestSubtitleFeaturesForPlanV3FollowsThePublishedRepresentation(t *testing.T
 	embeddedOnly := ScopeSubtitleInventoryV3("sess", &models.MediaFile{ID: 8, SubtitleTracks: file.SubtitleTracks}, BuildSubtitleInventoryV3(&models.MediaFile{ID: 8, SubtitleTracks: file.SubtitleTracks}, nil), nil)
 	if got := SubtitleFeaturesForPlanV3(embeddedOnly, withFeature); !slices.Equal(got, withFeature) {
 		t.Fatalf("an inventory with no external or downloaded SRT must keep the features: %v", got)
+	}
+}
+
+// Only tracks whose timing Silo can correct carry a sync key: external and
+// downloaded text tracks in SRT, WebVTT, ASS, or SSA.
+func TestBuildSubtitleInventoryV3_SyncKeys(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/movie.en.srt", Format: "srt"},
+			{Path: "/media/movie.fr.sub", Format: "sub"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{{Index: 2, Codec: "subrip"}},
+	}
+	items := BuildSubtitleInventoryV3(file, []SubtitleInventoryEntryV3{
+		{Codec: "ass", DownloadedSubtitleID: 7},
+		{Codec: "sub", DownloadedSubtitleID: 8},
+	})
+	want := []string{subtitles.ExternalSyncKey("/media/movie.en.srt"), "", "", "stored-7", ""}
+	for i, item := range items {
+		if item.SyncKey != want[i] {
+			t.Errorf("item %d (%s %s) sync key %q, want %q", i, item.Source, item.Codec, item.SyncKey, want[i])
+		}
 	}
 }

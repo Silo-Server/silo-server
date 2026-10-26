@@ -114,6 +114,20 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	}
 	defer s.inFlight.Delete(dc.CollectionID)
 
+	if claimed, err := s.claim(ctx, dc); !claimed {
+		if err != nil {
+			s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to claim a due collection",
+				"user_id", dc.UserID,
+				"collection_id", dc.CollectionID,
+				"error", err,
+			)
+		}
+		mu.Lock()
+		result.Skipped++
+		mu.Unlock()
+		return
+	}
+
 	startedAt := time.Now()
 	syncCtx, cancel := context.WithTimeout(ctx, collectionutil.SyncTimeout)
 	_, err := s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID)
@@ -130,7 +144,6 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 			"duration", dur,
 			"error", err,
 		)
-		s.advanceAfterFailure(ctx, dc, time.Now())
 		return
 	}
 	result.Synced++
@@ -141,20 +154,27 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	)
 }
 
-// advanceAfterFailure pushes next_sync_at forward by the user-sync minimum
-// interval so a broken source does not thrash the scheduler.
-func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, after time.Time) {
-	next := after.Add(time.Duration(MinSyncIntervalHours) * time.Hour)
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE user_personal_collections SET next_sync_at = $1 WHERE user_id = $2 AND id = $3`,
-		next, dc.UserID, dc.CollectionID,
-	); err != nil {
-		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to advance next_sync_at after failure",
-			"user_id", dc.UserID,
-			"collection_id", dc.CollectionID,
-			"error", err,
-		)
+// claim takes a due collection for this node before its sync runs. Every
+// node runs the scheduler, so two can list the same collection; the claim
+// moves next_sync_at past the user-sync minimum interval while it is still
+// due, and only the node whose UPDATE does that runs the sync. The moved
+// next_sync_at is also the retry time when the sync fails, and the sync
+// starts from it, so its own next run replaces it on success and a schedule
+// edited while the sync ran keeps what the edit wrote. "Still due" and the
+// retry time use the database clock, as listDue does.
+func (s *Scheduler) claim(ctx context.Context, dc dueCollection) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE user_personal_collections
+		 SET next_sync_at = NOW() + make_interval(hours => $1)
+		 WHERE user_id = $2 AND id = $3
+		   AND sync_schedule IS NOT NULL
+		   AND next_sync_at <= NOW()`,
+		MinSyncIntervalHours, dc.UserID, dc.CollectionID,
+	)
+	if err != nil {
+		return false, err
 	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (s *Scheduler) IsInFlight(collectionID string) bool {

@@ -19,6 +19,7 @@ import {
 } from "@/api/v2/adminApiKeys";
 import { isCapturedProfileAuthorityActive } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,14 +82,16 @@ export default function AdminApiKeys() {
 function ApiKeyManager() {
   const capability = useAdminApiKeyCapabilities();
   const viewerId = useAuth().user?.id;
-  // Only the server Owner may change or revoke the Owner's keys. Until the
-  // account list loads successfully, nobody is offered the actions.
+  // Only the server Owner may change or revoke another admin's keys, and
+  // nobody else may touch the Owner's. Until the account list loads
+  // successfully, nobody is offered the actions.
   const accounts = useAdminUsers();
-  const ownerId = accounts.data?.find((u) => u.is_owner)?.id;
-  const ownerLocked = (userId: string) =>
-    accounts.isPending ||
-    accounts.isError ||
-    (ownerId !== undefined && ownerId !== viewerId && Number(userId) === ownerId);
+  const viewerIsOwner = accounts.data?.some((u) => u.id === viewerId && u.is_owner) ?? false;
+  const ownerLocked = (userId: string) => {
+    if (accounts.isPending || accounts.isError) return true;
+    const account = accounts.data?.find((u) => u.id === Number(userId));
+    return account !== undefined && !canManageAccount(account, viewerId, viewerIsOwner);
+  };
   const keys = useAdminApiKeys(capability.data?.available === true);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -124,23 +127,21 @@ function ApiKeyManager() {
     }
   }
   return (
-    <div className="page-shell flex flex-col gap-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="flex flex-col gap-3">
-          <h1 className="page-title">API Keys</h1>
-          <p className="page-subtitle">
-            Create and manage credentials for integrations and automation.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!capability.data?.available}
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus data-icon="inline-start" />
-          Create Key
-        </Button>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="API Keys"
+        subtitle="Create and manage credentials for integrations and automation."
+        actions={
+          <Button
+            size="sm"
+            disabled={!capability.data?.available}
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus data-icon="inline-start" />
+            Create Key
+          </Button>
+        }
+      />
       {capability.isPending ? (
         <p role="status">Checking API key management…</p>
       ) : capability.isError ? (
@@ -388,6 +389,7 @@ function CreateApiKeyForm({
 }) {
   const { user } = useAuth();
   const users = useAdminUsers();
+  const viewerIsOwner = users.data?.some((u) => u.id === user?.id && u.is_owner) ?? false;
   const [profileContext] = useState(captureAdminApiKeyAuthority);
   const [label, setLabel] = useState("");
   const [userId, setUserId] = useState(String(user?.id ?? ""));
@@ -459,7 +461,7 @@ function CreateApiKeyForm({
           <SelectContent>
             <SelectGroup>
               {users.data
-                ?.filter((u) => canManageAccount(u, user?.id))
+                ?.filter((u) => canManageAccount(u, user?.id, viewerIsOwner))
                 .map((u) => (
                   <SelectItem key={u.id} value={String(u.id)}>
                     {u.username}

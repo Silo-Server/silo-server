@@ -50,15 +50,26 @@ it("invalidates cutoff events without marking ambiguous millisecond deliveries r
 it("preserves single-item and legacy all-read reducers and ignores another profile", () => {
   const client = new QueryClient();
   const key = notificationInboxKeys.list("all");
-  client.setQueryData(key, { pages: [{ notifications: [row] }], pageParams: [undefined] });
-  client.setQueryData(notificationInboxKeys.count(), 1);
+  client.setQueryData(key, {
+    pages: [{ notifications: [row, { ...row, id: "delivery-2" }] }],
+    pageParams: [undefined],
+  });
+  client.setQueryData(notificationInboxKeys.count(), 2);
   applyNotificationRead(client, { profile_id: "other", all: true });
-  expect(client.getQueryData(notificationInboxKeys.count())).toBe(1);
+  expect(client.getQueryData(notificationInboxKeys.count())).toBe(2);
   applyNotificationRead(client, { profile_id: "owner", id: row.id });
-  expect(client.getQueryData(notificationInboxKeys.count())).toBe(0);
+  expect(client.getQueryData(notificationInboxKeys.count())).toBe(1);
   applyNotificationRead(client, { profile_id: "owner", all: true });
+  expect(client.getQueryData(notificationInboxKeys.count())).toBe(0);
   expect(client.getQueryData(key)).toMatchObject({
-    pages: [{ notifications: [{ id: row.id, read_at: expect.any(String) }] }],
+    pages: [
+      {
+        notifications: [
+          { id: row.id, read_at: expect.any(String) },
+          { id: "delivery-2", read_at: expect.any(String) },
+        ],
+      },
+    ],
   });
 });
 it("realtime prepends retain the displayed cutoff", () => {

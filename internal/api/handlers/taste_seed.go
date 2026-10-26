@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -55,8 +57,8 @@ func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *
 // HandleTasteSeed handles POST /recommendations/taste-seed.
 //
 // Accepts a list of item IDs the user picked in the taste-seeding UI and
-// records each as a favorite for the active profile, then queues a
-// taste-profile refresh.
+// records each as a favorite for the active profile, then refreshes its
+// recommendations (see SubmitTasteSeed).
 func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.Request) {
 	var req tasteSeedSubmitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,10 +101,10 @@ func (h *RecommendationsHandler) resolveTasteSeedUserStates(ctx context.Context,
 	return states
 }
 
-// tasteSeedSectionItem builds the trimmed section item used by the seed grid.
-// We only populate poster fields — the picker doesn't need overlays, ratings,
-// or progress.
-func (h *RecommendationsHandler) tasteSeedSectionItem(ctx context.Context, mi *models.MediaItem, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
+// tasteSeedSectionItem builds the trimmed section item used by the seed grid
+// from its resolved poster (see tasteSeedPosterURLs). We only populate poster
+// fields — the picker doesn't need overlays, ratings, or progress.
+func tasteSeedSectionItem(mi *models.MediaItem, stateMap map[string]*itemUserStateResponse, posterURL string) sectionItemResponse {
 	item := sectionItemResponse{
 		ContentID:       mi.ContentID,
 		Type:            mi.Type,
@@ -118,9 +120,7 @@ func (h *RecommendationsHandler) tasteSeedSectionItem(ctx context.Context, mi *m
 	if item.Keywords == nil {
 		item.Keywords = []string{}
 	}
-	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(ctx, cardThumbnailPath(mi.PosterPath), "card")
-	}
+	item.PosterURL = posterURL
 	if stateMap != nil {
 		item.UserState = stateMap[mi.ContentID]
 	}
@@ -146,4 +146,29 @@ func parseTasteSeedOffset(r *http.Request) int {
 		}
 	}
 	return 0
+}
+
+// tasteSeedPosterURLs resolves the seed grid's card posters in one batch, at
+// the request's poster size or width, keyed by content ID.
+func (h *RecommendationsHandler) tasteSeedPosterURLs(ctx context.Context, items []*models.MediaItem, art imagesize.Request) map[string]string {
+	urls := make(map[string]string, len(items))
+	if h.DetailSvc == nil || len(items) == 0 {
+		return urls
+	}
+	size := art.For(imagesize.SlotPoster)
+	sized := make(map[string]string, len(items))
+	paths := make([]string, 0, len(items))
+	for _, mi := range items {
+		if mi == nil {
+			continue
+		}
+		path := sizedCardPath(mi.PosterPath, artworkkey.ImagePoster, size)
+		sized[mi.ContentID] = path
+		paths = append(paths, path)
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("card", size))
+	for contentID, path := range sized {
+		urls[contentID] = resolved[path].URL
+	}
+	return urls
 }

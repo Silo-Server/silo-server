@@ -8,14 +8,25 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/proto"
+)
+
+// OAuth flow kinds: a web flow ends on the SPA completion page; a native
+// flow ends on the fixed app redirect and its completion code is bound to the
+// app's PKCE S256 challenge.
+const (
+	OAuthFlowWeb    = "web"
+	OAuthFlowNative = "native"
 )
 
 // OAuthSession is one in-flight OAuth authorization-code exchange.
@@ -24,8 +35,14 @@ import (
 // host on /init and verified on /callback. ProviderState is opaque JSON
 // the plugin returned from InitAuthorize and that the host round-trips
 // back on ExchangeCode (e.g., PKCE verifier, OIDC nonce). LinkingUserID
-// is empty when the flow is a fresh login; non-empty when an existing
-// user is attaching another identity from /me/account.
+// is empty when the flow is a fresh login; non-empty when a signed-in
+// account is linking the provider identity (started with a link ticket).
+//
+// BinderHash is the SHA-256 (hex) of the browser-binding cookie the start
+// set; the callback accepts only the browser holding that cookie. A native
+// flow also keeps the app's S256 CodeChallenge, its opaque AppState and its
+// StartOrigin, the origin where the native start first arrived, which every
+// app redirect of the flow names as iss.
 type OAuthSession struct {
 	State         string
 	InstallID     string
@@ -33,6 +50,11 @@ type OAuthSession struct {
 	LinkingUserID string
 	ProviderState []byte
 	NextURL       string
+	BinderHash    string
+	Kind          string
+	CodeChallenge string
+	AppState      string
+	StartOrigin   string
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 }
@@ -48,23 +70,158 @@ type OAuthStore interface {
 // ErrOAuthSessionNotFound is returned by GetAndDelete when no row matches.
 var ErrOAuthSessionNotFound = errors.New("oauth_session not found")
 
+// OAuthCompletion is the one-time code a successful sign-in callback
+// issues, redeemed once by the client that started the flow. The callback
+// resolves the account; the login session opens only when the code is
+// redeemed (OAuthSessionOpener), so a code nobody redeems leaves no session.
+// UserID, IdentityID, DeviceName and IP are what the session is opened with.
+// A native completion is bound to the app's S256 CodeChallenge.
+//
+// A redemption answers the session it opened: SessionID and the token pair
+// (AccessToken, RefreshToken, ExpiresIn), which are never stored. A second
+// redemption answers SessionID so the caller can revoke it.
 type OAuthCompletion struct {
-	Code         string
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int
-	NextURL      string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
+	Code          string
+	AccessToken   string
+	RefreshToken  string
+	ExpiresIn     int
+	NextURL       string
+	Kind          string
+	CodeChallenge string
+	// BrowserHash binds a web code to the browser the callback answered: the
+	// hex SHA-256 of the completion cookie's value (OAuthCompletionCookieName).
+	// Empty for a native code.
+	BrowserHash string
+	UserID      int
+	// User is the account read by the session opener during redemption. It
+	// is answered to the caller only and is never stored with the code.
+	User *models.User
+	// IdentityID is the external sign-in identity the session is opened
+	// through (plugin_auth_identities.id).
+	IdentityID int64
+	DeviceName string
+	IP         string
+	SessionID  string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
 }
 
+// OAuthSessionDB is the database handle a login session is opened on: the
+// redemption's transaction, or nil for an opener-owned transaction (the
+// in-memory store). The account is locked on it too, so a redemption
+// holding the code's row lock needs no second connection.
+type OAuthSessionDB interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// OAuthSessionOpener opens the login session of a completion code while
+// its redemption holds the code, on db (see OAuthSessionDB). An error leaves
+// the code unredeemed and no session open.
+type OAuthSessionOpener func(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error)
+
+// OAuthCompletionStore keeps completion codes. RedeemCompletion checks the
+// client (the PKCE verifier of a native code, the completion cookie of a web
+// code, browser), opens the code's session with open and marks the code used
+// with that session, all under one lock; a code redeemed before answers
+// ErrOAuthCompletionReused together with the completion naming the session
+// it opened, which the caller revokes.
 type OAuthCompletionStore interface {
 	InsertCompletion(ctx context.Context, c OAuthCompletion) error
-	GetAndDeleteCompletion(ctx context.Context, code string) (OAuthCompletion, error)
+	RedeemCompletion(ctx context.Context, code, verifier, browser string, open OAuthSessionOpener) (OAuthCompletion, error)
 	DeleteExpiredCompletions(ctx context.Context, now time.Time) (int, error)
 }
 
-var ErrOAuthCompletionNotFound = errors.New("oauth_completion not found")
+var (
+	ErrOAuthCompletionNotFound = errors.New("oauth_completion not found")
+	// ErrOAuthCompletionReused is a second redemption of a code.
+	ErrOAuthCompletionReused = errors.New("oauth_completion already redeemed")
+	// ErrOAuthInvalidGrant is a redemption whose client does not fit the
+	// code: a PKCE verifier missing or wrong for a native code, or a web code
+	// redeemed with a verifier or without the completion cookie of the
+	// browser the callback answered. The code stays redeemable by the right
+	// client.
+	ErrOAuthInvalidGrant = errors.New("oauth completion verifier does not match the code")
+	// ErrOAuthCompletionBrowser is the ErrOAuthInvalidGrant of a web code
+	// redeemed without the completion cookie of the browser the callback
+	// answered.
+	ErrOAuthCompletionBrowser = fmt.Errorf("%w: a web completion code is redeemed only by the browser that signed in", ErrOAuthInvalidGrant)
+)
+
+// oauthCompletionRetention is how long a completion row is kept after its
+// redemption deadline, so a late second redemption is still recognized as
+// reuse.
+const oauthCompletionRetention = 10 * time.Minute
+
+// OAuthLinkTicket lets a signed-in account start a linking flow in a
+// browser that has no bearer token. Only its hash is stored.
+type OAuthLinkTicket struct {
+	Ticket         string
+	UserID         int
+	InstallationID int
+	ExpiresAt      time.Time
+}
+
+// OAuthLinkTicketStore keeps link tickets; ConsumeLinkTicket deletes the
+// ticket it returns, so a ticket starts at most one flow.
+type OAuthLinkTicketStore interface {
+	InsertLinkTicket(ctx context.Context, t OAuthLinkTicket) error
+	ConsumeLinkTicket(ctx context.Context, ticket string) (OAuthLinkTicket, error)
+}
+
+// ErrOAuthLinkTicketInvalid is an unknown, used or expired link ticket.
+var ErrOAuthLinkTicketInvalid = errors.New("oauth link ticket invalid or expired")
+
+// OAuthPendingLink is a native app's linking flow waiting for the app: the
+// callback parked the provider's answer under a one-time code bound to the
+// app's S256 CodeChallenge, and the link is made only when the app redeems
+// the code with its verifier and the bearer token of UserID, the account the
+// link ticket was issued to.
+type OAuthPendingLink struct {
+	Code           string
+	UserID         int
+	InstallationID int
+	CapabilityID   string
+	CodeChallenge  string
+	Response       *pluginv1.AuthenticateResponse
+	ExpiresAt      time.Time
+}
+
+// OAuthPendingLinkStore keeps pending links. RedeemPendingLink checks the
+// verifier (a mismatch is ErrOAuthInvalidGrant and leaves the link
+// redeemable) and the account, then deletes the row it returns, so a code
+// links at most once.
+type OAuthPendingLinkStore interface {
+	InsertPendingLink(ctx context.Context, l OAuthPendingLink) error
+	RedeemPendingLink(ctx context.Context, code, verifier string, userID int) (OAuthPendingLink, error)
+}
+
+// OAuthNativeStart is a native start that arrived on another origin than
+// the public URL, waiting for the browser to reach the public origin with
+// only the random ID: everything the flow needs, including the StartOrigin
+// its app redirects name as iss, stays on the server. LinkingUserID is the
+// account of the link ticket the start consumed, 0 for a sign-in.
+type OAuthNativeStart struct {
+	ID             string
+	InstallationID int
+	CodeChallenge  string
+	AppState       string
+	Prompt         string
+	LinkingUserID  int
+	StartOrigin    string
+	ExpiresAt      time.Time
+}
+
+// OAuthNativeStartStore keeps native starts on their way to the public
+// origin. ConsumeNativeStart deletes the start it returns, so an ID opens at
+// most one flow.
+type OAuthNativeStartStore interface {
+	InsertNativeStart(ctx context.Context, s OAuthNativeStart) error
+	ConsumeNativeStart(ctx context.Context, id string) (OAuthNativeStart, error)
+}
+
+// ErrOAuthNativeStartInvalid is an unknown, used or expired native start.
+var ErrOAuthNativeStartInvalid = errors.New("oauth native start unknown, used or expired")
 
 // PGOAuthStore is the Postgres-backed OAuthStore.
 type PGOAuthStore struct {
@@ -89,9 +246,11 @@ func (s *PGOAuthStore) Insert(ctx context.Context, sess OAuthSession) error {
 		return err
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO oauth_sessions (state, install_id, redirect_uri, linking_user_id, provider_state, next_url, expires_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7)
-	`, sess.State, sess.InstallID, sess.RedirectURI, sess.LinkingUserID, sess.ProviderState, sess.NextURL, sess.ExpiresAt)
+		INSERT INTO oauth_sessions (state, install_id, redirect_uri, linking_user_id, provider_state, next_url,
+			binder_hash, flow_kind, code_challenge, app_state, start_origin, expires_at)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12)
+	`, sess.State, sess.InstallID, sess.RedirectURI, sess.LinkingUserID, sess.ProviderState, sess.NextURL,
+		sess.BinderHash, sess.Kind, sess.CodeChallenge, sess.AppState, sess.StartOrigin, sess.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("insert oauth_session: %w", err)
 	}
@@ -101,10 +260,12 @@ func (s *PGOAuthStore) Insert(ctx context.Context, sess OAuthSession) error {
 func (s *PGOAuthStore) GetAndDelete(ctx context.Context, state string) (OAuthSession, error) {
 	row := s.pool.QueryRow(ctx, `
 		DELETE FROM oauth_sessions WHERE state = $1
-		RETURNING state, install_id, redirect_uri, COALESCE(linking_user_id, ''), provider_state, next_url, created_at, expires_at
+		RETURNING state, install_id, redirect_uri, COALESCE(linking_user_id, ''), provider_state, next_url,
+			binder_hash, flow_kind, code_challenge, app_state, start_origin, created_at, expires_at
 	`, state)
 	var out OAuthSession
-	if err := row.Scan(&out.State, &out.InstallID, &out.RedirectURI, &out.LinkingUserID, &out.ProviderState, &out.NextURL, &out.CreatedAt, &out.ExpiresAt); err != nil {
+	if err := row.Scan(&out.State, &out.InstallID, &out.RedirectURI, &out.LinkingUserID, &out.ProviderState, &out.NextURL,
+		&out.BinderHash, &out.Kind, &out.CodeChallenge, &out.AppState, &out.StartOrigin, &out.CreatedAt, &out.ExpiresAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return OAuthSession{}, ErrOAuthSessionNotFound
 		}
@@ -125,61 +286,359 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 	if err := validateCompletion(&c); err != nil {
 		return err
 	}
-	codeHash := oauthCompletionCodeHash(c.Code)
-	tokenCiphertext, err := s.encryptCompletionTokens(c, codeHash)
-	if err != nil {
-		return fmt.Errorf("encrypt oauth_completion tokens: %w", err)
-	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO oauth_completions (code_hash, token_ciphertext, expires_in, next_url, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`, codeHash, tokenCiphertext, c.ExpiresIn, c.NextURL, c.ExpiresAt)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_completions (code_hash, token_ciphertext, expires_in, next_url, flow_kind, code_challenge,
+			browser_hash, user_id, identity_id, device_name, ip_address, expires_at)
+		VALUES ($1, '', 0, $2, $3, $4, $5, $6, NULLIF($7, 0), $8, $9, $10)
+	`, oauthCompletionCodeHash(c.Code), c.NextURL, c.Kind, c.CodeChallenge, c.BrowserHash, c.UserID, c.IdentityID,
+		c.DeviceName, c.IP, c.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("insert oauth_completion: %w", err)
 	}
 	return nil
 }
 
-func (s *PGOAuthStore) GetAndDeleteCompletion(ctx context.Context, code string) (OAuthCompletion, error) {
+// RedeemCompletion checks the client, opens the code's session and marks
+// the code used in one transaction under a row lock, so two concurrent
+// redemptions cannot both succeed: the second waits, then sees the first's
+// mark and the session it opened, and reports reuse. The session is created
+// in the same transaction, so a redemption that fails opens none.
+func (s *PGOAuthStore) RedeemCompletion(ctx context.Context, code, verifier, browser string, open OAuthSessionOpener) (OAuthCompletion, error) {
 	codeHash := oauthCompletionCodeHash(code)
-	row := s.pool.QueryRow(ctx, `
-		DELETE FROM oauth_completions WHERE code_hash = $1 AND expires_at >= now()
-		RETURNING token_ciphertext, expires_in, next_url, created_at, expires_at
-	`, codeHash)
 	var out OAuthCompletion
-	var tokenCiphertext string
-	if err := row.Scan(&tokenCiphertext, &out.ExpiresIn, &out.NextURL, &out.CreatedAt, &out.ExpiresAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return OAuthCompletion{}, ErrOAuthCompletionNotFound
+	// Lock the account before the completion, matching account deletion's
+	// user lock and cascade to completion rows. A refusal rolls back a
+	// transaction that wrote nothing.
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		lockedUserID, err := lockCompletionAccount(ctx, tx, codeHash, verifier, browser)
+		if err != nil {
+			return err
 		}
-		return OAuthCompletion{}, fmt.Errorf("get_and_delete oauth_completion: %w", err)
+		var userID *int
+		var identityID *int64
+		var redeemedAt *time.Time
+		err = tx.QueryRow(ctx, `
+			SELECT next_url, flow_kind, code_challenge, browser_hash, user_id, identity_id, device_name, ip_address,
+				session_id, redeemed_at, created_at, expires_at
+			FROM oauth_completions WHERE code_hash = $1 FOR UPDATE
+		`, codeHash).Scan(&out.NextURL, &out.Kind, &out.CodeChallenge, &out.BrowserHash, &userID, &identityID, &out.DeviceName,
+			&out.IP, &out.SessionID, &redeemedAt, &out.CreatedAt, &out.ExpiresAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOAuthCompletionNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select oauth_completion: %w", err)
+		}
+		if userID != nil {
+			out.UserID = *userID
+		}
+		if out.UserID != lockedUserID {
+			return ErrOAuthCompletionNotFound
+		}
+		if identityID != nil {
+			out.IdentityID = *identityID
+		}
+		out.Code = code
+		// The client proves itself before anything else (a native code with
+		// the verifier, a web code with the browser's completion cookie), so
+		// a code intercepted without that proof cannot even trigger the reuse
+		// revocation.
+		if err := checkCompletionClient(out, verifier, browser); err != nil {
+			return err
+		}
+		switch {
+		case redeemedAt != nil:
+			return ErrOAuthCompletionReused
+		case out.ExpiresAt.Before(time.Now()) || out.UserID <= 0:
+			// A row without an account was stored before codes opened their
+			// session at redemption.
+			return ErrOAuthCompletionNotFound
+		}
+		if out.Kind != OAuthFlowNative {
+			if err := checkCompletionVerifier(out, verifier); err != nil {
+				return err
+			}
+		}
+		if err := redeemWith(ctx, tx, open, &out); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE oauth_completions SET redeemed_at = NOW(), session_id = $2 WHERE code_hash = $1
+		`, codeHash, out.SessionID); err != nil {
+			return fmt.Errorf("redeem oauth_completion: %w", err)
+		}
+		return nil
+	})
+	switch {
+	case err == nil:
+		return out, nil
+	case errors.Is(err, ErrOAuthCompletionReused):
+		return OAuthCompletion{Code: code, UserID: out.UserID, SessionID: out.SessionID, Kind: out.Kind}, err
 	}
-	out.Code = code
-	if err := s.decryptCompletionTokens(tokenCiphertext, codeHash, &out); err != nil {
-		return OAuthCompletion{}, fmt.Errorf("decrypt oauth_completion tokens: %w", err)
-	}
-	return out, nil
+	return OAuthCompletion{}, err
 }
 
+// lockCompletionAccount proves the client from a preliminary read, then
+// locks the immutable account the completion names. The caller re-reads
+// the completion under its row lock before redeeming it.
+func lockCompletionAccount(ctx context.Context, tx pgx.Tx, codeHash, verifier, browser string) (int, error) {
+	var c OAuthCompletion
+	var userID *int
+	err := tx.QueryRow(ctx, `SELECT user_id, flow_kind, code_challenge, browser_hash
+		FROM oauth_completions WHERE code_hash = $1`, codeHash).
+		Scan(&userID, &c.Kind, &c.CodeChallenge, &c.BrowserHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read oauth completion account: %w", err)
+	}
+	if err := checkCompletionClient(c, verifier, browser); err != nil {
+		return 0, err
+	}
+	if userID == nil || *userID <= 0 {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	var lockedUserID int
+	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, *userID).Scan(&lockedUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrOAuthCompletionNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("lock oauth completion account: %w", err)
+	}
+	return lockedUserID, nil
+}
+
+// redeemWith opens the session of the completion being redeemed and fills
+// in the session and token pair it answers.
+func redeemWith(ctx context.Context, db OAuthSessionDB, open OAuthSessionOpener, c *OAuthCompletion) error {
+	if open == nil {
+		return errors.New("oauth completion has no session opener")
+	}
+	pair, err := open(ctx, db, *c)
+	if err != nil {
+		return fmt.Errorf("open oauth session: %w", err)
+	}
+	if pair == nil || pair.SessionID == "" {
+		return errors.New("open oauth session: no session opened")
+	}
+	if pair.User == nil || pair.User.ID != c.UserID {
+		return errors.New("open oauth session: account does not fit the completion")
+	}
+	c.AccessToken, c.RefreshToken, c.ExpiresIn, c.SessionID = pair.AccessToken, pair.RefreshToken, pair.ExpiresIn, pair.SessionID
+	c.User = pair.User
+	return nil
+}
+
+// DeleteExpiredCompletions deletes completion rows kept past their
+// reuse-detection window.
 func (s *PGOAuthStore) DeleteExpiredCompletions(ctx context.Context, now time.Time) (int, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completions WHERE expires_at < $1`, now)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completions WHERE expires_at < $1`, now.Add(-oauthCompletionRetention))
 	if err != nil {
 		return 0, fmt.Errorf("delete expired oauth_completion: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }
 
-type oauthCompletionTokenPayload struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+func (s *PGOAuthStore) InsertLinkTicket(ctx context.Context, t OAuthLinkTicket) error {
+	if t.Ticket == "" || t.UserID <= 0 || t.InstallationID <= 0 || t.ExpiresAt.IsZero() {
+		return fmt.Errorf("oauth_link_ticket: ticket, user, installation and expiry required")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_link_tickets (ticket_hash, user_id, installation_id, expires_at) VALUES ($1, $2, $3, $4)
+	`, oauthCompletionCodeHash(t.Ticket), t.UserID, t.InstallationID, t.ExpiresAt); err != nil {
+		return fmt.Errorf("insert oauth_link_ticket: %w", err)
+	}
+	return nil
 }
 
-func (s *PGOAuthStore) encryptCompletionTokens(c OAuthCompletion, codeHash string) (string, error) {
-	block, err := aes.NewCipher(s.completionKey[:])
+func (s *PGOAuthStore) ConsumeLinkTicket(ctx context.Context, ticket string) (OAuthLinkTicket, error) {
+	out := OAuthLinkTicket{Ticket: ticket}
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM oauth_link_tickets WHERE ticket_hash = $1
+		RETURNING user_id, installation_id, expires_at
+	`, oauthCompletionCodeHash(ticket)).Scan(&out.UserID, &out.InstallationID, &out.ExpiresAt)
 	if err != nil {
-		return "", err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return OAuthLinkTicket{}, ErrOAuthLinkTicketInvalid
+		}
+		return OAuthLinkTicket{}, fmt.Errorf("consume oauth_link_ticket: %w", err)
 	}
-	gcm, err := cipher.NewGCM(block)
+	if out.ExpiresAt.Before(time.Now()) {
+		return OAuthLinkTicket{}, ErrOAuthLinkTicketInvalid
+	}
+	return out, nil
+}
+
+// DeleteExpiredLinkTickets deletes link tickets past their expiry.
+func (s *PGOAuthStore) DeleteExpiredLinkTickets(ctx context.Context, now time.Time) (int, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_link_tickets WHERE expires_at < $1`, now)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired oauth_link_ticket: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (s *PGOAuthStore) InsertNativeStart(ctx context.Context, n OAuthNativeStart) error {
+	if err := validateNativeStart(n); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_native_starts (flow_hash, installation_id, code_challenge, app_state, prompt, linking_user_id,
+			start_origin, expires_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), $7, $8)
+	`, oauthCompletionCodeHash(n.ID), n.InstallationID, n.CodeChallenge, n.AppState, n.Prompt, n.LinkingUserID,
+		n.StartOrigin, n.ExpiresAt); err != nil {
+		return fmt.Errorf("insert oauth_native_start: %w", err)
+	}
+	return nil
+}
+
+func (s *PGOAuthStore) ConsumeNativeStart(ctx context.Context, id string) (OAuthNativeStart, error) {
+	out := OAuthNativeStart{ID: id}
+	var linkingUserID *int
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM oauth_native_starts WHERE flow_hash = $1
+		RETURNING installation_id, code_challenge, app_state, prompt, linking_user_id, start_origin, expires_at
+	`, oauthCompletionCodeHash(id)).Scan(&out.InstallationID, &out.CodeChallenge, &out.AppState, &out.Prompt,
+		&linkingUserID, &out.StartOrigin, &out.ExpiresAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return OAuthNativeStart{}, ErrOAuthNativeStartInvalid
+		}
+		return OAuthNativeStart{}, fmt.Errorf("consume oauth_native_start: %w", err)
+	}
+	if out.ExpiresAt.Before(time.Now()) {
+		return OAuthNativeStart{}, ErrOAuthNativeStartInvalid
+	}
+	if linkingUserID != nil {
+		out.LinkingUserID = *linkingUserID
+	}
+	return out, nil
+}
+
+// DeleteExpiredNativeStarts deletes native starts past their expiry.
+func (s *PGOAuthStore) DeleteExpiredNativeStarts(ctx context.Context, now time.Time) (int, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_native_starts WHERE expires_at < $1`, now)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired oauth_native_start: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// pendingLinkAAD binds a pending link's encrypted answer to its code.
+func pendingLinkAAD(codeHash string) string { return "oauth_pending_links:" + codeHash }
+
+func (s *PGOAuthStore) InsertPendingLink(ctx context.Context, l OAuthPendingLink) error {
+	if err := validatePendingLink(l); err != nil {
+		return err
+	}
+	raw, err := proto.Marshal(l.Response)
+	if err != nil {
+		return fmt.Errorf("encode oauth_pending_link: %w", err)
+	}
+	codeHash := oauthCompletionCodeHash(l.Code)
+	payload, err := s.seal(raw, pendingLinkAAD(codeHash))
+	if err != nil {
+		return fmt.Errorf("encrypt oauth_pending_link: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_pending_links (code_hash, user_id, installation_id, capability_id, code_challenge, payload, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, codeHash, l.UserID, l.InstallationID, l.CapabilityID, l.CodeChallenge, payload, l.ExpiresAt); err != nil {
+		return fmt.Errorf("insert oauth_pending_link: %w", err)
+	}
+	return nil
+}
+
+// RedeemPendingLink checks the verifier and the account under a row lock
+// and deletes the link it returns. A wrong verifier leaves the link for the
+// app that holds the right one; a different account removes it.
+func (s *PGOAuthStore) RedeemPendingLink(ctx context.Context, code, verifier string, userID int) (OAuthPendingLink, error) {
+	codeHash := oauthCompletionCodeHash(code)
+	var out OAuthPendingLink
+	var payload string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			SELECT user_id, installation_id, capability_id, code_challenge, payload, expires_at
+			FROM oauth_pending_links WHERE code_hash = $1 FOR UPDATE
+		`, codeHash).Scan(&out.UserID, &out.InstallationID, &out.CapabilityID, &out.CodeChallenge, &payload, &out.ExpiresAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOAuthCompletionNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select oauth_pending_link: %w", err)
+		}
+		if out.ExpiresAt.Before(time.Now()) {
+			return ErrOAuthCompletionNotFound
+		}
+		if err := checkCompletionVerifier(OAuthCompletion{Kind: OAuthFlowNative, CodeChallenge: out.CodeChallenge}, verifier); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM oauth_pending_links WHERE code_hash = $1`, codeHash); err != nil {
+			return fmt.Errorf("redeem oauth_pending_link: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return OAuthPendingLink{}, err
+	}
+	if out.UserID != userID {
+		return OAuthPendingLink{}, ErrOAuthCompletionNotFound
+	}
+	raw, err := s.open(payload, pendingLinkAAD(codeHash))
+	if err != nil {
+		return OAuthPendingLink{}, fmt.Errorf("decrypt oauth_pending_link: %w", err)
+	}
+	out.Response = &pluginv1.AuthenticateResponse{}
+	if err := proto.Unmarshal(raw, out.Response); err != nil {
+		return OAuthPendingLink{}, fmt.Errorf("decode oauth_pending_link: %w", err)
+	}
+	out.Code = code
+	return out, nil
+}
+
+// DeleteExpiredPendingLinks deletes pending links past their expiry.
+func (s *PGOAuthStore) DeleteExpiredPendingLinks(ctx context.Context, now time.Time) (int, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_pending_links WHERE expires_at < $1`, now)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired oauth_pending_link: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// OAuthExpiredFlowGrace is how long an expired flow row (and its browser
+// binding cookie) is kept, so a callback that arrives after the flow expired
+// still reaches the flow's own client with session_expired instead of the
+// web login's state_invalid.
+const OAuthExpiredFlowGrace = time.Hour
+
+// DeleteExpiredFlows removes every expired OAuth flow row: flows (after
+// OAuthExpiredFlowGrace), completion codes past their reuse window, link
+// tickets, pending links and native starts. The cleanup_oauth_flows task
+// runs it; nothing else removes abandoned flows.
+func (s *PGOAuthStore) DeleteExpiredFlows(ctx context.Context) (int, error) {
+	now := time.Now()
+	total := 0
+	for _, deleteExpired := range []func(context.Context, time.Time) (int, error){
+		func(ctx context.Context, now time.Time) (int, error) {
+			return s.DeleteExpired(ctx, now.Add(-OAuthExpiredFlowGrace))
+		},
+		s.DeleteExpiredCompletions, s.DeleteExpiredLinkTickets, s.DeleteExpiredPendingLinks, s.DeleteExpiredNativeStarts,
+	} {
+		n, err := deleteExpired(ctx, now)
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+// seal encrypts plaintext with the completion key (AES-GCM) bound to aad.
+func (s *PGOAuthStore) seal(plaintext []byte, aad string) (string, error) {
+	gcm, err := s.completionAEAD()
 	if err != nil {
 		return "", err
 	}
@@ -187,45 +646,33 @@ func (s *PGOAuthStore) encryptCompletionTokens(c OAuthCompletion, codeHash strin
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	plaintext, err := json.Marshal(oauthCompletionTokenPayload{
-		AccessToken:  c.AccessToken,
-		RefreshToken: c.RefreshToken,
-	})
-	if err != nil {
-		return "", err
-	}
-	sealed := gcm.Seal(nonce, nonce, plaintext, []byte(codeHash))
+	sealed := gcm.Seal(nonce, nonce, plaintext, []byte(aad))
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
 }
 
-func (s *PGOAuthStore) decryptCompletionTokens(ciphertext, codeHash string, out *OAuthCompletion) error {
+// open reverses seal.
+func (s *PGOAuthStore) open(ciphertext, aad string) ([]byte, error) {
 	sealed, err := base64.RawURLEncoding.DecodeString(ciphertext)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	block, err := aes.NewCipher(s.completionKey[:])
+	gcm, err := s.completionAEAD()
 	if err != nil {
-		return err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(sealed) < gcm.NonceSize() {
-		return fmt.Errorf("ciphertext too short")
+		return nil, fmt.Errorf("ciphertext too short")
 	}
 	nonce, body := sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():]
-	plaintext, err := gcm.Open(nil, nonce, body, []byte(codeHash))
+	return gcm.Open(nil, nonce, body, []byte(aad))
+}
+
+func (s *PGOAuthStore) completionAEAD() (cipher.AEAD, error) {
+	block, err := aes.NewCipher(s.completionKey[:])
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var payload oauthCompletionTokenPayload
-	if err := json.Unmarshal(plaintext, &payload); err != nil {
-		return err
-	}
-	out.AccessToken = payload.AccessToken
-	out.RefreshToken = payload.RefreshToken
-	return nil
+	return cipher.NewGCM(block)
 }
 
 func oauthCompletionCodeHash(code string) string {
@@ -238,12 +685,20 @@ type InMemoryOAuthStore struct {
 	mu          sync.Mutex
 	rows        map[string]OAuthSession
 	completions map[string]OAuthCompletion
+	redeemed    map[string]bool
+	tickets     map[string]OAuthLinkTicket
+	links       map[string]OAuthPendingLink
+	starts      map[string]OAuthNativeStart
 }
 
 func NewInMemoryOAuthStore() *InMemoryOAuthStore {
 	return &InMemoryOAuthStore{
 		rows:        make(map[string]OAuthSession),
 		completions: make(map[string]OAuthCompletion),
+		redeemed:    make(map[string]bool),
+		tickets:     make(map[string]OAuthLinkTicket),
+		links:       make(map[string]OAuthPendingLink),
+		starts:      make(map[string]OAuthNativeStart),
 	}
 }
 
@@ -303,15 +758,33 @@ func (s *InMemoryOAuthStore) InsertCompletion(_ context.Context, c OAuthCompleti
 	return nil
 }
 
-func (s *InMemoryOAuthStore) GetAndDeleteCompletion(_ context.Context, code string) (OAuthCompletion, error) {
+func (s *InMemoryOAuthStore) RedeemCompletion(ctx context.Context, code, verifier, browser string, open OAuthSessionOpener) (OAuthCompletion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.completions[code]
-	if !ok || c.ExpiresAt.Before(time.Now().UTC()) {
-		delete(s.completions, code)
+	if !ok {
 		return OAuthCompletion{}, ErrOAuthCompletionNotFound
 	}
-	delete(s.completions, code)
+	if err := checkCompletionClient(c, verifier, browser); err != nil {
+		return OAuthCompletion{}, err
+	}
+	if s.redeemed[code] {
+		return OAuthCompletion{Code: code, UserID: c.UserID, SessionID: c.SessionID, Kind: c.Kind}, ErrOAuthCompletionReused
+	}
+	if c.ExpiresAt.Before(time.Now().UTC()) {
+		return OAuthCompletion{}, ErrOAuthCompletionNotFound
+	}
+	if c.Kind != OAuthFlowNative {
+		if err := checkCompletionVerifier(c, verifier); err != nil {
+			return OAuthCompletion{}, err
+		}
+	}
+	if err := redeemWith(ctx, nil, open, &c); err != nil {
+		return OAuthCompletion{}, err
+	}
+	s.redeemed[code] = true
+	s.completions[code] = OAuthCompletion{Code: code, UserID: c.UserID, SessionID: c.SessionID, Kind: c.Kind,
+		CodeChallenge: c.CodeChallenge, BrowserHash: c.BrowserHash, ExpiresAt: c.ExpiresAt}
 	return c, nil
 }
 
@@ -320,12 +793,96 @@ func (s *InMemoryOAuthStore) DeleteExpiredCompletions(_ context.Context, now tim
 	defer s.mu.Unlock()
 	n := 0
 	for k, v := range s.completions {
-		if v.ExpiresAt.Before(now) {
+		if v.ExpiresAt.Before(now.Add(-oauthCompletionRetention)) {
 			delete(s.completions, k)
+			delete(s.redeemed, k)
 			n++
 		}
 	}
 	return n, nil
+}
+
+func (s *InMemoryOAuthStore) InsertLinkTicket(_ context.Context, t OAuthLinkTicket) error {
+	if t.Ticket == "" || t.UserID <= 0 || t.InstallationID <= 0 || t.ExpiresAt.IsZero() {
+		return fmt.Errorf("oauth_link_ticket: ticket, user, installation and expiry required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tickets[t.Ticket] = t
+	return nil
+}
+
+func (s *InMemoryOAuthStore) ConsumeLinkTicket(_ context.Context, ticket string) (OAuthLinkTicket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tickets[ticket]
+	delete(s.tickets, ticket)
+	if !ok || t.ExpiresAt.Before(time.Now()) {
+		return OAuthLinkTicket{}, ErrOAuthLinkTicketInvalid
+	}
+	return t, nil
+}
+
+func (s *InMemoryOAuthStore) InsertPendingLink(_ context.Context, l OAuthPendingLink) error {
+	if err := validatePendingLink(l); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.links[l.Code] = l
+	return nil
+}
+
+func (s *InMemoryOAuthStore) RedeemPendingLink(_ context.Context, code, verifier string, userID int) (OAuthPendingLink, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.links[code]
+	if !ok || l.ExpiresAt.Before(time.Now()) {
+		return OAuthPendingLink{}, ErrOAuthCompletionNotFound
+	}
+	if err := checkCompletionVerifier(OAuthCompletion{Kind: OAuthFlowNative, CodeChallenge: l.CodeChallenge}, verifier); err != nil {
+		return OAuthPendingLink{}, err
+	}
+	delete(s.links, code)
+	if l.UserID != userID {
+		return OAuthPendingLink{}, ErrOAuthCompletionNotFound
+	}
+	return l, nil
+}
+
+func (s *InMemoryOAuthStore) InsertNativeStart(_ context.Context, n OAuthNativeStart) error {
+	if err := validateNativeStart(n); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starts[n.ID] = n
+	return nil
+}
+
+func (s *InMemoryOAuthStore) ConsumeNativeStart(_ context.Context, id string) (OAuthNativeStart, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, ok := s.starts[id]
+	delete(s.starts, id)
+	if !ok || n.ExpiresAt.Before(time.Now()) {
+		return OAuthNativeStart{}, ErrOAuthNativeStartInvalid
+	}
+	return n, nil
+}
+
+func validateNativeStart(n OAuthNativeStart) error {
+	if n.ID == "" || n.InstallationID <= 0 || n.CodeChallenge == "" || n.AppState == "" || n.StartOrigin == "" || n.ExpiresAt.IsZero() {
+		return fmt.Errorf("oauth_native_start: id, installation, challenge, app state, start origin and expiry required")
+	}
+	return nil
+}
+
+func validatePendingLink(l OAuthPendingLink) error {
+	if l.Code == "" || l.UserID <= 0 || l.InstallationID <= 0 || l.CodeChallenge == "" || l.Response == nil || l.ExpiresAt.IsZero() {
+		return fmt.Errorf("oauth_pending_link: code, user, installation, challenge, answer and expiry required")
+	}
+	return nil
 }
 
 func validateSession(sess *OAuthSession) error {
@@ -344,6 +901,18 @@ func validateSession(sess *OAuthSession) error {
 	if len(sess.ProviderState) == 0 {
 		sess.ProviderState = []byte("{}")
 	}
+	if sess.Kind == "" {
+		sess.Kind = OAuthFlowWeb
+	}
+	if sess.Kind != OAuthFlowWeb && sess.Kind != OAuthFlowNative {
+		return fmt.Errorf("oauth_session: unknown flow kind %q", sess.Kind)
+	}
+	if sess.Kind == OAuthFlowNative && sess.CodeChallenge == "" {
+		return fmt.Errorf("oauth_session: native flows require a code challenge")
+	}
+	if sess.Kind == OAuthFlowNative && sess.StartOrigin == "" {
+		return fmt.Errorf("oauth_session: native flows require a start origin")
+	}
 	return nil
 }
 
@@ -351,17 +920,26 @@ func validateCompletion(c *OAuthCompletion) error {
 	if c.Code == "" {
 		return fmt.Errorf("oauth_completion: code required")
 	}
-	if c.AccessToken == "" || c.RefreshToken == "" {
-		return fmt.Errorf("oauth_completion: tokens required")
-	}
-	if c.ExpiresIn <= 0 {
-		return fmt.Errorf("oauth_completion: expires_in required")
+	if c.UserID <= 0 {
+		return fmt.Errorf("oauth_completion: account required")
 	}
 	if c.ExpiresAt.IsZero() {
 		return fmt.Errorf("oauth_completion: expires_at required")
 	}
 	if c.NextURL == "" {
 		c.NextURL = "/"
+	}
+	if c.Kind == "" {
+		c.Kind = OAuthFlowWeb
+	}
+	if c.Kind != OAuthFlowWeb && c.Kind != OAuthFlowNative {
+		return fmt.Errorf("oauth_completion: unknown flow kind %q", c.Kind)
+	}
+	if c.Kind == OAuthFlowNative && c.CodeChallenge == "" {
+		return fmt.Errorf("oauth_completion: native completions require a code challenge")
+	}
+	if c.Kind == OAuthFlowWeb && c.BrowserHash == "" {
+		return fmt.Errorf("oauth_completion: web completions require a browser binding")
 	}
 	return nil
 }

@@ -72,10 +72,30 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// callerProviderIDs is ProviderIDs as the caller sent it, before
+	// prepareProcessRequest merges in the item's durable IDs.
+	callerProviderIDs map[string]string
+	// durableProviderIDs is the item's stored provider-ID rows as loaded,
+	// before any request IDs are merged with them.
+	durableProviderIDs map[string]string
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
 	enrichmentOnly bool
+	// localReapply marks a write of an item's changed local sidecar metadata
+	// (local_reapply.go): the local provider's fields replace unlocked stored
+	// ones, and like an enrichment write it leaves identity, refresh
+	// bookkeeping, videos, seasons and episodes alone.
+	localReapply bool
+	// fallback is the fallback-language text processInternal fetched for the
+	// gaps its providers left; mergeAndPersist applies it to a base-row write.
+	fallback *fallbackText
+}
+
+// writesFieldsOnly reports whether the request merges provider fields into an
+// existing item without the rest of a refresh.
+func (r ProcessRequest) writesFieldsOnly() bool {
+	return r.enrichmentOnly || r.localReapply
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -84,6 +104,10 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
+	// Pinned reports that automatic matching skipped an item an admin left
+	// unmatched on purpose, by ignoring it or by splitting it off unmatched.
+	// It is a completed outcome, not a failure.
+	Pinned bool
 }
 
 // MatchDecision is a bounded, persistence-safe explanation of an automatic
@@ -93,6 +117,10 @@ type MatchDecision struct {
 	CandidateCount int                      `json:"candidate_count"`
 	Threshold      float64                  `json:"threshold"`
 	TopCandidates  []MatchDecisionCandidate `json:"top_candidates,omitempty"`
+	// localSidecarUnreadable marks a transient outcome caused by a local
+	// sidecar (NFO) the server could not read rather than by a provider, so
+	// the queue's message points at the share instead of a provider outage.
+	localSidecarUnreadable bool
 }
 
 type MatchDecisionCandidate struct {
@@ -193,7 +221,7 @@ type SearchResult struct {
 // TitleAlias is a provider-confirmed title for the same work.
 type TitleAlias struct {
 	Title    string `json:"title"`
-	Language string `json:"language,omitempty"`
+	Language string `json:"language,omitempty" doc:"Language of the alias as the provider reports it, usually ISO 639-1"`
 	Kind     string `json:"kind"`
 	Provider string `json:"provider,omitempty"`
 }
@@ -261,6 +289,13 @@ type MetadataResult struct {
 	TitleAliasesComplete bool
 	TitleLanguage        string
 	TitleIsFallback      bool
+	// OverviewLanguage is the language of Overview and Tagline when a provider
+	// reported them in a language other than the requested one; empty means
+	// the requested language or unknown.
+	OverviewLanguage string
+	// taglineLanguage is OverviewLanguage of the provider Tagline came from,
+	// which need not be the one Overview came from.
+	taglineLanguage string
 	// titleAliasProviders records whether each contributing provider declared
 	// its aliases to be an authoritative snapshot. False means merge-only,
 	// which is the safe default for legacy plugins and partial responses.
@@ -271,13 +306,20 @@ type MetadataResult struct {
 	// replacedProviderIDKeys forces an owning-provider consensus replacement to
 	// overwrite the corresponding stored provider-ID column during merge.
 	replacedProviderIDKeys map[string]struct{}
+	// rejectedIdentityProviderIDs holds the stored identity values an Identify
+	// or corrected NFO rejected. They are suppressed by value, so a re-anchor
+	// that merges into another item keeps that item's own IDs.
+	rejectedIdentityProviderIDs providerIDValueSet
 	// recordedStaleProviderIDs contains provider values known dead before this
 	// refresh and suppresses them when durable state is merged.
 	recordedStaleProviderIDs providerIDValueSet
 	// sameRunStaleProviderIDs contains identity values that 404ed during this
 	// refresh and prevents them from being persisted by the same operation.
 	sameRunStaleProviderIDs providerIDValueSet
-	ContentRating           string
+	// localLists records, on a pipeline run's accumulator, which lists the
+	// local provider supplied; remote results may not extend them.
+	localLists    localListFields
+	ContentRating string
 	// AdvisoryAge is a recommended minimum viewer age from an advisory service,
 	// 0 when none was reported. It never feeds a content-rating ceiling.
 	AdvisoryAge int
@@ -350,6 +392,9 @@ type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// SeasonNumber is present only for an exact season artwork gallery. A
+	// pointer distinguishes Specials (0) from an item-level request.
+	SeasonNumber *int
 	// Local sidecar context (additive; empty for purely remote providers).
 	// RepresentativeFilePath is the group's representative media file,
 	// AllGroupFilePaths are every file in the content group, and
@@ -370,6 +415,7 @@ type RemoteImage struct {
 	Height       int
 	Rating       float64 // Vote average for ordering
 	IncludesText *bool   // nil when the provider does not report text presence
+	SeasonNumber *int    // present only when the provider confirms exact season scope
 }
 
 // ImageType classifies image purpose.
@@ -381,6 +427,10 @@ const (
 	ImageLogo
 	ImageStill // Episode stills
 	ImageProfile
+	ImageBanner   // Wide banner strip (Kodi banner.jpg)
+	ImageThumb    // Landscape thumb (Kodi landscape.jpg)
+	ImageClearArt // Transparent cut-out art (clearart.png)
+	ImageDisc     // Disc art (disc.png, cdart.png, discart.png)
 )
 
 // CacheImageRequest describes an image to be cached. For season posters
@@ -440,9 +490,12 @@ type SeasonsRequest struct {
 	// SeriesRootPaths are directories already validated as safe for
 	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
 	// each directory-derived season number to its candidate directories.
-	// Both are empty for purely remote providers, which key off ProviderIDs.
+	// ShowFilePaths lists every cataloged media file of the show; a local
+	// provider reads a season folder only while one of them is still in it.
+	// All are empty for purely remote providers, which key off ProviderIDs.
 	SeriesRootPaths      []string
 	SeasonDirectoryPaths map[int][]string
+	ShowFilePaths        []string
 }
 
 // EpisodesRequest is passed to EpisodeProvider.GetEpisodes().
@@ -453,35 +506,60 @@ type EpisodesRequest struct {
 	// Local sidecar context (additive, internal). SeriesRootPaths as on
 	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
 	// number within SeasonNumber to that episode's media file paths.
+	// ShowFilePaths lists every cataloged media file of the show; a local
+	// provider checks them, with EpisodeFilePaths' files, to tell a deleted
+	// file from a missing share (seasons can share one folder), and reads
+	// sidecars only for EpisodeFilePaths.
 	SeriesRootPaths  []string
 	EpisodeFilePaths map[int][]string
+	ShowFilePaths    []string
 }
 
 // SeasonResult carries season data from a provider.
 type SeasonResult struct {
-	ContentID        string
-	SeasonNumber     int
-	Title            string
-	Overview         string
+	ContentID    string
+	SeasonNumber int
+	Title        string
+	Overview     string
+	// TitleLanguage and OverviewLanguage follow MetadataResult.OverviewLanguage.
+	TitleLanguage    string
+	OverviewLanguage string
 	AirDate          string
 	PosterPath       string
 	PosterSourcePath string
 	PosterThumbhash  string
 	Episodes         []EpisodeResult
+
+	// remotePosterPath keeps the best remote poster when a local sidecar
+	// poster won the merge (preferLocalSeasonPoster). Local art belongs to the
+	// base season row, so a write that only touches the localization row uses
+	// this provider poster instead.
+	remotePosterPath      string
+	remotePosterThumbhash string
 }
 
 // EpisodeResult carries episode data from a provider.
 type EpisodeResult struct {
-	ContentID       string
-	ProviderIDs     map[string]string
-	SeasonNumber    int
-	EpisodeNumber   int
-	Title           string
-	Overview        string
-	AirDate         string
-	Runtime         int
-	Ratings         Ratings
-	StillPath       string
-	StillSourcePath string
-	StillThumbhash  string
+	ContentID     string
+	ProviderIDs   map[string]string
+	SeasonNumber  int
+	EpisodeNumber int
+	Title         string
+	Overview      string
+	// TitleLanguage and OverviewLanguage follow MetadataResult.OverviewLanguage.
+	TitleLanguage    string
+	OverviewLanguage string
+	AirDate          string
+	Runtime          int
+	Ratings          Ratings
+	StillPath        string
+	StillSourcePath  string
+	StillThumbhash   string
+
+	// stillFallback is the remote still a local one displaced while results
+	// merged; the episode shows it until the local copy is cached.
+	stillFallback string
+	// titleLocal marks a title from the library's own files, which stands
+	// even when it looks like a numbered stand-in.
+	titleLocal bool
 }

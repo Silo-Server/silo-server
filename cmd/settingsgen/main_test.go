@@ -30,6 +30,9 @@ func TestPresentationMetadataIsGeneratedForEveryClientLanguage(t *testing.T) {
 				// settings that do not apply to the device being edited.
 				`platforms: ["web"]`,
 				`platforms: ["ios", "android"]`,
+				// The device settings screen names an inherited value a server
+				// default rather than an app default when an admin can set it.
+				`adminDefault: true`,
 			},
 		},
 		{

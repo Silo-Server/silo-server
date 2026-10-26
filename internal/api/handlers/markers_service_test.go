@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"reflect"
@@ -42,10 +43,11 @@ type markerServiceNotifier struct{ calls int }
 func (n *markerServiceNotifier) MarkersUpdated(context.Context, *models.MediaFile) { n.calls++ }
 
 func markerServiceFixture() (*MarkersHandler, *markerServiceWriter, *markerServiceNotifier) {
-	files := fakeMarkerFiles{file: &models.MediaFile{ID: 5, ContentID: "item", Duration: 100}}
+	file := &models.MediaFile{ID: 5, ContentID: "item", Duration: 100}
+	files := fakeMarkerFiles{file: file, contentFiles: []*models.MediaFile{file}}
 	writer := &markerServiceWriter{}
 	notifier := &markerServiceNotifier{}
-	h := NewMarkersHandler(files, writer, nil, nil, notifier, nil)
+	h := newTestMarkersHandler(files, writer, nil, nil, notifier, nil)
 	h.Authorizer = &MediaFileAuthorizer{FileResolver: files, ItemAccess: stubItemAccessChecker{}}
 	return h, writer, notifier
 }
@@ -82,7 +84,7 @@ func TestMarkerServiceItemSkipsInaccessibleFile(t *testing.T) {
 	second := &models.MediaFile{ID: 2, ContentID: "allowed", Duration: 100}
 	files := fakeMarkerFiles{byID: map[int]*models.MediaFile{1: first, 2: second}, contentFiles: []*models.MediaFile{nil, first, second}}
 	writer := &markerServiceWriter{}
-	h := NewMarkersHandler(files, writer, nil, nil, nil, nil)
+	h := newTestMarkersHandler(files, writer, nil, nil, nil, nil)
 	var checked []string
 	h.Authorizer = &MediaFileAuthorizer{FileResolver: files, ItemAccess: markerServiceAccess(func(_ context.Context, id string, access catalog.AccessFilter) error {
 		checked = append(checked, id)
@@ -105,10 +107,12 @@ func TestMarkerServiceItemSkipsInaccessibleFile(t *testing.T) {
 
 func TestMarkerServiceValidatesWholeChangeBeforeWriting(t *testing.T) {
 	tests := map[string]MarkerChanges{
-		"invalid bounds":  {"intro": {End: new(10.0)}, "credits": nil, "preview": {Start: new(90.0), End: new(80.0)}},
-		"unknown segment": {"intro": {End: new(10.0)}, "unknown": nil},
-		"beyond duration": {"intro": {End: new(102.0)}},
-		"nonfinite":       {"intro": {End: new(math.NaN())}},
+		"invalid bounds":                        {"intro": {End: new(10.0)}, "credits": nil, "preview": {Start: new(90.0), End: new(80.0)}},
+		"unknown segment":                       {"intro": {End: new(10.0)}, "unknown": nil},
+		"beyond duration":                       {"intro": {End: new(102.0)}},
+		"nonfinite":                             {"intro": {End: new(math.NaN())}},
+		"credits at the intro":                  {"intro": {Start: new(5.0), End: new(80.0)}, "credits": {Start: new(76.0)}},
+		"credits before the end-credits window": {"credits": {Start: new(60.0)}},
 	}
 	for name, changes := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -127,7 +131,7 @@ func TestMarkerServicePresenceDefaultsAndAudit(t *testing.T) {
 	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 7, APIKeyID: 9, ImpersonatorUserID: new(8)})
 	ctx = MarkerRequestAuditContext(ctx, "marker-service-test")
 	_, err := h.SetMarkers(ctx, catalog.AccessFilter{}, MarkerTarget{FileID: 5}, MarkerChanges{
-		"intro": {End: new(10.0)}, "credits": {Start: new(90.0)}, "recap": nil,
+		"intro": {End: new(10.0)}, "credits": {Start: new(80.0)}, "recap": nil,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,5 +195,41 @@ func TestMarkerServiceWriterCancellationPreserved(t *testing.T) {
 	}
 	if w.calls != 1 || n.calls != 0 {
 		t.Fatalf("writes=%d notifications=%d", w.calls, n.calls)
+	}
+}
+
+// A configured library lookup is required for every manual write. Most service
+// fixtures represent movies; individual tests override the owning library kind.
+type markerLibraryFixture struct {
+	kind string
+	err  error
+}
+
+func (f markerLibraryFixture) GetByID(context.Context, int) (*models.MediaFolder, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &models.MediaFolder{Type: f.kind}, nil
+}
+func newTestMarkersHandler(files MarkerFileResolver, writer ManualMarkerWriter, contributor MarkerContributor, contributions MarkerContributionLister, notifier PlaybackMarkerUpdateNotifier, logger *slog.Logger) *MarkersHandler {
+	h := NewMarkersHandler(files, writer, contributor, contributions, notifier, logger)
+	h.Libraries = markerLibraryFixture{kind: "movies"}
+	return h
+}
+func TestMarkerServiceRejectsUnsupportedLibrariesBeforeEffects(t *testing.T) {
+	for _, kind := range []string{"audiobooks", "ebooks", "podcasts", "manga"} {
+		for _, target := range []MarkerTarget{{FileID: 5}, {ItemID: "item"}} {
+			h, w, n := markerServiceFixture()
+			h.Libraries = markerLibraryFixture{kind: kind}
+			for _, changes := range []MarkerChanges{{"intro": {Start: new(10.0), End: new(30.0)}}, {"intro": nil}} {
+				_, err := h.SetMarkers(t.Context(), catalog.AccessFilter{}, target, changes)
+				requireMarkerServiceStatus(t, err, http.StatusUnprocessableEntity)
+			}
+			_, err := h.ClearMarker(t.Context(), catalog.AccessFilter{}, 5, "intro")
+			requireMarkerServiceStatus(t, err, http.StatusUnprocessableEntity)
+			if w.calls != 0 || n.calls != 0 {
+				t.Fatalf("%s caused effects: writes=%d notifications=%d", kind, w.calls, n.calls)
+			}
+		}
 	}
 }

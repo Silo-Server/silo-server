@@ -258,10 +258,32 @@ export function fieldIsVisible(
   );
 }
 
+export type BuildSchemaValuesOptions = {
+  /**
+   * Send an emptied non-secret field as an explicit clear ("" for a string
+   * field, null otherwise) instead of leaving it out. Plugin global config
+   * saves merge into the stored value, so an omitted field keeps what was
+   * saved; the server treats an explicit empty or null as clearing it.
+   * Secret fields stay omitted: a blank secret keeps the stored one, and
+   * clearing it is the separate clear_secrets action.
+   */
+  explicitClears?: boolean;
+};
+
+/**
+ * The explicit clear sent for an emptied field: "" for a declared (or
+ * text-control) string, null for numbers and dynamic selects.
+ */
+export function clearedFieldValue(field: PluginAdminFormField, fieldType?: FieldType): "" | null {
+  if (fieldType !== undefined) return fieldType === "string" ? "" : null;
+  return field.control === "NUMBER" || field.dynamic_options ? null : "";
+}
+
 export function buildSchemaValues(
   descriptor: PluginAdminForm,
   draft: Record<string, unknown>,
   fieldTypes?: Record<string, FieldType>,
+  options?: BuildSchemaValuesOptions,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const field of descriptor.fields) {
@@ -270,7 +292,12 @@ export function buildSchemaValues(
     // default persists exactly as it is displayed.
     const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;
     const coerced = coerceFieldValue(field, rawSource, fieldTypes?.[field.key]);
-    if (coerced === undefined) continue;
+    if (coerced === undefined) {
+      if (options?.explicitClears && !field.secret && field.control !== "PASSWORD") {
+        out[field.key] = clearedFieldValue(field, fieldTypes?.[field.key]);
+      }
+      continue;
+    }
     out[field.key] = coerced;
   }
   return out;

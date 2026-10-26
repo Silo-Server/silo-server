@@ -54,7 +54,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -171,7 +171,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -210,12 +210,12 @@
           {
             "pointer": "/verification_uri_complete",
             "op": "matches",
-            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+            "value": "/activate\\?code=[A-Z0-9]{8}$"
           },
           {
             "pointer": "/expires_in",
             "op": "equals",
-            "value": 600
+            "value": 900
           },
           {
             "pointer": "/interval",
@@ -362,7 +362,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -457,7 +457,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -574,7 +574,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -613,12 +613,12 @@
           {
             "pointer": "/verification_uri_complete",
             "op": "matches",
-            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+            "value": "/activate\\?code=[A-Z0-9]{8}$"
           },
           {
             "pointer": "/expires_in",
             "op": "equals",
-            "value": 600
+            "value": 900
           },
           {
             "pointer": "/interval",
@@ -765,7 +765,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "startDeviceLogin",
       "method": "POST",
@@ -1178,7 +1178,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "getDeviceLogin",
       "method": "GET",
@@ -1219,8 +1219,11 @@
               "device_platform",
               "ip_address_hint",
               "expires_at",
+              "requested_at",
               "client_purpose",
-              "temporary"
+              "temporary",
+              "server_id",
+              "server_name"
             ]
           },
           {
@@ -1232,6 +1235,15 @@
             "pointer": "/user_code",
             "op": "equals",
             "value": ""
+          },
+          {
+            "pointer": "/requested_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/server_name",
+            "op": "equals",
+            "value": "Silo"
           }
         ]
       }
@@ -1272,7 +1284,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "getDeviceLogin",
       "method": "GET",
@@ -1313,8 +1325,11 @@
               "device_platform",
               "ip_address_hint",
               "expires_at",
+              "requested_at",
               "client_purpose",
-              "temporary"
+              "temporary",
+              "server_id",
+              "server_name"
             ]
           },
           {
@@ -1326,6 +1341,15 @@
             "pointer": "/user_code",
             "op": "equals",
             "value": "FIXT-URE1"
+          },
+          {
+            "pointer": "/requested_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/server_name",
+            "op": "equals",
+            "value": "Silo"
           }
         ]
       }
@@ -1384,7 +1408,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "getDeviceLogin",
       "method": "GET",
@@ -1444,8 +1468,11 @@
               "device_platform",
               "ip_address_hint",
               "expires_at",
+              "requested_at",
               "client_purpose",
-              "temporary"
+              "temporary",
+              "server_id",
+              "server_name"
             ]
           },
           {
@@ -1457,6 +1484,15 @@
             "pointer": "/user_code",
             "op": "equals",
             "value": ""
+          },
+          {
+            "pointer": "/requested_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/server_name",
+            "op": "equals",
+            "value": "Silo"
           }
         ]
       }
@@ -1496,7 +1532,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "getDeviceLogin",
       "method": "GET",
@@ -1537,8 +1573,11 @@
               "device_platform",
               "ip_address_hint",
               "expires_at",
+              "requested_at",
               "client_purpose",
-              "temporary"
+              "temporary",
+              "server_id",
+              "server_name"
             ]
           },
           {
@@ -1550,6 +1589,15 @@
             "pointer": "/user_code",
             "op": "equals",
             "value": ""
+          },
+          {
+            "pointer": "/requested_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/server_name",
+            "op": "equals",
+            "value": "Silo"
           }
         ]
       }
@@ -1597,7 +1645,7 @@
     },
     "pair": {
       "kind": "intentional_difference",
-      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
       "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
       "operation_id": "getDeviceLogin",
       "method": "GET",
@@ -1633,8 +1681,11 @@
               "device_platform",
               "ip_address_hint",
               "expires_at",
+              "requested_at",
               "client_purpose",
-              "temporary"
+              "temporary",
+              "server_id",
+              "server_name"
             ]
           },
           {
@@ -1646,6 +1697,15 @@
             "pointer": "/user_code",
             "op": "equals",
             "value": ""
+          },
+          {
+            "pointer": "/requested_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/server_name",
+            "op": "equals",
+            "value": "Silo"
           }
         ]
       }

@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "id": "sub-1",
+      "profile_id": "p-owner",
+      "device_id": "device-tv",
+      "series_id": "series-1",
+      "series_title": "Synthetic Series",
+      "mode": "all",
+      "season_numbers": [],
+      "target_season": null,
+      "delete_watched": true,
+      "max_storage_bytes": 0,
+      "active": true,
+      "on_device": 3,
+      "in_progress": 1,
+      "removed_episodes": 2,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

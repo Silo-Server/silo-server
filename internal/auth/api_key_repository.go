@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,7 +20,7 @@ var (
 	ErrAPIKeyNotFound = errors.New("api key not found")
 )
 
-const apiKeyColumns = `id, user_id, label, api_key, rate_tier, scopes, created_at, last_used_at`
+const apiKeyColumns = `id, user_id, label, rate_tier, scopes, created_at, last_used_at` //nolint:gosec // SQL column names, not credentials.
 
 // APIKeyRepository provides CRUD operations for the api_keys table.
 type APIKeyRepository struct {
@@ -37,7 +39,6 @@ func scanAPIKey(row pgx.Row) (*models.APIKey, error) {
 		&k.ID,
 		&k.UserID,
 		&k.Label,
-		&k.Key,
 		&k.RateTier,
 		&k.Scopes,
 		&k.CreatedAt,
@@ -50,6 +51,15 @@ func scanAPIKey(row pgx.Row) (*models.APIKey, error) {
 		return nil, fmt.Errorf("scanning api key: %w", err)
 	}
 	return &k, nil
+}
+
+// ValidTextKey reports whether a client-supplied lookup key (an API key or a
+// session token) can be sent to Postgres as a text parameter: valid UTF-8
+// with no NUL byte. Postgres rejects any other value with an encoding error
+// (SQLSTATE 22021), which a caller would mistake for an unreachable store; a
+// key that fails this check cannot match a stored one.
+func ValidTextKey(key string) bool {
+	return utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }
 
 // generateAPIKey creates a cryptographically random API key with the "sa_" prefix.
@@ -74,18 +84,33 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 		scopes = []string{}
 	}
 
-	query := `INSERT INTO api_keys (user_id, label, api_key, scopes)
-		VALUES ($1, $2, $3, $4)
+	query := `INSERT INTO api_keys (user_id, label, key_hash, key_prefix, scopes)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING ` + apiKeyColumns
 
-	row := r.pool.QueryRow(ctx, query, userID, label, key, scopes)
-	return scanAPIKey(row)
+	row := r.pool.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes)
+	created, err := scanAPIKey(row)
+	if err != nil {
+		return nil, err
+	}
+	// The bearer is disclosed once. No ordinary row projection carries it.
+	created.Key = key
+	return created, nil
 }
 
 // GetByKey looks up an API key by its full key string (including "sa_" prefix).
+// A key Postgres cannot take as text matches no key: ErrAPIKeyNotFound, not
+// the query error that would read as a store outage.
 func (r *APIKeyRepository) GetByKey(ctx context.Context, key string) (*models.APIKey, error) {
-	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE api_key = $1`
-	return scanAPIKey(r.pool.QueryRow(ctx, query, key))
+	if !ValidTextKey(key) {
+		return nil, ErrAPIKeyNotFound
+	}
+	// These bearers contain 256 random bits. The indexed SHA-256 digest is
+	// both the lookup key and verifier, as for password-reset and invitation
+	// link tokens. Do not tighten the public format here: legacy credentials
+	// remain valid.
+	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE key_hash = $1`
+	return scanAPIKey(r.pool.QueryRow(ctx, query, HashLinkToken(key)))
 }
 
 // Delete removes an API key owned by the given user.
@@ -110,12 +135,6 @@ func (r *APIKeyRepository) DeleteByAdmin(ctx context.Context, id int64) error {
 		return ErrAPIKeyNotFound
 	}
 	return nil
-}
-
-// GetByID looks up an API key by its ID.
-func (r *APIKeyRepository) GetByID(ctx context.Context, id int64) (*models.APIKey, error) {
-	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE id = $1`
-	return scanAPIKey(r.pool.QueryRow(ctx, query, id))
 }
 
 // UpdateTier updates the rate tier for an API key.

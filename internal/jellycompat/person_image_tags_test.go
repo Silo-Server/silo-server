@@ -98,7 +98,8 @@ func TestJellyfinWebPersonPhotoUsesSignedTag(t *testing.T) {
 	assertImageRedirect(t, request(otherRouteID, crewTag, ""), "https://cdn.example.test/tmdb/people/288/profile/w300.def456.webp")
 	// A tag authorizes by itself, matching the item and collection image routes.
 	assertImageRedirect(t, request(routeID, castTag, "hidden"), "https://cdn.example.test/tmdb/people/287/profile/w300.abc123.webp")
-	if _, ok := h.images.LookupSized(personImageCacheRouteID(routeID, people[287].PhotoPath), "Primary", "", compatCardImageSize); !ok {
+	warmed := compatRequestImageSize(httptest.NewRequest(http.MethodGet, "/?fillHeight=446&fillWidth=298", nil), "Primary")
+	if _, ok := h.images.LookupSized(personImageCacheRouteID(routeID, people[287].PhotoPath), "Primary", "", warmed); !ok {
 		t.Fatal("signed request did not warm the shared cache")
 	}
 

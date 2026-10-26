@@ -1,5 +1,5 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyQueryDefinition } from "@/api/types";
 
@@ -11,19 +11,31 @@ vi.mock("@/components/FilterRuleEditor", () => ({
   ),
 }));
 
+beforeAll(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+});
+
+afterEach(cleanup);
+
 describe("CollectionRulesEditor", () => {
-  it("forwards ebook media scope to advanced rule labels", () => {
-    const markup = renderToStaticMarkup(
+  it("saves the Movies & Series scope", () => {
+    const onChange = vi.fn();
+    render(
       <CollectionRulesEditor
-        value={{
-          ...createEmptyQueryDefinition(),
-          media_scope: "ebook",
-        }}
-        onChange={() => {}}
-        allowPersonalizedFilters
+        value={createEmptyQueryDefinition()}
+        onChange={onChange}
+        allowLibrarySelection={false}
       />,
     );
 
-    expect(markup).toContain("mediaScope:ebook");
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Movies & Series" }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media_scope: "video",
+        sort: { field: "added_at", order: "desc" },
+      }),
+    );
   });
 });

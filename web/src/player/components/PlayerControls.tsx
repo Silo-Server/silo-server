@@ -17,7 +17,8 @@ import {
   AudioLines,
 } from "lucide-react";
 import { CircleButton } from "./CircleButton";
-import { SeekBar, formatTime } from "./SeekBar";
+import { SeekBar } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";
@@ -32,8 +33,10 @@ import type {
   QualityOption,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
+import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -52,6 +55,10 @@ interface PlayerControlsProps {
   // Seek bar markers
   chapters?: PlayerChapter[];
   regions?: MarkerRegionView[];
+  // Seek bar previews
+  trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
+  onTrickplayError?: () => void;
   // Marker editing
   editing?: boolean;
   activeEditKind?: MarkerKind | null;
@@ -74,9 +81,10 @@ interface PlayerControlsProps {
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
-  onSubtitleJobAccepted?: (jobId: string) => void;
+  onSubtitleJobAccepted?: (jobId: string, resultSubtitleId?: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
+  subtitleSync?: SubtitleSync;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -84,6 +92,8 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  /** The plan's `active_quality`, the menu entry it delivers. */
+  activeQuality?: string;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -91,6 +101,9 @@ interface PlayerControlsProps {
   versions?: VersionInfo[];
   versionLocked?: boolean;
   onSwitchVersion?: (fileId: number) => void;
+  // Speed. Omitted while something else owns the rate (a Watch Party room).
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (rate: number) => void;
   // PiP
   onTogglePiP?: () => void;
   // Playback info
@@ -109,7 +122,8 @@ interface PlayerControlsProps {
   onSeek: (seconds: number) => void;
   onVolumeChange: (volume: number) => void;
   onMutedChange: (muted: boolean) => void;
-  onFullscreenToggle: () => void;
+  /** Absent when fullscreen cannot work, such as engine playback on iPhone. */
+  onFullscreenToggle?: () => void;
   onSurfaceTap?: (event: MouseEvent<HTMLElement>) => void;
 }
 
@@ -124,6 +138,9 @@ export function PlayerControls({
   buffered,
   chapters,
   regions,
+  trickplay,
+  trickplayUpdatedAt,
+  onTrickplayError,
   editing,
   activeEditKind,
   onRegionEdgeChange,
@@ -147,17 +164,21 @@ export function PlayerControls({
   onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
+  subtitleSync,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  activeQuality,
   isTranscoding,
   qualityError,
   onQualitySelect,
   versions,
   versionLocked,
   onSwitchVersion,
+  playbackSpeed,
+  onPlaybackSpeedChange,
   onTogglePiP,
   showPlaybackInfo,
   onTogglePlaybackInfo,
@@ -225,7 +246,7 @@ export function PlayerControls({
       {compactControls && (
         <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
           <div
-            className="pointer-events-auto flex items-center gap-2"
+            className={`flex items-center gap-2 ${visible ? "pointer-events-auto" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
             {showEpisodeSlots ? (
@@ -299,6 +320,9 @@ export function PlayerControls({
           buffered={buffered}
           chapters={chapters}
           regions={regions}
+          trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
+          onTrickplayError={onTrickplayError}
           editing={editing}
           activeEditKind={activeEditKind}
           onRegionEdgeChange={onRegionEdgeChange}
@@ -336,17 +360,21 @@ export function PlayerControls({
               onSubtitleJobAccepted={onSubtitleJobAccepted}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
+              subtitleSync={subtitleSync}
               audioTracks={audioTracks}
             />
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              activeQuality={activeQuality}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
               versions={versions}
               versionLocked={versionLocked}
               onSwitchVersion={onSwitchVersion}
+              playbackSpeed={playbackSpeed}
+              onPlaybackSpeedChange={onPlaybackSpeedChange}
             />
             <button
               type="button"
@@ -358,18 +386,20 @@ export function PlayerControls({
             >
               <MoreHorizontal className="h-5 w-5" />
             </button>
-            <button
-              type="button"
-              className="player-utility-btn"
-              onClick={onFullscreenToggle}
-              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            >
-              {isFullscreen ? (
-                <Minimize className="h-[18px] w-[18px]" />
-              ) : (
-                <Maximize className="h-[18px] w-[18px]" />
-              )}
-            </button>
+            {onFullscreenToggle && (
+              <button
+                type="button"
+                className="player-utility-btn"
+                onClick={onFullscreenToggle}
+                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {isFullscreen ? (
+                  <Minimize className="h-[18px] w-[18px]" />
+                ) : (
+                  <Maximize className="h-[18px] w-[18px]" />
+                )}
+              </button>
+            )}
           </div>
         ) : (
           <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5">
@@ -511,18 +541,22 @@ export function PlayerControls({
                 onSubtitleJobAccepted={onSubtitleJobAccepted}
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
+                subtitleSync={subtitleSync}
                 audioTracks={audioTracks}
               />
 
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                activeQuality={activeQuality}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}
                 versions={versions}
                 versionLocked={versionLocked}
                 onSwitchVersion={onSwitchVersion}
+                playbackSpeed={playbackSpeed}
+                onPlaybackSpeedChange={onPlaybackSpeedChange}
               />
 
               {markerEditAvailable && onToggleMarkerEdit && (
@@ -573,18 +607,20 @@ export function PlayerControls({
                 <Scaling className="h-[18px] w-[18px]" />
               </button>
 
-              <button
-                type="button"
-                className="player-utility-btn"
-                onClick={onFullscreenToggle}
-                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              >
-                {isFullscreen ? (
-                  <Minimize className="h-[18px] w-[18px]" />
-                ) : (
-                  <Maximize className="h-[18px] w-[18px]" />
-                )}
-              </button>
+              {onFullscreenToggle && (
+                <button
+                  type="button"
+                  className="player-utility-btn"
+                  onClick={onFullscreenToggle}
+                  aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {isFullscreen ? (
+                    <Minimize className="h-[18px] w-[18px]" />
+                  ) : (
+                    <Maximize className="h-[18px] w-[18px]" />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         )}

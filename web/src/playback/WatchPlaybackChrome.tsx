@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pause, PictureInPicture2, Play, SkipBack, SkipForward, Tv, X } from "lucide-react";
 import { useLocation } from "react-router";
 import type { WatchDetail } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import {
   getAccessToken,
   getAuthContextVersion,
@@ -42,9 +43,11 @@ import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
+import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
+import type { BufferingMode } from "@/player/buffering-quality";
 import type {
   EpisodeRef,
   IntroSkipMode,
@@ -53,7 +56,7 @@ import type {
   PlayerPictureInPictureChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
-import { formatTime } from "@/player/components/SeekBar";
+import { formatTime } from "@/player/utils/formatTime";
 import { storage } from "@/utils/storage";
 import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";
@@ -76,6 +79,8 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
+import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
   import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
@@ -89,14 +94,24 @@ const PlayingNextScreen = lazy(() =>
   importPlayingNextScreen().then((module) => ({ default: module.PlayingNextScreen })),
 );
 
-let playingNextScreenPrefetched = false;
+// A shuffle's post-roll wraps the same screen; it loads only during shuffles.
+const importShufflePlayingNext = () => import("./ShufflePlayingNext");
+const ShufflePlayingNext = lazy(importShufflePlayingNext);
 
-function prefetchPlayingNextScreen() {
-  if (playingNextScreenPrefetched) return;
-  playingNextScreenPrefetched = true;
+let playingNextScreenPrefetched = false;
+let shufflePlayingNextPrefetched = false;
+
+function prefetchPlayingNextScreen(shuffled: boolean) {
   // Nothing to report here: post-roll imports the chunk again when it renders,
   // and its error boundary handles a failure.
-  importPlayingNextScreen().catch(() => undefined);
+  if (!playingNextScreenPrefetched) {
+    playingNextScreenPrefetched = true;
+    importPlayingNextScreen().catch(() => undefined);
+  }
+  if (shuffled && !shufflePlayingNextPrefetched) {
+    shufflePlayingNextPrefetched = true;
+    importShufflePlayingNext().catch(() => undefined);
+  }
 }
 
 function normalizeWatchPlaybackRequest(
@@ -132,6 +147,15 @@ function buildPlaybackSubtitle(
   }
 
   return undefined;
+}
+
+/**
+ * Whether playback of fileId (or, with none chosen, of the first part) has a
+ * later part still to play.
+ */
+function hasLaterPart(item: WatchDetail | undefined, fileId?: number): boolean {
+  if (fileId) return findNextPlaybackPartFileId(item, fileId) != null;
+  return (item?.playback_variants ?? []).some((variant) => (variant.parts?.length ?? 0) > 1);
 }
 
 function findNextPlaybackPartFileId(
@@ -193,7 +217,8 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     request.returnHref == null &&
     request.audioTrackIndex == null &&
     request.prePlaySubtitleMode == null &&
-    request.prePlaySubtitleSelection == null
+    request.prePlaySubtitleSelection == null &&
+    !request.versionPicked
   ) {
     return undefined;
   }
@@ -203,6 +228,7 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     audioTrackIndex: request.audioTrackIndex,
     prePlaySubtitleMode: request.prePlaySubtitleMode,
     prePlaySubtitleSelection: request.prePlaySubtitleSelection ?? null,
+    versionPicked: request.versionPicked,
   };
 }
 
@@ -221,6 +247,37 @@ function PlaybackPreparingScreen() {
             Loading stream details, subtitles, and resume state.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The server answers the same 404 for a missing title and one the profile may
+ * not see, so the copy says neither, as the item page does.
+ */
+function playbackUnavailableMessage(error: Error): string {
+  if (isNotFoundProblem(error)) {
+    return "This title isn't available. It may have been removed, or you may not have access to it.";
+  }
+  return error.message || "Item not found";
+}
+
+function PlaybackUnavailableScreen({ error, onBack }: { error: Error; onBack: () => void }) {
+  return (
+    <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
+      <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
+        <div className="space-y-2">
+          <p className="text-base font-semibold text-white">Playback unavailable</p>
+          <div className="text-sm text-white/60">{playbackUnavailableMessage(error)}</div>
+        </div>
+        <button
+          onClick={onBack}
+          type="button"
+          className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
+        >
+          Go Back
+        </button>
       </div>
     </div>
   );
@@ -527,6 +584,7 @@ function WatchPlaybackHostContent() {
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
+  const playbackProfileId = currentProfile?.id ?? null;
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -539,6 +597,14 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
     );
+  // A server below revision 20 rejects the whole batch for a key it does not
+  // define, so the cellular pair is read only where the server has it.
+  const supportsCellularQuality =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -548,8 +614,15 @@ function WatchPlaybackHostContent() {
   // consulted, so a recap or preview override an admin (or the user) set on a
   // device silently did nothing. One batched read costs no more than the single
   // key did and makes all three behave as the contract says they do.
+  const supportsBufferingQualityMode =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+    );
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
+      ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -561,16 +634,31 @@ function WatchPlaybackHostContent() {
       // The bandwidth cap that pairs with it; the player keeps its startup
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
+      // The pair that replaces those two on a metered link, as in the apps.
+      ...(supportsCellularQuality
+        ? [
+            SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+            SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
+          ]
+        : []),
     ],
     enabled: signedIn,
   });
+  const loadedBufferingMode = supportsBufferingQualityMode
+    ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+        | BufferingMode
+        | undefined)
+    : undefined;
+  useEffect(() => {
+    if (loadedBufferingMode) rememberBufferingMode(playbackProfileId, loadedBufferingMode);
+  }, [loadedBufferingMode, playbackProfileId]);
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
-  const { data: item, error } = useWatchDetail(
-    request?.contentId,
-    request?.fileId,
-    request?.libraryId,
-  );
+  const {
+    data: item,
+    error,
+    isFetching: isFetchingItem,
+  } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
   const [renderedSession, setRenderedSession] = useState<{
     request: WatchRouteRequest;
     item: WatchDetail;
@@ -789,8 +877,19 @@ function WatchPlaybackHostContent() {
     [activeRequest, controller, navigate],
   );
 
+  // -- Shuffle: the server picks what plays next --
+  const shuffleId = activeRequest?.shuffleId;
+
+  // A series-owned extra (trailer, featurette, ...) carries the series' id,
+  // but it has no place in the episode order: it plays to its end and goes
+  // back to where it was started, like a movie.
+  const isExtra = activeItem?.type === "extra";
+  const episodeSeriesId = isExtra ? undefined : activeItem?.series_id;
+
   // -- Series episodes for next-episode navigation --
-  const seriesId = activeItem?.series_id;
+  // A shuffle replaces the series order, so it loads none and the player
+  // offers no sequential next or previous episode.
+  const seriesId = shuffleId ? undefined : episodeSeriesId;
   const currentSeason = activeItem?.season_number ?? 0;
   const { episodes: seriesEpisodes } = useSeriesEpisodes(
     seriesId,
@@ -800,7 +899,7 @@ function WatchPlaybackHostContent() {
 
   // Find the next episode from the populated list.
   const nextEpisodeRef = useMemo<EpisodeRef | null>(() => {
-    if (!activeItem?.series_id || !seriesEpisodes.length) return null;
+    if (!activeItem || !episodeSeriesId || !seriesEpisodes.length) return null;
     const idx = seriesEpisodes.findIndex(
       (ep) =>
         ep.seasonNumber === (activeItem.season_number ?? 0) &&
@@ -808,7 +907,7 @@ function WatchPlaybackHostContent() {
     );
     if (idx < 0 || idx >= seriesEpisodes.length - 1) return null;
     return seriesEpisodes[idx + 1] ?? null;
-  }, [activeItem, seriesEpisodes]);
+  }, [activeItem, episodeSeriesId, seriesEpisodes]);
 
   // -- Continue watching for On Deck carousel --
   const isPostRoll = state.mode === "post-roll";
@@ -828,10 +927,19 @@ function WatchPlaybackHostContent() {
   useEffect(() => {
     modeRef.current = state.mode;
   }, [state.mode]);
-  const seriesIdRef = useRef(activeItem?.series_id);
+  // Series episodes and shuffled items reach post-roll; other playback ends
+  // on the detail page.
+  const hasPostRollRef = useRef(false);
+  const shuffledRef = useRef(false);
+  // A shuffled item with a later part plays that part before the shuffle
+  // moves on, so its post-roll waits for the last part.
+  const awaitsLaterPartRef = useRef(false);
   useEffect(() => {
-    seriesIdRef.current = activeItem?.series_id;
-  }, [activeItem?.series_id]);
+    hasPostRollRef.current = Boolean(episodeSeriesId || shuffleId);
+    shuffledRef.current = Boolean(shuffleId);
+    awaitsLaterPartRef.current =
+      Boolean(shuffleId) && hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
+  }, [activeItem, activeRequest?.fileId, episodeSeriesId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
   useEffect(() => {
@@ -861,9 +969,13 @@ function WatchPlaybackHostContent() {
           {
             contentId: activeRequest.contentId,
             fileId: nextPartFileId,
+            // The next part of a version the viewer picked, before Play or
+            // in the player, is still the viewer's pick.
+            versionPicked: activeRequest.versionPicked || exitState?.versionPinned,
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,
+            shuffleId: activeRequest.shuffleId,
             returnHref: activeRequest.returnHref,
           },
           "automatic",
@@ -879,11 +991,23 @@ function WatchPlaybackHostContent() {
       }
 
       // Movies (no series_id) exit straight to the detail page — there's no
-      // post-roll experience to fall through into.
-      if (!activeItem?.series_id) {
+      // post-roll experience to fall through into — unless a shuffle picks
+      // what plays next. An extra has no detail page of its own, so it goes
+      // back to the page it was started from, or to its series when opened
+      // from a direct link.
+      if (!episodeSeriesId && !activeRequest?.shuffleId) {
         if (activeRequest) {
           stopPlayback();
-          navigate(buildWatchItemHref(activeRequest), { up: true });
+          const ownerId = isExtra ? activeItem?.series_id : undefined;
+          navigate(
+            isExtra
+              ? (activeRequest.returnHref ??
+                  buildWatchItemHref(
+                    ownerId ? { ...activeRequest, contentId: ownerId } : activeRequest,
+                  ))
+              : buildWatchItemHref(activeRequest),
+            { up: true },
+          );
         }
         return;
       }
@@ -898,6 +1022,8 @@ function WatchPlaybackHostContent() {
       requestKeyValue,
       activeRequest,
       activeItem,
+      episodeSeriesId,
+      isExtra,
       applyExitStateToCache,
       stopPlayback,
       navigate,
@@ -908,7 +1034,14 @@ function WatchPlaybackHostContent() {
   const handlePostRollClose = useCallback(() => {
     if (activeRequest) {
       stopPlayback();
-      navigate(buildWatchItemHref(activeRequest), { up: true });
+      // A shuffle returns to the library, series, or collection it started
+      // from rather than to whichever item happened to play last.
+      navigate(
+        activeRequest.shuffleId
+          ? buildPlaybackReturnHref(activeRequest)
+          : buildWatchItemHref(activeRequest),
+        { up: true },
+      );
     }
   }, [activeRequest, stopPlayback, navigate]);
 
@@ -919,21 +1052,31 @@ function WatchPlaybackHostContent() {
     },
     [requestKeyValue, setPictureInPictureActive],
   );
+  const inRoom = Boolean(activeRequest?.roomId && activeRequest.roomToken);
   const handlePlaybackStateChange = useCallback(
     (snapshot: WatchPlaybackSnapshot) => {
       if (!requestKeyValue) return;
       updatePlaybackSnapshot(requestKeyValue, snapshot);
 
-      // Only series episodes reach post-roll. Waiting until the episode plays
-      // keeps the screen's download out of the way of the first frame.
-      if (seriesIdRef.current && snapshot.playing) prefetchPlayingNextScreen();
+      // Only series episodes and shuffles reach post-roll. Waiting until the
+      // item plays keeps the screen's download out of the way of the first
+      // frame.
+      if (hasPostRollRef.current && snapshot.playing) {
+        prefetchPlayingNextScreen(shuffledRef.current);
+      }
 
       // Enter post-roll early when approaching end of a series episode.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
+      // A Watch Together room decides what follows for everyone: it returns to
+      // its lobby when the item finishes. The player's room exit only goes
+      // back to the room from the foreground, so post-roll would leave the
+      // member on an empty player page.
       if (
         !postRollEnteredRef.current &&
-        seriesIdRef.current &&
+        !inRoom &&
+        hasPostRollRef.current &&
+        !awaitsLaterPartRef.current &&
         modeRef.current === "foreground" &&
         snapshot.duration > 0 &&
         snapshot.currentTime > 0 &&
@@ -944,7 +1087,7 @@ function WatchPlaybackHostContent() {
         controller.enterPostRoll(requestKeyValue);
       }
     },
-    [requestKeyValue, updatePlaybackSnapshot, controller],
+    [requestKeyValue, updatePlaybackSnapshot, controller, inRoom],
   );
   const handlePlaybackTransportReady = useCallback(
     (controls: WatchPlaybackTransportControls | null) => {
@@ -982,44 +1125,35 @@ function WatchPlaybackHostContent() {
       return null;
     }
 
+    // The detail read failed for this request and is not being retried, so
+    // waiting on it would hold the preparing screen forever. The query is
+    // keyed by the title, file, and library, so an error from an earlier
+    // title cannot land here; a refetch of the same title waits for its answer.
+    if (error && !isFetchingItem) {
+      return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
+    }
+
     return <PlaybackPreparingScreen />;
   }
 
-  if (error && isForeground) {
-    return (
-      <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
-        <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
-          <div className="space-y-2">
-            <p className="text-base font-semibold text-white">Playback unavailable</p>
-            <div className="text-sm text-white/60">
-              {error instanceof Error ? error.message : "Item not found"}
-            </div>
-          </div>
-          <button
-            onClick={() => navigate(-1)}
-            type="button"
-            className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // The player has its title's detail from here on, and `error` may still be
+  // set: a refetch of that detail failed (a catalog event landing in a server
+  // restart, say), or, outside the foreground, a newer request's first read
+  // did. Neither ends the title that plays; its stream carries its own
+  // authorization.
 
-  const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
-    ?.value as string | undefined;
-  const maxBitrateKbps = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]
-    ?.value as number | null | undefined;
+  const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
+    effectivePlaybackSettings,
+    onMeteredConnection(),
+  );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
     currentProfile,
     seriesEpisodes,
-    // Passed through verbatim: "original" and "auto" are distinct wire values
-    // (the planner preserves the source for "original", adapts for "auto").
-    // Undefined until the read resolves, which leaves the profile-column
-    // fallback in place rather than blocking playback on a settings fetch.
+    // The session reads a legacy "original" as "auto". Undefined until the
+    // read resolves, which leaves the profile-column fallback in place rather
+    // than blocking playback on a settings fetch.
     qualityPreference: canonicalQuality,
   });
   // The resolved answer already folds in the profile layer, so the props built
@@ -1055,6 +1189,14 @@ function WatchPlaybackHostContent() {
     if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
     return legacy ? "always" : "ask";
   })();
+  // Until the profile's mode loads, or if the read fails, the mode this
+  // browser saw last for the profile applies, and the default only when it
+  // has seen none: the start does not wait, and a `never` profile keeps its
+  // `ignore`. A server without the setting runs the default.
+  const bufferingMode: BufferingMode =
+    capabilitiesKnown && !supportsBufferingQualityMode
+      ? "always"
+      : (loadedBufferingMode ?? lastBufferingMode(playbackProfileId) ?? "always");
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
@@ -1075,6 +1217,7 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
+          bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}
@@ -1095,20 +1238,32 @@ function WatchPlaybackHostContent() {
       {isPostRoll && (
         <LocalErrorBoundary onError={handlePostRollUnavailable}>
           <Suspense fallback={null}>
-            <PlayingNextScreen
-              seriesId={activeItem.series_id}
-              seriesTitle={activeItem.series_title}
-              nextEpisode={nextEpisodeRef ?? undefined}
-              continueWatchingItems={continueWatchingItems}
-              videoEnded={postRollVideoEnded}
-              onPlayNow={
-                nextEpisodeRef
-                  ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
-                  : undefined
-              }
-              onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
-              onClose={handlePostRollClose}
-            />
+            {activeRequest.shuffleId ? (
+              <ShufflePlayingNext
+                request={activeRequest}
+                shuffleId={activeRequest.shuffleId}
+                seriesId={activeItem.series_id}
+                continueWatchingItems={continueWatchingItems}
+                videoEnded={postRollVideoEnded}
+                onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
+                onClose={handlePostRollClose}
+              />
+            ) : (
+              <PlayingNextScreen
+                seriesId={activeItem.series_id}
+                seriesTitle={activeItem.series_title}
+                nextEpisode={nextEpisodeRef ?? undefined}
+                continueWatchingItems={continueWatchingItems}
+                videoEnded={postRollVideoEnded}
+                onPlayNow={
+                  nextEpisodeRef
+                    ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
+                    : undefined
+                }
+                onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
+                onClose={handlePostRollClose}
+              />
+            )}
           </Suspense>
         </LocalErrorBoundary>
       )}

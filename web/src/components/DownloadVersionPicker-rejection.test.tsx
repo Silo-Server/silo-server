@@ -26,22 +26,28 @@ it.each(["account", "profile", "pin", "unchanged"])(
   "fences a rejected actual HEAD for %s authority without replacing the picker",
   async (authority) => {
     let reject!: (error: Error) => void;
-    const fetch = vi.fn(
-      () =>
-        new Promise<Response>((_, fail) => {
-          reject = fail;
-        }),
-    );
+    const link = "/api/v2/direct-download?file_id=42&dl=synthetic-link";
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ url: link, proxy_url: link, expires_at: "2026-01-01T00:05:00Z" }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_, fail) => {
+            reject = fail;
+          }),
+      );
     vi.stubGlobal("fetch", fetch);
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const close = vi.fn();
     render(<DownloadVersionPicker open onOpenChange={close} versions={versions} />);
     fireEvent.click(screen.getByRole("button", { name: /1080p/ }));
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v2/direct-download?file_id=42&token=original-account",
-      { method: "HEAD", cache: "no-store" },
-    );
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch).toHaveBeenLastCalledWith(link, { method: "HEAD", cache: "no-store" });
     // No close/rerender/versions replacement: only the client authority changes.
     if (authority === "account") setAccessToken("replacement-account");
     if (authority === "profile") setProfileId("replacement-profile");
@@ -49,7 +55,7 @@ it.each(["account", "profile", "pin", "unchanged"])(
     await act(async () => {
       reject(new TypeError("connection lost"));
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(click).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
     expect(mocks.error).toHaveBeenCalledTimes(authority === "unchanged" ? 1 : 0);

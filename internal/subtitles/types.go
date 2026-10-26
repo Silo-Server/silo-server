@@ -70,6 +70,9 @@ type DownloadedSubtitle struct {
 	HearingImpaired bool           `json:"hearing_impaired"`
 	DownloadedBy    *int           `json:"-"` // audit only
 	CreatedAt       time.Time      `json:"created_at"`
+	// Timing is the stored correction applied when the subtitle is delivered
+	// to clients. It stays out of the frozen v1 JSON.
+	Timing Timing `json:"-"`
 }
 
 // ProviderConfig stores the configuration for a subtitle provider.

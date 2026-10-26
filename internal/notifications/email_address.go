@@ -95,12 +95,14 @@ func (s *System) RequestEmailAddress(ctx context.Context, userID int, profileID,
 	}
 
 	verifyURL := linkBase + "/api/v2/notifications/email/verify?token=" + token
-	content := composeVerificationEmail(profile.Name, verifyURL)
+	brand := s.emailBrand.Load(ctx)
+	content := composeVerificationEmail(brand, profile.Name, verifyURL)
 	err = s.mailSender.Send(ctx, mail.Message{
 		To:       []string{address},
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   brand.InlineImages(),
 	})
 	if err != nil {
 		return fmt.Errorf("send verification email: %w", err)
@@ -141,7 +143,7 @@ func (s *System) UnsubscribeEmail(ctx context.Context, token string) (ok bool, e
 }
 
 // composeVerificationEmail renders the address-confirmation message.
-func composeVerificationEmail(profileName, verifyURL string) emailContent {
+func composeVerificationEmail(brand mail.Brand, profileName, verifyURL string) emailContent {
 	who := "your profile"
 	if profileName != "" {
 		who = "the profile “" + profileName + "”"
@@ -157,7 +159,7 @@ func composeVerificationEmail(profileName, verifyURL string) emailContent {
 	body.WriteString(mail.EmailParagraph(fmt.Sprintf(
 		"This address was entered as the notification destination for %s on a Silo server.", who)))
 	body.WriteString(mail.EmailParagraph("To confirm and start receiving notifications here:"))
-	body.WriteString(mail.EmailButton("Confirm this address", verifyURL))
+	body.WriteString(mail.EmailButton(brand, "Confirm this address", verifyURL))
 	body.WriteString(fmt.Sprintf(
 		`<p style="margin:20px 0 0;font:400 12px/1.7 %s;color:%s;">Or paste this link into your browser:<br>`+
 			`<span style="font:400 12px/1.7 %s;word-break:break-all;">%s</span></p>`,
@@ -167,6 +169,7 @@ func composeVerificationEmail(profileName, verifyURL string) emailContent {
 		Subject: "Confirm your Silo notification address",
 		Text:    text,
 		HTML: mail.RenderLayout(mail.LayoutOptions{
+			Brand:      brand,
 			Preheader:  "Confirm this address to start receiving Silo notifications.",
 			Title:      "Confirm your notification address",
 			BodyHTML:   body.String(),

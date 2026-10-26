@@ -23,6 +23,38 @@ const (
 	codeUnsupportedSource = "unsupported_source"
 )
 
+// External sign-in problem types (docs/architecture/external-sign-in.md).
+// account_required: the provider admitted the person, but the server has no
+// account for them and does not create one.
+var (
+	TypeNotPermitted            = ProblemType{"not_permitted", http.StatusForbidden, "Not permitted"}
+	TypeAccountRequired         = ProblemType{"account_required", http.StatusForbidden, "Account required"}
+	TypeLocalLoginDisabled      = ProblemType{"local_login_disabled", http.StatusForbidden, "Local password sign-in disabled"}
+	TypeProviderPasswordExpired = ProblemType{"password_expired", http.StatusForbidden, "Password expired"}
+	TypeEmailInUse              = ProblemType{"email_in_use", http.StatusConflict, "Email in use"}
+	TypeIdentityLinkedElsewhere = ProblemType{"identity_linked_elsewhere", http.StatusConflict, "Identity linked elsewhere"}
+	TypeProviderAlreadyEnabled  = ProblemType{"provider_already_enabled", http.StatusConflict, "Provider already enabled"}
+	TypeBreakGlassRequired      = ProblemType{"break_glass_required", http.StatusConflict, "Break-glass account required"}
+	TypeLastSignInMethod        = ProblemType{"last_sign_in_method", http.StatusConflict, "Last sign-in method"}
+	TypeProviderUnavailable     = ProblemType{"provider_unavailable", http.StatusServiceUnavailable, "Provider unavailable"}
+	// Directory linking (linkAccountIdentityWithCredentials) refusals.
+	TypeAccountDisabled       = ProblemType{"account_disabled", http.StatusForbidden, "Account disabled"}
+	TypeLocalPasswordRequired = ProblemType{"local_password_required", http.StatusConflict, "Local password required"}
+	TypeAlreadyLinked         = ProblemType{"already_linked", http.StatusConflict, "Already linked"}
+	// TypeNetworkIdentityRequired: a network identity sign-in or link came
+	// in on another address than the provider's overlay listener, so there
+	// is no overlay peer to sign in.
+	TypeNetworkIdentityRequired = ProblemType{"network_identity_required", http.StatusForbidden, "Network identity required"}
+	// TypeInvalidGrant is an OAuth completion code redeemed with a PKCE
+	// verifier that does not fit it (RFC 6749 invalid_grant).
+	TypeInvalidGrant = ProblemType{"invalid_grant", http.StatusBadRequest, "Invalid grant"}
+)
+
+// TypePreparedFileExpired: a finished download's prepared file was cleaned up
+// from the server. The client keeps its copy and calls prepareDownloadAgain
+// before fetching the file again.
+var TypePreparedFileExpired = ProblemType{"prepared_file_expired", http.StatusConflict, "Prepared file expired"}
+
 // ProblemType is one entry of the shared problem catalog.
 type ProblemType struct {
 	// ID is the stable identifier and the final path segment of the type URI.
@@ -53,6 +85,7 @@ var (
 	TypeAuthenticationRequired                        = ProblemType{"authentication_required", http.StatusUnauthorized, "Authentication required"}
 	TypeInvalidToken                                  = ProblemType{"invalid_token", http.StatusUnauthorized, "Invalid token"}
 	TypeSessionExpired                                = ProblemType{"session_expired", http.StatusUnauthorized, "Session expired"}
+	TypeTokenRefreshRequired                          = ProblemType{"token_refresh_required", http.StatusUnauthorized, "Token refresh required"}
 	TypePermissionDenied                              = ProblemType{"permission_denied", http.StatusForbidden, "Permission denied"}
 	TypeProfileVerificationRequired                   = ProblemType{"profile_verification_required", http.StatusForbidden, "Profile verification required"}
 	TypePasswordChangeRequired                        = ProblemType{"password_change_required", http.StatusForbidden, "Password change required"}
@@ -76,7 +109,7 @@ var (
 	TypeCapabilityUnsupported                         = ProblemType{"capability_unsupported", http.StatusNotImplemented, "Capability unsupported"}
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)
@@ -367,12 +400,17 @@ func validationCode(msg string) string {
 	return codeInvalid
 }
 
-// validationLocation lifts the property a "required" message names into the
-// location, so a missing body.name is reported at body.name like every other
-// field-level failure rather than at its parent.
+// msgExpectedURI opens Huma's message for a uri or uri-reference value that
+// does not parse; the rest is the parser's error, which quotes the value.
+const msgExpectedURI = "expected string to be RFC 3986 uri: "
+
 // validationDetail keeps Huma's message except where it echoes the rejected
-// value: a multipart part's media type is restated without it.
+// value: a multipart part's media type is restated without it, and a URL
+// that does not parse, which can carry a token, loses the parser's quote of it.
 func validationDetail(msg string) string {
+	if strings.HasPrefix(msg, msgExpectedURI) {
+		return strings.TrimSuffix(msgExpectedURI, ": ")
+	}
 	if strings.HasPrefix(msg, "Invalid mime type: ") {
 		if _, want, ok := strings.Cut(msg, ", expected "); ok {
 			return "expected a part of media type " + strings.ReplaceAll(want, ",", ", ")
@@ -381,6 +419,9 @@ func validationDetail(msg string) string {
 	return msg
 }
 
+// validationLocation lifts the property a "required" message names into the
+// location, so a missing body.name is reported at body.name like every other
+// field-level failure rather than at its parent.
 func validationLocation(d *huma.ErrorDetail) string {
 	const prefix = "expected required property "
 	if strings.HasPrefix(d.Message, prefix) {

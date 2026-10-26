@@ -28,6 +28,10 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
 }
 
 function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
+  // Dismissing an episode or series hides the whole show from both rows.
+  if (mediaType === "episode" || mediaType === "series") {
+    return "Removed from Continue Watching and Next Up";
+  }
   if (surface === "next_up") return "Removed from Next Up";
   if (mediaType === "audiobook") return "Removed from Continue Listening";
   if (mediaType === "ebook") return "Removed from Continue Reading";

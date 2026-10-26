@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -21,15 +22,15 @@ type LibraryViewInput struct {
 
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
-	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	ArtworkQuery
 }
 
 // LibrarySectionItemsInput is the getLibrarySectionItems query.
 type LibrarySectionItemsInput struct {
 	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
 	SectionID string `path:"section_id" minLength:"1" doc:"Section identifier from the layout" example:"recently_added"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // SectionLayoutEntry is one section of a page layout, without items.
@@ -94,11 +95,11 @@ type CuratedCollection struct {
 	SortOrder         int             `json:"sort_order" example:"0"`
 	GroupID           *string         `json:"group_id" doc:"null when ungrouped"`
 	Featured          bool            `json:"featured" example:"false"`
-	PosterURL         string          `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
-	BackdropURL       string          `json:"backdrop_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL         string          `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	BackdropURL       string          `json:"backdrop_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
-	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from; empty otherwise"`
+	SourceURL         string          `json:"source_url" doc:"Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI"`
 	QueryDefinition   json.RawMessage `json:"query_definition" doc:"Smart collection query; null when not a smart collection"`
 	SortConfig        json.RawMessage `json:"sort_config" doc:"Sort configuration document; null when default"`
 	SourceConfig      json.RawMessage `json:"source_config" doc:"Import source configuration; null when not imported"`
@@ -113,17 +114,19 @@ type CuratedCollection struct {
 	ItemCount         int             `json:"item_count" example:"12"`
 	CreatedAt         Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt         Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
+	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 }
 
 // LibraryCollectionCard is a collection as the Collections tab shows it.
 type LibraryCollectionCard struct {
 	ID               string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
 	Title            string  `json:"title" example:"Oscar Winners"`
-	PosterURL        string  `json:"poster_url" doc:"Presigned, short-lived; empty when none"`
+	PosterURL        string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	ItemCount        int     `json:"item_count" example:"12"`
 	Featured         bool    `json:"featured,omitempty"`
 	CreatorProfileID *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
+	PosterIsCollage  bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 }
 
 // LibraryCollectionGroup is one group of the Collections tab.
@@ -163,8 +166,9 @@ type UserCollection struct {
 	Description      string  `json:"description,omitempty"`
 	CollectionType   string  `json:"collection_type" example:"manual"`
 	ItemCount        int     `json:"item_count" example:"4"`
-	PosterURL        string  `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterURL        string  `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage  bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt        Instant `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt        Instant `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
 }
@@ -215,12 +219,8 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func sectionViewer(ctx context.Context, imageSize string) handlers.SectionViewer {
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}
+func sectionViewer(ctx context.Context, art imagesize.Request) handlers.SectionViewer {
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -264,10 +264,10 @@ func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 	return out
 }
 
-func sectionOf(v handlers.SectionView) Section {
+func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
 	items := make([]CatalogItem, 0, len(v.Items))
 	for _, item := range v.Items {
-		items = append(items, catalogItemOfSection(item))
+		items = append(items, catalogItemOfSection(item, sel))
 	}
 	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items}
 }
@@ -284,13 +284,14 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	sel := reg.ratingSelection(ctx)
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, sectionOf(s))
+		out.Sections = append(out.Sections, sectionOf(s, sel))
 	}
 	return &SectionCollectionOutput{Body: out}, nil
 }
@@ -307,11 +308,11 @@ func (reg *Registry) getLibrarySectionItems(ctx context.Context, in *LibrarySect
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionOutput{Body: sectionOf(view)}, nil
+	return &SectionOutput{Body: sectionOf(view, reg.ratingSelection(ctx))}, nil
 }
 
 func instantOfStamp(s string) *Instant {
@@ -341,6 +342,7 @@ func curatedCollectionOf(v handlers.LibraryCollectionView) CuratedCollection {
 		ManagementMode: v.ManagementMode, ManagementSource: v.ManagementSource, ManagementKey: v.ManagementKey,
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage, LastSyncAt: instantOfStamp(v.LastSyncAt), SyncSchedule: v.SyncSchedule, NextSyncAt: instantOfStamp(v.NextSyncAt),
 		ItemCount: v.ItemCount, CreatedAt: created, UpdatedAt: updated,
+		PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 }
 
@@ -356,7 +358,8 @@ func jsonValue(raw json.RawMessage) json.RawMessage {
 func collectionCardsOf(cards []handlers.LibraryCollectionTabEntryView) []LibraryCollectionCard {
 	out := make([]LibraryCollectionCard, 0, len(cards))
 	for _, c := range cards {
-		out = append(out, LibraryCollectionCard{ID: c.ID, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash, ItemCount: c.ItemCount, Featured: c.Featured, CreatorProfileID: c.CreatorProfileID})
+		out = append(out, LibraryCollectionCard{ID: c.ID, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash, ItemCount: c.ItemCount, Featured: c.Featured, CreatorProfileID: c.CreatorProfileID,
+			PosterIsCollage: c.PosterIsCollage && c.PosterURL != ""})
 	}
 	return out
 }
@@ -374,7 +377,8 @@ func (reg *Registry) getLibraryCollections(ctx context.Context, in *LibraryViewI
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.LibraryCollectionsTab(ctx, id, userID, profileID)
+	// Marked as /api/v2, personal collections show their collages.
+	view, err := svc.LibraryCollectionsTab(handlers.WithNativeAPIV2(ctx), id, userID, profileID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -404,7 +408,8 @@ func userCollectionOf(c usercollections.ServerVisibleCollection) UserCollection 
 		updated = *t
 	}
 	return UserCollection{ID: c.ID, CreatorProfileID: c.CreatorProfileID, Name: c.Name, Description: c.Description, CollectionType: c.CollectionType,
-		ItemCount: c.ItemCount, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash, CreatedAt: created, UpdatedAt: updated}
+		ItemCount: c.ItemCount, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash, PosterIsCollage: c.PosterIsCollage && c.PosterURL != "",
+		CreatedAt: created, UpdatedAt: updated}
 }
 
 func (reg *Registry) listLibraryUserCollections(ctx context.Context, in *LibraryViewInput) (*UserCollectionCollectionOutput, error) {
@@ -420,7 +425,8 @@ func (reg *Registry) listLibraryUserCollections(ctx context.Context, in *Library
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.LibraryUserCollections(ctx, id, userID, profileID)
+	// Marked as /api/v2, personal collections show their collages.
+	views, err := svc.LibraryUserCollections(handlers.WithNativeAPIV2(ctx), id, userID, profileID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

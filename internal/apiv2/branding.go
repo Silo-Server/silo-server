@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -18,28 +17,17 @@ type BrandingService interface {
 	Load(context.Context) branding.Snapshot
 	GetAsset(context.Context, branding.AssetKind) ([]byte, string, string, error)
 }
-type ThemeOverrideService interface {
-	AdminCSS(context.Context) handlers.AdminCSSView
-}
 type BrandingConfiguration struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
 	AccentColor      string `json:"accent_color,omitempty"`
-	DefaultTheme     string `json:"default_theme,omitempty"`
-	WordmarkURL      string `json:"wordmark_url,omitempty"`
-	WordmarkLightURL string `json:"wordmark_light_url,omitempty"`
-	MarkURL          string `json:"mark_url,omitempty"`
-	MarkLightURL     string `json:"mark_light_url,omitempty"`
-	FaviconURL       string `json:"favicon_url,omitempty"`
-	LoginBgURL       string `json:"login_bg_url,omitempty"`
+	WordmarkURL      string `json:"wordmark_url,omitempty" format:"uri-reference"`
+	MarkURL          string `json:"mark_url,omitempty" format:"uri-reference"`
+	FaviconURL       string `json:"favicon_url,omitempty" format:"uri-reference"`
+	LoginBgURL       string `json:"login_bg_url,omitempty" format:"uri-reference"`
 	StorageAvailable bool   `json:"storage_available"`
 }
 type BrandingOutput struct{ Body BrandingConfiguration }
-type ThemeOverrides struct {
-	Vars   string `json:"vars"`
-	RawCSS string `json:"raw_css"`
-}
-type ThemeOverridesOutput struct{ Body ThemeOverrides }
 type BrandingCapabilitiesOutput struct {
 	Status       int
 	ETag         string `header:"ETag"`
@@ -49,9 +37,8 @@ type BrandingCapabilitiesOutput struct {
 
 type BrandingCapabilitiesOutputBody struct {
 	Capability
-	BrandingAvailable  bool `json:"branding_available"`
-	OverridesAvailable bool `json:"overrides_available"`
-	StorageAvailable   bool `json:"storage_available"`
+	BrandingAvailable bool `json:"branding_available"`
+	StorageAvailable  bool `json:"storage_available"`
 }
 
 func brandingAssetURL(snap branding.Snapshot, kind branding.AssetKind) string {
@@ -68,7 +55,6 @@ func registerBranding(reg *Registry) {
 	Register(reg, op("/theme/capabilities", "getBrandingCapabilities", "Discover public branding and asset storage availability."), func(_ context.Context, _ *CapabilityInput) (*BrandingCapabilitiesOutput, error) {
 		out := new(BrandingCapabilitiesOutput)
 		out.Body.BrandingAvailable = reg.deps.Branding != nil
-		out.Body.OverridesAvailable = reg.deps.ThemeOverrides != nil
 		out.Body.StorageAvailable = reg.deps.Branding != nil && reg.deps.Branding.HasStorage()
 		return out, nil
 	})
@@ -79,14 +65,7 @@ func registerBranding(reg *Registry) {
 			snap = reg.deps.Branding.Load(ctx)
 			storage = reg.deps.Branding.HasStorage()
 		}
-		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, DefaultTheme: snap.DefaultTheme, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), WordmarkLightURL: brandingAssetURL(snap, branding.KindWordmarkLight), MarkURL: brandingAssetURL(snap, branding.KindMark), MarkLightURL: brandingAssetURL(snap, branding.KindMarkLight), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
-	})
-	Register(reg, op("/theme/admin-css", "getThemeOverrides", "Read public pre-login theme overrides."), func(ctx context.Context, _ *struct{}) (*ThemeOverridesOutput, error) {
-		view := handlers.AdminCSSView{}
-		if reg.deps.ThemeOverrides != nil {
-			view = reg.deps.ThemeOverrides.AdminCSS(ctx)
-		}
-		return &ThemeOverridesOutput{Body: ThemeOverrides{Vars: view.Vars, RawCSS: view.RawCSS}}, nil
+		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), MarkURL: brandingAssetURL(snap, branding.KindMark), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
 	})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		id := "getBrandingAsset"
@@ -95,6 +74,9 @@ func registerBranding(reg *Registry) {
 		}
 		raw := op("/branding/assets/{kind}", id, "Read a public branding image with content-version validation.")
 		raw.Method = method
+		// The light logo kinds stay readable here although v2 neither uploads
+		// nor advertises them: the frozen v1 branding response mints their URLs
+		// in this namespace, and v1 can still upload them.
 		raw.Parameters = []*huma.Param{
 			{Name: "kind", In: "path", Required: true, Schema: &huma.Schema{Type: "string", Enum: []any{"wordmark", "wordmark_light", "mark", "mark_light", "favicon", "login_bg"}}},
 			{Name: "v", In: "query", Schema: &huma.Schema{Type: "string"}, Description: "Content reference returned by branding discovery; a stale reference returns 404."},

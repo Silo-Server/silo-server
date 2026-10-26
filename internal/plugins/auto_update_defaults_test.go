@@ -1,6 +1,11 @@
 package plugins
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -51,5 +56,121 @@ func TestAutoUpdateDefaultsInstallTheIntroDBWithoutReenablingExistingInstallatio
 				t.Fatalf("resolved plugins = %+v, want TheIntroDB", catalog.resolveRequests)
 			}
 		})
+	}
+}
+
+func TestAutoUpdateInstallsRequiredPluginsFromTheSiloRepository(t *testing.T) {
+	entry := func(repositoryID int, source, pluginID string) CatalogEntry {
+		return CatalogEntry{
+			RepositoryID: repositoryID,
+			SourceKind:   source,
+			Manifest:     &pluginv1.PluginManifest{PluginId: pluginID, Version: "1.0.0"},
+		}
+	}
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{
+			entry(7, RepositorySourceSilo, "silo.watchprovider.trakt"),
+			// A plugin of the same ID from an admin-added repository must not
+			// be what a required install picks.
+			entry(9, RepositorySourceExternal, "silo.watchprovider.simkl"),
+		},
+		resolved: &ResolvedCatalogInstall{
+			RepositoryID: 7,
+			ArchiveURL:   "https://plugins.example.test/trakt",
+			Checksum:     "test-checksum",
+		},
+	}
+	// The defaults are installed already, so only required plugins remain.
+	installations := &fakeAutoUpdateInstallations{list: []*Installation{
+		{PluginID: pluginIDTMDB, Enabled: true},
+		{PluginID: "silo.tvdb", Enabled: true},
+		{PluginID: "silo.theintrodb", Enabled: true},
+	}}
+	installer := &fakeAutoUpdateInstaller{}
+	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, installations, catalog, installer, nil, nil, nil)
+	service.SetRequiredPlugins(func(context.Context) ([]string, error) {
+		return []string{"silo.watchprovider.trakt", "silo.watchprovider.simkl"}, nil
+	})
+	summary, err := service.Check(t.Context(), AutoUpdateOptions{AutoInstallDefaults: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.DefaultPluginsInstalled != 1 || len(catalog.resolveRequests) != 1 ||
+		catalog.resolveRequests[0].PluginID != "silo.watchprovider.trakt" || catalog.resolveRequests[0].RepositoryID != 7 {
+		t.Fatalf("installs = %d, resolved = %+v, want only Trakt from the Silo repository", summary.DefaultPluginsInstalled, catalog.resolveRequests)
+	}
+}
+
+func TestAutoUpdateKeepsInstallingDefaultsWhenRequiredPluginsFail(t *testing.T) {
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{{
+			RepositoryID: 7, SourceKind: RepositorySourceSilo,
+			Manifest: &pluginv1.PluginManifest{PluginId: "silo.theintrodb", Version: "1.0.0"},
+		}},
+		resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/theintrodb", Checksum: "test-checksum"},
+	}
+	installer := &fakeAutoUpdateInstaller{}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, &fakeAutoUpdateInstallations{}, catalog, installer, nil, logger, nil)
+	service.SetRequiredPlugins(func(context.Context) ([]string, error) {
+		return nil, errors.New("database unavailable")
+	})
+	summary, err := service.Check(t.Context(), AutoUpdateOptions{AutoInstallDefaults: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.FailedOperations != 1 {
+		t.Fatalf("failed operations = %d, want the required-plugin lookup recorded", summary.FailedOperations)
+	}
+	if !strings.Contains(logs.String(), "database unavailable") {
+		t.Fatalf("logs = %q, want the failure logged by every Check caller", logs.String())
+	}
+	if summary.DefaultPluginsInstalled != 1 || len(installer.binary) != 1 {
+		t.Fatalf("default installs = %d, binary requests = %d, want 1 each", summary.DefaultPluginsInstalled, len(installer.binary))
+	}
+}
+
+// The daily update check runs without default installs. Required plugins still
+// install there, so a catalog that was unreachable at startup does not leave
+// them missing until the next restart.
+func TestAutoUpdateInstallsRequiredPluginsOnLaterChecks(t *testing.T) {
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{
+			{RepositoryID: 7, SourceKind: RepositorySourceSilo, Manifest: &pluginv1.PluginManifest{PluginId: "silo.theintrodb", Version: "1.0.0"}},
+			{RepositoryID: 7, SourceKind: RepositorySourceSilo, Manifest: &pluginv1.PluginManifest{PluginId: "silo.watchprovider.simkl", Version: "0.2.0"}},
+		},
+		resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/simkl", Checksum: "test-checksum"},
+	}
+	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, &fakeAutoUpdateInstallations{}, catalog, &fakeAutoUpdateInstaller{}, nil, nil, nil)
+	service.SetRequiredPlugins(func(context.Context) ([]string, error) {
+		return []string{"silo.watchprovider.simkl"}, nil
+	})
+	summary, err := service.Check(t.Context(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.DefaultPluginsInstalled != 1 || len(catalog.resolveRequests) != 1 ||
+		catalog.resolveRequests[0].PluginID != "silo.watchprovider.simkl" {
+		t.Fatalf("installs = %d, resolved = %+v, want only the required Simkl plugin", summary.DefaultPluginsInstalled, catalog.resolveRequests)
+	}
+}
+
+// Failure text reaches logs, task result data, and the task error, so a
+// credential assignment nested in a diagnostic must be masked before it is
+// recorded.
+func TestAutoUpdateSummaryMasksCredentialsInFailures(t *testing.T) {
+	var summary AutoUpdateSummary
+	summary.recordFailuref("process plugin update %s: %v", "silo.example",
+		errors.New("rpc error: code = Unauthenticated desc = api_key=sk-live-123 rejected"))
+	if summary.FailedOperations != 1 || len(summary.Failures) != 1 {
+		t.Fatalf("summary = %+v, want one recorded failure", summary)
+	}
+	got := summary.Failures[0]
+	if strings.Contains(got, "sk-live-123") {
+		t.Fatalf("failure = %q, want the api key masked", got)
+	}
+	if !strings.Contains(got, "silo.example") || !strings.Contains(got, "Unauthenticated") {
+		t.Fatalf("failure = %q, want the plugin and reason kept", got)
 	}
 }

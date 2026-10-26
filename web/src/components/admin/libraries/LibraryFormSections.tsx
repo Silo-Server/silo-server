@@ -11,6 +11,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import { Link } from "react-router";
 
 import FolderBrowser from "@/components/FolderBrowser";
 import PathAutocompleteInput from "@/components/PathAutocompleteInput";
@@ -25,13 +26,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { LANGUAGES } from "@/player/utils/languageNames";
 
 import { LIBRARY_TYPES } from "./libraryTypes";
+import {
+  REALTIME_MONITORING_SETTINGS_PATH,
+  realtimeMonitoringNeedsAttention,
+  realtimeMonitoringStatusText,
+} from "./realtimeMonitoring";
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
+import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
 function SettingCard({
   htmlFor,
@@ -185,6 +193,66 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
   );
 }
 
+/**
+ * The library's real-time monitoring switch and the server's status line for
+ * it. It stays out of FolderFields, which the setup wizard also renders, so
+ * only the admin library editor fetches the monitoring status.
+ */
+export function RealtimeMonitoringFields({ form }: { form: LibraryFormController }) {
+  const { data: status } = useLibraryRealtimeMonitoring();
+  const serverOff = status?.server_enabled === false;
+  const { library } = form;
+  const entry = library
+    ? status?.libraries.find((candidate) => candidate.library_id === library.id)
+    : undefined;
+  // The status describes the saved switch, so an unsaved change hides it
+  // rather than contradicting it.
+  const hasUnsavedChange = form.realtimeMonitoring !== (library?.realtime_monitoring ?? true);
+
+  let footer: ReactNode = null;
+  if (serverOff) {
+    footer = (
+      <p className="text-muted-foreground text-xs">
+        Real-time monitoring is turned off server-wide. Turn it on in{" "}
+        <Link
+          to={REALTIME_MONITORING_SETTINGS_PATH}
+          className="text-foreground font-medium underline underline-offset-2"
+        >
+          Settings → Library &amp; Metadata
+        </Link>
+        .
+      </p>
+    );
+  } else if (entry && !hasUnsavedChange) {
+    footer = (
+      <p
+        className={cn(
+          "text-xs",
+          realtimeMonitoringNeedsAttention(entry) ? "text-warning" : "text-muted-foreground",
+        )}
+      >
+        Status: {realtimeMonitoringStatusText(entry)}
+      </p>
+    );
+  }
+
+  return (
+    <SettingCard
+      htmlFor="realtime-monitoring-switch"
+      title="Real-time monitoring"
+      description="Scan this library automatically when its files change."
+      footer={footer}
+    >
+      <Switch
+        id="realtime-monitoring-switch"
+        checked={form.realtimeMonitoring}
+        disabled={serverOff}
+        onCheckedChange={form.setRealtimeMonitoring}
+      />
+    </SettingCard>
+  );
+}
+
 function ProviderLevelSection({
   level,
   items,
@@ -303,6 +371,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
+      {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
           <Label>Trailer &amp; extras types</Label>
@@ -345,8 +414,8 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>
           <p className="text-muted-foreground mb-3 text-xs">
-            Providers are asked in order from top to bottom. Uncheck a provider to skip it for that
-            level.
+            Local metadata always comes first. Remote providers are asked in order from top to
+            bottom and fill in what is still missing. Uncheck a provider to skip it for that level.
           </p>
           {form.chainLoading ? (
             <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
@@ -354,15 +423,39 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
               Loading providers…
             </div>
           ) : form.hasMetadataProviders ? (
-            form.contentLevels.map((level) => (
-              <ProviderLevelSection
-                key={level}
-                level={level}
-                items={form.activeLevelChains[level] ?? []}
-                onReorder={(newItems) => form.reorderLevel(level, newItems)}
-                onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
-              />
-            ))
+            <>
+              {form.hasLocalMetadata && (
+                <div className="mb-3">
+                  <SettingCard
+                    htmlFor="local-metadata-switch"
+                    title="Local metadata (NFO + artwork)"
+                    description="Reads .nfo files and artwork saved next to your media. Runs first at every level, so its values win over remote providers; fields you lock while editing an item win over both."
+                  >
+                    <Switch
+                      id="local-metadata-switch"
+                      checked={form.localMetadataEnabled}
+                      onCheckedChange={form.toggleLocalMetadata}
+                    />
+                  </SettingCard>
+                </div>
+              )}
+              {form.hasRemoteProviders ? (
+                form.contentLevels.map((level) => (
+                  <ProviderLevelSection
+                    key={level}
+                    level={level}
+                    items={form.remoteLevelChains[level] ?? []}
+                    onReorder={(newItems) => form.reorderLevel(level, newItems)}
+                    onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
+                  />
+                ))
+              ) : (
+                <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
+                  No remote metadata provider plugins are installed. Install one under Admin →
+                  Plugins to fetch artwork and descriptions.
+                </p>
+              )}
+            </>
           ) : (
             <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
               No metadata provider plugins are installed. Install one under Admin → Plugins to fetch
@@ -378,9 +471,12 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
 export function AdvancedFields({
   form,
   chapterThumbnailsSupported,
+  trickplaySupported,
 }: {
   form: LibraryFormController;
   chapterThumbnailsSupported: boolean;
+  /** Undefined when the server does not offer seek previews. */
+  trickplaySupported?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -388,11 +484,12 @@ export function AdvancedFields({
         <SettingCard
           htmlFor="chapter-thumbnails-switch"
           title="Generate chapter thumbnails"
-          description="Stores chapter preview images in the configured public asset S3 bucket. Chapter markers and chapter menus still work without thumbnails."
+          description="Stores chapter preview images in artwork storage (local disk or S3). Chapter markers and chapter menus still work without thumbnails."
           footer={
             !chapterThumbnailsSupported ? (
               <p className="text-warning text-xs">
-                Public asset S3 storage is required before this can be enabled.
+                Artwork storage must be available before this can be enabled. Check it in Storage
+                &amp; Database settings.
               </p>
             ) : null
           }
@@ -405,12 +502,29 @@ export function AdvancedFields({
           />
         </SettingCard>
       )}
-      {form.settingSupport.introDetection && (
+      {form.settingSupport.trickplay && trickplaySupported !== undefined && (
         <SettingCard
-          htmlFor="intro-detection-switch"
-          title="Detect intro markers"
-          description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
+          htmlFor="trickplay-switch"
+          title="Generate seek previews"
+          description="Makes the thumbnails players show while seeking, in the configured public asset storage. Files are processed in the background at low priority. Turning this off deletes the library's previews."
+          footer={
+            !trickplaySupported ? (
+              <p className="text-warning text-xs">
+                Public asset storage is required before this can be enabled.
+              </p>
+            ) : null
+          }
         >
+          <Switch
+            id="trickplay-switch"
+            checked={form.trickplayEnabled}
+            disabled={!trickplaySupported && !form.trickplayEnabled}
+            onCheckedChange={form.setTrickplayEnabled}
+          />
+        </SettingCard>
+      )}
+      {form.settingSupport.introDetection && (
+        <SettingCard htmlFor="intro-detection-switch" {...markerDetectionCopy(form.settingSupport)}>
           <Switch
             id="intro-detection-switch"
             checked={form.introDetectionEnabled}
@@ -420,4 +534,30 @@ export function AdvancedFields({
       )}
     </div>
   );
+}
+
+// markerDetectionCopy describes what local marker detection covers in a
+// library: movies get best-effort end credits only, episodes get intros and
+// credits, and mixed libraries hold both.
+function markerDetectionCopy(support: {
+  creditsOnlyDetection: boolean;
+  movieCreditsDetection: boolean;
+}): { title: string; description: string } {
+  if (support.creditsOnlyDetection) {
+    return {
+      title: "Detect credits markers (best effort)",
+      description:
+        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late. Needs Detect credits on in server settings.",
+    };
+  }
+  const episodes =
+    "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available.";
+  const kinds =
+    "Detect intros and Detect credits in server settings choose which markers it finds.";
+  return {
+    title: "Detect intro and credits markers",
+    description: support.movieCreditsDetection
+      ? `${episodes} Movies get end credits only, on a best-effort basis. ${kinds}`
+      : `${episodes} ${kinds}`,
+  };
 }

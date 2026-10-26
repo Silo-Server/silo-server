@@ -55,16 +55,9 @@ type ratingStore interface {
 	DeleteIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed catalog.ObservedRating) (bool, error)
 }
 
-// ratingProfileStaler marks a profile's recommendations stale after imports
-// changed its ratings.
-type ratingProfileStaler interface {
-	MarkProfileStale(ctx context.Context, userID int, profileID string) error
-}
-
-func (s *Service) WithRatingStore(store ratingStore, staler ratingProfileStaler) *Service {
+func (s *Service) WithRatingStore(store ratingStore) *Service {
 	if s != nil {
 		s.ratings = store
-		s.ratingStaler = staler
 	}
 	return s
 }
@@ -94,7 +87,7 @@ const (
 // unrated; base is the last agreed rating. A zero remoteAt is unknown.
 func decideRating(local, remote, base int, localAt, remoteAt time.Time) ratingAction {
 	switch {
-	case local == remote && local == base:
+	case local == base && remote == base:
 		return ratingKeep
 	case local == remote:
 		return ratingRebase
@@ -408,7 +401,7 @@ func (s *Service) processLocalRatingEvent(ctx context.Context, event LocalRating
 func (s *Service) recordRatingEventError(ctx context.Context, conn Connection, err error) {
 	fresh, reloadErr := s.reloadConnection(ctx, conn)
 	if reloadErr != nil || fresh.ProviderAccountID != conn.ProviderAccountID {
-		slog.WarnContext(ctx, "local rating provider event failed", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", err, "reload_error", reloadErr)
+		slog.WarnContext(ctx, "local rating or dropped-show provider event failed", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", err, "reload_error", reloadErr)
 		return
 	}
 	s.recordLocalWatchEventError(ctx, fresh, err)
@@ -776,18 +769,6 @@ func (s *Service) reconcileRatings(
 		}
 	}
 
-	// Imports commit one by one, so recommendations are marked stale once any
-	// applied, even if the bookkeeping after them fails or the run's context
-	// ends; the mark gets a short context of its own.
-	defer func() {
-		if result.imported > 0 && s.ratingStaler != nil {
-			markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			defer cancel()
-			if err := s.ratingStaler.MarkProfileStale(markCtx, conn.UserID, conn.ProfileID); err != nil {
-				slog.WarnContext(ctx, "failed to mark profile stale after rating import", "component", "watchsync", "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
-			}
-		}
-	}()
 	for _, item := range items {
 		switch decideRating(item.local, item.remote, item.base, item.localAt, item.remoteAt) {
 		case ratingKeep:

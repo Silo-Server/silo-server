@@ -1,1 +1,20 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://discord.gg/siloserver
+    about: Ask how to set up or use Silo in the Silo Discord.
+  - name: Report a security vulnerability
+    url: https://github.com/Silo-Server/silo-server/security/advisories/new
+    about: Report it privately. Do not open a public issue.
+  - name: How to report a problem
+    url: https://siloserver.org/docs/report-a-problem
+    about: Where to find versions, logs, and diagnostics, and what to include.
+  - name: Troubleshoot with an AI agent
+    url: https://github.com/Silo-Server/silo-troubleshooting-skill
+    about: Use Claude Code or Codex to diagnose your server and draft a reviewed report.
+  - name: Problem in the iOS, tvOS, or macOS app
+    url: https://github.com/Silo-Server/silo-apple/issues/new/choose
+    about: Report it in silo-apple.
+  - name: Problem in the Android phone or TV app
+    url: https://github.com/Silo-Server/silo-android/issues/new/choose
+    about: Report it in silo-android.

@@ -99,7 +99,10 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 		FROM media_item_libraries mil
 		JOIN media_folders f ON f.id = mil.media_folder_id
 		JOIN media_items mi ON mi.content_id = mil.content_id
-		WHERE mil.media_folder_id = $1`
+		WHERE mil.media_folder_id = $1
+		  -- An item an admin ignored is left unmatched on purpose; refreshing
+		  -- it would only rescan its folder for nothing.
+		  AND mi.match_ignored_at IS NULL`
 	args := []any{libraryID}
 
 	if normalizeLibraryRefreshMode(mode) == LibraryRefreshModeQuick {
@@ -114,9 +117,12 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 			OR COALESCE(mi.overview, '') = ''
 			OR COALESCE(mi.poster_path, '') = ''
 			OR COALESCE(mi.backdrop_path, '') = ''
+			OR COALESCE(mi.logo_path, '') = ''
 			OR COALESCE(mi.poster_path, '') LIKE '%//poster/%'
 			OR COALESCE(mi.backdrop_path, '') LIKE '%//backdrop/%'
 			OR COALESCE(mi.logo_path, '') LIKE '%//logo/%'
+			OR LOWER(COALESCE(mi.logo_source_path, '')) LIKE '%/clearart/%'
+			OR LOWER(COALESCE(mi.logo_path, '')) LIKE '%/clearart/%'
 			OR mi.refresh_failures > 0
 			OR mi.episode_metadata_incomplete = TRUE
 			OR (

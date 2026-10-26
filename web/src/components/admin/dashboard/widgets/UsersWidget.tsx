@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { AdminUser } from "@/api/types";
+import { accountRoleLabel } from "@/lib/accountOwner";
 import { formatRelativeTime } from "@/lib/date";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { SectionError, UserSkeletonRows } from "../feedback";
@@ -88,7 +89,7 @@ export function UsersWidget() {
                           <span className="truncate text-[13px] font-semibold">{u.username}</span>
                           {u.role === "admin" && (
                             <Badge variant="default" className="px-1.5 py-0 text-[9px]">
-                              admin
+                              {accountRoleLabel(u)}
                             </Badge>
                           )}
                         </div>

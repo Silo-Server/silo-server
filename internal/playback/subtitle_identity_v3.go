@@ -1,10 +1,10 @@
 package playback
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/url"
 	"strconv"
+
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
@@ -16,8 +16,7 @@ const (
 // filesystem path in a URL. Authorization still comes from the playback
 // session and source file; this key only prevents inventory-order drift.
 func ExternalSubtitlePathKeyV3(path string) string {
-	sum := sha256.Sum256([]byte(path))
-	return hex.EncodeToString(sum[:])
+	return subtitles.ExternalPathKey(path)
 }
 
 func subtitleURLIdentityV3(rawURL, key string, fileID int) string {

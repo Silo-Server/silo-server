@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -154,8 +156,9 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 }
 
 // HandleApplyItemMatch handles POST /admin/items/{id}/match/apply.
-// It applies the user-selected provider IDs to the item via ModeIdentify,
-// preserving the original content_id.
+// It applies the user-selected provider IDs to the item via ModeIdentify. A
+// local item, or one whose match the choice corrects, moves to the content_id
+// its new identity derives; the response carries the resulting content_id.
 func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.Request) {
 	contentID := chi.URLParam(r, "id")
 	if contentID == "" {
@@ -216,6 +219,9 @@ func (h *AdminMatchHandler) ApplyAdminItemMatch(ctx context.Context, contentID s
 		Mode:        metadata.ModeIdentify,
 	})
 	if err != nil {
+		if errors.Is(err, access.ErrMetadataCurationScope) {
+			return AdminMatchApplyResult{}, metadataCurationForbidden()
+		}
 		slog.ErrorContext(ctx, "admin match: apply failed", "component", "api", "content_id", contentID, "error", err)
 		return AdminMatchApplyResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply match")
 	}

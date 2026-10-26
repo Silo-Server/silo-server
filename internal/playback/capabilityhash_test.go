@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -10,9 +9,10 @@ import (
 
 func sampleCapabilityInfo() HWAccelInfo {
 	return HWAccelInfo{
-		Resolved:      "nvenc",
-		BootID:        "5b2c1f0e-1111-4a2b-9c3d-2f6e7a8b9c0d",
-		RenderDevices: []string{"/dev/dri/renderD128", "/dev/dri/renderD129"},
+		Resolved:                  "nvenc",
+		ProbeRequestTimeoutMillis: 111_000,
+		BootID:                    "5b2c1f0e-1111-4a2b-9c3d-2f6e7a8b9c0d",
+		RenderDevices:             []string{"/dev/dri/renderD128", "/dev/dri/renderD129"},
 		RenderDeviceDetails: []RenderDeviceInfo{
 			{Path: "/dev/dri/renderD128", PCIAddress: "0000:03:00.0", GPUUUID: "GPU-aaa", Description: "NVIDIA GPU (0x2204)"},
 			{Path: "/dev/dri/renderD129", PCIAddress: "0000:04:00.0", Description: "Intel GPU (0x9a49)"},
@@ -70,32 +70,6 @@ func TestComputeCapabilityHashIgnoresPerCallerMetadata(t *testing.T) {
 	}
 }
 
-// The advertised probe budget does move it, though it describes the report
-// rather than the hardware. The control plane sizes real deadlines from the
-// stored copy, so a node upgraded to a build that needs longer — changing
-// nothing else about itself — has to reach the sweep, or the API keeps
-// canceling that node's re-probes against a budget it has outgrown.
-func TestComputeCapabilityHashTracksTheAdvertisedProbeBudget(t *testing.T) {
-	info := sampleCapabilityInfo()
-	info.ProbeRequestTimeoutMillis = 111_000
-	before := ComputeCapabilityHash(info)
-
-	info.ProbeRequestTimeoutMillis = 136_000
-	if got := ComputeCapabilityHash(info); got == before {
-		t.Fatal("a node that raised its advertised probe budget hashed identically; the sweep would never refetch it")
-	}
-}
-
-func TestComputeCapabilityHashIsPrefixedSHA256(t *testing.T) {
-	hash := ComputeCapabilityHash(sampleCapabilityInfo())
-	if !strings.HasPrefix(hash, "sha256:") {
-		t.Fatalf("hash = %q, want a sha256: prefix", hash)
-	}
-	if len(hash) != len("sha256:")+64 {
-		t.Fatalf("hash = %q, want 64 hex digits after the prefix", hash)
-	}
-}
-
 // Every hardware or capability change must move the hash, since the hash is the
 // only thing the health sweep looks at before deciding nothing changed.
 func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
@@ -104,6 +78,7 @@ func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
 		name   string
 		mutate func(*HWAccelInfo)
 	}{
+		{"advertised probe budget", func(i *HWAccelInfo) { i.ProbeRequestTimeoutMillis = 136_000 }},
 		{"resolved backend", func(i *HWAccelInfo) { i.Resolved = "vaapi" }},
 		{"boot id", func(i *HWAccelInfo) { i.BootID = "0000ffff-2222-4a2b-9c3d-2f6e7a8b9c0d" }},
 		{"render device removed", func(i *HWAccelInfo) {
@@ -132,18 +107,6 @@ func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
 				t.Fatalf("%s did not change the hash (%s)", tt.name, got)
 			}
 		})
-	}
-}
-
-// An empty report still hashes, so a node with no hardware advertises a stable
-// identity rather than an empty one the sweep would read as "cannot say".
-func TestComputeCapabilityHashOfEmptyReport(t *testing.T) {
-	hash := ComputeCapabilityHash(HWAccelInfo{})
-	if hash == "" {
-		t.Fatal("empty report produced no hash")
-	}
-	if hash == ComputeCapabilityHash(sampleCapabilityInfo()) {
-		t.Fatal("empty report hashed the same as a populated one")
 	}
 }
 

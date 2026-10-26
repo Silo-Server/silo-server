@@ -6,6 +6,7 @@ import {
   isCapturedProfileAuthorityActive,
   isSessionIdentityCurrent,
   StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import type { UserLibrary } from "@/api/types";
@@ -72,7 +73,36 @@ export function filterVisibleLibraries(libraries: UserLibrary[], disabledLibrary
   return libraries.filter((library) => !disabled.has(library.id));
 }
 
-export function useAvailableUserLibraries() {
+/**
+ * The libraries a profile may browse, read as profileContext when given and as
+ * the active profile otherwise.
+ */
+export async function listUserLibraries({
+  profileContext,
+  includeHidden = false,
+}: {
+  profileContext?: ProfileRequestContextSnapshot;
+  includeHidden?: boolean;
+} = {}): Promise<UserLibrary[]> {
+  const result = await v2("GET /api/v2/user/libraries", {
+    profileContext,
+    ...(includeHidden ? { query: { include_hidden: true } } : {}),
+  });
+  return result.items.map((library) => {
+    const id = Number(library.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Unsupported library identifier.");
+    return { ...library, id };
+  });
+}
+
+/**
+ * The libraries this profile may browse. includeHidden also lists the ones it
+ * hid itself (ui.disabled_library_ids), which a profile with a library limit
+ * otherwise doesn't get back; only the screen that unhides them asks for it.
+ */
+export function useAvailableUserLibraries({
+  includeHidden = false,
+}: { includeHidden?: boolean } = {}) {
   const { profile } = useAuth();
   const identity = captureSessionIdentity();
   const profileContext = captureProfileRequestContext();
@@ -91,19 +121,16 @@ export function useAvailableUserLibraries() {
       ...libraryKeys.user(profile?.id),
       identity.serverOrigin,
       identity.authContextVersion,
+      includeHidden,
     ],
     queryFn: async (): Promise<UserLibrary[]> => {
       requireAuthority();
-      const result = await v2("GET /api/v2/user/libraries", {
+      const libraries = await listUserLibraries({
         profileContext: profileContext ?? undefined,
+        includeHidden,
       });
       requireAuthority();
-      return result.items.map((library) => {
-        const id = Number(library.id);
-        if (!Number.isSafeInteger(id) || id <= 0)
-          throw new Error("Unsupported library identifier.");
-        return { ...library, id };
-      });
+      return libraries;
     },
     staleTime: 5 * 60 * 1000,
   });

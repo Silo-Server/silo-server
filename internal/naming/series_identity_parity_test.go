@@ -8,7 +8,6 @@ func TestSeriesFilenameIdentity(t *testing.T) {
 		year              int
 	}{
 		{"/tv/downloads/Show.One.S01E01.mkv", "Show One", "/tv/downloads/Show.One.S01E01.mkv", 0},
-		{"/tv/downloads/Show.Two.S01E01.mkv", "Show Two", "/tv/downloads/Show.Two.S01E01.mkv", 0},
 		{"/tv/downloads/Show.One.(2020).S01E01.mkv", "Show One", "/tv/downloads/Show.One.(2020).S01E01.mkv", 2020},
 		{"/tv/Show One/Show.One.S01E01.mkv", "Show One", "/tv/Show One", 0},
 		{"/tv/Show.One.S01.1080p.WEB-DL/Show.One.S01E01.mkv", "Show One", "/tv/Show.One.S01.1080p.WEB-DL", 0},

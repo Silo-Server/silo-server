@@ -11,6 +11,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // Error codes reported by Probe. They are part of the admin mount-check API
@@ -47,10 +49,11 @@ type Result struct {
 	ErrorMessage string // empty when Reachable
 }
 
-// Probe checks that path exists, is a directory, and can be listed.
+// Probe checks that path exists, is a directory, and can be listed. path is
+// fspath-encoded.
 func Probe(path string) Result {
 	res := Result{Reachable: true}
-	info, err := os.Stat(path)
+	info, err := fspath.Stat(path)
 	switch {
 	case err != nil:
 		res.Reachable = false
@@ -59,7 +62,7 @@ func Probe(path string) Result {
 		res.Reachable = false
 		res.ErrorCode, res.ErrorMessage = ErrCodeNotDirectory, "Path is not a directory"
 	default:
-		dir, err := os.Open(path)
+		dir, err := fspath.Open(path)
 		if err == nil {
 			_, err = dir.Readdirnames(1)
 			_ = dir.Close()
@@ -161,28 +164,6 @@ func probeMany(
 	close(jobs)
 	workers.Wait()
 	return results
-}
-
-func probeBounded(ctx context.Context, timeout time.Duration, probe func() Result) Result {
-	if timeout <= 0 {
-		timeout = DefaultProbeTimeout
-	}
-	done := make(chan Result, 1)
-	go func() { done <- probe() }()
-
-	var ctxDone <-chan struct{}
-	if ctx != nil {
-		ctxDone = ctx.Done()
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case res := <-done:
-		return res
-	case <-ctxDone:
-	case <-timer.C:
-	}
-	return timeoutResult()
 }
 
 func awaitProbe(ctx context.Context, timeout time.Duration, done <-chan struct{}, result func() Result) Result {

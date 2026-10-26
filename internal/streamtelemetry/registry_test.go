@@ -238,10 +238,15 @@ func TestSetRealtimeConnectionIgnoresUnknownAndIsIdempotent(t *testing.T) {
 	registry.release(obs, httpstreamOutcomeCompleted)
 }
 
-type failingStore struct{ published atomic.Int64 }
+type failingStore struct {
+	published     atomic.Int64
+	secondPublish chan struct{}
+}
 
 func (s *failingStore) Publish(context.Context, Snapshot) error {
-	s.published.Add(1)
+	if s.published.Add(1) == 2 && s.secondPublish != nil {
+		close(s.secondPublish)
+	}
 	return errors.New("publish failed")
 }
 func (s *failingStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
@@ -249,11 +254,15 @@ func (s *failingStore) Load(context.Context) (Snapshot, error) { return Snapshot
 func TestStartContinuesAfterPublishError(t *testing.T) {
 	cfg := testConfig()
 	cfg.SweepInterval = time.Millisecond
-	store := &failingStore{}
+	store := &failingStore{secondPublish: make(chan struct{})}
 	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
 	ctx, cancel := context.WithCancel(context.Background())
 	registry.Start(ctx)
-	time.Sleep(8 * time.Millisecond)
+	select {
+	case <-store.secondPublish:
+	case <-time.After(time.Second):
+		t.Error("collector did not retry after publish error")
+	}
 	cancel()
 	// Wait for the collector to actually exit. Returning while it still runs
 	// leaks a goroutine that keeps reading the package-level now() seam, which
@@ -273,11 +282,15 @@ type lifecycleStore struct {
 	published      []Snapshot
 	leaveCalls     int
 	failFirstLeave bool
+	secondPublish  chan struct{}
 }
 
 func (s *lifecycleStore) Publish(_ context.Context, snapshot Snapshot) error {
 	s.mu.Lock()
 	s.published = append(s.published, snapshot)
+	if len(s.published) == 2 && s.secondPublish != nil {
+		close(s.secondPublish)
+	}
 	s.mu.Unlock()
 	return nil
 }
@@ -298,12 +311,16 @@ func (s *lifecycleStore) Leave(ctx context.Context) error {
 func TestRegistryStartOnceAndPublishedSequence(t *testing.T) {
 	cfg := testConfig()
 	cfg.SweepInterval = time.Millisecond
-	store := &lifecycleStore{}
+	store := &lifecycleStore{secondPublish: make(chan struct{})}
 	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
 	ctx, cancel := context.WithCancel(context.Background())
 	registry.Start(ctx)
 	registry.Start(ctx)
-	time.Sleep(6 * time.Millisecond)
+	select {
+	case <-store.secondPublish:
+	case <-time.After(time.Second):
+		t.Error("collector did not publish two snapshots")
+	}
 	cancel()
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
 	defer stopCancel()

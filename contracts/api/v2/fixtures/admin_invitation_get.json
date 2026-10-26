@@ -1,6 +1,7 @@
 {
   "id": "7",
   "email": "invitee@example.invalid",
+  "delivery": "unknown",
   "role": "user",
   "library_ids": null,
   "create_profile": true,

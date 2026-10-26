@@ -2,10 +2,12 @@ package taskmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 )
 
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
@@ -187,7 +189,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
 			// For other errors, rearm so the trigger fires again later.
-			if err != ErrTaskAlreadyRunning {
+			if !errors.Is(err, ErrTaskAlreadyRunning) {
 				m.rearmTriggers(w)
 			}
 			continue
@@ -275,14 +277,28 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 	return nil
 }
 
+// manualStartKey marks the execution context of a run started by StartTask.
+type manualStartKey struct{}
+
+// StartedManually reports whether ctx belongs to a task run started through
+// StartTask (the v2 admin run and trigger operations). Runs through RunTask,
+// including the trigger loop, internal kicks and the v1 admin task run route,
+// do not report it. Tasks use it to skip their scheduling floors when asked to
+// run now.
+func StartedManually(ctx context.Context) bool {
+	manual, _ := ctx.Value(manualStartKey{}).(bool)
+	return manual
+}
+
 // StartTask starts work on this process after synchronously reserving its worker.
 // It does not persist work intent or guarantee execution after a process failure.
+// The run's context reports StartedManually.
 func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	w, err := m.getWorker(key)
 	if err != nil {
 		return TaskInfo{}, err
 	}
-	ctx, cancel, err := w.reserve(context.Background())
+	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true))
 	if err != nil {
 		return TaskInfo{}, err
 	}
@@ -360,6 +376,14 @@ func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 func isManualOnly(task Task) bool {
 	manual, ok := task.(ManualOnlyTask)
 	return ok && manual.ManualOnly()
+}
+
+func startSpread(task Task) time.Duration {
+	spreader, ok := task.(StartSpreader)
+	if !ok {
+		return 0
+	}
+	return spreader.StartSpread()
 }
 
 func servesAnyLibrary(task Task, libraryTypes []string) bool {

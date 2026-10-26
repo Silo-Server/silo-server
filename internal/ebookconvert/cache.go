@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // moduleVersion is a short fingerprint of the embedded wasm, mixed into every
@@ -145,7 +147,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		// Convert to a temp file in the cache dir, then atomically rename in.
 		tmp, tmpErr := os.CreateTemp(c.opts.Dir, "converting-*.epub")
 		if tmpErr != nil {
-			return "", fmt.Errorf("%w: cache temp: %v", ErrConversionFailed, tmpErr)
+			return "", fmt.Errorf("%w: cache temp: %v", ErrConversionFailed, tmpErr) //nolint:errorlint // callers classify by the verdict sentinel; the filesystem error is only reported
 		}
 		tmpPath := tmp.Name()
 		_ = tmp.Close()
@@ -158,7 +160,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		}
 		if renErr := os.Rename(tmpPath, dst); renErr != nil {
 			_ = os.Remove(tmpPath)
-			return "", fmt.Errorf("%w: cache rename: %v", ErrConversionFailed, renErr)
+			return "", fmt.Errorf("%w: cache rename: %v", ErrConversionFailed, renErr) //nolint:errorlint // callers classify by the verdict sentinel; the filesystem error is only reported
 		}
 		c.enforceBudget(dst)
 		return dst, nil
@@ -169,7 +171,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		if res.Err != nil {
 			return "", res.Err
 		}
-		return res.Val.(string), nil
+		return res.Val.(string), nil //nolint:errcheck,forcetypeassert // c.group's only DoChan closure returns a string
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
@@ -271,9 +273,10 @@ func (c *Cache) enforceBudget(keep string) {
 }
 
 // SourceKeyFromStat builds a SourceKey from a file path + fileID, reading
-// size/mtime via stat. Checksum is left empty (pass one explicitly if known).
+// size/mtime via stat. path is fspath-encoded. Checksum is left empty (pass
+// one explicitly if known).
 func SourceKeyFromStat(fileID int, path string) (SourceKey, error) {
-	fi, err := os.Stat(path)
+	fi, err := fspath.Stat(path)
 	if err != nil {
 		return SourceKey{}, err
 	}

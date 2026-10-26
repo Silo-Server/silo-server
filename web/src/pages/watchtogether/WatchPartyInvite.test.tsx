@@ -38,17 +38,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("offers the app on iPhone with the silo://watch-party link", () => {
+it("continues to the hub with the invite query intact", () => {
   mount("/rooms/join?token=abc%2B1", IPHONE);
   const link = screen.getByRole("link", { name: /open in the silo app/i });
   const server = encodeURIComponent(window.location.origin);
   expect(link.getAttribute("href")).toBe(`silo://watch-party?server=${server}&token=abc%2B1`);
-});
-
-it("continues to the hub with the invite query intact", () => {
-  mount("/rooms/join?token=abc", IPHONE);
   fireEvent.click(screen.getByRole("link", { name: /continue in the browser/i }));
-  expect(screen.getByText("Hub at /rooms?token=abc")).toBeTruthy();
+  expect(screen.getByText("Hub at /rooms?token=abc%2B1")).toBeTruthy();
 });
 
 it("treats iPadOS Safari's desktop user agent as iOS", () => {

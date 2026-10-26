@@ -19,7 +19,7 @@ type SubtitleUploadService interface {
 type SubtitleUploadForm struct {
 	File             huma.FormFile `form:"file" contentType:"application/octet-stream"`
 	MediaFileID      string        `form:"media_file_id" minLength:"1" maxLength:"128"`
-	Language         string        `form:"language" required:"false" maxLength:"64"`
+	Language         string        `form:"language" required:"false" maxLength:"64" doc:"BCP 47 tag or ISO 639 code; omitted means detect"`
 	LanguageOverride bool          `form:"language_override" required:"false"`
 	ReleaseName      string        `form:"release_name" required:"false" maxLength:"4096"`
 	HearingImpaired  bool          `form:"hearing_impaired" required:"false"`
@@ -29,13 +29,13 @@ type SubtitleUploadInput struct {
 }
 type SubtitleDetectForm struct {
 	File     huma.FormFile `form:"file" contentType:"application/octet-stream"`
-	Language string        `form:"language" required:"false" maxLength:"64"`
+	Language string        `form:"language" required:"false" maxLength:"64" doc:"BCP 47 tag or ISO 639 code, used as a hint; omitted means detect"`
 }
 type SubtitleDetectInput struct {
 	RawBody huma.MultipartFormFiles[SubtitleDetectForm]
 }
 type SubtitleDetection struct {
-	Language string `json:"language"`
+	Language string `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag detected from the file name, embedded metadata, or speech"`
 	Source   string `json:"source" enum:"filename,metadata,content,manual"`
 }
 type SubtitleDetectOutput struct{ Body SubtitleDetection }
@@ -65,6 +65,7 @@ func registerSubtitleUploads(reg *Registry) {
 	upload := op("/subtitles/upload", "uploadSubtitle")
 	upload.ServiceBacked = true
 	upload.DemoRestricted = true
+	upload.HouseholdProfileGate = true
 	upload.RetrySafety = RetrySafetyNonRetryable
 	upload.Description = "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
 	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
@@ -94,7 +95,7 @@ func registerSubtitleUploads(reg *Registry) {
 		if row == nil {
 			return nil, NewProblem(TypeInternalError, "Subtitle upload returned no result.")
 		}
-		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: storedSubtitleView(*row)}}, nil
+		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: reg.storedSubtitleWithSync(ctx, *row)}}, nil
 	})
 	detect := op("/subtitles/detect-language", "detectSubtitleLanguage")
 	detect.RetrySafety = RetrySafetyNaturalIdempotent

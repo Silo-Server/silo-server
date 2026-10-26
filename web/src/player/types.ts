@@ -3,6 +3,8 @@
  * Zero imports from app-specific code.
  */
 
+import type { BufferingMode } from "./buffering-quality";
+
 /** Subtitle display mode. */
 export type SubtitleMode = "off" | "auto" | "always";
 
@@ -39,6 +41,8 @@ export interface PlayerFileVersion {
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
   marker_segments?: PlayerMarkerSegment[];
+  /** Seek-bar previews are published for this file. */
+  trickplay_available?: boolean;
 }
 
 export interface PlayerPlaybackVariantPart {
@@ -97,6 +101,7 @@ export interface PlayerAudioTrack {
   embedded_title?: string;
   language?: string;
   codec?: string;
+  profile?: string;
   layout?: string;
   channels?: number;
   bitrate?: number;
@@ -129,6 +134,8 @@ export interface PlayerSubtitleInfo {
   source?: "external" | "embedded" | "downloaded";
   forced?: boolean;
   hearing_impaired?: boolean;
+  /** Names the track to the subtitle sync operations; absent when it can't be synced. */
+  sync_key?: string;
   url: string;
   /**
    * Optional endpoint returning base64-encoded container font attachments for
@@ -180,6 +187,9 @@ export type MarkerKind = "intro" | "recap" | "credits" | "preview";
 
 /** Every occurrence in the v2 marker inventory. An empty array means no markers. */
 export interface PlayerMarkerSegment {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;
@@ -195,6 +205,9 @@ export interface MarkerDraft {
 
 /** A marker range positioned on the seek bar, tagged with its kind for color. */
 export interface MarkerRegionView {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start: number;
   end: number;
@@ -218,6 +231,8 @@ export interface PlaybackExitState {
   lastHDR?: boolean;
   lastCodecVideo?: string;
   lastEditionKey?: string;
+  /** The file that ended was one the viewer chose; its next part keeps the choice. */
+  versionPinned?: boolean;
   destinationHref?: string;
 }
 
@@ -258,6 +273,8 @@ export interface WatchPageProps {
   title: string;
   year?: number;
   fileId?: number;
+  /** The viewer chose fileId, so Auto must not swap in another version. */
+  versionPicked?: boolean;
   libraryId?: number;
   versions: PlayerFileVersion[];
   playbackVariants?: PlayerPlaybackVariant[];
@@ -280,10 +297,11 @@ export interface WatchPageProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */
   introSkipMode?: IntroSkipMode | null;
+  /** Effective profile mode, seeded by the host before its settings read resolves. */
+  bufferingMode?: BufferingMode;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
@@ -316,7 +334,6 @@ export interface QualityOption {
   sublabel: string;
   resolution: string;
   bitrateKbps: number;
-  isOriginal: boolean;
 }
 
 /** Context for series playback (episode navigation). */
@@ -337,7 +354,14 @@ export interface EpisodeRef {
   runtime: number;
   /** Optional display fields for post-roll / next-episode UI. */
   overview?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machineTranslatedFields?: string[];
   stillUrl?: string;
+  stillIsEpisodeStill?: boolean;
   stillThumbhash?: string;
   airDate?: string | null;
+  /** The profile's watch state, for spoiler protection. */
+  watchState?: { played?: boolean; is_in_progress?: boolean; position_seconds?: number };
+  /** A shuffle can play a movie next; spoiler protection covers episodes only. */
+  isMovie?: boolean;
 }

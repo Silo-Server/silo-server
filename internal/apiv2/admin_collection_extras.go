@@ -22,8 +22,8 @@ type AdminCollectionExtrasService interface {
 	SyncAdminCollection(context.Context, string) (*models.LibraryCollectionSyncRun, error)
 	ImportAdminMDBList(context.Context, handlers.AdminCollectionImportMDBList) (handlers.AdminCollectionImportResult, error)
 	ImportAdminTMDB(context.Context, handlers.AdminCollectionImportTMDB) (handlers.AdminCollectionImportResult, error)
-	ImportAdminTrakt(context.Context, handlers.AdminCollectionImportTrakt) (handlers.AdminCollectionImportResult, error)
-	ListAdminCollectionTemplates(context.Context) (templates.BundleCatalog, error)
+	ImportAdminTMDBList(context.Context, handlers.AdminCollectionImportTMDBList) (handlers.AdminCollectionImportResult, error)
+	ListAdminCollectionTemplates(context.Context) ([]templates.BundleWithTemplates, error)
 	AdminCollectionTemplateCatalog(context.Context) templates.Catalog
 	ApplyAdminCollectionTemplate(context.Context, string, handlers.AdminCollectionTemplateApply) (handlers.AdminCollectionTemplateResult, error)
 	QueueAdminCollectionTemplate(context.Context, string, handlers.AdminCollectionTemplateApply, int) (*models.AdminJob, error)
@@ -53,7 +53,7 @@ type AdminCollectionImageInput struct {
 }
 type AdminCollectionArtworkForm struct {
 	Image     huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp" required:"false"`
-	SourceURL string        `form:"source_url" required:"false"`
+	SourceURL string        `form:"source_url" format:"uri-reference" required:"false"`
 }
 type AdminCollectionArtworkInput struct {
 	ID      ID `path:"id"`
@@ -72,8 +72,8 @@ type AdminTMDBInput struct {
 	Body    AdminTMDBImport
 	RawBody []byte
 }
-type AdminTraktInput struct {
-	Body    AdminTraktImport
+type AdminTMDBListInput struct {
+	Body    AdminTMDBListImport
 	RawBody []byte
 }
 type AdminCollectionImportOutput struct {
@@ -82,7 +82,39 @@ type AdminCollectionImportOutput struct {
 }
 type AdminCollectionSyncOutput struct{ Body AdminCollectionSyncRun }
 type AdminTemplateCatalogOutput struct{ Body templates.Catalog }
-type AdminBundleCatalogOutput struct{ Body templates.BundleCatalog }
+type AdminBundleCatalogOutput struct{ Body BundleCatalog }
+
+// BundleCatalog is the /api/v2 bundle list. Each bundle adds a summary of its
+// templates; /api/v1 serves templates.BundleCatalog without them.
+type BundleCatalog struct {
+	Bundles []CollectionTemplateBundle `json:"bundles"`
+}
+type CollectionTemplateBundle struct {
+	templates.Bundle
+	Templates []CollectionTemplateSummary `json:"templates" doc:"The bundle's templates, in template_ids order."`
+}
+type CollectionTemplateSummary struct {
+	ID         string              `json:"id"`
+	Title      string              `json:"title"`
+	Source     templates.Source    `json:"source"`
+	MediaKind  templates.MediaKind `json:"media_kind"`
+	Featured   bool                `json:"featured" doc:"Collections created from this template are pinned first on their shelf."`
+	PosterPath string              `json:"poster_path,omitempty" doc:"Server-relative path of the template's poster image."`
+	NeedsSetup bool                `json:"needs_setup" doc:"Applying the template creates an empty collection that cannot sync until an administrator sets its source."`
+}
+
+func bundleCatalogOf(listed []templates.BundleWithTemplates) BundleCatalog {
+	out := BundleCatalog{Bundles: make([]CollectionTemplateBundle, 0, len(listed))}
+	for _, b := range listed {
+		summaries := make([]CollectionTemplateSummary, 0, len(b.Templates))
+		for _, t := range b.Templates {
+			summaries = append(summaries, CollectionTemplateSummary{ID: t.ID, Title: t.Title, Source: t.Source, MediaKind: t.MediaKind, Featured: t.Featured, PosterPath: t.PosterPath, NeedsSetup: t.NeedsSetup()})
+		}
+		out.Bundles = append(out.Bundles, CollectionTemplateBundle{Bundle: b.Bundle, Templates: summaries})
+	}
+	return out
+}
+
 type AdminTemplateInput struct {
 	BundleID string `path:"bundle_id"`
 	Body     AdminTemplateApply
@@ -93,7 +125,7 @@ type AdminCollectionPreviewItem struct {
 	ContentID ID     `json:"content_id"`
 	Title     string `json:"title"`
 	Type      string `json:"type"`
-	PosterURL string `json:"poster_url,omitempty"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference"`
 }
 type AdminCollectionPreviewOutput struct {
 	Body struct {
@@ -136,17 +168,17 @@ func registerAdminCollectionExtras(reg *Registry) {
 	tmdb := adminCollectionOperation(http.MethodPost, "/admin/collections/import/tmdb", "importAdminTMDB", "Import a TMDB collection.", false)
 	tmdb.DefaultStatus = http.StatusCreated
 	Register(reg, tmdb, reg.importAdminTMDB)
-	trakt := adminCollectionOperation(http.MethodPost, "/admin/collections/import/trakt", "importAdminTrakt", "Import a Trakt collection.", false)
-	trakt.DefaultStatus = http.StatusCreated
-	Register(reg, trakt, reg.importAdminTrakt)
-	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/templates", "listAdminCollectionTemplates", "List supported collection templates.", false), func(ctx context.Context, _ *struct{}) (*AdminTemplateCatalogOutput, error) {
+	tmdbList := adminCollectionOperation(http.MethodPost, "/admin/collections/import/tmdb-list", "importAdminTMDBList", "Import a public TMDB list as a collection.", false)
+	tmdbList.DefaultStatus = http.StatusCreated
+	Register(reg, tmdbList, reg.importAdminTMDBList)
+	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/templates", "listAdminCollectionTemplates", "List the collection templates with an mdblist, tmdb or tmdb_list source.", false), func(ctx context.Context, _ *struct{}) (*AdminTemplateCatalogOutput, error) {
 		s, p := reg.adminCollectionExtras()
 		if p != nil {
 			return nil, p
 		}
-		return &AdminTemplateCatalogOutput{Body: s.AdminCollectionTemplateCatalog(ctx)}, nil
+		return &AdminTemplateCatalogOutput{Body: creatableCollectionTemplates(s.AdminCollectionTemplateCatalog(ctx))}, nil
 	})
-	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/template-bundles", "listAdminCollectionTemplateBundles", "List collection template bundles.", false), func(ctx context.Context, _ *struct{}) (*AdminBundleCatalogOutput, error) {
+	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/template-bundles", "listAdminCollectionTemplateBundles", "List collection template bundles, each with a summary of its templates.", false), func(ctx context.Context, _ *struct{}) (*AdminBundleCatalogOutput, error) {
 		s, p := reg.adminCollectionExtras()
 		if p != nil {
 			return nil, p
@@ -155,7 +187,7 @@ func registerAdminCollectionExtras(reg *Registry) {
 		if e != nil {
 			return nil, adminCollectionError(e)
 		}
-		return &AdminBundleCatalogOutput{Body: v}, nil
+		return &AdminBundleCatalogOutput{Body: bundleCatalogOf(v)}, nil
 	})
 	Register(reg, adminCollectionOperation(http.MethodPost, "/admin/collections/template-bundles/{bundle_id}/apply", "applyAdminCollectionTemplateBundle", "Preview or synchronously apply a template bundle, preserving featured-section behavior.", false), reg.applyAdminTemplate)
 	job := adminCollectionOperation(http.MethodPost, "/admin/collections/template-bundles/{bundle_id}/apply-job", "startAdminCollectionTemplateBundleJob", "Queue durable template application; poll its collection-job Location.", false)
@@ -327,8 +359,7 @@ func (reg *Registry) importAdminTMDB(ctx context.Context, in *AdminTMDBInput) (*
 	}
 	return adminImportOutput(v), nil
 }
-func (reg *Registry) importAdminTrakt(ctx context.Context, in *AdminTraktInput) (*AdminCollectionImportOutput, error) {
-
+func (reg *Registry) importAdminTMDBList(ctx context.Context, in *AdminTMDBListInput) (*AdminCollectionImportOutput, error) {
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
 	}
@@ -340,7 +371,7 @@ func (reg *Registry) importAdminTrakt(ctx context.Context, in *AdminTraktInput) 
 	if p != nil {
 		return nil, p
 	}
-	v, e := s.ImportAdminTrakt(ctx, cmd)
+	v, e := s.ImportAdminTMDBList(ctx, cmd)
 	if e != nil {
 		return nil, adminCollectionError(e)
 	}

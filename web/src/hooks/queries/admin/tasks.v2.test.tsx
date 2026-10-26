@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { useRunTask, useCancelTask, useUpdateTriggers, useTaskHistory } from "./tasks";
+import { useRunTask, useCancelTask, useUpdateTriggers } from "./tasks";
 import { useAdminTaskJobs } from "./taskJobs";
 
 beforeEach(() => {
@@ -59,25 +59,6 @@ it("does not replay any task mutation on 401 and preserves the submitted guard",
   }
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/refresh"))).toBe(false);
   expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get("If-Match")).toBe('"original"');
-});
-it("loads task history only through explicit continuation", async () => {
-  const fetchMock = vi.fn<typeof fetch>(async (url) =>
-    jsonResponse({
-      items: [{ id: String(url).includes("cursor=") ? "older" : "newer" }],
-      page: String(url).includes("cursor=")
-        ? { has_more: false }
-        : { has_more: true, next_cursor: "history-cursor" },
-    }),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => useTaskHistory("fixture"), { wrapper });
-  await waitFor(() => expect(result.current.data?.[0]?.id).toBe("newer"));
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    await result.current.fetchNextPage();
-  });
-  await waitFor(() => expect(result.current.data?.map((e) => e.id)).toEqual(["newer", "older"]));
-  expect(result.current.hasNextPage).toBe(false);
 });
 it("loads job pages with the same kind and preserves opaque library identities", async () => {
   const fetchMock = vi.fn<typeof fetch>(async (url) =>

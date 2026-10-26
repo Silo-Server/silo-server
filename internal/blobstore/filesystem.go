@@ -524,7 +524,7 @@ func (f *Filesystem) Probe(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = root.Remove(name) }()
-	_, err = file.Write([]byte("ok"))
+	_, err = file.WriteString("ok")
 	if err == nil {
 		err = file.Sync()
 	}

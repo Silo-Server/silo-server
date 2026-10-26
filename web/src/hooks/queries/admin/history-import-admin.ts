@@ -93,12 +93,15 @@ export function useDeleteAdminMapping() {
 
 // --- Runs ---
 
+/** A mapping or source to import, with an optional lookback window in hours. */
+export type AdminRunStart = { id: number; lookbackHours?: number };
+
 export function useCreateAdminRunForMapping() {
   const queryClient = useQueryClient();
   const scope = adminImportScope();
   return useMutation({
     retry: false,
-    mutationFn: createAdminImportRun,
+    mutationFn: ({ id, lookbackHours }: AdminRunStart) => createAdminImportRun(id, lookbackHours),
     onSuccess: (run) => {
       queryClient.setQueryData([...adminKeys.historyImportAdminRun(run.id), scope], run);
       toast.success("Import queued");
@@ -116,7 +119,7 @@ export function useAdminBulkRun() {
   const scope = adminImportScope();
   return useMutation({
     retry: false,
-    mutationFn: bulkAdminImportRuns,
+    mutationFn: ({ id, lookbackHours }: AdminRunStart) => bulkAdminImportRuns(id, lookbackHours),
     onSuccess: (data) => {
       for (const outcome of data.outcomes)
         if (outcome.run)
@@ -182,20 +185,6 @@ export function useAdminHistoryImportRuns(sourceId?: number, enabled = true) {
     fetchNextPage: query.fetchNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
   };
-}
-export function useAdminHistoryImportRun(id: string | undefined) {
-  const queryClient = useQueryClient();
-  const key = [...adminKeys.historyImportAdminRun(id), adminImportScope()];
-  return useQuery({
-    queryKey: key,
-    queryFn: () => getAdminImportRun(id!, queryClient.getQueryData<AdminImportRun>(key)?.location),
-    enabled: !!id,
-    retry: false,
-    refetchInterval: (query) =>
-      query.state.status !== "error" && query.state.data && importRunActive(query.state.data)
-        ? (query.state.data.retryAfterMs ?? 5000)
-        : false,
-  });
 }
 
 export function useCancelAdminRun() {

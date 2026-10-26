@@ -36,16 +36,17 @@ function formatLibraryFilterSummary(
     .map((libraryId) => libraries.find((library) => library.id === libraryId)?.name)
     .filter((name): name is string => Boolean(name));
 
+  if (libraryIds.length === 1) {
+    return names[0] ?? "1 library";
+  }
   if (names.length === 0) {
     return `${libraryIds.length} libraries`;
   }
-  if (names.length === 1) {
-    return names[0] ?? "1 library";
-  }
-  if (names.length === 2) {
+  // Unnamed IDs (deleted or not yet loaded) still count toward "+N more".
+  if (libraryIds.length === 2 && names.length === 2) {
     return `${names[0] ?? "Library"}, ${names[1] ?? "Library"}`;
   }
-  return `${names[0] ?? "Library"} +${names.length - 1} more`;
+  return `${names[0] ?? "Library"} +${libraryIds.length - 1} more`;
 }
 
 function toggleLibrarySelection(
@@ -65,18 +66,26 @@ export default function LibraryMultiSelect({
   onChange,
   eligibleKinds,
   emptyLabel = "All Libraries",
+  allOptionLabel = emptyLabel,
   hideAllOption = false,
   ineligibleReason,
   triggerClassName,
+  disabled,
+  triggerLabel,
 }: {
   libraries: LibraryOption[];
   value: number[];
   onChange: (libraryIds: number[]) => void;
   eligibleKinds?: string[];
   emptyLabel?: string;
+  /** The menu's reset item, when it should read differently from the empty summary. */
+  allOptionLabel?: string;
   hideAllOption?: boolean;
   ineligibleReason?: string;
   triggerClassName?: string;
+  disabled?: boolean;
+  /** Read before the summary by screen readers, when no visible label names the button. */
+  triggerLabel?: string;
 }) {
   const hasIneligible =
     Array.isArray(eligibleKinds) &&
@@ -90,8 +99,10 @@ export default function LibraryMultiSelect({
           type="button"
           variant="outline"
           className={triggerClassName ?? "w-full justify-between"}
+          disabled={disabled}
         >
           <span className="truncate">
+            {triggerLabel ? <span className="sr-only">{`${triggerLabel}: `}</span> : null}
             {formatLibraryFilterSummary(value, libraries, emptyLabel)}
           </span>
           <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
@@ -107,7 +118,7 @@ export default function LibraryMultiSelect({
                 onChange([]);
               }}
             >
-              {emptyLabel}
+              {allOptionLabel}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>

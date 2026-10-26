@@ -1,10 +1,12 @@
 import { type ReactNode } from "react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
+import { useShowTitleArt } from "@/hooks/useTitleArt";
 
 import "./detailLayout.css";
 import DetailOverview from "./components/DetailOverview";
 import DetailTitle from "./DetailTitle";
+import MachineTranslatedLabel from "./components/MachineTranslatedLabel";
 
 interface DetailHeroProps {
   title: string;
@@ -30,6 +32,13 @@ interface DetailHeroProps {
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
+  /** Labels the overview as machine-translated by AI. */
+  overviewMachineTranslated?: boolean;
+  /** Marks the tagline as machine-translated by AI. */
+  taglineMachineTranslated?: boolean;
+  /** Spoiler protection: keep the overview behind a reveal button. */
+  overviewHidden?: boolean;
+  onRevealOverview?: () => void;
   actions?: ReactNode;
   aside?: ReactNode;
   studioLabel?: string;
@@ -57,6 +66,10 @@ export default function DetailHero({
   overview,
   overviewTranslating = false,
   onTranslateOverview,
+  overviewMachineTranslated = false,
+  taglineMachineTranslated = false,
+  overviewHidden = false,
+  onRevealOverview,
   actions,
   aside,
   studioLabel,
@@ -76,6 +89,14 @@ export default function DetailHero({
     onLoad: onPosterLoad,
     onError: onPosterError,
   } = useImageLoaded(posterUrl);
+  const showTitleArt = useShowTitleArt();
+  const titleLogoUrl = showTitleArt ? logoUrl : undefined;
+  // Until the profile's choice is known, a title with a logo reserves the logo
+  // box without fetching the art or drawing the text.
+  const holdTitle = showTitleArt === undefined && Boolean(logoUrl);
+  // A plain-text context is the title's type; it shares one eyebrow line with
+  // the studio or network. Richer context (an episode breadcrumb) keeps its own row.
+  const eyebrowType = typeof context === "string" ? context : undefined;
   const backdropPlaceholder = backdropThumbhash ? decodeThumbhash(backdropThumbhash) : "";
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
@@ -115,9 +136,12 @@ export default function DetailHero({
       data-viewport-bounded={isViewportBounded || undefined}
     >
       {topNav}
+      {/* The artwork stops 1px short of the bottom edge, which the fade below
+          covers solidly anyway. At a fractional hero height the edge pixel is
+          only partly covered by the fade, and the artwork bled through as a line. */}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-x-0 top-0 bottom-px"
           style={{
             ...(backdropPlaceholder
               ? {
@@ -220,26 +244,39 @@ export default function DetailHero({
                 role={isViewportBounded ? "region" : undefined}
                 aria-label={isViewportBounded ? "Media details" : undefined}
               >
-                {context && (
+                {context && !eyebrowType && (
                   <div className="detail-hero-context text-muted-foreground mb-4 text-sm font-medium">
                     {context}
                   </div>
                 )}
 
-                {studioLabel && (
-                  <div className="detail-hero-studio text-muted-foreground mb-2 text-xs font-semibold tracking-[0.16em] uppercase">
-                    {studioLabel}
-                  </div>
+                {(eyebrowType || studioLabel) && (
+                  <p className="detail-hero-context text-muted-foreground mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold tracking-[0.16em] uppercase">
+                    {eyebrowType && <span>{eyebrowType}</span>}
+                    {eyebrowType && studioLabel && (
+                      <span aria-hidden="true" className="size-[3px] rounded-full bg-current" />
+                    )}
+                    {studioLabel && <span className="text-foreground/85">{studioLabel}</span>}
+                  </p>
                 )}
 
-                {logoUrl ? (
+                {titleLogoUrl ? (
                   <>
                     <h1 className="sr-only">{title}</h1>
                     <img
-                      src={logoUrl}
+                      src={titleLogoUrl}
                       alt=""
                       decoding="async"
                       className="mb-4 h-20 w-full max-w-[420px] object-contain object-left lg:h-28 lg:max-w-[480px]"
+                    />
+                  </>
+                ) : holdTitle ? (
+                  <>
+                    <h1 className="sr-only">{title}</h1>
+                    <div
+                      aria-hidden="true"
+                      data-testid="detail-hero-title-pending"
+                      className="mb-4 h-20 w-full max-w-[420px] lg:h-28 lg:max-w-[480px]"
                     />
                   </>
                 ) : (
@@ -257,13 +294,16 @@ export default function DetailHero({
                 {/* Tagline (italic) — falls back to subtitle */}
                 {(tagline || subtitle) && (
                   <div
-                    className={`text-muted-foreground mb-4 text-[13px] ${
+                    className={`text-muted-foreground mb-4 text-[0.8125rem] ${
                       tagline
                         ? "text-foreground/72 italic"
                         : "text-muted-foreground text-base font-medium not-italic"
                     }`}
                   >
                     {tagline || subtitle}
+                    {tagline && taglineMachineTranslated && (
+                      <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+                    )}
                   </div>
                 )}
 
@@ -279,6 +319,9 @@ export default function DetailHero({
                     clamp={isViewportBounded}
                     translating={overviewTranslating}
                     onTranslate={onTranslateOverview}
+                    machineTranslated={overviewMachineTranslated}
+                    hidden={overviewHidden}
+                    onReveal={onRevealOverview}
                   />
                 )}
 

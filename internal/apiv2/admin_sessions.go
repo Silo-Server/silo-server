@@ -30,7 +30,7 @@ type AdminPlaybackSession struct {
 	EpisodeName              string  `json:"episode_name,omitempty"`
 	SeasonNumber             *int    `json:"season_number,omitempty"`
 	EpisodeNumber            *int    `json:"episode_number,omitempty"`
-	PosterURL                string  `json:"poster_url,omitempty"`
+	PosterURL                string  `json:"poster_url,omitempty" format:"uri-reference"`
 	PlayMethod               string  `json:"play_method"`
 	ReportingNode            string  `json:"reporting_node"`
 	NodeDisplayName          string  `json:"node_display_name,omitempty"`
@@ -65,9 +65,10 @@ type AdminPlaybackSession struct {
 	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
 	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
 	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int     `json:"source_video_height,omitempty" doc:"Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown."`
 	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
 	SourceAudioChannels      *int    `json:"source_audio_channels"`
-	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
+	SourceAudioLanguage      string  `json:"source_audio_language,omitempty" doc:"Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown"`
 	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
 	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
 	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
@@ -162,6 +163,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		SourceBitrateKbps:        v.SourceBitrateKbps,
 		SourceVideoCodec:         v.SourceVideoCodec,
 		SourceVideoResolution:    v.SourceVideoResolution,
+		SourceVideoHeight:        v.SourceVideoHeight,
 		SourceAudioCodec:         v.SourceAudioCodec,
 		SourceAudioChannels:      v.SourceAudioChannels,
 		SourceAudioLanguage:      v.SourceAudioLanguage,
@@ -218,6 +220,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	StreamLocation            bool     `json:"stream_location"`
 	NodeRouting               bool     `json:"node_routing"`
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
+	SourceVideoHeight         bool     `json:"source_video_height" doc:"Rows may carry source_video_height"`
 }
 
 const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
@@ -250,6 +253,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.NetworkAccessRoute = true
 		out.Body.StreamLocation = true
 		out.Body.OutputFormat = true
+		out.Body.SourceVideoHeight = true
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

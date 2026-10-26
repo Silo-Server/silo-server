@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 type AdminCatalogImagesService interface {
@@ -32,7 +33,7 @@ type AdminImagesOutput struct{ Body AdminImagesPage }
 type AdminImageApplyInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body struct {
-		OriginalURL string `json:"original_url" minLength:"1" maxLength:"8192"`
+		OriginalURL string `json:"original_url" minLength:"1" maxLength:"8192" doc:"An original_url from this item's image list, sent back unchanged; not validated as a URI"`
 		Type        string `json:"type" minLength:"1" maxLength:"100"`
 		ProviderID  string `json:"provider_id,omitempty" maxLength:"512"`
 	}
@@ -41,7 +42,7 @@ type AdminImageApplied struct {
 	ContentID  string `json:"content_id"`
 	StoredPath string `json:"stored_path"`
 	Thumbhash  string `json:"thumbhash"`
-	ImageURL   string `json:"image_url,omitempty"`
+	ImageURL   string `json:"image_url,omitempty" format:"uri-reference"`
 	Revision   string `json:"revision,omitempty"`
 }
 type AdminImageApplyOutput struct{ Body AdminImageApplied }
@@ -86,9 +87,21 @@ func registerAdminCatalogImages(reg *Registry) {
 			}
 			choices = append(choices, choice{string(raw), row})
 		}
-		// Keep the metadata service's rating-first presentation. The stable
-		// identity breaks ties without letting expiring display URLs affect pages.
+		// Local sidecar artwork leads in discovery order, which puts the file a
+		// refresh would pick first. Provider choices follow, highest rated
+		// first; the stable identity breaks their ties without letting expiring
+		// display URLs affect pages.
 		slices.SortStableFunc(choices, func(a, b choice) int {
+			aLocal := a.row.ProviderID == metadata.LocalImageProviderID
+			bLocal := b.row.ProviderID == metadata.LocalImageProviderID
+			switch {
+			case aLocal && bLocal:
+				return 0
+			case aLocal:
+				return -1
+			case bLocal:
+				return 1
+			}
 			if order := cmp.Compare(b.row.Rating, a.row.Rating); order != 0 {
 				return order
 			}
@@ -138,10 +151,10 @@ func registerAdminCatalogImages(reg *Registry) {
 // ItemImageEntry is the native transport projection, independent of handler views.
 type ItemImageEntry struct {
 	ProviderID  string  `json:"provider_id"`
-	URL         string  `json:"url"`
-	OriginalURL string  `json:"original_url"`
+	URL         string  `json:"url" doc:"Preview of the image: a fetchable URL, a data: URI, or the provider's value as given; not validated as a URI"`
+	OriginalURL string  `json:"original_url" doc:"The provider's image URL, or file:// and the unescaped path of a local image; not validated as a URI. Send it unchanged to apply the image"`
 	Type        string  `json:"type"`
-	Language    string  `json:"language"`
+	Language    string  `json:"language" doc:"Language of text in the image as the provider reports it, usually ISO 639-1 (TMDB uses xx for none); empty when textless or unknown"`
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
@@ -149,7 +162,7 @@ type ItemImageEntry struct {
 
 // CurrentImages is the native transport projection, independent of handler views.
 type CurrentImages struct {
-	PosterURL   string `json:"poster_url,omitempty"`
-	BackdropURL string `json:"backdrop_url,omitempty"`
-	LogoURL     string `json:"logo_url,omitempty"`
+	PosterURL   string `json:"poster_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
+	BackdropURL string `json:"backdrop_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
+	LogoURL     string `json:"logo_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
 }

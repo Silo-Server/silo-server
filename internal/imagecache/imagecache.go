@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -21,10 +20,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
-	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
+	maxDownloadBytes = metadata.MaxArtworkSourceBytes // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 
@@ -85,15 +85,18 @@ type CacheResult struct {
 
 // Cacher downloads and stores image variants to S3.
 type Cacher struct {
-	s3                ObjectPutter
-	revisionTracker   ArtworkRevisionTracker
+	s3              ObjectPutter
+	revisionTracker ArtworkRevisionTracker
+	// httpClient's netguard transport checks every address it dials,
+	// redirect hops included: public addresses only, or the local network
+	// too when the request context carries netguard.WithPrivateAccess.
 	httpClient        *http.Client
 	enforcePublicURLs bool
 }
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), enforcePublicURLs: true}
+	return &Cacher{s3: s3, httpClient: newGuardedHTTPClient(), enforcePublicURLs: true}
 }
 
 // SetArtworkRevisionTracker wires durable revision lifecycle tracking. The
@@ -102,13 +105,6 @@ func (c *Cacher) SetArtworkRevisionTracker(tracker ArtworkRevisionTracker) {
 	if c != nil {
 		c.revisionTracker = tracker
 	}
-}
-
-func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Cacher{s3: s3, httpClient: client}
 }
 
 // CacheImage implements metadata.ImageCacher using the internal Cache method.
@@ -187,6 +183,22 @@ func (c *Cacher) CacheEbookCover(ctx context.Context, data []byte, contentID str
 		ContentType: "ebooks",
 		ContentID:   contentID,
 		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return res.OriginalPath, res.Thumbhash, nil
+}
+
+// CacheExtraStill stores a local extra's sidecar card image under
+// "local/extras/{extraID}/still/..." with the 16:9 still variants episode
+// stills use.
+func (c *Cacher) CacheExtraStill(ctx context.Context, data []byte, extraID string) (storedPath string, thumbhash string, err error) {
+	res, err := c.CacheBytes(ctx, data, CacheRequest{
+		ProviderID:  "local",
+		ContentType: "extras",
+		ContentID:   extraID,
+		ImageType:   metadata.ImageStill,
 	})
 	if err != nil {
 		return "", "", err
@@ -453,6 +465,14 @@ func imageTypeName(t metadata.ImageType) string {
 		return "still"
 	case metadata.ImageProfile:
 		return "profile"
+	case metadata.ImageBanner:
+		return "banner"
+	case metadata.ImageThumb:
+		return "thumb"
+	case metadata.ImageClearArt:
+		return "clearart"
+	case metadata.ImageDisc:
+		return "disc"
 	default:
 		return "unknown"
 	}
@@ -480,14 +500,15 @@ func normalizeImageLanguage(language string) string {
 }
 
 // downloadImage fetches the image at the given URL, enforcing size, timeout,
-// and public-network limits.
+// and network limits: public addresses only, or the local network too when
+// ctx carries netguard.WithPrivateAccess.
 func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)
 	}
 	if c.enforcePublicURLs {
-		if err := validatePublicImageURL(parsed); err != nil {
+		if err := validateImageURLFor(ctx, parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -501,7 +522,7 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 
 	client := c.httpClient
 	if client == nil {
-		client = newSecureHTTPClient()
+		client = newGuardedHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -525,24 +546,24 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 	return data, nil
 }
 
-func newSecureHTTPClient() *http.Client {
-	transport := &http.Transport{
-		Proxy:               nil,
-		DialContext:         secureImageDialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
+// newGuardedHTTPClient returns the image download client. Its netguard
+// transport keeps trusted and untrusted requests in separate connection pools.
+func newGuardedHTTPClient() *http.Client {
 	return &http.Client{
-		Transport: transport,
+		Transport: netguard.NewTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return http.ErrUseLastResponse
 			}
-			return validatePublicImageURL(req.URL)
+			return validateImageURLFor(req.Context(), req.URL)
 		},
 	}
 }
 
-func validatePublicImageURL(u *url.URL) error {
+// validateImageURLFor checks u before it is requested. A literal IP host
+// gets an early netguard refusal; the transport checks every address it
+// dials, including hosts that resolve through DNS.
+func validateImageURLFor(ctx context.Context, u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("empty URL")
 	}
@@ -553,54 +574,10 @@ func validatePublicImageURL(u *url.URL) error {
 	if host == "" {
 		return fmt.Errorf("URL host is required")
 	}
-	if addr, err := netip.ParseAddr(host); err == nil && !isPublicAddr(addr) {
-		return fmt.Errorf("private image host %q is not allowed", host)
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if err := netguard.CheckAddr(addr, netguard.PrivateAccess(ctx)); err != nil {
+			return fmt.Errorf("image host %q is not allowed: %w", host, err)
+		}
 	}
 	return nil
-}
-
-func secureImageDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	addr, err := resolvePublicAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	dialer := &net.Dialer{Timeout: downloadTimeout}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
-}
-
-func resolvePublicAddr(ctx context.Context, host string) (netip.Addr, error) {
-	if addr, err := netip.ParseAddr(host); err == nil {
-		if isPublicAddr(addr) {
-			return addr, nil
-		}
-		return netip.Addr{}, fmt.Errorf("private image host %q is not allowed", host)
-	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("resolve image host %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		addr, ok := netip.AddrFromSlice(ip.IP)
-		if ok && isPublicAddr(addr) {
-			return addr, nil
-		}
-	}
-	return netip.Addr{}, fmt.Errorf("image host %q did not resolve to a public address", host)
-}
-
-func isPublicAddr(addr netip.Addr) bool {
-	if addr.Is4In6() {
-		addr = addr.Unmap()
-	}
-	return addr.IsGlobalUnicast() &&
-		!addr.IsPrivate() &&
-		!addr.IsLoopback() &&
-		!addr.IsLinkLocalUnicast() &&
-		!addr.IsLinkLocalMulticast() &&
-		!addr.IsMulticast() &&
-		!addr.IsUnspecified()
 }

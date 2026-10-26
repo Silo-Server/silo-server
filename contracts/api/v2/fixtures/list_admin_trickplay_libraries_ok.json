@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "library_id": "1",
+      "name": "Movies",
+      "pending": 12,
+      "running": 1,
+      "ready": 840,
+      "unusable": 2,
+      "sheet_bytes": 1800000000
+    }
+  ]
+}

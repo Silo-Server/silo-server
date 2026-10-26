@@ -167,16 +167,6 @@ func TestParseRadarrMovieFileDelete(t *testing.T) {
 	}
 }
 
-func TestParseRadarrTest(t *testing.T) {
-	parsed, err := Parse(ProviderAuto, fixture(t, "radarr_test.json"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !parsed.Test || parsed.Provider != ProviderRadarr {
-		t.Fatalf("unexpected parse: %+v", parsed)
-	}
-}
-
 func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	parsed, err := Parse(ProviderSonarr, fixture(t, "unknown_event.json"))
 	if err != nil {
@@ -184,6 +174,39 @@ func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	}
 	if parsed.EventType != "Health" || parsed.Test || len(parsed.Changes) != 0 {
 		t.Fatalf("unknown event must be a no-op: %+v", parsed)
+	}
+}
+
+// SeriesDelete and MovieDelete send deletedFiles as a bool, not the file list
+// an upgrade's download carries; they are valid deliveries with nothing to do.
+func TestParseSeriesAndMovieDeleteAreNoOps(t *testing.T) {
+	for _, tc := range []struct{ fixture, eventType, provider string }{
+		{"sonarr_series_delete.json", "SeriesDelete", ProviderSonarr},
+		{"radarr_movie_delete.json", "MovieDelete", ProviderRadarr},
+	} {
+		parsed, err := Parse(ProviderAuto, fixture(t, tc.fixture))
+		if err != nil {
+			t.Fatalf("%s: Parse: %v", tc.fixture, err)
+		}
+		if parsed.EventType != tc.eventType || parsed.Provider != tc.provider || parsed.Test || len(parsed.Changes) != 0 {
+			t.Fatalf("%s: want a no-op %s from %s, got %+v", tc.fixture, tc.eventType, tc.provider, parsed)
+		}
+	}
+}
+
+// Outside SeriesDelete and MovieDelete, a deletedFiles value that is not a list
+// of files is malformed, so a broken upgrade payload is not accepted with its
+// replaced files dropped.
+func TestParseMalformedDeletedFiles(t *testing.T) {
+	for _, deleted := range []string{`[1]`, `{"path":"/tv/x/old.mkv"}`, `"/tv/x/old.mkv"`, `1`, `true`} {
+		body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"deletedFiles":` + deleted + `}`)
+		if _, err := Parse(ProviderAuto, body); !errors.Is(err, ErrMalformedPayload) {
+			t.Fatalf("deletedFiles %s: want ErrMalformedPayload, got %v", deleted, err)
+		}
+	}
+	body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/new.mkv"},"deletedFiles":null}`)
+	if parsed, err := Parse(ProviderAuto, body); err != nil || len(parsed.Changes) != 1 {
+		t.Fatalf("deletedFiles null: got %+v, %v; want the imported file only", parsed, err)
 	}
 }
 

@@ -77,19 +77,6 @@ func markEbookRead(
 	return store.Upsert(ctx, progress)
 }
 
-// markEbookUnread clears an ebook's read state by deleting its reader-progress
-// row — the direct analog of the video unwatch path, where
-// userstore.ClearProgress DELETEs the user_watch_progress row (dropping the
-// resume position along with the watched flag).
-func markEbookUnread(
-	ctx context.Context,
-	store EbookReadStateStore,
-	userID int,
-	profileID, contentID string,
-) error {
-	return store.Delete(ctx, userID, profileID, contentID)
-}
-
 // setEbookReadState applies the watched toggle for an ebook target resolved by
 // resolveWatchedTargets, which has already enforced the access filter on the
 // item. Scoping matches the rest of the ebook progress code: user_id +
@@ -105,7 +92,7 @@ func (h *ItemsHandler) setEbookReadState(
 		return fmt.Errorf("ebook reader progress store is not configured")
 	}
 	if !read {
-		return markEbookUnread(ctx, h.ebookReadStateStore, userID, profileID, contentID)
+		return h.ebookReadStateStore.Delete(ctx, userID, profileID, contentID)
 	}
 	return markEbookRead(ctx, h.ebookReadStateStore, userID, profileID, contentID, time.Now().UTC(), func(ctx context.Context) (int, error) {
 		return h.defaultEbookFileID(ctx, contentID, filter)

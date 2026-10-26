@@ -4,7 +4,8 @@
       "client_ip": "127.0.0.1",
       "first_seen": "2026-01-02T03:04:05.678Z",
       "last_seen": "2026-01-02T03:04:05.678Z",
-      "request_count": 3
+      "request_count": 3,
+      "location": "local"
     }
   ],
   "page": {

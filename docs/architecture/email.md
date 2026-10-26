@@ -16,8 +16,9 @@ type Sender interface {
 }
 ```
 
-`Message` carries recipients, subject, and text and/or HTML bodies (both set →
-multipart/alternative). `Send` returns `mail.ErrNotConfigured` when email is
+`Message` carries recipients, subject, text and/or HTML bodies (both set →
+multipart/alternative), and optional inline images the HTML references as
+`cid:<ContentID>` (multipart/related). `Send` returns `mail.ErrNotConfigured` when email is
 disabled or incomplete, so features treat email as an optional transport and
 degrade gracefully. The SMTP implementation (`mail.NewSMTPSender`) is backed by
 `github.com/wneessen/go-mail`.
@@ -41,9 +42,27 @@ low):
 Admin UI: Admin Settings → Notifications → Email, including a synchronous test
 send (`POST /api/v1/admin/email/test`).
 
+## Branded layout
+
+HTML emails wrap their content with `mail.RenderLayout`, which draws the shared
+dark shell. Its header follows the web sidebar: the server's uploaded wordmark,
+else the Silo wordmark, with the server name as alt text. When
+`branding.accent_color` is set, `mail.EmailButton` uses it for the primary
+action and picks a dark or white label for contrast.
+
+The logo is embedded in each message as an inline PNG, not linked. Remote images
+are often blocked, the recipient may not reach the server, and uploaded logos
+are stored as WebP, which Outlook does not render. `mail.BrandLoader` reads the
+branding, converts the wordmark once per content ref, and falls back to the Silo
+wordmark when the asset cannot be read, so branding never blocks a send. A
+message rendered with a `mail.Brand` must carry `Brand.InlineImages()` as
+`Message.Inline`. Retained messages, such as queued address verifications, keep
+their logo so a retry sends exactly what was admitted.
+
 ## Adding a consumer
 
 Construct messages in the feature package and send through a `mail.Sender`
-dependency. Do not read `email.*` settings from feature code, and check
+dependency. Load the brand from the shared `mail.BrandLoader` and pass it to
+the layout and `Message.Inline`. Do not read `email.*` settings from feature code, and check
 `Enabled` (or branch on `ErrNotConfigured`) rather than treating a missing
 SMTP configuration as an error.

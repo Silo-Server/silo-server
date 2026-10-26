@@ -15,6 +15,7 @@ base_decision := decision if {
 		"unrestricted": libraries.unrestricted,
 		"allowed_library_ids": libraries.allowed_library_ids,
 		"disabled_library_ids": libraries.disabled_library_ids,
+		"hidden_library_ids": libraries.hidden_library_ids,
 		"libraries_restricted": libraries.libraries_restricted,
 		"max_content_rating": max_content_rating(input),
 		"max_content_rating_override": "",
@@ -33,6 +34,7 @@ library_decision(i) := result if {
 		"unrestricted": true,
 		"allowed_library_ids": [],
 		"disabled_library_ids": disabled_ids(i),
+		"hidden_library_ids": [],
 		"libraries_restricted": false,
 	}
 } else := result if {
@@ -42,6 +44,9 @@ library_decision(i) := result if {
 		"unrestricted": false,
 		"allowed_library_ids": subtract(effective.allowed_library_ids, disabled_ids(i)),
 		"disabled_library_ids": [],
+		# The allowed libraries the profile hid itself. They are not access:
+		# a library list that lets the profile show them again reports them.
+		"hidden_library_ids": intersect(effective.allowed_library_ids, disabled_ids(i)),
 		"libraries_restricted": true,
 	}
 }
@@ -150,11 +155,13 @@ tighten(base, override) := result if {
 	max_quality := quality.min(base["max_playback_quality"], object.get(override, "max_playback_quality", ""))
 	profile_verified := merged_profile_verified(base, override)
 	output_disabled := disabled_if_unrestricted(disabled, unrestricted)
+	hidden := merged_hidden(base, override, unrestricted)
 	result := {
 		"schema_version": base["schema_version"],
 		"unrestricted": unrestricted,
 		"allowed_library_ids": allowed,
 		"disabled_library_ids": output_disabled,
+		"hidden_library_ids": hidden,
 		"libraries_restricted": libraries_restricted,
 		"max_content_rating": base["max_content_rating"],
 		"max_content_rating_override": object.get(override, "max_content_rating", ""),
@@ -226,6 +233,23 @@ merged_allowed(base, override, unrestricted, disabled) := [] if {
 	not object.get(override, "unrestricted", base.unrestricted)
 	allowed := subtract(intersect(base.allowed_library_ids, object.get(override, "allowed_library_ids", [])), disabled)
 }
+
+# merged_hidden keeps the profile's hidden libraries that the override would
+# still allow had the profile not hidden them. A restricted base carries them
+# in hidden_library_ids and an unrestricted one in disabled_library_ids; the
+# override's allowlist and disabled list narrow them as they narrow allowed.
+merged_hidden(base, override, unrestricted) := [] if {
+	unrestricted
+} else := hidden if {
+	hidden := subtract(hidden_candidates(base, override), object.get(override, "disabled_library_ids", []))
+}
+
+hidden_candidates(base, override) := ids if {
+	not object.get(override, "unrestricted", base.unrestricted)
+	ids := intersect(own_hidden(base), object.get(override, "allowed_library_ids", []))
+} else := unique_sorted(own_hidden(base))
+
+own_hidden(base) := array.concat(object.get(base, "hidden_library_ids", []), base.disabled_library_ids)
 
 disabled_if_unrestricted(disabled, unrestricted) := disabled if {
 	unrestricted

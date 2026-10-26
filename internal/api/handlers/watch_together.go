@@ -230,6 +230,12 @@ func (c *watchTogetherRoomConn) Close() error {
 	return err
 }
 
+// LegacyRoomProtocol reports a connection on the frozen /api/v1 room socket,
+// which keeps its narrower host band.
+func (c *watchTogetherRoomConn) LegacyRoomProtocol() bool {
+	return !c.includeMemberStatus
+}
+
 // CloseReplaced uses the socket's single writer and waits for the terminal
 // frame to be written before closing. A blocked peer can delay takeover by at
 // most one second. V1 keeps its frozen, unexplained close behavior.

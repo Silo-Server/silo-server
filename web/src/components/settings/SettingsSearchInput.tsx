@@ -97,7 +97,7 @@ export function SettingsSearchInput({
         ) : showShortcutHint ? (
           <kbd
             aria-hidden="true"
-            className="border-border/80 bg-surface text-muted-foreground pointer-events-none absolute top-1/2 right-2 hidden h-6 -translate-y-1/2 items-center rounded-md border px-1.5 font-sans text-[10px] font-medium sm:inline-flex"
+            className="border-border/80 bg-surface text-muted-foreground pointer-events-none absolute top-1/2 right-2 hidden h-6 -translate-y-1/2 items-center rounded-md border px-1.5 font-sans text-xs font-medium sm:inline-flex"
           >
             {SEARCH_SHORTCUT_LABEL}
           </kbd>

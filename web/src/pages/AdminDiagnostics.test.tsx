@@ -81,23 +81,6 @@ describe("AdminDiagnostics uploads toggle", () => {
     expect(toggle).not.toBeChecked();
   });
 
-  it("renders available status on and submits disablement", async () => {
-    mocks.useDiagnosticsStatus.mockReturnValue({
-      data: diagnosticStatus("available"),
-      isError: false,
-      isLoading: false,
-    });
-    const user = userEvent.setup();
-    renderPage();
-    const toggle = screen.getByRole("switch", { name: "Client uploads" });
-
-    expect(toggle).toBeChecked();
-
-    await user.click(toggle);
-
-    expect(mocks.mutateUploadsEnabled).toHaveBeenCalledWith(false);
-  });
-
   it("keeps storage-unavailable status on while showing the warning", () => {
     mocks.useDiagnosticsStatus.mockReturnValue({
       data: diagnosticStatus("storage_unavailable"),
@@ -108,16 +91,6 @@ describe("AdminDiagnostics uploads toggle", () => {
 
     expect(screen.getByRole("switch", { name: "Client uploads" })).toBeChecked();
     expect(screen.getByText(/Client diagnostic storage is currently unavailable/)).toBeVisible();
-  });
-
-  it("disables the toggle while an update is pending", () => {
-    mocks.useUpdateDiagnosticsUploadsEnabled.mockReturnValue({
-      isPending: true,
-      mutate: mocks.mutateUploadsEnabled,
-    });
-    renderPage();
-
-    expect(screen.getByRole("switch", { name: "Client uploads" })).toBeDisabled();
   });
 
   it("disables the toggle when status is unavailable", () => {

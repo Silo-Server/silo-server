@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   useSetSettingValue: vi.fn(),
   useClearSettingValue: vi.fn(),
   useSubtitleAppearanceSetting: vi.fn(),
+  useSubtitleSyncSetting: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {
@@ -30,6 +31,16 @@ vi.mock("@/hooks/queries/settingValues", async () => {
 vi.mock("@/hooks/queries/subtitleAppearance", () => ({
   useSubtitleAppearanceSetting: (...args: unknown[]) => mocks.useSubtitleAppearanceSetting(...args),
 }));
+
+vi.mock("@/hooks/queries/subtitleSync", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/subtitleSync")>(
+    "@/hooks/queries/subtitleSync",
+  );
+  return {
+    ...actual,
+    useSubtitleSyncSetting: (...args: unknown[]) => mocks.useSubtitleSyncSetting(...args),
+  };
+});
 
 import SubtitleAppearanceSettings from "./SubtitleAppearanceSettings";
 
@@ -57,17 +68,20 @@ describe("SubtitleAppearanceSettings", () => {
   let clearMutateAsync: ReturnType<typeof vi.fn>;
   let save: ReturnType<typeof vi.fn>;
   let reset: ReturnType<typeof vi.fn>;
+  let saveSync: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mocks.useEffectiveSettings.mockReset();
     mocks.useSetSettingValue.mockReset();
     mocks.useClearSettingValue.mockReset();
     mocks.useSubtitleAppearanceSetting.mockReset();
+    mocks.useSubtitleSyncSetting.mockReset();
     mutate = vi.fn();
     mutateAsync = vi.fn().mockResolvedValue(undefined);
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
     save = vi.fn().mockResolvedValue(undefined);
     reset = vi.fn().mockResolvedValue(undefined);
+    saveSync = vi.fn().mockResolvedValue(undefined);
 
     mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
     mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutate, mutateAsync });
@@ -78,26 +92,40 @@ describe("SubtitleAppearanceSettings", () => {
     });
     mocks.useSubtitleAppearanceSetting.mockReturnValue({
       appearance: DEFAULT_SUBTITLE_APPEARANCE,
-      hasDeviceOverride: false,
+      isCustomized: false,
       save,
       reset,
       isSaving: false,
-      isResetting: false,
       isLoading: false,
+    });
+    mocks.useSubtitleSyncSetting.mockReturnValue({
+      offsetMs: 0,
+      isLoaded: true,
+      save: saveSync,
+      reset: vi.fn(),
+      isSaving: false,
     });
   });
 
   afterEach(cleanup);
 
-  it("reads the behavior triple from the contract in one batch", () => {
+  it("clears the stored metadata exceptions rather than saving an empty map", async () => {
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, { ja: "en" }, "profile"),
+      isLoading: false,
+    });
     render(<SubtitleAppearanceSettings />);
 
-    const [options] = mocks.useEffectiveSettings.mock.calls[0] ?? [];
-    expect(options?.keys).toEqual([
-      SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
-      SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
-      SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
-    ]);
+    fireEvent.click(screen.getByRole("button", { name: /Remove/ }));
+
+    await waitFor(() =>
+      expect(clearMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+          identity: { scope: "profile" },
+        }),
+      ),
+    );
   });
 
   it("writes forced subtitles at profile scope as a typed boolean", () => {
@@ -116,36 +144,35 @@ describe("SubtitleAppearanceSettings", () => {
     });
   });
 
-  it("reads a stored forced-subtitle choice rather than the default", () => {
-    mocks.useEffectiveSettings.mockReturnValue({
-      data: resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile"),
-      isLoading: false,
+  it("saves the profile's subtitle offset from the timing control", () => {
+    mocks.useSubtitleSyncSetting.mockReturnValue({
+      offsetMs: -300,
+      isLoaded: true,
+      save: saveSync,
+      reset: vi.fn(),
+      isSaving: false,
     });
-
     render(<SubtitleAppearanceSettings />);
 
-    expect(screen.getByLabelText("Show forced subtitles").getAttribute("aria-checked")).toBe(
-      "false",
-    );
+    expect(screen.getByText("−300 ms")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Subtitle offset" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show subtitles 100 ms later" }));
+    expect(saveSync).toHaveBeenCalledWith(-200);
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(saveSync).toHaveBeenLastCalledWith(0);
   });
 
-  it("offers the appearance reset only when this device holds an override", () => {
-    render(<SubtitleAppearanceSettings />);
-    expect(screen.queryByRole("button", { name: /Reset Appearance/ })).toBeNull();
-
-    cleanup();
-    mocks.useSubtitleAppearanceSetting.mockReturnValue({
-      appearance: DEFAULT_SUBTITLE_APPEARANCE,
-      hasDeviceOverride: true,
-      save,
-      reset,
+  it("keeps the timing control disabled until the saved offset has loaded", () => {
+    mocks.useSubtitleSyncSetting.mockReturnValue({
+      offsetMs: 0,
+      isLoaded: false,
+      save: saveSync,
+      reset: vi.fn(),
       isSaving: false,
-      isResetting: false,
-      isLoading: false,
     });
-
     render(<SubtitleAppearanceSettings />);
-    fireEvent.click(screen.getByRole("button", { name: /Reset Appearance/ }));
-    expect(reset).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show subtitles 100 ms later" }));
+    expect(saveSync).not.toHaveBeenCalled();
   });
 });

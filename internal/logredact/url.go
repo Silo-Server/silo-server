@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -74,7 +75,51 @@ func SanitizeURLError(err error) error {
 	default:
 		outer = clone.Error()
 	}
-	return &sanitizedWrapperError{message: outer, cause: &clone}
+	return &sanitizedWrapperError{message: scrubRequestedURLs(outer, err), cause: &clone}
+}
+
+// scrubRequestedURLs replaces the raw URL of every *url.Error in err's tree
+// wherever it still appears in message. errors.As above only finds the first
+// URL error, so a second one under a joined cause, or a wrapper that repeats
+// the requested URL in its own text, would otherwise keep its credentials.
+func scrubRequestedURLs(message string, err error) string {
+	var raws []string
+	collectRequestedURLs(err, &raws, 0)
+	// Longest first, so a URL that prefixes another is not rewritten inside it.
+	sort.SliceStable(raws, func(a, b int) bool { return len(raws[a]) > len(raws[b]) })
+	for _, raw := range raws {
+		// Credentials can only sit in userinfo, query or fragment. Skipping
+		// other URLs keeps short or unusual values from rewriting plain text.
+		if !strings.ContainsAny(raw, "@?#") {
+			continue
+		}
+		clean := SanitizeURL(raw)
+		message = strings.ReplaceAll(message, strconv.Quote(raw), strconv.Quote(clean))
+		message = strings.ReplaceAll(message, raw, clean)
+	}
+	return message
+}
+
+func collectRequestedURLs(err error, raws *[]string, depth int) {
+	if err == nil || depth > 64 {
+		return
+	}
+	if urlErr, ok := err.(*url.Error); ok { //nolint:errorlint // walking the tree by hand
+		if urlErr == nil {
+			return
+		}
+		if urlErr.URL != "" {
+			*raws = append(*raws, urlErr.URL)
+		}
+	}
+	switch wrapped := err.(type) { //nolint:errorlint // walking the tree by hand
+	case interface{ Unwrap() []error }:
+		for _, child := range wrapped.Unwrap() {
+			collectRequestedURLs(child, raws, depth+1)
+		}
+	case interface{ Unwrap() error }:
+		collectRequestedURLs(wrapped.Unwrap(), raws, depth+1)
+	}
 }
 
 // sanitizeMultiURLError rebuilds a multi-error's message in place: each
@@ -110,6 +155,7 @@ func sanitizeMultiURLError(original error, components []error) error {
 	if !allPresent {
 		return errors.Join(sanitized...)
 	}
+	outer = scrubRequestedURLs(outer, original)
 	if outer == original.Error() {
 		return original
 	}

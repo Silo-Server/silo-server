@@ -73,8 +73,7 @@ export function useMemberState(
 ) {
   const ids = useMemo(
     () => Array.from(new Set(contentIds.filter(Boolean))).sort(),
-    // A new array each render is fine: the key is by value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new array each render is fine: the key is by value
     [contentIds.join("\u0000")],
   );
   const query = useQuery({

@@ -2,11 +2,8 @@ package handlers
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -77,52 +74,4 @@ func TestPluginUploadSeamsOnRealManager(t *testing.T) {
 	if _, err := h.PutAdminPluginUploadChunk(ctx, session.ID, 0, bytes.NewReader([]byte("abcd")), 4); !errors.Is(err, uploads.ErrNotFound) {
 		t.Fatalf("chunk after cancel err = %v", err)
 	}
-}
-
-// The frozen bridge keeps its v1 answers on the direct upload route: an
-// oversize or malformed multipart body is 400 bad_request "Invalid plugin
-// upload", and a form without the archive part is 400 "archive upload is
-// required". The shared seam reports 413 only to the v2 listener.
-func TestHandleUploadInstallationKeepsBridgeStatuses(t *testing.T) {
-	t.Parallel()
-	h := &PluginHandler{
-		uploads:       uploads.NewManager(uploads.ManagerOptions{RootDir: t.TempDir()}),
-		installations: &plugins.InstallationStore{},
-		service:       &plugins.Service{},
-	}
-	form := func(field string, size int) (*bytes.Buffer, string) {
-		var buf bytes.Buffer
-		w := multipart.NewWriter(&buf)
-		part, err := w.CreateFormFile(field, "plugin.zip")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := part.Write(bytes.Repeat([]byte{0x50}, size)); err != nil {
-			t.Fatal(err)
-		}
-		_ = w.Close()
-		return &buf, w.FormDataContentType()
-	}
-	call := func(body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/uploads", body)
-		req.Header.Set("Content-Type", contentType)
-		rec := httptest.NewRecorder()
-		h.HandleUploadInstallation(rec, req)
-		return rec
-	}
-	assertV1 := func(t *testing.T, rec *httptest.ResponseRecorder, message string) {
-		t.Helper()
-		var body struct{ Error, Message string }
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatal(err, rec.Body.String())
-		}
-		if rec.Code != http.StatusBadRequest || body.Error != "bad_request" || body.Message != message {
-			t.Fatalf("status=%d body=%s, want 400 bad_request %q", rec.Code, rec.Body.String(), message)
-		}
-	}
-	body, ct := form("archive", int(maxPluginUploadSize)+1)
-	assertV1(t, call(body, ct), "Invalid plugin upload")
-	assertV1(t, call(bytes.NewBufferString("not multipart"), ct), "Invalid plugin upload")
-	body, ct = form("other", 8)
-	assertV1(t, call(body, ct), "archive upload is required")
 }

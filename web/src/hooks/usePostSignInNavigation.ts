@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import type { User } from "@/api/types";
 import { listProfiles } from "@/hooks/queries/profiles";
 import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
+import { isProfileLaunchPending } from "@/lib/profileLaunch";
 
 /** The screen a session holding a temporary password is confined to. */
 export const CHANGE_PASSWORD_PATH = "/change-password";
@@ -10,7 +11,8 @@ export const CHANGE_PASSWORD_PATH = "/change-password";
 /**
  * Where a fresh sign-in lands: first the password change a temporary password
  * requires, then the page the sign-in was asked for, else the sole unlocked
- * profile, else the profile picker.
+ * profile, else the profile picker. A browser set to ask who is watching
+ * always shows the picker on a sign-in that launches the tab.
  */
 export function usePostSignInNavigation(redirectTarget: string | null) {
   const navigate = useNavigate();
@@ -27,6 +29,10 @@ export function usePostSignInNavigation(redirectTarget: string | null) {
         return;
       }
 
+      if (isProfileLaunchPending()) {
+        navigate("/profiles");
+        return;
+      }
       try {
         const profileList = await listProfiles();
         const soleProfile = getBootstrapProfile(profileList.profiles ?? []);

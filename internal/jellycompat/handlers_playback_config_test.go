@@ -8,25 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
-
-func TestPlaybackHandlerReadsLiveSegmentRetention(t *testing.T) {
-	cfg := &config.Config{Playback: config.PlaybackConfig{SegmentRetentionSeconds: 300}}
-	handler := NewPlaybackHandler(cfg, nil, nil, nil, nil, nil, nil, nil)
-
-	if got := handler.tm.Config().SegmentRetentionSeconds; got != 300 {
-		t.Fatalf("configured segment retention = %d, want 300", got)
-	}
-	liveRetention := 300
-	handler.SegmentRetentionSeconds = func() int { return liveRetention }
-	liveRetention = 120
-	if got := handler.tm.Config().SegmentRetentionSeconds; got != 120 {
-		t.Fatalf("reloaded segment retention = %d, want 120", got)
-	}
-}
 
 func TestNewPlaybackHandler_ExpiresCompatTranscode(t *testing.T) {
 	sessions := playback.NewSessionManager(0, 0)
@@ -86,7 +70,7 @@ func TestEnsureTranscodeSession_StartsThrottleForFreshCompatRemux(t *testing.T) 
 		"printf init > \"$out/init.mp4\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}

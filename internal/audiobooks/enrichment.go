@@ -319,7 +319,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	}()
 	release := func(item enrichmentItemRow) {
 		cleanupOnce.Do(func() {
-			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second) //nolint:fatcontext,gosec // set once under cleanupOnce from the batch ctx; the deferred func above calls cleanupCancel
 		})
 		e.releaseClaim(cleanupCtx, item)
 	}

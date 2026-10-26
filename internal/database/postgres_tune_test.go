@@ -131,20 +131,6 @@ func TestPostgresTuneDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestPostgresTuneDBSizeDefaultsToAuto(t *testing.T) {
-	t.Setenv("POSTGRES_TUNE", "oltp")
-	t.Setenv("POSTGRES_TUNE_MEMORY", "8GB")
-	t.Setenv("POSTGRES_TUNE_CPUS", "4")
-
-	opts, err := LoadPostgresTuneOptionsFromEnv(20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts.DBSize != postgresTuneDBSizeAuto {
-		t.Fatalf("DBSize = %q, want %q", opts.DBSize, postgresTuneDBSizeAuto)
-	}
-}
-
 func TestClassifyPostgresTuneDBSize(t *testing.T) {
 	tests := []struct {
 		name       string

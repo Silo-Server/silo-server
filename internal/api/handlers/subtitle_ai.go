@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,8 +72,8 @@ type translateSubtitleRequest struct {
 // HandleStatus reports whether AI subtitle translation / ASR generation are
 // available, so the player can show or hide the entry points.
 // GET /api/v1/subtitles/ai/status
-func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.SubtitleAIStatus())
+func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.SubtitleAIStatus(r.Context()))
 }
 
 type SubtitleAIStatusView struct {
@@ -81,11 +82,11 @@ type SubtitleAIStatusView struct {
 }
 
 // SubtitleAIStatus reports configured engine capabilities without starting work.
-func (h *SubtitleAIHandler) SubtitleAIStatus() SubtitleAIStatusView {
+func (h *SubtitleAIHandler) SubtitleAIStatus(ctx context.Context) SubtitleAIStatusView {
 	if h == nil || h.service == nil {
 		return SubtitleAIStatusView{}
 	}
-	return SubtitleAIStatusView{Enabled: h.service.Enabled(), TranscribeEnabled: h.service.TranscribeEnabled()}
+	return SubtitleAIStatusView{Enabled: h.service.Enabled(ctx), TranscribeEnabled: h.service.TranscribeEnabled()}
 }
 
 // WriteSubtitleAIDisabledStatus answers the AI status capability probe with a

@@ -2,7 +2,9 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -64,7 +66,11 @@ type PluginProvider struct {
 	// look an item up by (lookup_provider_ids). GetMetadata runs when the item
 	// carries any of them, even without an ID of the provider's own.
 	lookupProviderIDs []string
-	clientFactory     pluginMetadataClientFactory
+	// declaredRatingSources are the rating sources of its own the capability
+	// declared (rating_sources); GetMetadata keeps them alongside Silo's
+	// built-in sources.
+	declaredRatingSources map[string]struct{}
+	clientFactory         pluginMetadataClientFactory
 }
 
 func NewPluginProvider(settings map[string]string, resolver pluginMetadataResolver) (*PluginProvider, error) {
@@ -125,6 +131,7 @@ func NewPluginProviderFromCapability(
 	capabilityID string,
 	displayName string,
 	lookupProviderIDs []string,
+	ratingSources []models.RatingSourceDefinition,
 	resolver pluginMetadataResolver,
 ) (*PluginProvider, error) {
 	if resolver == nil {
@@ -133,12 +140,20 @@ func NewPluginProviderFromCapability(
 	if displayName == "" {
 		displayName = capabilityID
 	}
+	var declared map[string]struct{}
+	if len(ratingSources) > 0 {
+		declared = make(map[string]struct{}, len(ratingSources))
+		for _, source := range ratingSources {
+			declared[source.Source] = struct{}{}
+		}
+	}
 	return &PluginProvider{
-		installationID:    installationID,
-		capabilityID:      capabilityID,
-		displayName:       displayName,
-		lookupProviderIDs: lookupProviderIDs,
-		clientFactory:     resolver.MetadataProviderClient,
+		installationID:        installationID,
+		capabilityID:          capabilityID,
+		displayName:           displayName,
+		lookupProviderIDs:     lookupProviderIDs,
+		declaredRatingSources: declared,
+		clientFactory:         resolver.MetadataProviderClient,
 	}, nil
 }
 
@@ -218,7 +233,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 			OriginalLanguage: result.GetOriginalLanguage(),
 			Year:             int(result.GetYear()),
 			ProviderIDs:      mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
-			ImageURL:         result.GetImageUrl(),
+			ImageURL:         p.remoteArtwork(ctx, result.GetImageUrl()),
 			Overview:         result.GetOverview(),
 			Provider:         p.Slug(),
 		})
@@ -277,6 +292,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		TitleIsFallback:      response.GetItem().GetTitleIsFallback(),
 		SortTitle:            response.GetItem().GetSortTitle(),
 		Overview:             response.GetItem().GetOverview(),
+		OverviewLanguage:     response.GetItem().GetOverviewLanguage(),
 		Tagline:              response.GetItem().GetTagline(),
 		Year:                 int(response.GetItem().GetYear()),
 		Runtime:              int(response.GetItem().GetRuntime()),
@@ -289,16 +305,16 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		ContentRating:        response.GetItem().GetContentRating(),
 		AdvisoryAge:          advisoryAge,
 		AdvisorySource:       advisorySource,
-		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
-		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug()),
-		People:               peopleFromRecords(response.GetItem().GetPeople()),
+		Ratings:              ratingsFromStruct(response.GetItem().GetRatings(), p.declaredRatingSources),
+		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug(), p.declaredRatingSources),
+		People:               p.peopleFromRecords(ctx, response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
-		PosterPath:           response.GetItem().GetPosterPath(),
+		PosterPath:           p.remoteArtwork(ctx, response.GetItem().GetPosterPath()),
 		PosterThumbhash:      response.GetItem().GetPosterThumbhash(),
-		BackdropPath:         response.GetItem().GetBackdropPath(),
+		BackdropPath:         p.remoteArtwork(ctx, response.GetItem().GetBackdropPath()),
 		ShowStatus:           response.GetItem().GetStatus(),
 		BackdropThumbhash:    response.GetItem().GetBackdropThumbhash(),
-		LogoPath:             response.GetItem().GetLogoPath(),
+		LogoPath:             p.remoteArtwork(ctx, response.GetItem().GetLogoPath()),
 		SeasonCount:          int(response.GetItem().GetSeasonCount()),
 		FirstAirDate:         response.GetItem().GetFirstAirDate(),
 		LastAirDate:          response.GetItem().GetLastAirDate(),
@@ -331,6 +347,11 @@ func titleAliasesFromPlugin(aliases []*pluginv1.TitleAlias, provider string) []T
 	return out
 }
 
+// ErrPersonDetailUnsupported reports a metadata plugin that does not implement
+// person lookup. It says nothing about the person, unlike a plugin that looked
+// them up and found nothing.
+var ErrPersonDetailUnsupported = errors.New("provider does not support person lookup")
+
 func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRequest) (*PersonDetailResult, error) {
 	client, err := p.clientFactory(ctx, p.installationID, p.capabilityID)
 	if err != nil {
@@ -348,7 +369,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 	})
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
-			return nil, nil
+			return nil, ErrPersonDetailUnsupported
 		}
 		return nil, err
 	}
@@ -364,7 +385,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 		DeathDate:      response.GetPerson().GetDeathDate(),
 		Birthplace:     response.GetPerson().GetBirthplace(),
 		Homepage:       response.GetPerson().GetHomepage(),
-		PhotoPath:      response.GetPerson().GetPhotoPath(),
+		PhotoPath:      p.remoteArtwork(ctx, response.GetPerson().GetPhotoPath()),
 		PhotoThumbhash: response.GetPerson().GetPhotoThumbhash(),
 		ProviderIDs:    stringMapFromStruct(response.GetPerson().GetProviderIds()),
 	}, nil
@@ -386,18 +407,27 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		return nil, err
 	}
 
-	response, err := client.GetImages(ctx, &pluginv1.GetImagesRequest{
+	pluginRequest := &pluginv1.GetImagesRequest{
 		ProviderId:  providerID,
 		ItemType:    req.ContentType,
 		ProviderIds: providerIDs,
 		Language:    req.Language,
-	})
+	}
+	if req.SeasonNumber != nil {
+		seasonNumber := int32(*req.SeasonNumber)
+		pluginRequest.SeasonNumber = &seasonNumber
+	}
+
+	response, err := client.GetImages(ctx, pluginRequest)
 	if err != nil {
 		return nil, err
 	}
 
 	images := make([]RemoteImage, 0, len(response.GetImages()))
 	for _, image := range response.GetImages() {
+		if url := image.GetUrl(); p.remoteArtwork(ctx, url) != url {
+			continue
+		}
 		ri := RemoteImage{
 			ProviderID: p.capabilityID,
 			URL:        image.GetUrl(),
@@ -405,6 +435,10 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 			Language:   image.GetLanguage(),
 			Width:      int(image.GetWidth()),
 			Height:     int(image.GetHeight()),
+		}
+		if image.SeasonNumber != nil {
+			seasonNumber := int(image.GetSeasonNumber())
+			ri.SeasonNumber = &seasonNumber
 		}
 		// Extract rating from the metadata struct if the plugin provided it.
 		if md := image.GetMetadata(); md != nil {
@@ -416,6 +450,21 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		images = append(images, ri)
 	}
 	return images, nil
+}
+
+// remoteArtwork returns an artwork path or URL a plugin returned, or "" when
+// it names a local source (a file:// sidecar or an nfo+http(s):// URL, see
+// isLocalImageSourcePath). Local sources take precedence over provider art and
+// a sidecar's path is looked up on this server's disk, so only the built-in
+// NFO provider, which runs in-process rather than as a plugin, may produce
+// them.
+func (p *PluginProvider) remoteArtwork(ctx context.Context, value string) string {
+	if !isLocalImageSourcePath(value) {
+		return value
+	}
+	slog.DebugContext(ctx, "metadata: ignoring local artwork source from a metadata plugin", "component", "metadata",
+		"installation_id", p.installationID, "capability_id", p.capabilityID)
+	return ""
 }
 
 func imageMetadataBool(md *structpb.Struct, key string) *bool {
@@ -462,12 +511,14 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 	for _, season := range response.GetSeasons() {
 		ids := mergePluginProviderIDs(p.capabilityID, season.GetProviderId(), season.GetProviderIds())
 		seasons = append(seasons, SeasonResult{
-			ContentID:    ids[p.capabilityID],
-			SeasonNumber: int(season.GetSeasonNumber()),
-			Title:        season.GetTitle(),
-			Overview:     season.GetOverview(),
-			AirDate:      season.GetAirDate(),
-			PosterPath:   season.GetPosterPath(),
+			ContentID:        ids[p.capabilityID],
+			SeasonNumber:     int(season.GetSeasonNumber()),
+			Title:            season.GetTitle(),
+			TitleLanguage:    season.GetTitleLanguage(),
+			Overview:         season.GetOverview(),
+			OverviewLanguage: season.GetOverviewLanguage(),
+			AirDate:          season.GetAirDate(),
+			PosterPath:       p.remoteArtwork(ctx, season.GetPosterPath()),
 		})
 	}
 	return seasons, nil
@@ -503,16 +554,18 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 	for _, episode := range response.GetEpisodes() {
 		ids := mergePluginProviderIDs(p.capabilityID, episode.GetProviderId(), episode.GetProviderIds())
 		episodes = append(episodes, EpisodeResult{
-			ContentID:     ids[p.capabilityID],
-			ProviderIDs:   ids,
-			SeasonNumber:  int(episode.GetSeasonNumber()),
-			EpisodeNumber: int(episode.GetEpisodeNumber()),
-			Title:         episode.GetTitle(),
-			Overview:      episode.GetOverview(),
-			AirDate:       episode.GetAirDate(),
-			Runtime:       int(episode.GetRuntime()),
-			Ratings:       ratingsFromStruct(episode.GetRatings()),
-			StillPath:     episode.GetStillPath(),
+			ContentID:        ids[p.capabilityID],
+			ProviderIDs:      ids,
+			SeasonNumber:     int(episode.GetSeasonNumber()),
+			EpisodeNumber:    int(episode.GetEpisodeNumber()),
+			Title:            episode.GetTitle(),
+			TitleLanguage:    episode.GetTitleLanguage(),
+			Overview:         episode.GetOverview(),
+			OverviewLanguage: episode.GetOverviewLanguage(),
+			AirDate:          episode.GetAirDate(),
+			Runtime:          int(episode.GetRuntime()),
+			Ratings:          ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
+			StillPath:        p.remoteArtwork(ctx, episode.GetStillPath()),
 		})
 	}
 	return episodes, nil
@@ -574,7 +627,12 @@ func stringMapFromStruct(value *structpb.Struct) map[string]string {
 	return result
 }
 
-func ratingsFromStruct(value *structpb.Struct) Ratings {
+// ratingsFromStruct reads the four flat ratings a plugin sends. IMDb and TMDB
+// are Silo's own and always kept. The Rotten Tomatoes scores are kept only
+// when the plugin declared rt_critic or rt_audience, the same rule
+// ratings.sources follows, so a plugin that does not declare them cannot fill
+// the columns another provider's declaration shows.
+func ratingsFromStruct(value *structpb.Struct, declared map[string]struct{}) Ratings {
 	var ratings Ratings
 	if value == nil {
 		return ratings
@@ -589,10 +647,14 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 			ratings.IMDB = number
 		case "tmdb":
 			ratings.TMDB = number
-		case "rt_critic":
-			ratings.RTCritic = number
-		case "rt_audience":
-			ratings.RTAudience = number
+		case models.RatingSourceRTCritic:
+			if _, ok := declared[models.RatingSourceRTCritic]; ok {
+				ratings.RTCritic = number
+			}
+		case models.RatingSourceRTAudience:
+			if _, ok := declared[models.RatingSourceRTAudience]; ok {
+				ratings.RTAudience = number
+			}
 		}
 	}
 	return ratings
@@ -607,19 +669,23 @@ const maxExactVotes = 1 << 53
 // a 0-100 scale and votes omitted when unknown.
 //
 // The Struct is the plugin's word, so each entry is validated on its own and a
-// bad one is dropped without affecting the rest: an unknown source name, a
-// score that is missing, non-finite or outside 0-100 drops the source, and a
-// negative, fractional or non-numeric vote count drops only the count.
-func ratingSourcesFromStruct(value *structpb.Struct, provider string) map[string]RatingSource {
+// bad one is dropped without affecting the rest: a source name that is neither
+// built in nor one the capability declared, a score that is missing,
+// non-finite or outside 0-100 drops the source, and a negative, fractional or
+// non-numeric vote count drops only the count.
+func ratingSourcesFromStruct(value *structpb.Struct, provider string, declared map[string]struct{}) map[string]RatingSource {
 	sources := value.GetFields()["sources"].GetStructValue()
 	if sources == nil {
 		return nil
 	}
 	result := make(map[string]RatingSource, len(sources.GetFields()))
 	for rawName, rawEntry := range sources.GetFields() {
-		name := models.NormalizeRatingSource(rawName)
+		name := strings.ToLower(strings.TrimSpace(rawName))
+		if _, ok := declared[name]; !ok && !models.IsBuiltinRatingSource(name) {
+			continue
+		}
 		entry := rawEntry.GetStructValue()
-		if name == "" || entry == nil {
+		if entry == nil {
 			continue
 		}
 		scoreValue, ok := entry.GetFields()["score"].GetKind().(*structpb.Value_NumberValue)
@@ -816,7 +882,7 @@ func videosFromRecords(providerSlug string, records []*pluginv1.VideoRecord) []R
 	return videos
 }
 
-func peopleFromRecords(records []*pluginv1.PersonRecord) []models.ItemPerson {
+func (p *PluginProvider) peopleFromRecords(ctx context.Context, records []*pluginv1.PersonRecord) []models.ItemPerson {
 	if len(records) == 0 {
 		return nil
 	}
@@ -833,7 +899,7 @@ func peopleFromRecords(records []*pluginv1.PersonRecord) []models.ItemPerson {
 				TvdbID:         record.GetTvdbId(),
 				ImdbID:         record.GetImdbId(),
 				PlexGUID:       record.GetPlexGuid(),
-				PhotoPath:      record.GetPhotoPath(),
+				PhotoPath:      p.remoteArtwork(ctx, record.GetPhotoPath()),
 				PhotoThumbhash: record.GetPhotoThumbhash(),
 			},
 			Kind:      personKindFromString(record.GetKind()),
@@ -862,6 +928,8 @@ func personKindFromString(value string) models.PersonKind {
 		return models.PersonKindAuthor
 	case "narrator":
 		return models.PersonKindNarrator
+	case "creator":
+		return models.PersonKindCreator
 	default:
 		return models.PersonKindFromJob(value)
 	}
@@ -877,6 +945,15 @@ func imageTypeFromKind(kind string) ImageType {
 		return ImageStill
 	case "profile":
 		return ImageProfile
+	// The extra types use the image cache's names for them.
+	case ImageCacheImageBanner:
+		return ImageBanner
+	case ImageCacheImageThumb:
+		return ImageThumb
+	case ImageCacheImageClearArt:
+		return ImageClearArt
+	case ImageCacheImageDisc:
+		return ImageDisc
 	default:
 		return ImagePoster
 	}

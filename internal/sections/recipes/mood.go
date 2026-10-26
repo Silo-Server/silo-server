@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,16 @@ var Moods = []moodInfo{
 	{Key: "quiet_sunday", Label: "Quiet Sunday Cinema", Icon: "☕", GenresAny: []string{"Drama", "Documentary"}, MinRating: 7.0},
 	{Key: "date_night", Label: "Date Night", Icon: "💕", GenresAny: []string{"Romance", "Comedy"}, MinRating: 6.0},
 	{Key: "after_midnight", Label: "After Midnight", Icon: "🌙", GenresAny: []string{"Horror", "Thriller"}, MinRating: 6.0},
+}
+
+// moodDescription states a mood's rule: its genres, TMDB rating floor and
+// vote minimum.
+func moodDescription(m moodInfo) string {
+	genres := m.GenresAny[0]
+	if n := len(m.GenresAny); n > 1 {
+		genres = strings.Join(m.GenresAny[:n-1], ", ") + " or " + m.GenresAny[n-1]
+	}
+	return fmt.Sprintf("%s, rated %.1f+ on TMDB with %d+ votes.", genres, m.MinRating, DiscoveryMinVotes)
 }
 
 // MoodByKey looks up a mood by its key. Returns the mood and whether it exists.
@@ -83,7 +94,7 @@ func (moodRecipe) Definition() RecipeDefinition {
 			Key:              "mood_" + m.Key,
 			DisplayName:      m.Label,
 			Icon:             m.Icon,
-			DescriptionShort: m.Label,
+			DescriptionShort: moodDescription(m),
 			DefaultParams:    json.RawMessage(params),
 		})
 	}
@@ -134,7 +145,7 @@ func (shortWatchesRecipe) Definition() RecipeDefinition {
 				Key:              "short_watches_default",
 				DisplayName:      "Short & Sweet",
 				Icon:             "⏱️",
-				DescriptionShort: "Well-rated movies under 95 minutes.",
+				DescriptionShort: fmt.Sprintf("Movies of 95 minutes or less, rated 6.0+ on TMDB with %d+ votes.", DiscoveryMinVotes),
 				DefaultParams:    json.RawMessage(`{"max_minutes":95}`),
 			},
 		},

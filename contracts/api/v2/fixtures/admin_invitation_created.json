@@ -2,6 +2,7 @@
   "invitation": {
     "id": "7",
     "email": "invitee@example.invalid",
+    "delivery": "link",
     "role": "user",
     "library_ids": null,
     "create_profile": true,
@@ -14,5 +15,5 @@
     "created_at": "2026-01-02T03:04:05.678Z"
   },
   "claim_url": "https://server.example.invalid/invite/synthetic-token",
-  "delivery_status": "sent"
+  "delivery_status": "not_configured"
 }

@@ -109,7 +109,7 @@ const RECOMMENDATIONS_SECTIONS: RecSectionDef[] = [
 ];
 
 const EMBEDDING_LOCK_NOTE =
-  "Changing this config requires a manual reset, which is not currently supported in-product.";
+  "Switching the embedding base URL or model requires resetting embeddings, which deletes them all.";
 
 export function buildRecommendationSections(): RecSectionDef[] {
   return RECOMMENDATIONS_SECTIONS;

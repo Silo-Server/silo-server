@@ -1,0 +1,15 @@
+{
+  "id": "9",
+  "installation_id": "3",
+  "provider_id": "plugin:3:oidc",
+  "provider_name": "Company SSO",
+  "username": "alice",
+  "email": "",
+  "display_name": "",
+  "linked_at": "2026-01-02T03:04:05.000Z",
+  "last_sign_in_at": null,
+  "last_checked_at": null,
+  "external_subject": "https://id.example.test/realms/silo|5d41402a",
+  "issuer": "https://id.example.test",
+  "last_check_status": "none"
+}

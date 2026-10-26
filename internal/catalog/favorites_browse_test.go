@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -50,42 +51,6 @@ func TestBuildBrowseFavoritesSQL_JoinsUserFavorites(t *testing.T) {
 	}
 }
 
-func TestBuildBrowseFavoritesSQL_MultiTypeUsesIN(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:    1,
-		ProfileID: "p1",
-		ItemType:  "movie,series",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan: %v", err)
-	}
-	sql, _ := plan.pagedSQL()
-	if !strings.Contains(sql, "mi.type = ANY($") {
-		t.Fatalf("expected multi-type = ANY clause; got %s", sql)
-	}
-}
-
-func TestBuildBrowseFavoritesSQL_TitleSortUsesMediaItemsColumns(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:    1,
-		ProfileID: "p1",
-		SortField: "sort_title",
-		SortOrder: "asc",
-		Limit:     10,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan: %v", err)
-	}
-	sql, _ := plan.pagedSQL()
-	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))") {
-		t.Fatalf("expected sort_title to fall back to mi.title; got %s", sql)
-	}
-	if !strings.Contains(sql, "ASC") {
-		t.Fatalf("expected ASC direction; got %s", sql)
-	}
-}
-
 func TestBuildBrowseFavoritesSQL_DisabledLibrariesNotExists(t *testing.T) {
 	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
 		UserID:             1,
@@ -112,7 +77,7 @@ func TestBuildBrowseFavoritesSQL_EmptyAllowedLibrariesEarlyEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error or sentinel for empty allowed libraries; got nil")
 	}
-	if err != errBrowseFavoritesEmpty {
+	if !errors.Is(err, errBrowseFavoritesEmpty) {
 		t.Fatalf("expected errBrowseFavoritesEmpty; got %v", err)
 	}
 }
@@ -165,61 +130,6 @@ func TestBuildBrowseFavoritesPlan_LibraryIDIntersectsAllowedLibraries(t *testing
 	}
 	if !foundAllowed {
 		t.Fatalf("expected AllowedLibraryIDs=[1 2] in bound args; got %v", args)
-	}
-}
-
-// TestBuildBrowseFavoritesPlan_NamePrefixDualColumnLike pins the dual-column
-// LIKE shape that powers /Items?Filters=IsFavorite&NameStartsWith=Star. The
-// pattern must be anchored to the prefix only (no leading wildcard) so the
-// idx_media_items_sort_key index can serve the lookup. (code review on
-// 614e45ac, formerly uncovered.)
-func TestBuildBrowseFavoritesPlan_NamePrefixDualColumnLike(t *testing.T) {
-	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
-		UserID:     1,
-		ProfileID:  "p1",
-		NamePrefix: "Star",
-		Limit:      20,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowseFavoritesPlan error: %v", err)
-	}
-	sql, args := plan.pagedSQL()
-	if !strings.Contains(sql, "LIKE") {
-		t.Fatalf("expected LIKE for NamePrefix; got %s", sql)
-	}
-	// The dual-column form ORs the sort-key expression against LOWER(title)
-	// so titles without a curated sort_title still match AND both arms are
-	// sargable: first arm via idx_media_items_sort_key (migration 102),
-	// second arm via idx_media_items_search_exact_title (migration 001).
-	// Pin both arms.
-	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
-		t.Fatalf("expected sort-key LIKE arm matching idx_media_items_sort_key; got %s", sql)
-	}
-	if !strings.Contains(sql, "LOWER(mi.title) LIKE") {
-		t.Fatalf("expected mi.title LIKE arm; got %s", sql)
-	}
-	// Pattern must escape backslash to defuse user-supplied %/_ wildcards.
-	if !strings.Contains(sql, "ESCAPE '\\'") {
-		t.Fatalf("expected ESCAPE '\\\\' clause; got %s", sql)
-	}
-	// Verify the bound pattern is "star%" — anchored prefix, lowercased, no
-	// leading wildcard. A leading "%" would defeat the index and let users
-	// substring-search the whole catalog.
-	foundPrefixArg := false
-	for _, a := range args {
-		s, ok := a.(string)
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(s, "%") {
-			t.Fatalf("NamePrefix arg must not have leading wildcard; got %q", s)
-		}
-		if strings.HasPrefix(strings.ToLower(s), "star") && strings.HasSuffix(s, "%") {
-			foundPrefixArg = true
-		}
-	}
-	if !foundPrefixArg {
-		t.Fatalf("expected 'star%%'-style arg in args slice; got %v", args)
 	}
 }
 

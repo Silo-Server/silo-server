@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "dl-1",
+      "profile_id": "p-maya",
+      "device_id": "dev-pixel",
+      "content_id": "series:tlou",
+      "episode_id": "episode:tlou-s02e01",
+      "title": "The Last of Us",
+      "media_type": "series",
+      "episode": {
+        "season_number": 2,
+        "episode_number": 1,
+        "title": "Future Days"
+      },
+      "status": "completed",
+      "quality": "10mbps",
+      "effective_quality": "10mbps",
+      "delivery_format": "transcode",
+      "target_bitrate_kbps": 10000,
+      "file_size": 2100000000,
+      "created_at": "2026-10-08T09:30:00.000Z",
+      "updated_at": "2026-10-08T09:30:00.000Z",
+      "completed_at": null,
+      "status_event_at": null,
+      "user_id": "7",
+      "username": "maya",
+      "device_name": "Pixel 8",
+      "location": "node:9",
+      "location_name": "node-gpu-1"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

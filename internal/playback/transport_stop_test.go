@@ -178,10 +178,7 @@ func TestServeRemuxAbortInterruptsBlockedClientWrite(t *testing.T) {
 
 func TestWatchTransportStopSignalsOnStopSession(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	stop, release := sessions.WatchTransportStop(session.ID)
 	defer release()
@@ -211,10 +208,7 @@ func TestWatchTransportStopSignalsOnStopSession(t *testing.T) {
 // response is still draining — and a stop has to end both.
 func TestWatchTransportStopSignalsEveryTransport(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	first, releaseFirst := sessions.WatchTransportStop(session.ID)
 	defer releaseFirst()
@@ -240,10 +234,7 @@ func TestWatchTransportStopSignalsEveryTransport(t *testing.T) {
 // session that is already gone reports the stop it missed.
 func TestWatchTransportStopAfterStopSessionIsAlreadyClosed(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 	if err := sessions.BeginTransport(session.ID); err != nil {
 		t.Fatalf("BeginTransport: %v", err)
 	}
@@ -274,10 +265,7 @@ func TestWatchTransportStopAfterStopSessionIsAlreadyClosed(t *testing.T) {
 // the same session ID has nothing to signal and nothing to leak.
 func TestWatchTransportStopReleaseUnregisters(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	stop, release := sessions.WatchTransportStop(session.ID)
 	release()

@@ -40,8 +40,8 @@ type APIKeyPageKey struct {
 	ID        int64
 }
 
-// Prefixes never contain the whole credential, even for malformed legacy rows.
-const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,CASE WHEN ak.api_key ~ '^sa_[0-9a-f]{64}$' THEN left(ak.api_key,11) ELSE '' END,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision`
+// Neither bearer nor verifier is part of a management projection.
+const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision` //nolint:gosec // SQL column names, not credentials.
 
 func apiKeyMetadataFields(k *models.APIKeyMetadata) []any {
 	return []any{&k.ID, &k.UserID, &k.Label, &k.KeyPrefix, &k.RateTier, &k.Scopes, &k.CreatedAt, &k.Revision}

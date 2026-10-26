@@ -1,15 +1,17 @@
+import { render as renderPage, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryMetadataSettings from "./LibraryMetadataSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 const useRestartKeysMock = vi.fn(() => new Set<string>());
-const storageAvailableMock = vi.fn(() => true);
 
-vi.mock("@/hooks/useBranding", () => ({
-  useBranding: () => ({ storageAvailable: storageAvailableMock() }),
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQueryClient: () => ({}),
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
@@ -20,39 +22,53 @@ vi.mock("@/hooks/useRestartKeys", () => ({
   useRestartKeys: () => useRestartKeysMock(),
 }));
 
-vi.mock("@/hooks/queries/admin/settings", () => ({
-  useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useCatalogSearchStatus: () => ({ data: undefined, isLoading: true }),
+/** A transcode node subtitle sync could run on. */
+const transcodeNode = { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true };
+const useAdminNodesMock = vi.fn(() => ({
+  data: [transcodeNode] as unknown[] | undefined,
+  isSuccess: true,
 }));
 
-vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: [] }),
-  useRunTask: () => ({ mutateAsync: vi.fn() }),
+vi.mock("@/hooks/queries/admin/nodes", () => ({
+  useAdminNodes: () => useAdminNodesMock(),
 }));
 
-vi.mock("@/components/realtimeEventsContext", () => ({
-  useEventChannel: () => undefined,
+const ratingSourcesMock = vi.fn(() => ({
+  isError: false,
+  isSuccess: true,
+  data: {
+    items: [
+      { source: "imdb", label: "IMDb", name: "IMDb", always_shown: true },
+      { source: "tmdb", label: "TMDB", name: "TMDB", always_shown: true },
+      {
+        source: "rt_critic",
+        label: "Rotten Tomatoes critics",
+        name: "RT",
+        always_shown: false,
+        provider: "MDBList",
+      },
+      {
+        source: "kinopoisk",
+        label: "Kinopoisk",
+        name: "Kinopoisk",
+        always_shown: false,
+        provider: "Kinopoisk Metadata",
+      },
+    ],
+  },
 }));
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
-  const dirtySet = new Set(dirty);
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    getPersistedValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    resetValue: vi.fn(),
-    isDirty: (key: string) => dirtySet.has(key),
-    isClearStaged: (key: string) => dirtySet.has(key) && (values[key] ?? "") === "",
-    dirtyCount: dirtySet.size,
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-    sensitiveConfigured: [] as string[],
-    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
-  };
-}
+const ratingSourceCapabilitiesMock = vi.fn(() => ({
+  data: { plugin_declared_sources: true } as { plugin_declared_sources: boolean } | undefined,
+}));
+
+vi.mock("@/hooks/queries/admin/ratingSources", () => ({
+  useAdminRatingSourceCapabilities: () => ratingSourceCapabilitiesMock(),
+  useAdminRatingSources: () => ratingSourcesMock(),
+}));
+
+const makeForm = (values: Record<string, string>, dirty: string[] = []) =>
+  fakeSettingsForm(values, { dirty });
 
 function render(values: Record<string, string>, dirty: string[] = []) {
   useSettingsFormMock.mockReturnValue(makeForm(values, dirty));
@@ -63,6 +79,11 @@ function render(values: Record<string, string>, dirty: string[] = []) {
   );
 }
 
+/** Opens one group's Advanced disclosure via its persisted state. */
+function expand(id: string) {
+  localStorage.setItem(`silo.admin.advanced.${id}`, "true");
+}
+
 function text(markup: string): string {
   const container = document.createElement("div");
   container.innerHTML = markup;
@@ -70,8 +91,8 @@ function text(markup: string): string {
 }
 
 // The toggle is a Radix switch, so reach it through the label association
-// SettingField sets up rather than by scanning the markup for "disabled".
-function toggleDisabled(markup: string, label: string): boolean {
+// SettingField sets up rather than by scanning the markup.
+function toggleChecked(markup: string, label: string): boolean {
   const container = document.createElement("div");
   container.innerHTML = markup;
   const labelEl = Array.from(container.querySelectorAll("label")).find(
@@ -80,214 +101,124 @@ function toggleDisabled(markup: string, label: string): boolean {
   if (!labelEl?.htmlFor) throw new Error(`no label found for ${label}`);
   const control = container.querySelector(`[id="${labelEl.htmlFor}"]`);
   if (!control) throw new Error(`no control found for ${label}`);
-  return control.hasAttribute("disabled");
+  return control.getAttribute("aria-checked") === "true";
 }
 
 describe("LibraryMetadataSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     useRestartKeysMock.mockReturnValue(new Set<string>());
-    storageAvailableMock.mockReturnValue(true);
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("renders every field group heading", () => {
-    const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
-
-    for (const heading of ["Artwork", "Browsing", "Scanning", "Skip markers", "Search"]) {
-      expect(rendered).toContain(heading);
-    }
-  });
-
-  it("renders the tab title and the essential controls", () => {
-    const rendered = text(render({ "catalog.search.provider": "postgres" }));
-
-    expect(rendered).toContain("Library & Metadata");
-    expect(rendered).toContain("Keep provider artwork");
-    expect(rendered).toContain("Marker source");
-    expect(rendered).toContain("Search engine");
-  });
-
-  it("states the CPU cost of local detection and the search fallback guarantee", () => {
-    const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
-
-    expect(rendered).toContain("Online markers take priority.");
-    expect(rendered).toContain("Local detection uses CPU.");
-    expect(rendered).toContain(
-      "Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically.",
+  it("shows the versions switch as the opposite of the stored scope key", () => {
+    const label = "Show all library versions on detail page";
+    expect(toggleChecked(render({}), label)).toBe(true);
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "false" }), label)).toBe(
+      true,
+    );
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "true" }), label)).toBe(
+      false,
     );
   });
 
-  it("offers the Meilisearch connection check as a filled button", () => {
+  it("shows the server-wide real-time monitoring switch only while it is off", () => {
+    const off = render({ "scanner.realtime_monitoring": "false" });
+    expect(toggleChecked(off, "Real-time monitoring")).toBe(false);
+
+    // Turning it back on keeps it in view until the change is saved.
+    const turningOn = render({ "scanner.realtime_monitoring": "true" }, [
+      "scanner.realtime_monitoring",
+    ]);
+    expect(toggleChecked(turningOn, "Real-time monitoring")).toBe(true);
+  });
+
+  it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
+    const markup = render({ "catalog.extra_rating_sources": "kinopoisk" });
+    const page = text(markup);
+
+    expect(page).toContain("From MDBList");
+    expect(page).toContain("Rotten Tomatoes critics");
+    expect(page).toContain("From Kinopoisk Metadata");
+    expect(page).toContain("Kinopoisk");
     const container = document.createElement("div");
-    container.innerHTML = render({ "catalog.search.provider": "meilisearch" });
-
-    const button = Array.from(container.querySelectorAll("button")).find(
-      (el) => el.textContent?.trim() === "Check Connection",
-    );
-
-    expect(button).toBeDefined();
-    // Filled rather than the transparent outline variant, so the control does
-    // not read as flat text inside the group panel.
-    expect(button?.getAttribute("data-variant")).toBe("secondary");
+    container.innerHTML = markup;
+    const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent);
+    expect(labels).not.toContain("IMDb");
+    expect(labels).not.toContain("TMDB");
   });
 
-  it.each(["stored", "on_demand"])("explains scheduled sync for %s storage", (storage) => {
-    const rendered = text(render({ "markers.mode": "online", "markers.online_storage": storage }));
+  it("lists a turned-on rating that no enabled plugin adds, so it can be turned off", () => {
+    const page = text(render({ "catalog.extra_rating_sources": "rt_critic,letterboxd" }));
 
-    if (storage === "stored") {
-      expect(rendered).toContain("daily at 03:00 (server time) by default");
-      expect(rendered).not.toContain("Scheduled online sync is disabled.");
-    } else {
-      expect(rendered).toContain("Scheduled online sync is disabled.");
-      expect(rendered).not.toContain("daily at 03:00");
-    }
+    expect(page).toContain("Not added by an enabled plugin");
+    expect(page).toContain("letterboxd");
+    expect(page).not.toContain("No metadata plugin adds ratings.");
   });
 
-  it("manages the merged key set of the three tabs it replaces", () => {
-    render({});
+  it("leaves out the Ratings group on a server without rating source support", () => {
+    ratingSourceCapabilitiesMock.mockReturnValueOnce({ data: undefined });
+    const page = text(render({ "catalog.extra_rating_sources": "kinopoisk" }));
 
-    const calls = useSettingsFormMock.mock.calls;
-    const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "metadata.cache_images",
-        "catalog.scope_versions_to_library",
-        "scanner.workers",
-        "matcher.workers",
-        "matcher.batch_size",
-        "metadata.image_workers",
-        "markers.mode",
-        "markers.lazy_playback",
-        "markers.online_storage",
-        "markers.detection_workers",
-        "catalog.search.provider",
-        "catalog.search.meilisearch.url",
-        "catalog.search.meilisearch.api_key",
-        "catalog.search.meilisearch.semantic_ratio",
-      ]),
-    );
-    // Hidden tier: still saved through the API, no control on this tab.
-    expect(keys).not.toContain("catalog.search.meilisearch.embedder");
-    expect(keys).not.toContain("catalog.search.meilisearch.binary_quantized");
-    expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
+    expect(page).not.toContain("Metadata plugins can add other ratings");
+    expect(page).not.toContain("From Kinopoisk Metadata");
+  });
+});
+
+describe("LibraryMetadataSettings subtitle sync", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useRestartKeysMock.mockReturnValue(new Set<string>());
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("keeps marker behavior and points provider setup at the providers page", () => {
-    const rendered = render({ "catalog.search.provider": "postgres" });
-
-    expect(text(rendered)).toContain("Marker source");
-    // Per-provider configuration moved to Subtitles & Metadata; only the link
-    // to it is left here.
-    expect(text(rendered)).not.toContain("Get markers from this provider");
-    expect(text(rendered)).not.toContain("Minimum confidence");
-    expect(text(rendered)).toContain("Marker providers");
-    expect(rendered).toContain("/admin/settings/providers");
-  });
-
-  it("keeps advanced settings collapsed but expands a section holding a staged edit", () => {
-    expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
-      "Scanner workers",
-    );
-
-    expect(text(render({ "catalog.search.provider": "postgres" }, ["scanner.workers"]))).toContain(
-      "Scanner workers",
-    );
-    expect(
-      text(render({ "catalog.search.provider": "postgres" }, ["metadata.image_workers"])),
-    ).toContain("Image encoding workers");
-  });
-
-  it("offers to restore worker defaults only while a value differs from them", () => {
-    const untouched = { "catalog.search.provider": "postgres", "scanner.workers": "8" };
-    expect(text(render(untouched))).not.toContain("Restore defaults");
-
-    const form = makeForm({ ...untouched, "metadata.image_workers": "2" });
+  function renderInteractive(values: Record<string, string>, dirty: string[] = []) {
+    const form = makeForm(values, dirty);
     useSettingsFormMock.mockReturnValue(form);
-    const markup = renderToStaticMarkup(
+    const view = renderPage(
       <MemoryRouter>
         <LibraryMetadataSettings />
       </MemoryRouter>,
     );
-    expect(text(markup)).toContain("Restore defaults");
-  });
-
-  it("hides Meilisearch connection fields until that engine is selected", () => {
-    expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
-      "Meilisearch URL",
-    );
-
-    expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
-  });
-
-  it("leaves artwork storage editable and unannotated while public storage is active", () => {
-    const rendered = render({ "s3.public_bucket": "silo-public" });
-
-    expect(text(rendered)).toContain("Keep provider artwork");
-    expect(text(rendered)).not.toContain("Restart the server for artwork storage to start");
-    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
-  });
-
-  it("allows caching provider artwork without an S3 bucket", () => {
-    storageAvailableMock.mockReturnValue(false);
-    const rendered = render({});
-    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
-  });
-
-  it("shows detection workers only while this server detects markers", () => {
-    expect(text(render({ "markers.mode": "local" }))).toContain("Detection workers");
-    expect(text(render({ "markers.mode": "both" }))).toContain("Detection workers");
-    expect(text(render({ "markers.mode": "online" }))).not.toContain("Detection workers");
-    expect(text(render({ "markers.mode": "off" }))).not.toContain("Detection workers");
-  });
-
-  it("says it once for a group where every field needs a restart", () => {
-    useRestartKeysMock.mockReturnValue(
-      new Set([
-        "markers.mode",
-        "markers.lazy_playback",
-        "markers.online_storage",
-        "markers.detection_workers",
-      ]),
-    );
-
-    const rendered = render({ "catalog.search.provider": "postgres" });
-
-    expect(text(rendered)).toContain("Changes apply after a restart");
-    // The group says it, so the field inside drops its own badge.
-    expect(rendered).not.toContain("Takes effect after a server restart");
-  });
-
-  it("marks a restart-required field with the restart badge inside a mixed group", () => {
-    useRestartKeysMock.mockReturnValue(new Set(["scanner.workers"]));
-
-    const rendered = render({ "catalog.search.provider": "postgres" }, ["scanner.workers"]);
-
-    expect(rendered).toContain("Takes effect after a server restart");
-    expect(text(rendered)).not.toContain("Changes apply after a restart");
-  });
-
-  it("warns that enabling meaning-based search rebuilds the index after restart", () => {
-    const values: Record<string, string> = {
-      "catalog.search.provider": "meilisearch",
-      "catalog.search.meilisearch.semantic_enabled": "true",
+    return {
+      form,
+      unmount: view.unmount,
+      group: within(screen.getByRole("group", { name: "Subtitle sync" })),
     };
-    const form = makeForm(values, ["catalog.search.meilisearch.semantic_enabled"]);
-    form.getPersistedValue = (key: string) =>
-      key === "catalog.search.meilisearch.semantic_enabled" ? "false" : (values[key] ?? "");
-    useSettingsFormMock.mockReturnValue(form);
+  }
 
-    const rendered = text(
-      renderToStaticMarkup(
-        <MemoryRouter>
-          <LibraryMetadataSettings />
-        </MemoryRouter>,
-      ),
-    );
+  it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
+    expand("library.subtitle_sync");
+    const local = renderInteractive({ "subtitles.sync_execution": "local" });
+    expect(local.group.getByRole("button", { name: "Advanced · 1 setting" })).toBeInTheDocument();
+    expect(
+      local.group.queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).not.toBeInTheDocument();
+    local.unmount();
 
-    expect(rendered).toContain("Enabling this changes the index format");
-    expect(rendered).toContain("rebuilds the index automatically");
-    expect(rendered).toContain("Keyword search stays available");
+    useAdminNodesMock.mockReturnValue({ data: [], isSuccess: true });
+    const nodeOnly = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+    expect(nodeOnly.group.getByText("No transcode nodes are connected")).toBeInTheDocument();
+  });
+
+  it("keeps an unsaved node capacity in view after sync moves to the local server", () => {
+    expand("library.subtitle_sync");
+    const { group } = renderInteractive({ "subtitles.sync_execution": "local" }, [
+      "subtitles.sync_execution",
+      "subtitles.sync_node_capacity",
+    ]);
+
+    expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toBeInTheDocument();
+    expect(
+      group.getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toBeVisible();
+  });
+
+  it("does not warn before the node list has loaded", () => {
+    expand("library.subtitle_sync");
+    useAdminNodesMock.mockReturnValue({ data: undefined, isSuccess: false });
+    const { group } = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+
+    expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
   });
 });

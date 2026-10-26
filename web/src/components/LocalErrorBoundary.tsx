@@ -24,18 +24,18 @@ export class LocalErrorBoundary extends Component<
   LocalErrorBoundaryProps,
   LocalErrorBoundaryState
 > {
-  state: LocalErrorBoundaryState = { failed: false, error: undefined };
+  override state: LocalErrorBoundaryState = { failed: false, error: undefined };
 
   static getDerivedStateFromError(error: unknown): LocalErrorBoundaryState {
     return { failed: true, error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[LocalErrorBoundary]", error, info.componentStack);
     this.props.onError?.(error);
   }
 
-  render() {
+  override render() {
     if (!this.state.failed) return this.props.children;
     const { fallback = null } = this.props;
     return typeof fallback === "function" ? fallback(this.state.error) : fallback;

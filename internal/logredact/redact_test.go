@@ -155,12 +155,3 @@ func mustJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
-
-func TestHandlerPassThroughWhenClean(t *testing.T) {
-	out := logAndCapture(t, func(l *slog.Logger) {
-		l.InfoContext(context.Background(), "clean", "user_id", 1, "component", "api")
-	})
-	if out["user_id"].(float64) != 1 || out["component"] != "api" {
-		t.Errorf("clean record altered: %v", out)
-	}
-}

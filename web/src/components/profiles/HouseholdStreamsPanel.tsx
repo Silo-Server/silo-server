@@ -14,6 +14,7 @@ import {
   getPlaybackSessionSubtitle,
   getPlaybackSessionTitle,
 } from "@/pages/adminActivityPresentation";
+import { buildWatchHref, createWatchRouteRequest } from "@/pages/watchRouteHelpers";
 
 function formatElapsed(startedAt: string): string {
   const started = new Date(startedAt).getTime();
@@ -48,7 +49,12 @@ function StreamRow({ session }: { session: AdminSession }) {
   const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const watchHref =
     session.content_id && session.media_file_id
-      ? `/watch/${session.content_id}?file=${session.media_file_id}`
+      ? buildWatchHref(
+          createWatchRouteRequest({
+            contentId: session.content_id,
+            fileId: session.media_file_id,
+          }),
+        )
       : null;
 
   return (

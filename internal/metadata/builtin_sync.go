@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // ContentLevelsForLibraryType maps a media_folders.type to the metadata
@@ -33,7 +34,7 @@ func ContentLevelsForLibraryType(libraryType string) []string {
 // before serving (callers must invalidate the chain cache afterwards when the
 // service is already constructed). It also doubles as the repair path: if a
 // stale chain-editor save drops a builtin row (SetChain is
-// delete-all-and-reinsert), the row is re-appended disabled on next startup.
+// delete-all-and-reinsert), the row is re-added on next startup.
 //
 // Two steps, in order:
 //
@@ -49,8 +50,12 @@ func ContentLevelsForLibraryType(libraryType string) []string {
 //     unchanged.
 //  2. For every builtin metadata capability (read from the database, the
 //     source of truth the registry mirrors), append it to all existing
-//     per-level chains it supports — disabled at MAX(priority)+1,
-//     ON CONFLICT DO NOTHING — exactly like a plugin install does.
+//     per-level chains it supports, ON CONFLICT DO NOTHING, exactly like a
+//     plugin install does: enabled when the capability is default_enabled
+//     (the NFO provider is).
+//  3. Every chain is renumbered so its builtin rows come first (the local
+//     tier, see local_tier.go); rows already in place are left alone. A
+//     failure here is logged, not returned.
 func SyncBuiltinProviderChains(ctx context.Context, chainRepo *ChainRepository) error {
 	if chainRepo == nil {
 		return nil
@@ -94,6 +99,12 @@ func SyncBuiltinProviderChains(ctx context.Context, chainRepo *ChainRepository) 
 		}); err != nil {
 			return fmt.Errorf("appending builtin capability %q to chains: %w", c.capabilityID, err)
 		}
+	}
+	// Chain resolution runs the local tier first whatever the stored order, so
+	// a failure here only leaves the editor showing a stale order until the
+	// next startup or save. It must not stop the server from starting.
+	if _, err := pool.Exec(ctx, pinStoredLocalTierSQL); err != nil {
+		slog.WarnContext(ctx, "metadata: could not move builtin providers to the front of stored chains", "component", "metadata", "error", err)
 	}
 	return nil
 }

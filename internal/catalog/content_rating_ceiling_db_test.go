@@ -13,20 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 )
 
-// TestContentRatingCeilingSQLShape pins the two predicate forms the
-// access.unrated_content setting selects between. Both compare the stored
-// minimum age; they differ only in what happens to a title that has none.
-func TestContentRatingCeilingSQLShape(t *testing.T) {
-	if got, want := contentRatingCeilingSQL("mi", false, 4),
-		"(mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $4)"; got != want {
-		t.Errorf("hide predicate = %q, want %q", got, want)
-	}
-	if got, want := contentRatingCeilingSQL("ece", true, 2),
-		"(ece.content_rating_age IS NULL OR ece.content_rating_age <= $2)"; got != want {
-		t.Errorf("allow predicate = %q, want %q", got, want)
-	}
-}
-
 // TestApplyMaturityLimitsBindsTheCeilingAge checks the three cases the
 // helper distinguishes: no ceiling, an unusable ceiling, and a real one.
 func TestApplyMaturityLimitsBindsTheCeilingAge(t *testing.T) {

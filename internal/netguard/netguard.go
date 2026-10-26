@@ -228,9 +228,16 @@ type Transport struct {
 
 // NewTransport returns a Transport whose dialers check every address they
 // connect to, which covers redirects and DNS answers that change after a
-// URL was checked.
-func NewTransport() *Transport {
-	return &Transport{public: newGuardedTransport(false), private: newGuardedTransport(true)}
+// URL was checked. Each configure function adjusts both pools, for settings
+// such as a response header timeout; it must not replace the dialer or set a
+// proxy.
+func NewTransport(configure ...func(*http.Transport)) *Transport {
+	t := &Transport{public: newGuardedTransport(false), private: newGuardedTransport(true)}
+	for _, fn := range configure {
+		fn(t.public)
+		fn(t.private)
+	}
+	return t
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {

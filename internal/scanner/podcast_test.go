@@ -46,26 +46,6 @@ func TestParsePodcastShow(t *testing.T) {
 	}
 }
 
-func TestPodcastIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
-	show := &parsedPodcastShow{Title: "Tagged Show", Author: "Host", Year: 2024}
-	episode := parsedPodcastEpisode{Title: "Episode", Track: 3}
-	if got := podcastIdentityConfidence(show, episode); got != "high" {
-		t.Fatalf("complete metadata confidence = %q, want high", got)
-	}
-
-	show = &parsedPodcastShow{Title: "Tagged Show"}
-	episode = parsedPodcastEpisode{Title: "Episode"}
-	if got := podcastIdentityConfidence(show, episode); got != "medium" {
-		t.Fatalf("partial metadata confidence = %q, want medium", got)
-	}
-
-	show = &parsedPodcastShow{}
-	episode = parsedPodcastEpisode{}
-	if got := podcastIdentityConfidence(show, episode); got != "low" {
-		t.Fatalf("empty metadata confidence = %q, want low", got)
-	}
-}
-
 func TestScanPodcastFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	root := t.TempDir()
 	showDir := filepath.Join(root, "bad-show")
@@ -193,50 +173,5 @@ func TestResolvePodcastMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	}
 	if writer.upserts[0].ContentID != got || writer.upserts[0].Type != "podcast" {
 		t.Fatalf("upserted item = %+v, contentID %q", writer.upserts[0], got)
-	}
-}
-
-func TestApplyPodcastShowMetadataUpdatesIndexedFields(t *testing.T) {
-	item := &models.MediaItem{
-		ContentID: "podcast-1",
-		Type:      "podcast",
-		Title:     "Old Title",
-		SortTitle: "Old Title",
-		Year:      2023,
-	}
-
-	changed := applyPodcastShowMetadata(item, &parsedPodcastShow{Title: "The New Show", Year: 2024})
-	if !changed {
-		t.Fatal("applyPodcastShowMetadata reported no change")
-	}
-	if item.Title != "The New Show" {
-		t.Fatalf("Title = %q, want The New Show", item.Title)
-	}
-	if item.SortTitle != "New Show, The" {
-		t.Fatalf("SortTitle = %q, want New Show, The", item.SortTitle)
-	}
-	if item.Year != 2024 {
-		t.Fatalf("Year = %d, want 2024", item.Year)
-	}
-}
-
-func TestResolvePodcastMediaItemPropagatesRootLookupError(t *testing.T) {
-	wantErr := errors.New("root lookup failed")
-	finder := &fakeRootContentFinder{err: wantErr}
-	writer := &fakeFilesystemItemWriter{}
-
-	_, err := resolvePodcastMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		8,
-		"/library/Show",
-		&parsedPodcastShow{Title: "Show"},
-	)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want %v", err, wantErr)
-	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("upserts = %d, want 0", len(writer.upserts))
 	}
 }

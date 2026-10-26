@@ -54,9 +54,10 @@ type Tracker struct {
 	nodeType string
 	nodeHash string // first 8 chars of SHA-256 of nodeURL
 
-	mu       sync.Mutex
-	sessions map[string]struct{}  // set of active session IDs
-	touched  map[string]time.Time // ephemeral sessions by last-activity time
+	mu        sync.Mutex
+	sessions  map[string]struct{}  // set of active session IDs
+	touched   map[string]time.Time // ephemeral sessions by last-activity time
+	delivered map[string]time.Time // last delivery record written per playback session
 }
 
 // NewTracker creates a session tracker for the given node.
@@ -64,13 +65,14 @@ type Tracker struct {
 func NewTracker(rdb *redis.Client, nodeURL, nodeName, nodeType string) *Tracker {
 	h := sha256.Sum256([]byte(nodeURL))
 	return &Tracker{
-		rdb:      rdb,
-		nodeURL:  nodeURL,
-		nodeName: nodeName,
-		nodeType: nodeType,
-		nodeHash: hex.EncodeToString(h[:4]), // 8 hex chars
-		sessions: make(map[string]struct{}),
-		touched:  make(map[string]time.Time),
+		rdb:       rdb,
+		nodeURL:   nodeURL,
+		nodeName:  nodeName,
+		nodeType:  nodeType,
+		nodeHash:  hex.EncodeToString(h[:4]), // 8 hex chars
+		sessions:  make(map[string]struct{}),
+		touched:   make(map[string]time.Time),
+		delivered: make(map[string]time.Time),
 	}
 }
 
@@ -191,6 +193,9 @@ func (tr *Tracker) Cleanup(ctx context.Context) {
 	}
 	tr.sessions = make(map[string]struct{})
 	tr.touched = make(map[string]time.Time)
+	// Delivery records stay in Redis: the deliveries happened, and the records
+	// expire on their own within DeliveryWindow.
+	tr.delivered = make(map[string]time.Time)
 	tr.mu.Unlock()
 
 	if len(ids) == 0 {
@@ -244,6 +249,7 @@ func (tr *Tracker) refreshAll(ctx context.Context) {
 			ids = append(ids, id)
 		}
 	}
+	tr.pruneDeliveredLocked(now)
 	tr.mu.Unlock()
 
 	if len(ids) == 0 {

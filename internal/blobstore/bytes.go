@@ -40,11 +40,11 @@ func (b *ByteStore) Get(ctx context.Context, key string) ([]byte, error) {
 // Delete removes one object. An absent key counts as deleted, matching the
 // store contract, so cleanup after a failed publish is not an error.
 //
-// The count is checked rather than discarded. S3 batch deletion reports
-// per-object failures in its response body and still returns a nil error with a
-// short count, so ignoring it would report success while the object remains.
-// Subtitle deletion removes the database row before the object, and a silent
-// success there leaves an orphan nothing will ever look for again.
+// The count is checked as well as the error. The store contract reports
+// failures as an error, but a backend that returned a short count with a nil
+// error would otherwise report success while the object remains. Subtitle
+// deletion removes the database row before the object, and a silent success
+// there leaves an orphan nothing will ever look for again.
 func (b *ByteStore) Delete(ctx context.Context, key string) error {
 	deleted, err := b.store.Delete(ctx, []string{key})
 	if err != nil {

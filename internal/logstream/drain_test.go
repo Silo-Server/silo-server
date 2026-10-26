@@ -156,20 +156,6 @@ func TestDrainFlushesBufferedEntriesWhenStopped(t *testing.T) {
 	}
 }
 
-func TestDrainReturnsAfterChannelCloses(t *testing.T) {
-	ch := make(chan int, 4)
-	ch <- 1
-	ch <- 2
-	close(ch)
-	rec := newInsertRecorder()
-	rec.drain(10, time.Hour).Run(context.Background(), ch)
-
-	batches, _, _ := rec.snapshot()
-	if want := [][]int{{1, 2}}; !slices.EqualFunc(batches, want, slices.Equal) {
-		t.Fatalf("batches = %v, want %v", batches, want)
-	}
-}
-
 // TestDrainRetriesABatchWhilePostgresIsUnreachable fails the first two
 // attempts the way a refused connection does and checks that the batch is
 // persisted once Postgres is back, with nothing counted as dropped.

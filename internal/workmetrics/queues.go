@@ -16,7 +16,7 @@ var queueQueries = []struct{ name, sql string }{
 	{workloadScan, `SELECT status, count(*), min(requested_at) FROM scan_runs WHERE status IN ('accepted','running') GROUP BY status`},
 	{"admin", `SELECT status, count(*), min(requested_at) FROM admin_jobs WHERE status IN ('queued','running') GROUP BY status`},
 	{"history_import", `SELECT status, count(*), min(created_at) FROM history_import_runs WHERE status IN ('queued','running') GROUP BY status`},
-	{workloadDownloads, `SELECT CASE WHEN status IN ('queued','tone_map_queued','audio_v2_queued') THEN 'queued' ELSE 'running' END, count(*), min(created_at) FROM download_artifacts WHERE status IN ('queued','running','tone_map_queued','tone_map_running','audio_v2_queued','audio_v2_running') GROUP BY 1`},
+	{workloadDownloads, `SELECT CASE WHEN status IN ('queued','tone_map_queued','audio_v2_queued','tracks_v1_queued') THEN 'queued' ELSE 'running' END, count(*), min(created_at) FROM download_artifacts WHERE status IN ('queued','running','tone_map_queued','tone_map_running','audio_v2_queued','audio_v2_running','tracks_v1_queued','tracks_v1_running') GROUP BY 1`},
 	{"subtitles", `SELECT status, count(*), min(created_at) FROM subtitle_ai_jobs WHERE status IN ('pending','running') GROUP BY status`},
 	{workloadSearch, `SELECT 'queued', count(*), min(created_at) FROM catalog_search_index_events WHERE processed_at IS NULL`},
 	{workloadNotifications, `SELECT 'queued', count(*), min(created_at) FROM release_events WHERE processed_at IS NULL`},

@@ -6,20 +6,31 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 func (h *SubtitleSearchHandler) authorizeSubtitleRead(ctx context.Context, access catalog.AccessFilter, fileID int) error {
-	if h == nil || h.repo == nil || h.FileAuthorizer == nil {
+	if h == nil || h.repo == nil {
 		return apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle storage is not configured")
 	}
-	if _, err := h.FileAuthorizer.AuthorizeContext(ctx, fileID, access); err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
-			return apiError(http.StatusNotFound, "not_found", "Media file not found")
-		}
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
+	_, err := h.authorizedSubtitleFile(ctx, access, fileID)
+	return err
+}
+
+// authorizedSubtitleFile loads a media file the viewer can play.
+func (h *SubtitleSearchHandler) authorizedSubtitleFile(ctx context.Context, access catalog.AccessFilter, fileID int) (*models.MediaFile, error) {
+	if h.FileAuthorizer == nil {
+		return nil, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle storage is not configured")
 	}
-	return nil
+	file, err := h.FileAuthorizer.AuthorizeContext(ctx, fileID, access)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
+			return nil, apiError(http.StatusNotFound, "not_found", "Media file not found")
+		}
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
+	}
+	return file, nil
 }
 
 // ListStoredSubtitles applies file and parent access before reading stored tracks.

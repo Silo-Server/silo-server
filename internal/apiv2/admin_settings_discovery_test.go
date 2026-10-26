@@ -20,9 +20,8 @@ func TestAdminSettingsDiscovery(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	f := new(fakeAdminSettingRead)
 	deps.AdminSettingRead = f
-	deps.SectionFlags = &handlers.SectionSettingsHandler{}
 	h := NewHandler(deps)
-	for _, path := range []string{"settings/redis.url", "settings/sections", "playback-routing/capabilities"} {
+	for _, path := range []string{"settings/redis.url", "playback-routing/capabilities"} {
 		requireProblem(t, do(t, h, "GET", Prefix+"/admin/"+path, "", bearer(memberToken)), TypePermissionDenied)
 	}
 	if f.calls != 0 {
@@ -33,10 +32,6 @@ func TestAdminSettingsDiscovery(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	requireProblem(t, do(t, h, "GET", Prefix+"/admin/settings/missing", "", bearer(adminToken)), TypeNotFound)
-	rec = do(t, h, "GET", Prefix+"/admin/settings/sections", "", bearer(adminToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"allow_profile_custom_sections":false`) {
-		t.Fatal("static path was not routed", rec.Code, rec.Body.String())
-	}
 	rec = do(t, h, "GET", Prefix+"/admin/playback-routing/capabilities", "", bearer(adminToken))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"playback_node_routing_v1"`) || !strings.Contains(rec.Body.String(), `"worker_only"`) {
 		t.Fatal(rec.Code, rec.Body.String())

@@ -79,6 +79,7 @@ type playbackSessionRow struct {
 	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
 	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
 	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int     `json:"-"`
 	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
 	SourceAudioChannels      *int    `json:"source_audio_channels"`
 	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
@@ -310,6 +311,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			mf.bitrate,
 			COALESCE(mf.codec_video, ''),
 			COALESCE(mf.resolution, ''),
+			CASE WHEN mf.video_tracks->0->>'height' ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'height')::int ELSE 0 END,
 			COALESCE(mf.codec_audio, ''),
 			mf.audio_channels,
 			COALESCE(mf.audio_tracks::text, '[]'),
@@ -394,7 +396,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec,
 			&targetAudioChannels, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.ToneMapMode, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
-			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
+			&s.SourceVideoHeight, &s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,

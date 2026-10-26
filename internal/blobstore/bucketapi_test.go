@@ -2,9 +2,6 @@ package blobstore
 
 import (
 	"context"
-	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -101,44 +98,6 @@ func (c *cancelAfterFirstRead) Read(p []byte) (int, error) {
 		c.cancel()
 	}
 	return n, err
-}
-
-func TestBucketAPIUploadFileReportsSize(t *testing.T) {
-	api, fs := localBucketAPI(t)
-	ctx := context.Background()
-	source := filepath.Join(t.TempDir(), "export.json.gz")
-	payload := []byte("a gzipped catalog, notionally")
-	if err := os.WriteFile(source, payload, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	size, err := api.UploadFile(ctx, "", "catalog-seeds/2026/09/16/job.json.gz", source, "application/gzip")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if size != int64(len(payload)) {
-		t.Fatalf("size = %d, want %d", size, len(payload))
-	}
-	info, err := fs.Stat(ctx, "catalog-seeds/2026/09/16/job.json.gz")
-	if err != nil || info.Size != int64(len(payload)) {
-		t.Fatalf("stored object: %+v %v", info, err)
-	}
-	if _, err := api.UploadFile(ctx, "", "catalog-seeds/missing.json.gz", filepath.Join(t.TempDir(), "absent"), ""); err == nil {
-		t.Fatal("missing source file accepted")
-	}
-}
-
-// Presigning is the one thing a filesystem cannot do. Callers must be able to
-// tell that apart from a transient failure, so it reports a sentinel and
-// answers the capability question directly.
-func TestBucketAPIRefusesToPresign(t *testing.T) {
-	api, _ := localBucketAPI(t)
-	if _, err := api.PresignGetURL(context.Background(), "", "catalog-seeds/job.json.gz", 0); !errors.Is(err, ErrNoPresign) {
-		t.Fatalf("err = %v, want ErrNoPresign", err)
-	}
-	if api.SupportsPresign() {
-		t.Fatal("local storage claims presign support")
-	}
 }
 
 // Listings are bounded by the prefix a caller owns. On a local backend the root

@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-func TestCollectionRecipeRegistered(t *testing.T) {
-	rec, ok := Get("collection")
-	if !ok {
-		t.Fatal("collection not registered")
-	}
-	if rec.Definition().Category != CategoryHandPicked {
-		t.Errorf("category = %v want hand_picked", rec.Definition().Category)
-	}
-}
-
 func TestCollectionRequiresLibraryCollectionID(t *testing.T) {
 	rec, _ := Get("collection")
 	if err := rec.Validate(json.RawMessage(`{}`)); err == nil {

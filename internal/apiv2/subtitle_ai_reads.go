@@ -24,8 +24,8 @@ type SubtitleAIJob struct {
 	MediaFileID      ID      `json:"media_file_id"`
 	Kind             string  `json:"kind"`
 	SourceIndex      int     `json:"source_index"`
-	SourceLanguage   string  `json:"source_language"`
-	TargetLanguage   string  `json:"target_language"`
+	SourceLanguage   string  `json:"source_language" doc:"BCP 47 tag of the source language; empty when not given"`
+	TargetLanguage   string  `json:"target_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"BCP 47 tag to produce; empty for transcribe jobs"`
 	Engine           string  `json:"engine"`
 	Model            string  `json:"model"`
 	Status           string  `json:"status"`
@@ -84,6 +84,7 @@ func registerSubtitleAIReads(reg *Registry) {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "subtitles", "Read authorized subtitle AI state."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
 	}
 	list := op("/subtitles/ai/jobs", "listSubtitleAIJobs")
+	list.HouseholdProfileGate = true
 	list.Description = "Read up to 50 recent jobs for one accessible media file. This is a bounded recent-activity view, not a complete job history."
 	Register(reg, list, func(ctx context.Context, in *SubtitleAIJobsInput) (*SubtitleAIJobsOutput, error) {
 		id, p := in.MediaFileID.positive("query.media_file_id")
@@ -105,7 +106,9 @@ func registerSubtitleAIReads(reg *Registry) {
 		}
 		return out, nil
 	})
-	Register(reg, op("/subtitles/ai/jobs/{job_id}", "getSubtitleAIJob"), func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
+	job := op("/subtitles/ai/jobs/{job_id}", "getSubtitleAIJob")
+	job.HouseholdProfileGate = true
+	Register(reg, job, func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
 		id, idProblem := in.JobID.positive64("path.job_id")
 		if idProblem != nil {
 			return nil, validationProblem("path.job_id", "invalid", "Expected a positive job identifier.")

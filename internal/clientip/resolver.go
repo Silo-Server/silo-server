@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Resolver resolves the real client IP from an HTTP request, accounting for
@@ -17,14 +18,38 @@ type Resolver struct {
 }
 
 // NewResolver creates a Resolver with the given trusted proxy CIDRs.
-// If trusted is nil or empty, forwarding headers are never consulted.
+// If trusted is nil or empty, forwarding headers never name the client.
 func NewResolver(trusted []*net.IPNet) *Resolver {
 	return &Resolver{trusted: trusted}
 }
 
 // ClientIP returns the resolved client IP address string.
 // The returned value is always normalized via net.ParseIP().String().
+//
+// Forwarding headers name the client only when the transport peer is a
+// trusted proxy.
+// X-Forwarded-For is read across all of its header lines in order, because
+// some proxies (HAProxy's option forwardfor) add their own line after the
+// client's instead of appending to it. Each entry was written by the hop to
+// its right, so walking right to left the first untrusted entry is the client.
+// An entry that is not an address stops the walk at the trusted hop that
+// wrote it, since nothing to its left can be attributed.
+//
+// X-Real-IP, as a single value, is read only when the peer named no address
+// in X-Forwarded-For: a proxy that appends to X-Forwarded-For may pass a
+// client's X-Real-IP through, so it never overrides an entry. It keeps nginx's
+// `X-Real-IP $remote_addr` setup working. That setup forwards a client's
+// X-Forwarded-For as sent, so ignoring X-Real-IP would not make it safe; it
+// would only resolve a client that sends junk X-Forwarded-For to the proxy's
+// own, local-looking address.
 func (r *Resolver) ClientIP(req *http.Request) string {
+	ip, _ := r.resolve(req)
+	return normalize(ip)
+}
+
+// resolve returns the client IP and whether it is the address of a forwarder
+// whose client the resolver could not identify (see ForwardedClientUnknown).
+func (r *Resolver) resolve(req *http.Request) (net.IP, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -32,42 +57,90 @@ func (r *Resolver) ClientIP(req *http.Request) string {
 
 	// If the connecting IP is not a trusted proxy, ignore forwarding headers.
 	if !r.isTrusted(remoteIP) {
-		return normalize(remoteIP)
+		return remoteIP, hasForwardingHeaders(req.Header)
 	}
 
-	// Check X-Forwarded-For: walk right-to-left, return first untrusted IP.
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		for i := len(ips) - 1; i >= 0; i-- {
-			candidate := strings.TrimSpace(ips[i])
-			if candidate == "" {
+	if ip, forwarded := r.forwardedFor(req.Header.Values("X-Forwarded-For")); ip != nil {
+		return ip, forwarded
+	}
+
+	if realIP := req.Header.Values("X-Real-IP"); len(realIP) == 1 {
+		if parsed := parseForwardedAddr(strings.TrimSpace(realIP[0])); parsed != nil {
+			return parsed, false
+		}
+	}
+
+	return remoteIP, hasForwardingHeaders(req.Header)
+}
+
+// forwardedFor walks the X-Forwarded-For lines right to left and returns the
+// first untrusted entry, the leftmost entry when all are trusted, or the
+// trusted hop before an entry that is not an address. It returns nil when the
+// peer named no address. The flag reports that the returned hop forwarded for
+// someone it could not name: entries remain to its left, or the walk stopped
+// at an entry that is not an address.
+func (r *Resolver) forwardedFor(lines []string) (net.IP, bool) {
+	var last net.IP
+	for i := len(lines) - 1; i >= 0; i-- {
+		entries := strings.Split(lines[i], ",")
+		for j := len(entries) - 1; j >= 0; j-- {
+			entry := strings.TrimSpace(entries[j])
+			if entry == "" {
 				continue
 			}
-			parsed := net.ParseIP(candidate)
-			if parsed == nil {
-				continue
+			ip := parseForwardedAddr(entry)
+			if ip == nil {
+				return last, true
 			}
-			if !r.isTrusted(parsed) {
-				return normalize(parsed)
+			if !r.isTrusted(ip) {
+				return ip, hasForwardedEntry(entries[:j]) || hasForwardedEntry(lines[:i])
 			}
-		}
-		// All IPs in chain are trusted — return leftmost
-		for _, raw := range ips {
-			candidate := strings.TrimSpace(raw)
-			if parsed := net.ParseIP(candidate); parsed != nil {
-				return normalize(parsed)
-			}
+			last = ip
 		}
 	}
+	return last, false
+}
 
-	// Fallback: X-Real-IP
-	if realIP := req.Header.Get("X-Real-IP"); realIP != "" {
-		if parsed := net.ParseIP(realIP); parsed != nil {
-			return normalize(parsed)
+// hasForwardedEntry reports whether any of the comma-separated values holds a
+// non-blank entry.
+func hasForwardedEntry(values []string) bool {
+	for _, value := range values {
+		if strings.TrimFunc(value, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) != "" {
+			return true
 		}
 	}
+	return false
+}
 
-	return normalize(remoteIP)
+// hasForwardingHeaders reports whether the request names a forwarded client
+// in any header the resolver knows of. Forwarded (RFC 7239) is never parsed
+// for an address, but its presence still shows the peer is a forwarder.
+func hasForwardingHeaders(h http.Header) bool {
+	return hasForwardedEntry(h.Values("X-Forwarded-For")) ||
+		hasForwardedEntry(h.Values("X-Real-IP")) ||
+		hasForwardedEntry(h.Values("Forwarded"))
+}
+
+// parseForwardedAddr parses a forwarded address: a bare IP, or an IP with a
+// port or in brackets, as some proxies write it. It returns nil otherwise.
+func parseForwardedAddr(addr string) net.IP {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return parseUnzonedIP(host)
+	}
+	if len(addr) > 1 && addr[0] == '[' && addr[len(addr)-1] == ']' {
+		addr = addr[1 : len(addr)-1]
+	}
+	return parseUnzonedIP(addr)
+}
+
+// parseUnzonedIP parses an IP, dropping the zone of an IPv6 address such as
+// "fe80::1%eth0". Go's reverse proxy writes a link-local client's address with
+// its zone, which means something only on that proxy's host.
+func parseUnzonedIP(addr string) net.IP {
+	if i := strings.IndexByte(addr, '%'); i >= 0 && strings.Contains(addr[:i], ":") {
+		addr = addr[:i]
+	}
+	return net.ParseIP(addr)
 }
 
 // parseRemoteAddr extracts the IP from r.RemoteAddr using net.SplitHostPort.
@@ -132,7 +205,8 @@ const (
 )
 
 // requestScheme must run before Middleware replaces the transport peer address.
-// Proxies must preserve Host and overwrite X-Forwarded-Proto, never append it.
+// Proxies must preserve Host (or name the client's host in X-Forwarded-Host)
+// and overwrite X-Forwarded-Proto, never append it.
 // On a WebSocket upgrade, Traefik sends "wss" or "ws" instead of "https" or
 // "http"; those name the same transport security and are accepted there only.
 func (r *Resolver) requestScheme(req *http.Request) string {
@@ -140,18 +214,7 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 	if req.TLS != nil {
 		scheme = "https"
 	}
-	host, _, err := net.SplitHostPort(req.RemoteAddr)
-	if err != nil {
-		host = req.RemoteAddr
-	}
-	peer := net.ParseIP(host)
-	if peer == nil || r == nil {
-		return scheme
-	}
-	r.mu.RLock()
-	trusted := r.isTrusted(peer)
-	r.mu.RUnlock()
-	if !trusted {
+	if !r.peerTrusted(req) {
 		return scheme
 	}
 	values := req.Header.Values("X-Forwarded-Proto")
@@ -174,6 +237,40 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// requestHost is the single X-Forwarded-Host value a trusted proxy sent, or
+// the Host header. A list, several headers or a value that is not a bare
+// host[:port] is ambiguous and falls back to Host. Like requestScheme it must
+// run before Middleware replaces the transport peer address.
+func (r *Resolver) requestHost(req *http.Request) string {
+	if !r.peerTrusted(req) {
+		return req.Host
+	}
+	values := req.Header.Values("X-Forwarded-Host")
+	if len(values) != 1 {
+		return req.Host
+	}
+	host := strings.TrimSpace(values[0])
+	if host == "" || strings.ContainsAny(host, ",/?#@ \t") {
+		return req.Host
+	}
+	return host
+}
+
+// peerTrusted reports whether the transport peer of req is a trusted proxy.
+func (r *Resolver) peerTrusted(req *http.Request) bool {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		host = req.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isTrusted(peer)
 }
 
 // isWebSocketUpgrade reports whether req asks to upgrade to WebSocket: a

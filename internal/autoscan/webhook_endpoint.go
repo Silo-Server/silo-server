@@ -253,7 +253,9 @@ func (r *Repository) ResolveWebhookToken(ctx context.Context, token string) (Sou
 	return src, endpoint, nil
 }
 
-// TouchWebhookReceived stamps the endpoint's last valid delivery time.
+// TouchWebhookReceived stamps the endpoint's last valid delivery time for a
+// delivery that is not queued (a provider Test event, or one without paths).
+// CreateWebhookDelivery stamps queued deliveries itself.
 func (r *Repository) TouchWebhookReceived(ctx context.Context, sourceID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE autoscan_webhook_endpoints

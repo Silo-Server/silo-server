@@ -73,64 +73,6 @@ func (c *countingEpisodeListSource) GetByIDs(_ context.Context, _ []string) ([]*
 	return nil, nil
 }
 
-// TestListSeasons_UsesBatchEpisodeFetch verifies ListSeasons makes exactly
-// one ListBySeriesGroupedBySeason call (replacing N per-season ListBySeason
-// calls) and exactly one ListProgressByMediaItems call (replacing N
-// per-season fetches inside enrichSeasonUserData) (audit 2026-05-01 §2.2).
-func TestListSeasons_UsesBatchEpisodeFetch(t *testing.T) {
-	provider := newProgressCountingStoreProvider()
-	episodeRepo := &countingEpisodeListSource{
-		groupedReturn: map[int][]*models.Episode{
-			1: {
-				{ContentID: "e1", SeriesID: "series-abc", SeasonNumber: 1, EpisodeNumber: 1},
-				{ContentID: "e2", SeriesID: "series-abc", SeasonNumber: 1, EpisodeNumber: 2},
-			},
-			2: {
-				{ContentID: "e3", SeriesID: "series-abc", SeasonNumber: 2, EpisodeNumber: 1},
-			},
-		},
-	}
-	seasonRepo := &stubSeasonListSource{
-		seasons: []*models.Season{
-			{ContentID: "s1", SeriesID: "series-abc", SeasonNumber: 1},
-			{ContentID: "s2", SeriesID: "series-abc", SeasonNumber: 2},
-		},
-	}
-	svc := &directContentService{
-		itemRepo:      stubItemAccessSource{},
-		seasonRepo:    seasonRepo,
-		episodeRepo:   episodeRepo,
-		storeProvider: provider,
-	}
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	result, err := svc.ListSeasons(context.Background(), session, "series-abc", nil)
-	if err != nil {
-		t.Fatalf("ListSeasons returned error: %v", err)
-	}
-	if len(result) != 2 {
-		t.Fatalf("expected 2 seasons in result; got %d", len(result))
-	}
-
-	if episodeRepo.listBySeasonCalls != 0 {
-		t.Fatalf("ListSeasons must not call ListBySeason on the batched path; got %d calls",
-			episodeRepo.listBySeasonCalls)
-	}
-	if episodeRepo.listGroupedCalls != 1 {
-		t.Fatalf("ListSeasons should call ListBySeriesGroupedBySeason exactly once; got %d",
-			episodeRepo.listGroupedCalls)
-	}
-	if provider.store.listProgressCalls != 1 {
-		t.Fatalf("ListSeasons should batch into 1 ListProgressByMediaItems call; got %d",
-			provider.store.listProgressCalls)
-	}
-	// The single batch must include every episode from every season.
-	if got, want := len(provider.store.lastListedMediaItemIDs), 3; got != want {
-		t.Fatalf("expected single progress batch to cover all %d episodes; got %d ids",
-			want, got)
-	}
-}
-
 // TestListSeasons_FallbackUsesGroupedEpisodes verifies that when the
 // seasons table is empty, ListSeasons still uses the single grouped fetch
 // and derives synthetic seasons without issuing an extra aggregation

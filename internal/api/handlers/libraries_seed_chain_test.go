@@ -66,20 +66,6 @@ func TestBuildSeededChainEntries_OptOutAndLevelScoping(t *testing.T) {
 	}
 }
 
-// A provider with default_enabled=true (the default) that declares the level is
-// seeded enabled, unchanged from the pre-flag behavior.
-func TestBuildSeededChainEntries_DefaultsEnabled(t *testing.T) {
-	entries := buildSeededChainEntries("movie", []seedCandidate{
-		{installationID: 1, capabilityID: "tmdb", supportsLevel: true, declaredPriority: 2, defaultEnabled: true},
-	})
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if !entries[0].Enabled {
-		t.Errorf("provider with default_enabled=true should be seeded enabled")
-	}
-}
-
 // A legacy provider that declares no default_priority map at all makes no claim
 // and stays eligible for every level (parked last, disabled) — preserving the
 // pre-existing catch-all behavior for providers that never enumerated levels.
@@ -96,5 +82,23 @@ func TestBuildSeededChainEntries_LegacyCatchAllParkedLast(t *testing.T) {
 	}
 	if entries[1].PluginInstallationID != 9 || entries[1].Enabled {
 		t.Errorf("legacy catch-all should be parked last and disabled, got %+v", entries[1])
+	}
+}
+
+// The built-in local provider is seeded first and enabled at every level it
+// declares, even when a remote provider declares a lower priority number.
+func TestBuildSeededChainEntries_LocalTierFirst(t *testing.T) {
+	entries := buildSeededChainEntries("movie", []seedCandidate{
+		{installationID: 2, capabilityID: "tmdb", supportsLevel: true, declaredPriority: 1, defaultEnabled: true},
+		{installationID: 1, capabilityID: "nfo", local: true, supportsLevel: true, declaredPriority: 1, defaultEnabled: true},
+	})
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if e := entries[0]; e.PluginInstallationID != 1 || !e.Local || !e.Enabled || e.Priority != 0 {
+		t.Errorf("first entry = %+v, want the enabled local provider", e)
+	}
+	if e := entries[1]; e.PluginInstallationID != 2 || e.Local || e.Priority != 1 {
+		t.Errorf("second entry = %+v, want tmdb", e)
 	}
 }

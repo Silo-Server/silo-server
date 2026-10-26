@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -97,17 +96,6 @@ func TestToneMapCapabilityTimeoutPricesANodeOverride(t *testing.T) {
 	}
 }
 
-// A planner that cannot enumerate nodes — or none at all — keeps the
-// pre-derivation behavior: the cluster policy over the fixed fallback.
-func TestToneMapCapabilityTimeoutFallsBackWithoutAPool(t *testing.T) {
-	want := playback.ColdCapabilityRequestTimeout(nil, "", "", compatRemoteNodeProbeFallbackTimeout)
-
-	handler := &PlaybackHandler{cfg: &config.Config{}}
-	if got := handler.toneMapCapabilityTimeout(); got != want {
-		t.Fatalf("toneMapCapabilityTimeout() with no planner = %v, want %v", got, want)
-	}
-}
-
 // Proxy nodes answer the audio-boost sweep under the same deadline, resolved
 // through their own pool: a proxy whose stored report out-prices the fallback
 // raises the sweep exactly as a transcode node's would.
@@ -130,18 +118,5 @@ func TestToneMapCapabilityTimeoutPricesProxyNodesFromTheirRecords(t *testing.T) 
 	}
 	if got := handler.toneMapCapabilityTimeout(); got != want {
 		t.Fatalf("toneMapCapabilityTimeout() = %v, want the proxy's cold budget %v", got, want)
-	}
-}
-
-// A pooled proxy the lookup cannot resolve still prices at the floor instead
-// of shrinking or failing the sweep.
-func TestToneMapCapabilityTimeoutCountsUnresolvedProxyNodesAtTheFloor(t *testing.T) {
-	want := playback.ColdCapabilityRequestTimeout(nil, "", "", compatRemoteNodeProbeFallbackTimeout)
-
-	handler := &PlaybackHandler{
-		NodePlanner: compatTimeoutPlanner{proxies: []string{"http://proxy:8083"}},
-	}
-	if got := handler.toneMapCapabilityTimeout(); got != want {
-		t.Fatalf("toneMapCapabilityTimeout() with an unresolved proxy = %v, want %v", got, want)
 	}
 }

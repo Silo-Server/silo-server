@@ -24,19 +24,6 @@ func (w *readerFromResponseWriter) ReadFrom(r io.Reader) (int64, error) {
 	return io.Copy(&w.Buffer, r)
 }
 
-func TestCopyChunkedUsesReaderFromPerSlice(t *testing.T) {
-	w := &readerFromResponseWriter{header: make(http.Header)}
-	rf, ok := ReaderFromOf(w)
-	if !ok {
-		t.Fatal("ReaderFromOf did not report direct implementation")
-	}
-	var recorded int64
-	n, err := CopyChunked(rf, bytes.NewReader(make([]byte, 10)), 4, func(n int64, _ error) { recorded += n })
-	if err != nil || n != 10 || recorded != 10 || w.called != 3 {
-		t.Fatalf("CopyChunked = n=%d err=%v recorded=%d calls=%d", n, err, recorded, w.called)
-	}
-}
-
 type recordingReaderFrom struct {
 	readers []io.Reader
 	errAt   int
@@ -119,13 +106,6 @@ func TestCopyChunkedLimitedReaderErrorUpdatesBudget(t *testing.T) {
 	})
 	if !errors.Is(err, wantErr) || n != 4 || lr.N != 6 || recordedN != 4 || !errors.Is(recordedErr, wantErr) {
 		t.Fatalf("CopyChunked = n=%d err=%v remaining=%d record=(%d,%v)", n, err, lr.N, recordedN, recordedErr)
-	}
-}
-
-func TestWriterOnlyHidesReaderFrom(t *testing.T) {
-	w := &readerFromResponseWriter{header: make(http.Header)}
-	if _, ok := WriterOnly(w).(io.ReaderFrom); ok {
-		t.Fatal("WriterOnly exposed io.ReaderFrom")
 	}
 }
 

@@ -74,7 +74,6 @@ type UserStore interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	DeleteProfile(ctx context.Context, id string) error
-	VerifyPIN(ctx context.Context, profileID, pin string) (bool, error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error
@@ -86,6 +85,12 @@ type UserStore interface {
 	MarkProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
+	// ClearResumePosition sets a visible resume position to 0 and reports
+	// whether there was one. It keeps the watched latch, the duration and
+	// watch history, never inserts a row, and stamps updated_at and event_at
+	// no earlier than at, so delta sync carries the change and an older
+	// provider resume point loses to it.
+	ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error)
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
 	// ListProgressPage is the keyset form of ListProgress: the same status
@@ -95,6 +100,13 @@ type UserStore interface {
 	// past the key between calls are neither repeated nor cause gaps, which the
 	// offset form cannot promise while playback keeps reordering the set.
 	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
+	// ListCompletedProgressSince returns at most limit completed rows, with the
+	// hidden-item exclusion, whose updated_at at whole-second precision (the
+	// precision WatchProgress.UpdatedAt carries) is after since and, when until
+	// is non-zero, not after until, newest first. It replaces offset paging for
+	// walks bounded by a cutoff; until lets a walk extend to an older cutoff
+	// without re-reading the rows it already holds.
+	ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]WatchProgress, error)
 	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
 	// the backing catalog item's type and/or library, so the watched-items path
 	// no longer scans the whole status set before discarding non-matching rows.
@@ -124,16 +136,26 @@ type UserStore interface {
 	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
+	// RemoveHistoryItems removes the items' plays from history ("Remove from
+	// history"): it deletes the plays dated at or before removedAt, or before
+	// the newest play when that is later, hides any that arrive later with
+	// such a date, and clears the items' watched state and progress.
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
+	// ClearWatchedState marks the items unwatched: it deletes their progress
+	// and stops their plays dated at or before clearedAt, or before the
+	// newest play when that is later, from counting as watched or being
+	// imported again. The plays stay in history.
+	ClearWatchedState(ctx context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error
 	DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source WatchHistorySource) error
 	ListHomeDismissals(ctx context.Context, profileID, surface string) ([]HomeItemDismissal, error)
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error
 	DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error
 
-	// Favorites & Watchlist
-	AddFavorite(ctx context.Context, profileID, mediaItemID string) error
+	// Favorites & Watchlist. Each add and remove reports whether it changed
+	// a row: false for an item already on the list or already absent.
+	AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	// ListFavoritesPage is the keyset form of ListFavorites: ordered by
 	// (added_at DESC, media_item_id DESC), returning at most limit rows
@@ -144,9 +166,9 @@ type UserStore interface {
 	// GetFavorite answers the profile's favorite entry for the item, nil when
 	// the item is not a favorite.
 	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
-	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
 	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
 	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
@@ -167,6 +189,19 @@ type UserStore interface {
 	// hidden from display so they reappear when new episodes are added.
 	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
 
+	// Not interested. A mark keeps a movie or series out of the profile's
+	// recommendations and counts against similar titles there; it leaves
+	// every other surface alone. Mark and unmark report whether they changed
+	// a row.
+	MarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	UnmarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetNotInterested answers the profile's mark on the item, nil when the
+	// item is not marked.
+	GetNotInterested(ctx context.Context, profileID, mediaItemID string) (*NotInterestedEntry, error)
+	// ListNotInterestedPage pages the profile's marks like ListFavoritesPage.
+	ListNotInterestedPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]NotInterestedEntry, error)
+	ListNotInterestedByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
+
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)
 	GetCollection(ctx context.Context, id string) (*Collection, error)
@@ -178,9 +213,9 @@ type UserStore interface {
 	ListCollectionItems(ctx context.Context, collectionID string) ([]CollectionItem, error)
 	ReplaceCollectionItems(ctx context.Context, collectionID string, items []CollectionItemReplacement) error
 	ReorderCollectionItems(ctx context.Context, collectionID string, orderedMediaItemIDs []string) error
-	// ReorderCollections scopes to the supplied group_id. A nil groupID means
-	// the implicit Ungrouped bucket.
-	ReorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string) error
+	// ReorderCollections replaces profileID's order of its own collections;
+	// orderedIDs must name each of them exactly once.
+	ReorderCollections(ctx context.Context, profileID string, orderedIDs []string) error
 	UpdateCollectionSyncState(ctx context.Context, input UpdateCollectionSyncStateInput) error
 	ListCollectionGroups(ctx context.Context) ([]CollectionGroup, error)
 	EnsureCollectionGroup(ctx context.Context, id string) error

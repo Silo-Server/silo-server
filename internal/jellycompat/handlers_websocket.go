@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -37,37 +38,39 @@ func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) ht
 func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthenticator, events UserStateEvents, codec *ResourceIDCodec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := ExtractToken(r)
-		resolve := func(ctx context.Context) *Session {
+		// resolve returns ErrSessionNotFound for a token that is signed out;
+		// any other error means the session could not be checked.
+		resolve := func(ctx context.Context) (*Session, error) {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			if strings.HasPrefix(token, "sa_") {
-				session, _, _ := keys.resolveSession(ctx, token)
-				return session
+				if session, _, _ := keys.resolveSession(ctx, token); session != nil {
+					return session, nil
+				}
+				return nil, ErrSessionNotFound
 			}
 			if sessions == nil {
-				return nil
+				return nil, ErrSessionNotFound
 			}
-			if sessions.repo != nil {
-				session, err := sessions.repo.GetByToken(ctx, token, sessions.now())
-				if err != nil {
-					return nil
-				}
-				return session
-			}
-			session, ok := sessions.Get(token)
-			if !ok {
-				return nil
-			}
-			return session
+			return sessions.Recheck(ctx, token)
 		}
-		validate := func(ctx context.Context) bool { return resolve(ctx) != nil }
+		// A check that could not run keeps the socket open; only a
+		// signed-out session closes it.
+		validate := func(ctx context.Context) bool {
+			_, err := resolve(ctx)
+			return !errors.Is(err, ErrSessionNotFound)
+		}
 		if !ok {
 			writeError(w, 401, "Unauthorized", "Invalid or expired authentication token")
 			return
 		}
-		session := resolve(r.Context())
-		if session == nil {
+		session, err := resolve(r.Context())
+		if errors.Is(err, ErrSessionNotFound) {
 			writeError(w, 401, "Unauthorized", "Invalid or expired authentication token")
+			return
+		}
+		if err != nil {
+			writeSessionLookupFailed(w, r, token, err)
 			return
 		}
 		var notices <-chan wsMessage

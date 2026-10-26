@@ -9,27 +9,38 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// Token types of the access and refresh JWTs a sign-in issues.
+const (
+	tokenTypeAccess  = "access"
+	tokenTypeRefresh = "refresh"
+)
+
 // Claims are the unified ABS JWT claim set. Different `Type` values denote
 // access, refresh, or session tokens.
 type Claims struct {
 	Type      string `json:"type"`          // access | refresh | session
 	UserID    string `json:"sub"`           // user id
-	ProfileID string `json:"pid,omitempty"` // empty = primary profile
-	JTI       string `json:"jti"`           // token id (revocable)
-	DeviceID  string `json:"device_id,omitempty"`
-	SessionID string `json:"sid,omitempty"`
-	BookID    string `json:"bid,omitempty"`
-	FileIdx   int    `json:"fidx,omitempty"`
+	ProfileID string `json:"pid,omitempty"` // empty = account with no profiles
+	// PINRevision is the profile's PIN revision at sign-in, carried through
+	// refresh. A pointer, so a token minted before the claim existed reads as
+	// absent and is refused for a PIN-protected profile.
+	PINRevision *int64 `json:"pin_rev,omitempty"`
+	JTI         string `json:"jti"` // token id (revocable)
+	DeviceID    string `json:"device_id,omitempty"`
+	SessionID   string `json:"sid,omitempty"`
+	BookID      string `json:"bid,omitempty"`
+	FileIdx     int    `json:"fidx,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // IssueAccessToken mints a stateless access JWT.
-func IssueAccessToken(secret []byte, userID, profileID, jti string, ttl time.Duration) (string, error) {
+func IssueAccessToken(secret []byte, userID, profileID string, pinRevision *int64, jti string, ttl time.Duration) (string, error) {
 	return issueJWT(secret, Claims{
-		Type:      "access",
-		UserID:    userID,
-		ProfileID: profileID,
-		JTI:       jti,
+		Type:        tokenTypeAccess,
+		UserID:      userID,
+		ProfileID:   profileID,
+		PINRevision: pinRevision,
+		JTI:         jti,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -38,12 +49,13 @@ func IssueAccessToken(secret []byte, userID, profileID, jti string, ttl time.Dur
 }
 
 // IssueRefreshToken mints a refresh JWT.
-func IssueRefreshToken(secret []byte, userID, profileID, jti string, ttl time.Duration) (string, error) {
+func IssueRefreshToken(secret []byte, userID, profileID string, pinRevision *int64, jti string, ttl time.Duration) (string, error) {
 	return issueJWT(secret, Claims{
-		Type:      "refresh",
-		UserID:    userID,
-		ProfileID: profileID,
-		JTI:       jti,
+		Type:        tokenTypeRefresh,
+		UserID:      userID,
+		ProfileID:   profileID,
+		PINRevision: pinRevision,
+		JTI:         jti,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

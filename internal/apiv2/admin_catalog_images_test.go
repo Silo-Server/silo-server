@@ -3,10 +3,12 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 type fakeAdminImages struct {
@@ -24,6 +26,29 @@ func (f *fakeAdminImages) ApplyAdminItemImage(_ context.Context, id string, r ha
 	f.request = r
 	return handlers.AdminItemImageResult{ContentID: id, StoredPath: "immutable-artwork", Revision: "revision", Thumbhash: "hash"}, nil
 }
+func TestAdminImageListLeadsWithLocalArtwork(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.AdminCatalogImages = &fakeAdminImages{rows: []handlers.AdminImageEntryView{
+		{ProviderID: "tvdb", OriginalURL: "unrated", Type: "poster"},
+		{ProviderID: "tmdb", OriginalURL: "rated", Type: "poster", Rating: 9},
+		{ProviderID: metadata.LocalImageProviderID, OriginalURL: "file:///fanart.jpg", Type: "backdrop"},
+		{ProviderID: metadata.LocalImageProviderID, OriginalURL: "file:///backdrop1.jpg", Type: "backdrop"},
+	}}
+	rec := do(t, newTestHandler(t, deps), "GET", Prefix+"/admin/items/item-1/images", "", bearer(adminToken))
+	var page AdminImagesPage
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, row := range page.Items {
+		got = append(got, row.OriginalURL)
+	}
+	// Local choices keep discovery order rather than sorting by path.
+	if want := []string{"file:///fanart.jpg", "file:///backdrop1.jpg", "rated", "unrated"}; !slices.Equal(got, want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+}
+
 func TestAdminImagePagesAndApply(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	f := &fakeAdminImages{rows: []handlers.AdminImageEntryView{{ProviderID: "p", OriginalURL: "b", URL: "display-b", Type: "poster", Rating: 9}, {ProviderID: "p", OriginalURL: "a", URL: "display-a", Type: "poster", Rating: 1}}}

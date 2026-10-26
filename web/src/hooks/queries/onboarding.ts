@@ -49,8 +49,7 @@ export function useOnboardingProgress() {
   const { context, scope } = useOnboardingContext();
   const writer = useMemo(
     () => (context ? createOnboardingWriter(context) : null),
-    // Token refresh preserves authority; account/profile changes start a new sequence.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- token refresh preserves authority; account/profile changes start a new sequence
     [context?.serverOrigin, context?.authContextVersion, context?.profileId, context?.profileToken],
   );
   return useMutation({

@@ -94,6 +94,20 @@ func firefoxMatroskaAACTimingQuirkV3(source SourceDescriptorV3, request StartReq
 	return &quirk, true
 }
 
+// firefoxMacOSHEVCResumeLeadingPictureDropV3 reports whether a progressive
+// HEVC remux for this client should drop open-GOP leading pictures when it
+// starts past zero. A seeked stream copy begins at the keyframe before the
+// requested position, and the RASL pictures that precede that CRA in
+// presentation order reference frames the copy never sent. macOS Firefox
+// rejects the stream at that boundary instead of skipping them.
+func firefoxMacOSHEVCResumeLeadingPictureDropV3(source SourceDescriptorV3, request StartRequestV3) bool {
+	if !isFirefoxWebV3(request) || normalizeCodecV3(source.VideoCodec) != transcodeCodecHEVC {
+		return false
+	}
+	userAgent := strings.ToLower(request.ClientPlaybackContext.Device.PlatformDetails["user_agent"])
+	return strings.Contains(userAgent, "macintosh") || strings.Contains(userAgent, "mac os x")
+}
+
 func isFirefoxWebV3(request StartRequestV3) bool {
 	device := request.ClientPlaybackContext.Device
 	if !strings.EqualFold(device.Platform, "web") {

@@ -69,15 +69,3 @@ func TestAdminAutoscanAvailableSourcesRead(t *testing.T) {
 	deps.AdminAutoscanAvailableSources = nil
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
-
-func TestAdminAutoscanAvailableSourceFormDefaults(t *testing.T) {
-	f := &fakeAdminAutoscanAvailableSources{rows: []autoscan.AvailableScanSource{{PluginID: "p", CapabilityID: "c", Descriptor: autoscan.ScanSourceDescriptor{DeliveryModes: []string{"poll"}, Connection: autoscan.ConnectionOptional, ConfigForm: &autoscan.AdminForm{Fields: []autoscan.AdminFormField{{Key: "value", Control: "FUTURE_CONTROL", DefaultValue: map[string]any{"nested": []any{false, 2, "x"}}, Secret: true, FillFrom: "library_paths_movie", Validation: &autoscan.AdminFormValidation{HasMin: true, Min: 0}}}}}}}}
-	deps := pilotDeps(nil, nil)
-	deps.AdminAutoscanAvailableSources = f
-	rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/autoscan/scan-source-plugins", "", bearer(adminToken))
-	for _, want := range []string{`"default_value":{"nested":[false,2,"x"]}`, `"control":"FUTURE_CONTROL"`, `"fill_from":"library_paths_movie"`, `"secret":true`, `"has_min":true`, `"connection_kinds":[]`} {
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
-			t.Fatal(want, rec.Code, rec.Body.String())
-		}
-	}
-}

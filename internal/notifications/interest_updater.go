@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -48,12 +50,43 @@ type InterestUpdater struct {
 	interests *InterestRepository
 	stores    userstore.UserStoreProvider
 	scopes    ScopeResolver
+	drops     droppedSeriesLister
 	logger    *slog.Logger
 
 	mu sync.Mutex
 	// pending maps each queued mutation to how many flushes have already
 	// failed it (transient failures requeue instead of dropping).
 	pending map[interestMutation]int
+	// deferred maps mutations to the time they join pending.
+	deferred map[interestMutation]time.Time
+	// homeChanged records each profile's latest Home removal or restore on
+	// this node, kept for progressSessionGap.
+	homeChanged map[profileKey]time.Time
+}
+
+// profileKey names one profile on one account. A profile id alone is not
+// unique: every account from before profiles has a profile named "default".
+type profileKey struct {
+	userID    int
+	profileID string
+}
+
+// String renders the key as account/profile for logs and errors.
+func (k profileKey) String() string { return strconv.Itoa(k.userID) + "/" + k.profileID }
+
+// LogValue logs the key as account/profile in every slog handler; the JSON
+// handler would otherwise encode the unexported fields as {}.
+func (k profileKey) LogValue() slog.Value { return slog.StringValue(k.String()) }
+
+// profileKeyArrays splits keys into the parallel account and profile arrays a
+// query matches with (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])).
+func profileKeyArrays(keys []profileKey) ([]int, []string) {
+	userIDs := make([]int, len(keys))
+	profileIDs := make([]string, len(keys))
+	for i, key := range keys {
+		userIDs[i], profileIDs[i] = key.userID, key.profileID
+	}
+	return userIDs, profileIDs
 }
 
 // NewInterestUpdater creates an InterestUpdater.
@@ -63,7 +96,7 @@ func NewInterestUpdater(
 	stores userstore.UserStoreProvider,
 	scopes ScopeResolver,
 ) *InterestUpdater {
-	return &InterestUpdater{
+	updater := &InterestUpdater{
 		pool:      pool,
 		interests: interests,
 		stores:    stores,
@@ -71,12 +104,16 @@ func NewInterestUpdater(
 		logger:    slog.Default().With("component", "notifications.interest"),
 		pending:   make(map[interestMutation]int),
 	}
+	if pool != nil {
+		updater.drops = catalog.NewDroppedSeriesRepo(pool)
+	}
+	return updater
 }
 
 // QueueItemMutation records that a profile's relationship to a media item
-// (favorite, watchlist, watch progress) changed. The item is resolved to its
-// parent series asynchronously; movie targets are ignored. Safe to call from
-// hot request paths.
+// (favorite, watchlist, watch progress, Home removal) changed. The item is
+// resolved to its parent series asynchronously; movie targets are ignored.
+// Safe to call from hot request paths.
 func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string) {
 	if u == nil || userID <= 0 || profileID == "" || itemID == "" {
 		return
@@ -87,6 +124,68 @@ func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string
 		u.pending[mutation] = 0
 	}
 	u.mu.Unlock()
+}
+
+// QueueItemMutationAfter queues the mutation once delay has passed. Queuing
+// the same mutation again moves its due time later, never earlier.
+func (u *InterestUpdater) QueueItemMutationAfter(userID int, profileID, itemID string, delay time.Duration) {
+	if u == nil || userID <= 0 || profileID == "" || itemID == "" {
+		return
+	}
+	mutation := interestMutation{userID: userID, profileID: profileID, itemID: itemID}
+	due := time.Now().Add(delay)
+	u.mu.Lock()
+	if u.deferred == nil {
+		u.deferred = make(map[interestMutation]time.Time)
+	}
+	if due.After(u.deferred[mutation]) {
+		u.deferred[mutation] = due
+	}
+	u.mu.Unlock()
+}
+
+// noteHomeChange records a Home removal or restore of the profile.
+func (u *InterestUpdater) noteHomeChange(userID int, profileID string, at time.Time) {
+	if u == nil {
+		return
+	}
+	u.mu.Lock()
+	if u.homeChanged == nil {
+		u.homeChanged = make(map[profileKey]time.Time)
+	}
+	u.homeChanged[profileKey{userID, profileID}] = at
+	u.mu.Unlock()
+}
+
+// changedHomeSince reports whether the profile changed Home on this node
+// after the given time.
+func (u *InterestUpdater) changedHomeSince(userID int, profileID string, since time.Time) bool {
+	if u == nil {
+		return false
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	at, ok := u.homeChanged[profileKey{userID, profileID}]
+	return ok && at.After(since)
+}
+
+// promoteDeferred moves deferred mutations due by now into pending and
+// forgets Home changes older than progressSessionGap. The caller holds u.mu.
+func (u *InterestUpdater) promoteDeferred(now time.Time) {
+	for key, at := range u.homeChanged {
+		if now.Sub(at) > progressSessionGap {
+			delete(u.homeChanged, key)
+		}
+	}
+	for mutation, due := range u.deferred {
+		if due.After(now) {
+			continue
+		}
+		delete(u.deferred, mutation)
+		if _, queued := u.pending[mutation]; !queued {
+			u.pending[mutation] = 0
+		}
+	}
 }
 
 // Run drains the mutation queue until ctx is canceled.
@@ -105,6 +204,7 @@ func (u *InterestUpdater) Run(ctx context.Context) {
 
 func (u *InterestUpdater) flush(ctx context.Context) {
 	u.mu.Lock()
+	u.promoteDeferred(time.Now())
 	if len(u.pending) == 0 {
 		u.mu.Unlock()
 		return
@@ -286,7 +386,16 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return fmt.Errorf("load watchlist: %w", err)
 	}
 
-	continueWatching := false
+	var inProgress []userstore.WatchProgress
+	started := make([]string, 0, 16)
+	var completedEpisodes []completedEpisode
+	// Home anchors Next Up on the most recently completed episode, ties going
+	// to the later episode. A special anchor moves to the most recent regular
+	// one; see below.
+	anchorKey, hasAnchor := 0, false
+	var anchorAt time.Time
+	regularAnchorKey, hasRegularAnchor := 0, false
+	var regularAnchorAt time.Time
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -305,12 +414,35 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		}
 		for episodeID, entry := range progress {
 			hasProgression = true
+			if entry.Completed || entry.PositionSeconds > 0 {
+				started = append(started, episodeID)
+			}
 			if !entry.Completed && entry.PositionSeconds > 0 {
-				continueWatching = true
+				entry.MediaItemID = episodeID
+				inProgress = append(inProgress, entry)
 			}
 			if entry.Completed {
 				markCompleted(episodeID)
+				if key, ok := episodeKeys[episodeID]; ok {
+					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
+					if !hasAnchor || completedLater(at, key, anchorAt, anchorKey) {
+						anchorKey, anchorAt, hasAnchor = key, at, true
+					}
+					if key >= firstRegularEpisodeKey && (!hasRegularAnchor || completedLater(at, key, regularAnchorAt, regularAnchorKey)) {
+						regularAnchorKey, regularAnchorAt, hasRegularAnchor = key, at, true
+					}
+				}
 			}
+		}
+	}
+	// Specials carry no airing position, so Home doesn't let one anchor a
+	// series that has regular seasons: it resumes after the most recent
+	// regular episode, or at the first one (catalog's nextUpAnchorsCTE).
+	if hasAnchor && anchorKey < firstRegularEpisodeKey && hasRegularEpisodes(episodeKeys) {
+		anchorKey = firstRegularEpisodeKey - 1
+		if hasRegularAnchor {
+			anchorKey = regularAnchorKey
 		}
 	}
 
@@ -352,7 +484,37 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		lastCompleted = &completed
 		nextExpected = &expected
 	}
-	nextUpCandidate := hasProgression
+
+	// Notifications follow Home: a series the profile removed from Continue
+	// Watching or Next Up stops notifying for that reason. The progression
+	// cursor is kept, so next_up resumes from the right episode once the
+	// removal lapses.
+	continueWatching, nextUpCandidate := false, false
+	inProgress = catalog.FilterSupersededProgress(inProgress,
+		supersededInProgress(inProgress, completedEpisodes, episodeKeys))
+	if hasProgression {
+		inProgressIDs := make([]string, len(inProgress))
+		for i, entry := range inProgress {
+			inProgressIDs[i] = entry.MediaItemID
+		}
+		var nextUpItems []string
+		if hasAnchor {
+			nextUpItems = episodeIDs
+		}
+		hides, err := u.loadHomeHides(ctx, store, userID, profileID, seriesID, inProgressIDs, nextUpItems)
+		if err != nil {
+			return err
+		}
+		continueWatching = hides.continueWatchingVisible(inProgress)
+		nextUpCandidate = !hides.dropped
+		if nextUpCandidate && len(hides.nextUp) > 0 {
+			next, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, anchorKey+1, started)
+			if err != nil {
+				return err
+			}
+			nextUpCandidate = hides.nextUpVisible(next)
+		}
+	}
 
 	flags := SeriesInterest{
 		UserID:                  userID,
@@ -368,7 +530,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 
 	if !flags.HasAnyInterest() && lastCompleted == nil {
 		// Nothing can ever notify: drop all rows for the pair.
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	libraryIDs, err := u.visibleSeriesLibraries(ctx, userID, profileID, seriesID)
@@ -376,7 +538,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return err
 	}
 	if len(libraryIDs) == 0 {
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	rows := make([]SeriesInterest, 0, len(libraryIDs))
@@ -388,7 +550,13 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	if err := u.interests.UpsertRows(ctx, rows); err != nil {
 		return err
 	}
-	return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, libraryIDs)
+	return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, libraryIDs)
+}
+
+// completedLater reports whether a completion at (at, key) anchors Next Up
+// over the current one: it is newer, or as new and a later episode.
+func completedLater(at time.Time, key int, currentAt time.Time, currentKey int) bool {
+	return at.After(currentAt) || (at.Equal(currentAt) && key > currentKey)
 }
 
 // loadSeriesStructure returns the series' episode keys (content_id ->

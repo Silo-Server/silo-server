@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -30,7 +31,7 @@ type HistoryCard struct {
 
 // HistoryListInput is the listHistory query.
 type HistoryListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -103,7 +104,7 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 		// The cards are access-filtered, so the cursor dies with the viewer
 		// policy it was minted under.
 		Security:   strconv.Itoa(userID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
-		Filter:     in.ImageSize,
+		Filter:     in.ImageSize + in.widthsCursorFilter(),
 		Sort:       "-watched_at,-id",
 		Tiebreaker: "id",
 	}
@@ -131,13 +132,14 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
-	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.ImageSize), entries)
+	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.Artwork()), entries)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	items := make([]HistoryCard, 0, len(cards))
+	sel := reg.ratingSelection(ctx)
 	for _, c := range cards {
-		card, p := historyCardOf(c)
+		card, p := historyCardOf(c, sel)
 		if p != nil {
 			return nil, p
 		}
@@ -146,13 +148,13 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 	return &HistoryCollectionOutput{Body: HistoryCollection{Collection: Paginated(items, next)}}, nil
 }
 
-func historyCardOf(v handlers.HistoryCardView) (HistoryCard, *Problem) {
+func historyCardOf(v handlers.HistoryCardView, sel ratingsources.Selection) (HistoryCard, *Problem) {
 	watched, p := storeInstant(v.Entry.WatchedAt)
 	if p != nil {
 		return HistoryCard{}, p
 	}
 	return HistoryCard{
-		CatalogItem: catalogItemOfListing(v.Item),
+		CatalogItem: catalogItemOfListing(v.Item, sel),
 		Watch: HistoryWatch{
 			MediaItemID:     ID(v.Entry.MediaItemID),
 			WatchedAt:       watched,

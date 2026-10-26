@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
 type AdminAccountActivityService interface {
@@ -31,6 +32,7 @@ type AdminUserIP struct {
 	FirstSeen    Instant `json:"first_seen"`
 	LastSeen     Instant `json:"last_seen"`
 	RequestCount int     `json:"request_count"`
+	Location     string  `json:"location" enum:"local,remote" doc:"Address class: private, loopback and link-local addresses are local, everything else remote. Request logs do not record the network-access route, so a provider path from a private address reads as local here."`
 }
 type AdminIPUser struct {
 	UserID       ID      `json:"user_id"`
@@ -72,7 +74,7 @@ func registerAdminAccountActivity(reg *Registry) {
 		}
 		items := make([]AdminUserIP, 0, len(rows))
 		for _, r := range rows {
-			items = append(items, AdminUserIP{ClientIP: r.ClientIP, FirstSeen: NewInstant(r.FirstSeen), LastSeen: NewInstant(r.LastSeen), RequestCount: r.RequestCount})
+			items = append(items, AdminUserIP{ClientIP: r.ClientIP, FirstSeen: NewInstant(r.FirstSeen), LastSeen: NewInstant(r.LastSeen), RequestCount: r.RequestCount, Location: string(streamlocation.FromMetadata(r.ClientIP, ""))})
 		}
 		next := ""
 		if more && len(rows) > 0 {

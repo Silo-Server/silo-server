@@ -13,13 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -41,6 +42,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	if deps.IngressTokens != nil {
 		r.Use(netaccess.Middleware(deps.IngressTokens))
+	}
+	// After client IP resolution and ingress-token stripping, before auth, so
+	// failed sign-ins are recorded too. Matches the native base middleware.
+	if deps.ActivityLogWriter != nil {
+		r.Use(activitylog.NewFilteredMiddleware(deps.ActivityLogWriter, deps.NodeID, skipCompatActivityLog))
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
@@ -78,8 +84,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	if artworkHandler == nil {
 		artworkHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	}
-	r.Method(http.MethodGet, "/api/v2/artwork/*", artworkHandler)
-	r.Method(http.MethodHead, "/api/v2/artwork/*", artworkHandler)
+	r.Method(http.MethodGet, compatArtworkRoute, artworkHandler)
+	r.Method(http.MethodHead, compatArtworkRoute, artworkHandler)
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator).WithUserStore(deps.UserStoreProvider)
@@ -92,6 +98,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.storeProvider = deps.UserStoreProvider
+	itemsHandler.adminDefaults = deps.AdminDefaults
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
 	itemsHandler.FileResolver = deps.FileResolver
 	itemsHandler.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
@@ -99,6 +106,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		itemsHandler.themeSongs = themesongs.NewRepository(deps.DB)
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+		itemsHandler.collectionPosters = deps.CollectionPosters
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -110,17 +118,26 @@ func NewRouter(deps Dependencies) chi.Router {
 		// left unset as they serve other section types.
 		sf := sections.NewFetcher(deps.DB)
 		sf.StoreProvider = deps.UserStoreProvider
+		sf.AdminDefaults = deps.AdminDefaults
 		itemsHandler.sectionsFetcher = sf
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL
+	itemsHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
+	autoscanHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
+	// Rate limiting mirrors the native API: credential endpoints spend their
+	// per-endpoint budget, and authenticated routes, media included, run the
+	// generic limiter after auth, as the native authenticated group does.
+	// Anonymous artwork, avatars, web assets, and public server info stay
+	// unlimited like native public artwork and server reads.
+	rateLimit := compatRateLimit(deps.RateLimit)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
-		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth)).
+		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth), rateLimit).
 			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
-		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey, rateLimit).
 			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
 		autoscanVirtualFoldersRegistered = true
 	}
@@ -136,6 +153,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
+	playbackHandler.downloads = deps.Downloads
+	playbackHandler.accessFilter = deps.AccessFilterFn
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {
@@ -148,9 +167,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			return cfg.Playback
 		}
 		return config.PlaybackConfig{Routing: config.DefaultPlaybackRoutingPolicy()}
-	}
-	if deps.DB != nil {
-		playbackHandler.profileStaler = recommendations.NewRepo(deps.DB)
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
@@ -166,7 +182,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.RegisterShutdownWork != nil {
 		deps.RegisterShutdownWork(cleanupDone)
 	}
-	playbackHandler.profileRefreshRequester = deps.RecWorker
+	if deps.RecWorker != nil {
+		playbackHandler.signalsNotifier = deps.RecWorker
+	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
@@ -174,36 +192,54 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
+	playbackHandler.Trickplay = deps.Trickplay
+	playbackHandler.PlaySync = deps.SubtitlePlaySync
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
+		// The PostgreSQL repository also stores sidecar timing corrections.
+		if timings, ok := subtitleRepo.(subtitles.ExternalTimingLookup); ok {
+			playbackHandler.ExternalTimings = timings
+		}
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	if deps.DB != nil {
+		imagesHandler.extraRepo = catalog.NewExtraRepository(deps.DB)
+	}
 	imagesHandler.collections = itemsHandler.collections
+	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
+	imagesHandler.artworkStore = deps.ArtworkStore
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
-	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
 	r.Get("/System/Ping", systemHandler.HandlePing)
+	r.Post("/System/Ping", systemHandler.HandlePing)
 	r.Get("/System/Endpoint", systemHandler.HandleEndpoint)
 	r.Get("/Branding/Configuration", systemHandler.HandleBrandingConfiguration)
-	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
+	r.Get("/Branding/Css", systemHandler.HandleBrandingCSS)
+	r.Get("/Branding/Css.css", systemHandler.HandleBrandingCSS)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
-	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
-	r.Get("/Items/{id}/Images/{imageType}", imagesHandler.HandleItemImage)
-	r.Get("/Items/{id}/Images/{imageType}/{index}", imagesHandler.HandleItemImage)
+	r.With(compatAuthEndpointRateLimit(deps.RateLimit, compatLoginRateLimitBucket)).
+		Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
+	registerQuickConnectRoutes(r, deps, authHandler)
+	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
+	// Roku clients probe for artwork with HEAD before showing it.
+	r.Head(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Head(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
-	r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/Users/{id}/Images/Primary", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
 	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
-	r.Get("/UserImage", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/UserImage", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -211,11 +247,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
 	})
-	r.Handle("/web/*", webHandler)
+	r.Handle(compatWebAssetsRoute, webHandler)
 
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(RequireSessionOrAPIKeySession(deps.Authenticator, adminAPIKeyAuth))
+			r.Use(rateLimit)
 			r.Get("/Users/Me", authHandler.HandleCurrentUser)
 			r.Get("/Users", authHandler.HandleUsers)
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
@@ -225,6 +262,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			if !autoscanVirtualFoldersRegistered {
 				r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
 			}
+			r.Get(compatMediaFoldersPath, itemsHandler.HandleMediaFolders)
 			r.Get("/Users/{userId}/Views", itemsHandler.HandleViews)
 			r.Get("/Items", itemsHandler.HandleItems)
 			r.Get("/Users/{id}/Items", itemsHandler.HandleItems)
@@ -244,6 +282,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
+			r.Get("/Videos/{id}/AdditionalParts", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Users/{userId}/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongs)
@@ -251,6 +290,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
+			r.Get("/Items/{id}/Images", itemsHandler.HandleItemImageInfos)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Studios", itemsHandler.HandleStudios)
@@ -261,6 +301,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
+			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
+			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
 			r.Get("/UserItems/Resume", itemsHandler.HandleResume)
@@ -270,6 +312,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Get("/Localization/Cultures", authHandler.HandleCultures)
+			r.Get("/System/Configuration/{key}", systemHandler.HandleNamedConfiguration)
 			// Clients probe group discovery even when SyncPlayAccess is None.
 			r.Get("/SyncPlay/List", func(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, []struct{}{})
@@ -317,6 +360,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Use(rateLimit)
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Method(http.MethodHead, "/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
@@ -339,12 +383,18 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Get("/Videos/{id}/hevc-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/master.m3u8", playbackHandler.HandleHEVCV1MasterManifest))
+		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHEVCV1HLSManifest))
+		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHEVCV1HLSSegment))
 		r.Get("/Videos/{id}/remux-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", playbackHandler.HandleRemuxV1MasterManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxV1HLSManifest))
 		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxV1HLSSegment))
 		r.Get("/Videos/{id}/remux-ts-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/master.m3u8", playbackHandler.HandleRemuxTSV1MasterManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxTSV1HLSManifest))
 		r.Get("/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxTSV1HLSSegment))
+		r.Get("/Videos/{id}/remux-dv-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/master.m3u8", playbackHandler.HandleRemuxDVV1MasterManifest))
+		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
+		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
 		// Jellyfin subtitle routes encode the start position in ticks in this component.
@@ -356,6 +406,30 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Head("/", systemHandler.HandlePing)
 
 	return r
+}
+
+// Route patterns shared by the router and skipCompatActivityLog.
+const (
+	compatArtworkRoute        = "/api/v2/artwork/*"
+	compatItemImageRoute      = "/Items/{id}/Images/{imageType}"
+	compatItemImageIndexRoute = "/Items/{id}/Images/{imageType}/{index}"
+	compatUserImageRoute      = "/Users/{id}/Images/Primary"
+	compatUserImageQueryRoute = "/UserImage"
+	compatWebAssetsRoute      = "/web/*"
+)
+
+// skipCompatActivityLog leaves out routes that a single page view or playback
+// fetches many times over: artwork, the bundled jellyfin-web assets, trickplay
+// sheets, and HLS variant playlists and segments. The PlaybackInfo and master playlist requests
+// that start playback are still recorded, as native stream starts are.
+func skipCompatActivityLog(pattern string) bool {
+	switch pattern {
+	case compatItemImageRoute, compatItemImageIndexRoute, compatUserImageRoute,
+		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute,
+		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
+		return true
+	}
+	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {
@@ -377,10 +451,12 @@ func skipCompatMediaCompression(r *http.Request) bool {
 	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == compatHLSPathSegment && p[3] != "" && p[4] != "":
 		return p[4] != hlsManifest && strings.Contains(p[4], ".")
 	case len(p) == 6 && p[0] == videosSegment && p[1] != "" &&
-		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment) &&
+		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment || p[2] == compatRemuxDVV1PathSegment) &&
 		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
+		return true
+	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == "Trickplay" && strings.HasSuffix(p[4], ".jpg"):
 		return true
 	default:
 		return false
@@ -395,6 +471,9 @@ func withDefaults(deps Dependencies) Dependencies {
 	// access filter so all consumers (content service, items/images handlers,
 	// recommendations) inherit them without per-call-site guards.
 	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
+	// The playback bitrate cap reads the same scope as the access filter, so
+	// one request resolves it once for both (see NewScopeAccessFilter).
+	deps.PlaybackScopeResolver = rememberRequestScope(deps.PlaybackScopeResolver)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}
@@ -411,6 +490,9 @@ func withDefaults(deps Dependencies) Dependencies {
 		} else {
 			deps.SessionStore = NewSessionStore(deps.Config.JellyfinCompat.SessionTTL, deps.Now)
 		}
+	}
+	if deps.SessionStore != nil && deps.SessionStore.loginSessions == nil && deps.AuthService != nil {
+		deps.SessionStore.WithLoginSessions(deps.AuthService)
 	}
 	if deps.IDCodec == nil {
 		deps.IDCodec = NewResourceIDCodec()
@@ -430,7 +512,8 @@ func withDefaults(deps Dependencies) Dependencies {
 	// from creation, not sliding/idle: the session need not outlive its token
 	// while token re-mint is unimplemented, and at 6h long content (audiobooks,
 	// movies) and paused-overnight sessions expired mid-playback even though the
-	// stream token was still valid. Overridable per-deployment via config.
+	// stream token was still valid. jellyfin_compat.playback_session_ttl
+	// defaults to the same 24h and replaces it when an admin sets another value.
 	playbackTTL := playback.MaxTokenTTL
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
@@ -449,7 +532,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 	}
 	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+		deps.HTTPClient = newCompatImageClient()
 	}
 
 	// Build ContentService from repos if not provided
@@ -475,9 +558,9 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build UserDataService from store provider if not provided
 	if deps.UserDataService == nil && deps.UserStoreProvider != nil && deps.ItemRepo != nil {
-		var staler profileStaler
-		if deps.DB != nil {
-			staler = recommendations.NewRepo(deps.DB)
+		var signalsNotifier signalsChangedNotifier
+		if deps.RecWorker != nil {
+			signalsNotifier = deps.RecWorker
 		}
 		var pool *pgxpool.Pool
 		if deps.BrowseRepo != nil {
@@ -490,8 +573,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.ProviderIDRepo,
 			deps.DetailSvc,
 			catalog.NewContinueWatchingProgressFilter(pool),
-			staler,
-			deps.RecWorker,
+			signalsNotifier,
 			deps.WatchCompletionObserver,
 		)
 		svc.events = deps.UserStateEvents
@@ -500,7 +582,16 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build LoginResolver from auth service if not provided
 	if deps.LoginResolver == nil && deps.AuthService != nil && deps.UserStoreProvider != nil && deps.SessionStore != nil {
-		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now)
+		pinAttempts := deps.ProfilePINAttempts
+		if pinAttempts == nil {
+			pinAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
+		resolver := NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
+			WithPINAttempts(pinAttempts)
+		if deps.DeviceLogin != nil {
+			resolver.WithQuickConnect(deps.DeviceLogin)
+		}
+		deps.LoginResolver = resolver
 	}
 
 	if deps.Authenticator == nil && deps.SessionStore != nil {
@@ -525,4 +616,35 @@ func stripSlashesExceptWeb(next http.Handler) http.Handler {
 		}
 		stripped.ServeHTTP(w, r)
 	})
+}
+
+// registerQuickConnectRoutes serves Jellyfin Quick Connect. The routes spend
+// the native device sign-in budgets, keyed by client address: opening a
+// request spends device_start, polling and collecting spend device_poll, and
+// approving a code spends device_lookup, like the native operations that do
+// the same.
+func registerQuickConnectRoutes(r chi.Router, deps Dependencies, authHandler *AuthHandler) {
+	// Quick Connect is on only when an approved request can also be
+	// exchanged for a session.
+	var service QuickConnectService
+	if _, ok := deps.LoginResolver.(quickConnectLogin); ok {
+		service = deps.DeviceLogin
+	}
+	handler := NewQuickConnectHandler(service)
+	limited := func(bucket string, h http.HandlerFunc) http.Handler {
+		return compatAuthEndpointRateLimit(deps.RateLimit, bucket)(h)
+	}
+	r.Get("/QuickConnect/Enabled", handler.HandleEnabled)
+	initiate := limited("device_start", handler.HandleInitiate)
+	r.Method(http.MethodPost, "/QuickConnect/Initiate", initiate)
+	// Jellyfin 10.8 opened requests with GET; later servers keep it.
+	r.Method(http.MethodGet, "/QuickConnect/Initiate", initiate)
+	r.Method(http.MethodGet, "/QuickConnect/Connect", limited("device_poll", handler.HandleConnect))
+	r.Method(http.MethodPost, "/Users/AuthenticateWithQuickConnect", limited("device_poll", authHandler.HandleAuthenticateWithQuickConnect))
+	if deps.Authenticator != nil {
+		// Only a signed-in session approves, never an API key: an approval
+		// gives the device a login session of the account.
+		r.With(deps.Authenticator.RequireSession).
+			Method(http.MethodPost, "/QuickConnect/Authorize", limited("device_lookup", handler.HandleAuthorize))
+	}
 }

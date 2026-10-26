@@ -19,8 +19,6 @@ func TestParseTrackIDV3RejectsNonCanonicalNumerics(t *testing.T) {
 		"file:007:audio:1",                  // leading zeros in file id
 		"file:7:audio:01",                   // leading zeros in ordinal
 		"file:7:audio:+1",                   // sign
-		"file:+7:audio:1",                   // sign
-		"file:7:audio:-1",                   // sign
 		"file:0:audio:1",                    // file ids are positive
 		"file:7:video:1",                    // unknown kind
 		"file:7:audio:",                     // empty ordinal

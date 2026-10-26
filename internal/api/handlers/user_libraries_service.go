@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -20,12 +21,19 @@ type UserLibraryView struct {
 
 // ListUserLibraries uses the resolved viewer scope, or the account policy when
 // no profile scope exists. It never returns administrator storage metadata.
-func (h *LibraryHandler) ListUserLibraries(ctx context.Context, userID int) ([]UserLibraryView, error) {
+// includeHidden also lists the libraries a restricted profile hid itself
+// (ui.disabled_library_ids), for the settings screen that unhides them; an
+// unrestricted scope lists those either way.
+func (h *LibraryHandler) ListUserLibraries(ctx context.Context, userID int, includeHidden bool) ([]UserLibraryView, error) {
 	var folders []*models.MediaFolder
 	var err error
 	if scope, ok := access.GetScope(ctx); ok {
 		if scope.LibrariesRestricted {
-			folders, err = h.folderRepo.ListByIDs(ctx, scope.AllowedLibraryIDs)
+			ids := scope.AllowedLibraryIDs
+			if includeHidden {
+				ids = append(slices.Clone(ids), scope.HiddenLibraryIDs...)
+			}
+			folders, err = h.folderRepo.ListByIDs(ctx, ids)
 		} else {
 			folders, err = h.folderRepo.GetEnabled(ctx)
 		}

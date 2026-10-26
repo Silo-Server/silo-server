@@ -9,9 +9,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -176,6 +178,93 @@ func (h *AdminHandler) ReadAdminDevice(ctx context.Context, userIDRawInput, devi
 		LastUpdated:    summary.LastUpdated,
 		Settings:       buildAdminDeviceSettingsResponse(user.ID, profileNames, deviceEntries).Settings,
 	}, nil
+}
+
+// AdminUserDeviceView is one device of one account: the fleet summary plus
+// when the app last registered it. LastSeenAt is the latest registration of
+// the device across profiles and ProfileLastSeenAt the latest per profile, as
+// RFC 3339; both are empty when the device is known only from saved settings.
+type AdminUserDeviceView struct {
+	AdminDeviceSummaryView
+	LastSeenAt        string
+	ProfileLastSeenAt map[string]string
+}
+
+// ReadAdminUserDevices lists one account's devices: every device that
+// registered with the app or holds saved per-device settings. A missing
+// account is auth.ErrNotFound.
+func (h *AdminHandler) ReadAdminUserDevices(ctx context.Context, userID int) ([]AdminUserDeviceView, error) {
+	if h.userRepo == nil || h.storeProv == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Device settings not configured")
+	}
+	user, err := h.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, auth.ErrNotFound
+	}
+	store, err := h.storeProv.ForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("user store: %w", err)
+	}
+	if store == nil {
+		return nil, auth.ErrNotFound
+	}
+	entries, err := store.ListAllDeviceSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list device settings: %w", err)
+	}
+	canonicalValues, err := store.ListAllSettingValues(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list canonical setting values: %w", err)
+	}
+	registered, err := listRegisteredDevices(ctx, store)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	profileNames, err := listProfileNamesByID(ctx, store)
+	if err != nil {
+		slog.WarnContext(ctx, "admin account devices profile lookup failed", "component", "api", "user_id", userID, "error", err)
+		profileNames = map[string]string{}
+	}
+	summaries := buildAdminDeviceSummaries(user.ID, user.Username, user.Email, entries, canonicalValues, registered, profileNames)
+
+	type seen struct {
+		device   time.Time
+		profiles map[string]time.Time
+	}
+	byDevice := make(map[string]*seen)
+	for _, entry := range registered {
+		deviceID := strings.TrimSpace(entry.DeviceID)
+		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.LastSeenAt))
+		if deviceID == "" || err != nil {
+			continue
+		}
+		current, ok := byDevice[deviceID]
+		if !ok {
+			current = &seen{profiles: make(map[string]time.Time)}
+			byDevice[deviceID] = current
+		}
+		if at.After(current.device) {
+			current.device = at
+		}
+		if profileID := strings.TrimSpace(entry.ProfileID); profileID != "" && at.After(current.profiles[profileID]) {
+			current.profiles[profileID] = at
+		}
+	}
+	out := make([]AdminUserDeviceView, 0, len(summaries))
+	for _, summary := range summaries {
+		view := AdminUserDeviceView{AdminDeviceSummaryView: summary, ProfileLastSeenAt: map[string]string{}}
+		if current, ok := byDevice[summary.DeviceID]; ok {
+			view.LastSeenAt = current.device.UTC().Format(time.RFC3339Nano)
+			for profileID, at := range current.profiles {
+				view.ProfileLastSeenAt[profileID] = at.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		out = append(out, view)
+	}
+	return out, nil
 }
 
 func (h *AdminHandler) AdminDevicesAvailable() bool {

@@ -48,6 +48,10 @@ type Service struct {
 	pool       *pgxpool.Pool
 	personRepo *catalog.PersonRepository
 	recsRepo   *recommendations.Repo
+	// embeddingModel is the configured embedding model. Imports keep only
+	// bundle embeddings from the locked model, or from this one when no lock
+	// exists yet.
+	embeddingModel string
 }
 
 func NewService(pool *pgxpool.Pool, personRepo *catalog.PersonRepository, recsRepo *recommendations.Repo) *Service {
@@ -58,6 +62,16 @@ func NewService(pool *pgxpool.Pool, personRepo *catalog.PersonRepository, recsRe
 		recsRepo = recommendations.NewRepo(pool)
 	}
 	return &Service{pool: pool, personRepo: personRepo, recsRepo: recsRepo}
+}
+
+// WithEmbeddingModel sets the configured embedding model and returns the
+// service. Without it, an import into an installation with no embedding lock
+// keeps none of the bundle's embeddings.
+func (s *Service) WithEmbeddingModel(model string) *Service {
+	if s != nil {
+		s.embeddingModel = strings.TrimSpace(model)
+	}
+	return s
 }
 
 func (s *Service) Export(ctx context.Context, opts ExportOptions) ([]byte, error) {
@@ -138,6 +152,12 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	}
 
 	result := &ImportResult{}
+	embeddings, err := s.acceptedEmbeddings(ctx, tx, bundle.Embeddings)
+	if err != nil {
+		return nil, err
+	}
+	result.EmbeddingsSkipped = len(bundle.Embeddings) - len(embeddings)
+	currentWork += result.EmbeddingsSkipped
 	folderIDMap := make(map[int]int, len(libraries))
 	for _, library := range libraries {
 		localID, created, matched, importErr := importLibrary(ctx, tx, library, opts.ConflictMode == ConflictModeOverwrite)
@@ -206,17 +226,21 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			itemStates[item.ContentID] = true
 		}
 
+		if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
+			return nil, err
+		}
+
 		reportProgress("Importing people", currentWork, totalWork)
 		if err := s.replacePeople(ctx, tx, bundle.People, itemStates, ConflictModeOverwrite, result); err != nil {
 			return nil, err
 		}
-		if err := s.importEmbeddings(ctx, tx, bundle.Embeddings, true, result, func(processed int) {
+		if err := s.importEmbeddings(ctx, tx, embeddings, true, result, func(processed int) {
 			currentWork += processed
 			reportProgress("Importing embeddings", currentWork, totalWork)
 		}); err != nil {
 			return nil, err
 		}
-		if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, catalogSeedSearchUpsertIDs(itemStates, bundle.Embeddings, nil, nil)); err != nil {
+		if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, catalogSeedSearchUpsertIDs(itemStates, embeddings, nil, nil)); err != nil {
 			return nil, fmt.Errorf("enqueueing catalog search seed import updates: %w", err)
 		}
 		currentWork++
@@ -386,11 +410,15 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	result.ItemsUpdated = itemsUpdated
 	result.Skipped += itemsSkipped
 
+	if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
+		return nil, err
+	}
+
 	reportProgress("Importing people", currentWork, totalWork)
 	if err := s.replacePeople(ctx, tx, bundle.People, itemStates, opts.ConflictMode, result); err != nil {
 		return nil, fmt.Errorf("replacing people: %w", err)
 	}
-	if err := s.importEmbeddings(ctx, tx, bundle.Embeddings, false, result, func(processed int) {
+	if err := s.importEmbeddings(ctx, tx, embeddings, false, result, func(processed int) {
 		currentWork += processed
 		reportProgress("Importing embeddings", currentWork, totalWork)
 	}); err != nil {
@@ -590,7 +618,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	}
 	result.LinksCreated = int(linksAffected)
 
-	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, catalogSeedSearchUpsertIDs(itemStates, bundle.Embeddings, bundle.Files, bundle.LibraryLinks)); err != nil {
+	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, catalogSeedSearchUpsertIDs(itemStates, embeddings, bundle.Files, bundle.LibraryLinks)); err != nil {
 		return nil, fmt.Errorf("enqueueing catalog search seed import updates: %w", err)
 	}
 	currentWork++
@@ -838,18 +866,18 @@ func encodeBundle(bundle Bundle) ([]byte, error) {
 func decodeBundle(data []byte) (*Bundle, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("%w: opening catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: opening catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	defer gz.Close()
 
 	payload, err := io.ReadAll(gz)
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 
 	var bundle Bundle
 	if err := json.Unmarshal(payload, &bundle); err != nil {
-		return nil, fmt.Errorf("%w: decoding catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: decoding catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	return &bundle, nil
 }
@@ -1198,6 +1226,46 @@ func (s *Service) replacePeople(ctx context.Context, tx pgx.Tx, people []PersonR
 
 	result.CreditsReplaced += len(contentIDs)
 	return nil
+}
+
+// acceptedEmbeddings returns the bundle embeddings from this installation's
+// embedding model: the locked model, read inside the import transaction, or
+// the configured model when nothing is locked yet. Vectors from another model
+// live in another space, and recommendations and search would compare them
+// with this model's vectors. The backfill embeds the skipped items instead.
+// The import never writes the lock: a bundle carries neither the base URL nor
+// the source dimensions a lock records.
+func (s *Service) acceptedEmbeddings(ctx context.Context, tx pgx.Tx, records []EmbeddingRecord) ([]EmbeddingRecord, error) {
+	if len(records) == 0 {
+		return records, nil
+	}
+	// Held until the import commits, so a reset cannot delete embeddings and
+	// the lock between this read and the inserts; a reset running now is
+	// waited for.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, recommendations.EmbeddingWritersLock); err != nil {
+		return nil, fmt.Errorf("waiting for an embeddings reset: %w", err)
+	}
+	model := s.embeddingModel
+	lock, err := recommendations.ReadEmbeddingLock(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("reading embedding lock for import: %w", err)
+	}
+	if lock != nil {
+		model = lock.Model
+	}
+	return embeddingsForModel(records, model), nil
+}
+
+// embeddingsForModel returns the records whose model is model. An empty model
+// matches nothing.
+func embeddingsForModel(records []EmbeddingRecord, model string) []EmbeddingRecord {
+	accepted := make([]EmbeddingRecord, 0, len(records))
+	for _, rec := range records {
+		if model != "" && rec.Model == model {
+			accepted = append(accepted, rec)
+		}
+	}
+	return accepted
 }
 
 // embeddingImportBatchSize is larger than the general batch size because
@@ -1905,6 +1973,59 @@ func lookupFolderIDsByPaths(ctx context.Context, tx pgx.Tx, paths []string) ([]i
 	}
 	sort.Ints(ids)
 	return ids, rows.Err()
+}
+
+// importTMDBRatingSources writes the TMDB rating source of each item the
+// import created or overwrote; a trigger derives the TMDB vote pair discovery
+// rows rank by from it. When the bundle carries sources (bundleHasSources),
+// an overwritten item without one loses its stale source; an older bundle
+// leaves it in place. Items the import left alone keep theirs.
+func importTMDBRatingSources(ctx context.Context, tx pgx.Tx, items []ItemRecord, itemStates map[string]bool, bundleHasSources bool) error {
+	var changed, providers []string
+	// ids is never nil, so an import with no TMDB sources binds an empty
+	// array (and clears every changed item's source) rather than NULL.
+	ids := []string{}
+	var scores []float64
+	var votes []*int64
+	for _, item := range items {
+		if !itemStates[item.ContentID] {
+			continue
+		}
+		changed = append(changed, item.ContentID)
+		if source := item.TMDBRating; source != nil {
+			ids = append(ids, item.ContentID)
+			scores = append(scores, source.Score)
+			votes = append(votes, source.Votes)
+			providers = append(providers, source.Provider)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if bundleHasSources {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_item_rating_sources
+			WHERE source = 'tmdb' AND content_id = ANY($1::text[]) AND content_id <> ALL($2::text[])`,
+			changed, ids); err != nil {
+			return fmt.Errorf("clearing imported tmdb rating sources: %w", err)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_rating_sources (content_id, source, score, votes, provider)
+		SELECT s.content_id, 'tmdb', s.score, s.votes, s.provider
+		FROM unnest($1::text[], $2::double precision[], $3::bigint[], $4::text[]) AS s(content_id, score, votes, provider)
+		ON CONFLICT (content_id, source) DO UPDATE SET
+			score = EXCLUDED.score,
+			votes = EXCLUDED.votes,
+			provider = EXCLUDED.provider,
+			updated_at = now()`,
+		ids, scores, votes, providers); err != nil {
+		return fmt.Errorf("importing tmdb rating sources: %w", err)
+	}
+	return nil
 }
 
 // batchImportItems inserts items in multi-row batches with ON CONFLICT handling.

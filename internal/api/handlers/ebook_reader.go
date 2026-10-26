@@ -19,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -147,22 +148,6 @@ const (
 	ebookReaderAnnotationMaxBodySize = 256 << 10 // 256 KiB
 )
 
-// decodeEbookReaderBody decodes a JSON request body with a hard size cap.
-// It writes the error response and returns false when decoding fails.
-func decodeEbookReaderBody(w http.ResponseWriter, r *http.Request, maxBodySize int64, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Request body is too large")
-			return false
-		}
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return false
-	}
-	return true
-}
-
 type ebookReaderProgressRequest struct {
 	FileID   int     `json:"file_id"`
 	Location string  `json:"location"`
@@ -245,7 +230,7 @@ func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.R
 	}
 
 	var req ebookReaderProgressRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderProgressMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderProgressMaxBodySize, &req, false) {
 		return
 	}
 	req.Location = strings.TrimSpace(req.Location)
@@ -313,7 +298,7 @@ func (h *EbookReaderHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	var req ebookReaderConfigRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderConfigMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderConfigMaxBodySize, &req, false) {
 		return
 	}
 	if !jsonObject(req.Config) {
@@ -357,7 +342,7 @@ func (h *EbookReaderHandler) HandleCreateAnnotation(w http.ResponseWriter, r *ht
 		return
 	}
 	var req ebookReaderAnnotationRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
 		return
 	}
 	annotation, _, err := h.createReaderAnnotation(r.Context(), userID, profileID, contentID, "", req)
@@ -379,7 +364,7 @@ func (h *EbookReaderHandler) HandleUpdateAnnotation(w http.ResponseWriter, r *ht
 		return
 	}
 	var req ebookReaderAnnotationPatchRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
 		return
 	}
 	updated, err := h.patchReaderAnnotation(r.Context(), userID, profileID, contentID, annotationID, req, nil)
@@ -540,7 +525,7 @@ func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
 }
 
 func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.MediaFile) error {
-	f, err := os.Open(file.FilePath)
+	f, err := fspath.Open(file.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return catalog.ErrItemNotFound
@@ -555,7 +540,7 @@ func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.Media
 	}
 
 	w.Header().Set("Content-Type", ebookMimeType(file.FilePath, file.Container))
-	w.Header().Set("Content-Disposition", inlineContentDisposition(filepath.Base(file.FilePath)))
+	w.Header().Set("Content-Disposition", inlineContentDisposition(fspath.Display(filepath.Base(file.FilePath))))
 	// Ebook files are served inline on the API origin (and reachable via the
 	// ?token= query fallback), so browsers must never content-sniff them.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -646,6 +631,26 @@ type PGEbookReaderProgressStore struct {
 
 func NewPGEbookReaderProgressStore(pool *pgxpool.Pool) *PGEbookReaderProgressStore {
 	return &PGEbookReaderProgressStore{pool: pool}
+}
+
+// PurgeProfile deletes a deleted profile's reading progress, reader settings
+// and annotations in one transaction. None of these tables has a foreign key
+// to the profile, which may live outside Postgres.
+func (s *PGEbookReaderProgressStore) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin ebook reader purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, table := range []string{"ebook_reader_progress", "ebook_reader_config", "ebook_reader_annotations"} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1 AND profile_id = $2", userID, profileID); err != nil {
+			return fmt.Errorf("purge %s for user %d profile %s: %w", table, userID, profileID, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit ebook reader purge: %w", err)
+	}
+	return nil
 }
 
 type PGEbookReaderConfigStore struct {

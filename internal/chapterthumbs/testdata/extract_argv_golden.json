@@ -1,0 +1,645 @@
+[
+  {
+    "name": "none sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "none sdr rounding",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "1234.568",
+        "-i",
+        "/media/a b/movie's.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "none sdr zero",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "0.000",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "none hdr bt2390",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "none hdr hable",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "none hdr disabled",
+    "attempts": [],
+    "timeouts": [],
+    "reason": "tonemap_unsupported"
+  },
+  {
+    "name": "empty accel sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      8,
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "nvenc sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      8,
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "nvenc hdr bt2390",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "vaapi sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        "vaapi=hw:/dev/dri/renderD128",
+        "-filter_hw_device",
+        "hw",
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-vf",
+        "hwdownload,format=nv12",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      8,
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "vaapi hdr bt2390",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        "vaapi=hw:/dev/dri/renderD128",
+        "-filter_hw_device",
+        "hw",
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      20,
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "vaapi hdr hardware only",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        "vaapi=hw:/dev/dri/renderD128",
+        "-filter_hw_device",
+        "hw",
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      20
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "qsv sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        "vaapi=va:/dev/dri/renderD129,driver=iHD,kernel_driver=i915,vendor_id=0x8086",
+        "-init_hw_device",
+        "qsv=qs@va",
+        "-filter_hw_device",
+        "va",
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-vf",
+        "hwdownload,format=nv12",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      8,
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "qsv hdr hable",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        "vaapi=va:/dev/dri/renderD129,driver=iHD,kernel_driver=i915,vendor_id=0x8086",
+        "-init_hw_device",
+        "qsv=qs@va",
+        "-filter_hw_device",
+        "va",
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      20,
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "videotoolbox sdr",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-hwaccel",
+        "videotoolbox",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/movie.mkv",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      8,
+      10
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "videotoolbox hdr bt2390",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-hwaccel",
+        "videotoolbox",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      20,
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "videotoolbox hdr hable",
+    "attempts": [
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-hwaccel",
+        "videotoolbox",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ],
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        "42.500",
+        "-i",
+        "/media/hdr.mkv",
+        "-vf",
+        "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-"
+      ]
+    ],
+    "timeouts": [
+      20,
+      25
+    ],
+    "reason": "chapter_extract_failed"
+  },
+  {
+    "name": "videotoolbox hdr disabled",
+    "attempts": [],
+    "timeouts": [],
+    "reason": "tonemap_unsupported"
+  }
+]

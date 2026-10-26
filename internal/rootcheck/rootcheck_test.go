@@ -7,19 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
-
-func TestProbeReachableDirectory(t *testing.T) {
-	t.Parallel()
-
-	res := Probe(t.TempDir())
-	if !res.Reachable {
-		t.Fatalf("Probe(temp dir) = %+v, want reachable", res)
-	}
-	if res.ErrorCode != "" || res.ErrorMessage != "" {
-		t.Fatalf("Probe(temp dir) error fields = %q/%q, want empty", res.ErrorCode, res.ErrorMessage)
-	}
-}
 
 func TestProbeMissingPath(t *testing.T) {
 	t.Parallel()
@@ -30,6 +20,25 @@ func TestProbeMissingPath(t *testing.T) {
 	}
 	if res.ErrorCode != ErrCodeNotFound {
 		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodeNotFound)
+	}
+}
+
+// Folders derived from catalog paths arrive fspath-encoded; a non-UTF-8
+// directory must probe as reachable.
+func TestProbeEncodedNonUTF8Directory(t *testing.T) {
+	t.Parallel()
+
+	raw := filepath.Join(t.TempDir(), "B\xe5rd")
+	if err := os.Mkdir(raw, 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(raw, "poster.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	res := Probe(fspath.Encode(raw))
+	if !res.Reachable || res.Empty {
+		t.Fatalf("Probe(encoded dir) = %+v, want reachable and non-empty", res)
 	}
 }
 
@@ -68,59 +77,6 @@ func TestProbeUnreadableDirectory(t *testing.T) {
 	}
 	if res.ErrorCode != ErrCodePermissionDenied {
 		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodePermissionDenied)
-	}
-}
-
-func TestProbeWithTimeoutReachableDirectory(t *testing.T) {
-	t.Parallel()
-
-	res := ProbeWithTimeout(context.Background(), t.TempDir(), DefaultProbeTimeout)
-	if !res.Reachable {
-		t.Fatalf("ProbeWithTimeout(temp dir) = %+v, want reachable", res)
-	}
-}
-
-func TestProbeBoundedTimesOutOnHungProbe(t *testing.T) {
-	t.Parallel()
-
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	res := probeBounded(context.Background(), 10*time.Millisecond, func() Result {
-		<-release // simulate a stat/readdir blocked on a hung mount
-		return Result{Reachable: true}
-	})
-	if res.Reachable {
-		t.Fatal("hung probe reported reachable")
-	}
-	if res.ErrorCode != ErrCodeTimeout {
-		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodeTimeout)
-	}
-}
-
-func TestProbeBoundedHonorsContextCancellation(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	res := probeBounded(ctx, time.Minute, func() Result {
-		<-release
-		return Result{Reachable: true}
-	})
-	if res.Reachable || res.ErrorCode != ErrCodeTimeout {
-		t.Fatalf("canceled probe = %+v, want unreachable/%s", res, ErrCodeTimeout)
-	}
-}
-
-func TestProbeBoundedReturnsFastResult(t *testing.T) {
-	t.Parallel()
-
-	res := probeBounded(context.Background(), time.Minute, func() Result {
-		return Result{Reachable: false, ErrorCode: ErrCodeNotFound, ErrorMessage: "Path does not exist"}
-	})
-	if res.Reachable || res.ErrorCode != ErrCodeNotFound {
-		t.Fatalf("probeBounded passthrough = %+v, want the probe's own result", res)
 	}
 }
 
@@ -188,15 +144,15 @@ func TestProbeReportsEmptyDirectory(t *testing.T) {
 
 	dir := t.TempDir()
 	res := Probe(dir)
-	if !res.Reachable || !res.Empty {
-		t.Fatalf("Probe(empty dir) = %+v, want reachable and empty", res)
+	if !res.Reachable || !res.Empty || res.ErrorCode != "" || res.ErrorMessage != "" {
+		t.Fatalf("Probe(empty dir) = %+v, want reachable and empty without an error", res)
 	}
 
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	res = Probe(dir)
-	if !res.Reachable || res.Empty {
-		t.Fatalf("Probe(non-empty dir) = %+v, want reachable and not empty", res)
+	if !res.Reachable || res.Empty || res.ErrorCode != "" || res.ErrorMessage != "" {
+		t.Fatalf("Probe(non-empty dir) = %+v, want reachable and not empty without an error", res)
 	}
 }

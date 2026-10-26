@@ -7,18 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 )
 
 func newMetricsProxyServer(t *testing.T) *Server {
 	t.Helper()
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "proxy-metrics-secret"
-	cfg.Playback.TranscodeDir = t.TempDir()
-	w.SetConfigForTest(cfg)
+	w := testWatcher("proxy-metrics-secret")
+	w.Config().Playback.TranscodeDir = t.TempDir()
 	return NewServer(w, nil)
 }
 
@@ -83,24 +78,6 @@ func TestProxyHealthIncludesResourceSampleWithoutBlocking(t *testing.T) {
 	}
 	if len(body.GPU) != 1 || body.GPU[0].Device != "/dev/dri/renderD128" {
 		t.Fatalf("gpu = %+v", body.GPU)
-	}
-}
-
-// Without a sampler the response is byte-for-byte what it always was.
-func TestProxyHealthOmitsResourceFieldsWithoutASampler(t *testing.T) {
-	server := newMetricsProxyServer(t)
-
-	recorder := httptest.NewRecorder()
-	server.handleHealth(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-
-	var body map[string]any
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("health body: %v (%s)", err, recorder.Body)
-	}
-	for _, key := range []string{"system", "gpu"} {
-		if _, ok := body[key]; ok {
-			t.Fatalf("%s emitted without a sampler: %s", key, recorder.Body)
-		}
 	}
 }
 

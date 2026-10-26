@@ -414,6 +414,22 @@ export function formatVideoSummary(session: AdminSession): string {
   );
 }
 
+/**
+ * The catalog labels a file by its size class (a 3840x1600 file is "2160p"),
+ * while a transcode target names its output height ("1600p"). A transcode
+ * that keeps the source height is labelled like the source, so a
+ * full-resolution output doesn't read as a downscale.
+ */
+function deliveredResolutionLabel(session: AdminSession): string | undefined {
+  const target = session.target_resolution?.trim();
+  const source = session.source_video_resolution?.trim();
+  const targetHeight = Number(/^(\d+)p$/i.exec(target ?? "")?.[1]);
+  if (source && session.source_video_height && targetHeight === session.source_video_height) {
+    return source;
+  }
+  return target;
+}
+
 export function formatDeliveredVideoSummary(session: AdminSession): string {
   const decision = session.video_decision || session.play_method;
   if (decision !== "transcode") {
@@ -421,7 +437,7 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
   }
 
   return (
-    [formatCodec(session.target_video_codec), session.target_resolution?.trim()]
+    [formatCodec(session.target_video_codec), deliveredResolutionLabel(session)]
       .filter(Boolean)
       .join(" · ") || "Transcoding"
   );
@@ -430,7 +446,7 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
 export function formatVideoDetail(session: AdminSession): string {
   const decision = normalizeStreamDecision(session.video_decision || session.play_method);
   const requestedSource = formatRequestedVideoSource(session);
-  const target = [formatCodec(session.target_video_codec), session.target_resolution?.trim()]
+  const target = [formatCodec(session.target_video_codec), deliveredResolutionLabel(session)]
     .filter(Boolean)
     .join(" · ");
 

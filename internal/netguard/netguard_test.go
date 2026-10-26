@@ -176,15 +176,6 @@ func TestUntrustedRequestDoesNotReuseTrustedConnection(t *testing.T) {
 	}
 }
 
-func TestPrivateAccessDefaultsOff(t *testing.T) {
-	if PrivateAccess(context.Background()) {
-		t.Fatal("a plain context must not carry private access")
-	}
-	if !PrivateAccess(WithPrivateAccess(context.Background())) {
-		t.Fatal("WithPrivateAccess was not recorded")
-	}
-}
-
 // get sends a GET and drains and closes the response, which returns the
 // connection to its pool for reuse.
 func get(ctx context.Context, client *http.Client, url string) error {

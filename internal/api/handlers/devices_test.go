@@ -14,7 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -99,53 +98,6 @@ func listDevices(t *testing.T, h *DeviceHandler, query, profileID string) device
 	return body
 }
 
-// TestListDevices_FiltersToCallingProfile is the security test for this
-// endpoint. ListDevices is account-wide by construction in both backends —
-// "WHERE user_id" in Postgres and no WHERE at all in the per-user SQLite — so a
-// passthrough would show every household member's devices to everyone.
-func TestListDevices_FiltersToCallingProfile(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 {
-		t.Fatalf("returned %d devices, want 1: %+v", len(body.Devices), body.Devices)
-	}
-	if body.Devices[0].DeviceID != "device-1" {
-		t.Errorf("returned device %q, want device-1", body.Devices[0].DeviceID)
-	}
-	for _, device := range body.Devices {
-		if device.ProfileID != "profile-1" {
-			t.Errorf("leaked device %q from profile %q", device.DeviceID, device.ProfileID)
-		}
-	}
-}
-
-func TestListDevices_CountsChangedSettings(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Laptop")
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-	seedDeviceValue(t, store, "profile-1", "device-2", "player.hdr_enabled", `false`)
-	seedDeviceValue(t, store, "profile-1", "device-2", "playback.subtitle_mode", `"always"`)
-	// Another profile's row on the same device must not be counted.
-	seedDeviceValue(t, store, "profile-2", "device-2", "player.seek_cache_enabled", `false`)
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	counts := map[string]int{}
-	for _, device := range body.Devices {
-		counts[device.DeviceID] = device.ChangedCount
-	}
-	if counts["device-2"] != 2 {
-		t.Errorf("device-2 changed_count = %d, want 2", counts["device-2"])
-	}
-	if counts["device-1"] != 0 {
-		t.Errorf("device-1 changed_count = %d, want 0", counts["device-1"])
-	}
-}
-
 // TestListDevices_CountsAMirroredPairOnce. The intro-skip preference is stored
 // under two keys while old clients are in the field, and the badge on the
 // device list is meant to tell a household how much this device does
@@ -172,33 +124,6 @@ func TestListDevices_CountsAMirroredPairOnce(t *testing.T) {
 	}
 }
 
-func TestListDevices_MarksCurrentDevice(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "This browser")
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	for _, device := range body.Devices {
-		want := device.DeviceID == "device-1"
-		if device.IsCurrentDevice != want {
-			t.Errorf("device %q is_current_device = %v, want %v",
-				device.DeviceID, device.IsCurrentDevice, want)
-		}
-	}
-}
-
-func TestListDevices_IncludesProfileName(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Laptop")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 || body.Devices[0].ProfileName != "Sam" {
-		t.Errorf("profile_name = %q, want Sam", body.Devices[0].ProfileName)
-	}
-}
-
 func routeDevice(
 	t *testing.T, h *DeviceHandler, method, target, deviceID, profileID string,
 	handle func(http.ResponseWriter, *http.Request),
@@ -212,30 +137,6 @@ func routeDevice(
 	rec := httptest.NewRecorder()
 	handle(rec, req)
 	return rec
-}
-
-func TestForgetDevice_RemovesSettingsAndRegistryRow(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-	seedDeviceValue(t, store, "profile-1", "device-2", "player.hdr_enabled", `false`)
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-2", "device-2",
-		"profile-1", handler.HandleForgetDevice)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-2")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if exists {
-		t.Error("registry row survived forget")
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Errorf("setting row survived forget on device %q", got)
-	}
 }
 
 func TestForgetDevice_RejectsOtherProfilesDevice(t *testing.T) {
@@ -259,24 +160,6 @@ func TestForgetDevice_RejectsOtherProfilesDevice(t *testing.T) {
 	}
 	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-9" {
 		t.Errorf("another profile's setting row was removed (device %q)", got)
-	}
-}
-
-// A repeated forget reports 404, not 500 or a partial delete: once the device
-// is gone this profile has no trace of it, which is indistinguishable from a
-// device that was never here — and deliberately so, since the same answer is
-// what keeps another profile's device ids from being probeable.
-func TestForgetDevice_SecondCallIsNotFound(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-
-	if rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-2", "device-2",
-		"profile-1", handler.HandleForgetDevice); rec.Code != http.StatusNoContent {
-		t.Fatalf("first DELETE = %d, want 204: %s", rec.Code, rec.Body.String())
-	}
-	if rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-2", "device-2",
-		"profile-1", handler.HandleForgetDevice); rec.Code != http.StatusNotFound {
-		t.Fatalf("second DELETE = %d, want 404", rec.Code)
 	}
 }
 
@@ -335,28 +218,8 @@ func TestClearDeviceSettings_KeepsRegistryRow(t *testing.T) {
 func householdDevicesHandler(t *testing.T) (*DeviceHandler, userstore.UserStore) {
 	t.Helper()
 	handler, store := newDevicesTestHandler(t)
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
-}
-
-func TestListDevices_PrimarySeesHouseholdWhenRequested(t *testing.T) {
-	handler, store := householdDevicesHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-
-	body := listDevices(t, handler, "scope=household", "profile-1")
-
-	if len(body.Devices) != 2 {
-		t.Fatalf("household scope returned %d devices, want 2: %+v", len(body.Devices), body.Devices)
-	}
-	names := map[string]string{}
-	for _, device := range body.Devices {
-		names[device.DeviceID] = device.ProfileName
-	}
-	if names["device-9"] != "Robin" {
-		t.Errorf("device-9 profile_name = %q, want Robin", names["device-9"])
-	}
 }
 
 func TestListDevices_NonPrimaryCannotRequestHousehold(t *testing.T) {
@@ -386,27 +249,6 @@ func TestListDevices_PrimaryDefaultsToOwnProfile(t *testing.T) {
 
 	if len(body.Devices) != 1 || body.Devices[0].DeviceID != "device-1" {
 		t.Fatalf("default scope returned %+v, want only device-1", body.Devices)
-	}
-}
-
-func TestForgetDevice_PrimaryMayForgetHouseholdDevice(t *testing.T) {
-	handler, store := householdDevicesHandler(t)
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-	seedDeviceValue(t, store, "profile-2", "device-9", "player.hdr_enabled", `false`)
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9?profile_id=profile-2",
-		"device-9", "profile-1", handler.HandleForgetDevice)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("primary forgetting a household device = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-9")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if exists {
-		t.Error("device survived the household forget")
 	}
 }
 

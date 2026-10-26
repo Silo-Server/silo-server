@@ -2,14 +2,67 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-const serverSettingsMutationLock = "silo:server_settings:mutation"
+const serverSettingsMutationLock = config.ServerSettingsMutationLock
+
+// Local waiters share one admission slot per pool and key before acquiring a
+// connection. PostgreSQL's advisory lock still serializes different processes.
+// Entries exist only while a holder or waiter uses them.
+type settingsValueSlotKey struct {
+	pool *pgxpool.Pool
+	key  string
+}
+
+type settingsValueSlot struct {
+	token chan struct{}
+	users int
+}
+
+var settingsValueSlots = struct {
+	sync.Mutex
+	active map[settingsValueSlotKey]*settingsValueSlot
+}{active: make(map[settingsValueSlotKey]*settingsValueSlot)}
+
+func acquireSettingsValueSlot(ctx context.Context, pool *pgxpool.Pool, key string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	id := settingsValueSlotKey{pool, key}
+	settingsValueSlots.Lock()
+	slot := settingsValueSlots.active[id]
+	if slot == nil {
+		slot = &settingsValueSlot{token: make(chan struct{}, 1)}
+		settingsValueSlots.active[id] = slot
+	}
+	slot.users++
+	settingsValueSlots.Unlock()
+	forget := func() {
+		settingsValueSlots.Lock()
+		defer settingsValueSlots.Unlock()
+		slot.users--
+		if slot.users == 0 {
+			delete(settingsValueSlots.active, id)
+		}
+	}
+	select {
+	case slot.token <- struct{}{}:
+		return func() { <-slot.token; forget() }, nil
+	case <-ctx.Done():
+		forget()
+		return nil, ctx.Err()
+	}
+}
 
 // ServerSettingsRepo provides CRUD access to the server_settings table.
 type ServerSettingsRepo struct {
@@ -36,6 +89,31 @@ func (r *ServerSettingsRepo) Get(ctx context.Context, key string) (string, error
 	return value, nil
 }
 
+// GetMany reads keys in one query, so a batch written by SetMany or
+// UpdateAtomic is seen either whole or not at all. Keys without a row are
+// absent from the map.
+func (r *ServerSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT key, value FROM server_settings WHERE key = ANY($1)`, keys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("server_settings get many: %w", err)
+	}
+	defer rows.Close()
+	values := make(map[string]string, len(keys))
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("server_settings scan: %w", err)
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server_settings iterate: %w", err)
+	}
+	return values, nil
+}
+
 // Set upserts a setting.
 func (r *ServerSettingsRepo) Set(ctx context.Context, key, value string) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {
@@ -60,12 +138,69 @@ func (r *ServerSettingsRepo) UpdateAtomic(
 	ctx context.Context,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateValueAtomic serializes an exclusively machine-managed value, such as
+// a rotating OAuth credential bundle. Its callback holds a key-specific lock;
+// general settings mutations remain independent. The key must not also be
+// changed through the general read/validate/write settings surface.
+func (r *ServerSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	release, err := acquireSettingsValueSlot(ctx, r.pool, key)
+	if err != nil {
+		return fmt.Errorf("server_settings wait for value admission: %w", err)
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("server_settings begin value mutation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, serverSettingsMutationLock+":"+key); err != nil {
+		return fmt.Errorf("server_settings acquire value lock: %w", err)
+	}
+	var current string
+	err = tx.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&current)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("server_settings read value: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	value, err := update(current)
+	if err != nil {
+		return err
+	}
+	// A completed token rotation must commit even if the caller cancels after
+	// the callback returns. Keep this final database phase bounded.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := upsertServerSettings(commitCtx, tx, map[string]string{key: value}); err != nil {
+		return err
+	}
+	if err := tx.Commit(commitCtx); err != nil {
+		return fmt.Errorf("server_settings commit value mutation: %w", err)
+	}
+	return nil
+}
+
+// UpdateAtomicInTransaction also supplies the held transaction for validation
+// that reads other tables, without requesting another pool connection.
+func (r *ServerSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {
 		current, err := getAllServerSettings(ctx, tx)
 		if err != nil {
 			return err
 		}
-		writes, err := update(current)
+		writes, err := update(current, tx)
 		if err != nil {
 			return err
 		}

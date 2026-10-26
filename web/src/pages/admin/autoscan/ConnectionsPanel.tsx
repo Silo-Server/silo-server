@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from "lucide-react";
+import { Link } from "react-router";
 import type {
   AutoscanConnection,
   AutoscanConnectionInput,
@@ -19,7 +20,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -52,7 +52,8 @@ import {
   useTestAutoscanConnection,
   useUpdateAutoscanConnection,
 } from "@/hooks/queries/useAutoscan";
-import { useRequestIntegrations } from "@/hooks/queries/useRequests";
+import { useRequestIntegrations } from "@/hooks/queries/admin/requests";
+import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 
 // ---------------------------------------------------------------------------
 // Dialog mode types
@@ -293,77 +294,72 @@ export default function ConnectionsPanel() {
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle>Connections</CardTitle>
-            <Button variant="outline" size="sm" onClick={openAddDialog}>
-              <Plus />
-              Add connection
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="px-0">
-          {connections.isLoading ? (
-            <p className="text-muted-foreground px-6 py-4 text-sm">Loading…</p>
-          ) : list.length === 0 ? (
-            <p className="text-muted-foreground px-6 py-6 text-sm">
-              No connections yet. A connection holds credentials for a server-based source (e.g.
-              Sonarr/Radarr). Add one if your source needs to reach a server.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>URL</TableHead>
-                  <TableHead className="w-0" />
+      <FieldGroup
+        label="Connections"
+        description="Credentials for sources that reach a server, such as Sonarr or Radarr. Webhook sources need none."
+        actions={
+          <Button variant="outline" size="sm" onClick={openAddDialog}>
+            <Plus />
+            Add connection
+          </Button>
+        }
+      >
+        {connections.isLoading ? (
+          <p className="text-muted-foreground py-3.5 text-sm">Loading…</p>
+        ) : list.length === 0 ? (
+          <p className="text-muted-foreground py-3.5 text-sm">No connections yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>URL</TableHead>
+                <TableHead className="w-0" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map((conn) => (
+                <TableRow key={conn.id}>
+                  <TableCell className="font-medium">{conn.name}</TableCell>
+                  <TableCell>{connectionKindLabel(conn.kind)}</TableCell>
+                  <TableCell>
+                    {conn.request_integration_id ? (
+                      <Badge variant="secondary">Reused from Requests</Badge>
+                    ) : (
+                      <Badge variant="outline">Own</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground max-w-[240px] truncate">
+                    {conn.base_url ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Edit connection"
+                        onClick={() => openEditDialog(conn)}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Delete connection"
+                        onClick={() => setDeleteTarget(conn)}
+                      >
+                        <Trash2 className="text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {list.map((conn) => (
-                  <TableRow key={conn.id}>
-                    <TableCell className="font-medium">{conn.name}</TableCell>
-                    <TableCell>{connectionKindLabel(conn.kind)}</TableCell>
-                    <TableCell>
-                      {conn.request_integration_id ? (
-                        <Badge variant="secondary">Reused from Requests</Badge>
-                      ) : (
-                        <Badge variant="outline">Own</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[240px] truncate">
-                      {conn.base_url ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Edit connection"
-                          onClick={() => openEditDialog(conn)}
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Delete connection"
-                          onClick={() => setDeleteTarget(conn)}
-                        >
-                          <Trash2 className="text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </FieldGroup>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialog.open} onOpenChange={(open) => !open && closeDialog()}>
@@ -401,12 +397,19 @@ export default function ConnectionsPanel() {
             {/* Reuse mode */}
             {dialog.mode === "reuse" && (
               <div className="space-y-1.5">
-                <Label>Requests integration</Label>
+                <Label>Request server</Label>
                 {requestIntegrations.isLoading ? (
-                  <p className="text-muted-foreground text-sm">Loading integrations…</p>
+                  <p className="text-muted-foreground text-sm">Loading servers…</p>
                 ) : arrIntegrations.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
-                    No Sonarr/Radarr integrations found. Add one in the Requests page first.
+                    No Sonarr or Radarr servers yet. Add one under{" "}
+                    <Link
+                      to="/admin/settings/requests"
+                      className="text-foreground underline underline-offset-2"
+                    >
+                      Settings › Requests
+                    </Link>{" "}
+                    first, or enter credentials manually.
                   </p>
                 ) : (
                   <Select
@@ -417,7 +420,7 @@ export default function ConnectionsPanel() {
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select an integration…" />
+                      <SelectValue placeholder="Select a server…" />
                     </SelectTrigger>
                     <SelectContent>
                       {arrIntegrations.map((integration) => (

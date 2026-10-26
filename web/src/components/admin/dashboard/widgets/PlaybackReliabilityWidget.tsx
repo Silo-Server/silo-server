@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPlaybackActivity } from "@/hooks/queries/admin/dashboardInsights";
 import { SectionError } from "../feedback";
 import { rangeHours, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 
 /**
@@ -25,12 +26,9 @@ export function PlaybackReliabilityWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle("Playback reliability", range)}
-        </CardTitle>
+      <WidgetHeader title={rangeTitle("Playback reliability", range)}>
         <WidgetRangePicker />
-      </CardHeader>
+      </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

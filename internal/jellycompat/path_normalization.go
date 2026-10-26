@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type requestContextKey string
@@ -85,6 +87,13 @@ var compatPathSegments = map[string]string{
 
 func normalizeCompatPathMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// StripSlashes runs first and, inside a chi router, leaves the stripped
+		// path in RoutePath, which chi then matches instead of r.URL.Path.
+		// Without this, "/items/" (jellyfin-roku's search) would route as
+		// "/items" and 404.
+		if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.RoutePath != "" {
+			rctx.RoutePath = canonicalizeCompatPath(rctx.RoutePath)
+		}
 		normalized := canonicalizeCompatPath(r.URL.Path)
 		if normalized == r.URL.Path {
 			next.ServeHTTP(w, r)
@@ -116,17 +125,38 @@ func canonicalizeCompatPath(path string) string {
 			parts = append([]string{""}, parts[2:]...)
 		}
 	}
-	// Match discovery routes as whole paths: these words can also be opaque
-	// IDs (for example /DisplayPreferences/list), whose case must not change.
+	// Match these routes as whole paths: their words can also be opaque IDs
+	// or names (for example /DisplayPreferences/list or a genre called
+	// "connect"), whose case must not change.
 	switch strings.ToLower(strings.Join(parts, "/")) {
 	case "/localization/cultures":
 		return "/Localization/Cultures"
 	case "/syncplay/list":
 		return "/SyncPlay/List"
+	case "/branding/css":
+		return "/Branding/Css"
+	case "/branding/css.css":
+		return "/Branding/Css.css"
+	case "/quickconnect/initiate":
+		return "/QuickConnect/Initiate"
+	case "/quickconnect/connect":
+		return "/QuickConnect/Connect"
+	case "/quickconnect/authorize":
+		return "/QuickConnect/Authorize"
+	case "/users/authenticatewithquickconnect":
+		return "/Users/AuthenticateWithQuickConnect"
+	case "/library/mediafolders":
+		return compatMediaFoldersPath
 	}
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
 		if part == "" {
+			continue
+		}
+		// The {displayPreferencesId} in /DisplayPreferences/{id} is a
+		// case-sensitive storage key, so it keeps its case even when it reads
+		// like a route word.
+		if i == 2 && strings.EqualFold(parts[1], "displaypreferences") {
 			continue
 		}
 		// LocalTrailers is matched only in its route position,
@@ -134,6 +164,11 @@ func canonicalizeCompatPath(path string) string {
 		// opaque value that happens to read "localtrailers" keeps its case.
 		if i >= 3 && strings.EqualFold(part, "localtrailers") && strings.EqualFold(parts[i-2], "items") {
 			parts[i] = "LocalTrailers"
+			continue
+		}
+		// AdditionalParts likewise, only as /Videos/{id}/AdditionalParts.
+		if i >= 3 && strings.EqualFold(part, "additionalparts") && strings.EqualFold(parts[i-2], "videos") {
+			parts[i] = "AdditionalParts"
 			continue
 		}
 		parts[i] = canonicalizeCompatSegment(part)

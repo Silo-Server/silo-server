@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
@@ -163,8 +163,12 @@ describe("StartPartySheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create party & copy invite" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     setProfileToken("replacement");
-    resolve(json(roomBody(draftRoomId(fetch.mock.calls[0]![1])), 201));
-    await new Promise((r) => setTimeout(r, 10));
+    await act(async () => {
+      resolve(json(roomBody(draftRoomId(fetch.mock.calls[0]![1])), 201));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create party & copy invite" })).toBeEnabled(),
+    );
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(nav.navigate).not.toHaveBeenCalled();
   });

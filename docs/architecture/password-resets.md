@@ -8,10 +8,11 @@ The temporary-password state lives in `internal/auth` and the auth middleware. T
 wire contract is in [admin-users-api.md](../admin-users-api.md#passwords) and
 [auth-api.md](../auth-api.md#temporary-passwords).
 
-Both apply only to accounts that sign in with a local password
+Reset links apply only to accounts that sign in with a local password
 (`users.local_password_login_enabled`). An account an external authentication
-provider manages has no password here to reset, so the server refuses the actions
-and clients hide them.
+provider manages has no password here to reset, so the server refuses reset links
+for it and clients hide them. An administrator can still set a password on such an
+account; see Temporary passwords.
 
 ## Reset links
 
@@ -33,16 +34,28 @@ administrator, another reset) retires outstanding links without other writers
 knowing this table exists. Resolving also requires the account to be enabled and
 to use local password sign-in.
 
+**Retired on recovery email changes.** A database trigger deletes the account's
+link in the transaction that changes `users.email`, covering every account writer.
+Rolling back the email change preserves the link; restoring an earlier address
+does not revive a deleted link. The column's `citext` comparison treats a change
+of letter case as the same recovery identity. Issuance locks the account before
+the link and checks that its email still matches the address read for delivery.
+If the email changes first, no link is issued; if issuance wins, the email change
+deletes that link. Mail sent after a concurrent change can therefore carry only
+an unusable link to the previous address.
+
 **Uniform not-found.** Lookup and completion return the same `ErrNotFound` for
 unknown, expired, used, replaced, and outdated links, so a probe learns nothing.
 The public operations spend the `password_reset` per-IP rate-limit budget; with
 256-bit tokens this is anti-probe hygiene, not the guard.
 
-**One transaction.** Completion locks the link and account rows, re-checks
+**One transaction.** Completion locks the account before the link, matching
+issuance, promotion and recovery email changes. It re-checks
 expiry against `clock_timestamp()`, deletes the link, replaces the password,
 clears `password_change_required`, and revokes every login session the account
 owns or impersonates from, then commits. The same transaction revokes the
-account's Audiobookshelf-compatible sessions and denies any device sign-in it
+account's Audiobookshelf-compatible sessions, deletes its stored
+Jellyfin-compatible sessions, and denies any device sign-in it
 approved that the device has not collected yet, which would otherwise mint a
 fresh session afterwards. Personal API keys survive: the account created them on
 purpose, and revoking them would break its integrations, so the account or an
@@ -97,8 +110,9 @@ budget.
 
 **Every password write decides the flag.** `users.password_change_required` is
 written only together with a password. An administrator's create or update sets it
-from `require_password_change`, false when omitted, and refuses it for an account
-without local password sign-in, which could never run the change. A self-service change or a
+from `require_password_change`, false when omitted. An administrator's password
+write also turns local password sign-in back on for an account that had it off,
+so `require_password_change` applies to such an account too. A self-service change or a
 completed reset clears it. A write without a password never touches it, so no path
 leaves a stale flag behind.
 

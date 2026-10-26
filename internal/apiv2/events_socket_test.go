@@ -34,7 +34,7 @@ func TestEventsSocketTicketDelegatesOnlyLoginAuthority(t *testing.T) {
 	fake := new(fakeEventsSocket)
 	deps.EventsSocket = fake
 	claims := &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims}}, fakeSessions{map[string]bool{"s1": true}}, nil, nil)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims}}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
 	h := NewHandler(deps)
 	path := Prefix + "/events/ws-ticket"
 	rec := do(t, h, http.MethodPost, path, "", profileOwner())

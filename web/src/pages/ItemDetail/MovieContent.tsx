@@ -1,16 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
-import type { FileVersion, ItemDetail } from "@/api/types";
+import { useLocation, useNavigate } from "react-router";
+import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
-import { useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
+import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
@@ -19,6 +22,7 @@ import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
+import DetailLayout, { DetailSection } from "./DetailLayout";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MetadataBadges from "./components/MetadataBadges";
 import TrailersSection from "./components/TrailersSection";
@@ -41,6 +45,7 @@ import {
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function MovieContent({
   item,
@@ -52,6 +57,11 @@ export default function MovieContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
@@ -64,6 +74,16 @@ export default function MovieContent({
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
 
   const refreshMetadataMutation = useRefreshItemMetadata();
+  const redetectMarkersMutation = useRedetectItemMarkers();
+  // Movies have no re-detect action on an API node without redetect-markers
+  // or movie credits.
+  const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
+  const canRedetectMovieCredits =
+    markerCapabilities.data?.redetect_markers === true &&
+    markerCapabilities.data?.movie_credits === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
@@ -72,12 +92,12 @@ export default function MovieContent({
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Director"), [item.crew]);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions), [item.versions]);
-  const userData =
-    item.user_data && "position_seconds" in item.user_data ? item.user_data : undefined;
+  const userData = leafUserData(item.user_data);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -96,13 +116,14 @@ export default function MovieContent({
     ],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
-  const selectedVersion = useMemo(
+  const pickedVersion = useMemo(
     () =>
-      (manualSelectedFileId != null
+      manualSelectedFileId != null
         ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
-        : null) ?? defaultSelectedVersion,
-    [defaultSelectedVersion, manualSelectedFileId, sortedVersions],
+        : null,
+    [manualSelectedFileId, sortedVersions],
   );
+  const selectedVersion = pickedVersion ?? defaultSelectedVersion;
   const selectedMediaSummary = useMemo(
     () => resolveSelectedMediaSummary(selectedVersion, item.playback_variants, item.runtime ?? 0),
     [item.playback_variants, item.runtime, selectedVersion],
@@ -114,8 +135,12 @@ export default function MovieContent({
     },
     [selectedVersion?.file_id],
   );
-  const [audioSelectionMode, setAudioSelectionMode] = useState<"auto" | "explicit">("auto");
-  const [explicitAudioTrackIndex, setExplicitAudioTrackIndex] = useState<number | null>(null);
+  const audioSelection = usePrePlayAudioSelection(
+    item.content_id,
+    item.content_id,
+    selectedVersion,
+  );
+  const clearAudioSelection = audioSelection.clear;
   const [subtitleSelectionMode, setSubtitleSelectionMode] = useState<"auto" | "off" | "explicit">(
     "auto",
   );
@@ -127,28 +152,19 @@ export default function MovieContent({
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
-  const handleSelectVersion = useCallback((version: FileVersion) => {
-    setManualSelectedFileId(version.file_id);
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
-  }, []);
-
-  const handleSelectAudioTrack = useCallback((trackIndex: number) => {
-    setAudioSelectionMode("explicit");
-    setExplicitAudioTrackIndex(trackIndex);
-  }, []);
-
-  const handleResetAudioSelection = useCallback(() => {
-    setAudioSelectionMode("auto");
-    setExplicitAudioTrackIndex(null);
-  }, []);
+  const handleSelectVersion = useCallback(
+    (version: FileVersion) => {
+      setManualSelectedFileId(version.file_id);
+      // Track indexes belong to a file, so another version starts from Auto.
+      clearAudioSelection();
+      setSubtitleSelectionMode("auto");
+      setExplicitSubtitleSelection(null);
+    },
+    [clearAudioSelection],
+  );
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
@@ -158,7 +174,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -168,7 +183,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection: null,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -224,192 +238,202 @@ export default function MovieContent({
   const firstStudio = (item.studios ?? [])[0];
 
   return (
-    <div>
-      <DetailHero
-        title={title}
-        topNav={<PageBack />}
-        context="Movie"
-        studioLabel={firstStudio}
-        backdropUrl={item.backdrop_url}
-        backdropThumbhash={item.backdrop_thumbhash}
-        posterUrl={item.poster_url}
-        posterThumbhash={item.poster_thumbhash}
-        logoUrl={item.logo_url}
-        tagline={item.tagline || undefined}
-        metadata={
-          <div className="flex flex-wrap items-center gap-2">
-            <MetadataBadges
-              year={year || undefined}
-              contentRating={item.content_rating || undefined}
-              advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
-              advisorySource={item.advisory_source || undefined}
-              duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
-            />
-            <QualityBadges summary={selectedMediaSummary} />
-          </div>
-        }
-        scoreRow={
-          <ScoreRow
-            ratingImdb={item.rating_imdb}
-            ratingRtCritic={item.rating_rt_critic}
-            ratingRtAudience={item.rating_rt_audience}
-          />
-        }
-        overview={item.overview}
-        overviewTranslating={overviewTranslating}
-        onTranslateOverview={onTranslateOverview}
-        crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
-        actions={
-          <MediaUserActionBar
-            item={item}
-            contentId={item.content_id}
-            watchTogether={watchTogether.menu}
-            playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
-            playLabel={primaryAction.label}
-            playProgress={primaryAction.progress}
-            restartHref={restartHref}
-            resumePositionSeconds={
-              item.user_data && "position_seconds" in item.user_data
-                ? item.user_data.position_seconds
-                : undefined
-            }
-            resumeDurationSeconds={
-              item.user_data && "duration_seconds" in item.user_data
-                ? item.user_data.duration_seconds
-                : undefined
-            }
-            resumeResolution={
-              item.user_data && "last_resolution" in item.user_data
-                ? item.user_data.last_resolution
-                : undefined
-            }
-            resumeHdr={
-              item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
-            }
-            onRefresh={
-              canCurateMetadata
-                ? (mode) =>
-                    refreshMetadataMutation.mutate({
-                      item,
-                      mode,
-                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-                    })
-                : undefined
-            }
-            isRefreshing={refreshMetadataMutation.isPending}
-            isAdmin={isAdmin}
-            canCurateMetadata={canCurateMetadata}
-            canEditMarkers={canEditMarkers}
-            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-            onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
-            onSplitItem={
-              canCurateMetadata && item.versions.length > 1 ? () => setSplitOpen(true) : undefined
-            }
-            onShowMediaInfo={
-              canCurateMetadata && item.versions.length > 0 ? () => openMediaInfo() : undefined
-            }
-            versions={item.versions}
-            playbackVariants={item.playback_variants}
-            selectedVersion={selectedVersion}
-            onSelectVersion={handleSelectVersion}
-            onDownload={
-              user?.download_allowed && item.versions.length > 0
-                ? () => setDownloadOpen(true)
-                : undefined
-            }
-            onSearchSubtitles={
-              item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
-            }
-            qualityPreference={qualityPreference}
-            audioSelectionMode={audioSelectionMode}
-            explicitAudioTrackIndex={explicitAudioTrackIndex}
-            onSelectAudioTrack={handleSelectAudioTrack}
-            onResetAudioSelection={handleResetAudioSelection}
-            prePlaySubtitleMode={subtitleSelectionMode}
-            explicitSubtitleSelection={explicitSubtitleSelection}
-            onSelectSubtitle={handleSelectSubtitle}
-            onSelectSubtitleOff={handleSelectSubtitleOff}
-            onResetSubtitleSelection={handleResetSubtitleSelection}
-            preferredSubtitleLanguage={item.effective_subtitle_language}
-            preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
-            subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
-            showForcedSubtitles={item.effective_show_forced_subtitles}
-            profileLanguage={currentProfile?.language}
-          />
-        }
-      />
-
-      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
-        {canCurateMetadata && (
-          <MediaLocations
-            title="Media locations"
-            versions={item.versions}
-            onShowMediaInfo={openMediaInfo}
-          />
-        )}
-
-        {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
-
-        {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
-
-        {item.cast && item.cast.length > 0 && (
-          <div>
-            <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>
-            <CastCarousel cast={item.cast} prefetchPeople />
-          </div>
-        )}
-
-        {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
-
-        {/* More Like This */}
-        {similarLoading ? (
-          <RecommendationGridSkeleton />
-        ) : (
-          similarData?.items &&
-          similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
-        )}
-      </div>
-      {canCurateMetadata && (
-        <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
-      )}
-      {canCurateMetadata && (
-        <MatchItemDialog
-          key={item.content_id}
-          item={item}
-          open={matchOpen}
-          onOpenChange={setMatchOpen}
-        />
-      )}
-      {canCurateMetadata && (
-        <SplitItemDialog
-          key={`split-${item.content_id}`}
-          item={item}
-          open={splitOpen}
-          onOpenChange={setSplitOpen}
-        />
-      )}
-      <DownloadVersionPicker
-        open={downloadOpen}
-        onOpenChange={setDownloadOpen}
-        versions={item.versions}
-        title={title}
-      />
-      <SubtitleSearchDialog
-        open={subtitleSearchOpen}
-        onOpenChange={setSubtitleSearchOpen}
-        version={selectedVersion}
-        title={title}
-      />
-      {canCurateMetadata && (
-        <MediaInfoDialog
-          open={mediaInfoOpen}
-          onOpenChange={setMediaInfoOpen}
-          versions={item.versions}
+    <DetailLayout
+      hero={
+        <DetailHero
           title={title}
-          initialFileId={mediaInfoFileId}
+          topNav={<PageBack />}
+          context="Movie"
+          studioLabel={firstStudio}
+          backdropUrl={item.backdrop_url}
+          backdropThumbhash={item.backdrop_thumbhash}
+          posterUrl={item.poster_url}
+          posterThumbhash={item.poster_thumbhash}
+          logoUrl={item.logo_url}
+          tagline={item.tagline || undefined}
+          metadata={
+            <div className="flex flex-wrap items-center gap-2">
+              <MetadataBadges
+                year={year || undefined}
+                contentRating={item.content_rating || undefined}
+                advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
+                advisorySource={item.advisory_source || undefined}
+                duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
+              />
+              <QualityBadges summary={selectedMediaSummary} />
+            </div>
+          }
+          scoreRow={<ScoreRow ratings={item.ratings} />}
+          overview={item.overview}
+          overviewTranslating={overviewTranslating}
+          onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          taglineMachineTranslated={hasMachineTranslation(
+            item.machine_translated_fields,
+            "tagline",
+          )}
+          crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
+          actions={
+            <MediaUserActionBar
+              item={item}
+              contentId={item.content_id}
+              watchTogether={watchTogether.menu}
+              playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
+              playLabel={primaryAction.label}
+              playProgress={primaryAction.progress}
+              restartHref={restartHref}
+              resumePositionSeconds={
+                item.user_data && "position_seconds" in item.user_data
+                  ? item.user_data.position_seconds
+                  : undefined
+              }
+              resumeDurationSeconds={
+                item.user_data && "duration_seconds" in item.user_data
+                  ? item.user_data.duration_seconds
+                  : undefined
+              }
+              resumeResolution={
+                item.user_data && "last_resolution" in item.user_data
+                  ? item.user_data.last_resolution
+                  : undefined
+              }
+              resumeHdr={
+                item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
+              }
+              onRefresh={
+                canCurateMetadata
+                  ? (mode) =>
+                      refreshMetadataMutation.mutate({
+                        item,
+                        mode,
+                        onReplaced: followReplacedItem,
+                      })
+                  : undefined
+              }
+              isRefreshing={refreshMetadataMutation.isPending}
+              onRedetectMarkers={
+                isAdmin && canRedetectMovieCredits
+                  ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
+                  : undefined
+              }
+              redetectKind="credits"
+              isRedetectingMarkers={redetectMarkersMutation.isPending}
+              isAdmin={isAdmin}
+              canCurateMetadata={canCurateMetadata}
+              canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
+              onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+              onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+              onSplitItem={
+                canCurateMetadata && item.versions.length > 1 ? () => setSplitOpen(true) : undefined
+              }
+              onShowMediaInfo={
+                canCurateMetadata && item.versions.length > 0 ? () => openMediaInfo() : undefined
+              }
+              versions={item.versions}
+              playbackVariants={item.playback_variants}
+              selectedVersion={selectedVersion}
+              versionPicked={pickedVersion != null}
+              onSelectVersion={handleSelectVersion}
+              onDownload={
+                user?.download_allowed && item.versions.length > 0
+                  ? () => setDownloadOpen(true)
+                  : undefined
+              }
+              onSearchSubtitles={
+                item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
+              }
+              qualityPreference={qualityPreference}
+              audioSelectionMode={audioSelection.mode}
+              explicitAudioTrackIndex={audioSelection.explicitIndex}
+              onSelectAudioTrack={audioSelection.select}
+              onResetAudioSelection={audioSelection.reset}
+              prePlaySubtitleMode={subtitleSelectionMode}
+              explicitSubtitleSelection={explicitSubtitleSelection}
+              onSelectSubtitle={handleSelectSubtitle}
+              onSelectSubtitleOff={handleSelectSubtitleOff}
+              onResetSubtitleSelection={handleResetSubtitleSelection}
+              preferredSubtitleLanguage={item.effective_subtitle_language}
+              preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
+              subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
+              showForcedSubtitles={item.effective_show_forced_subtitles}
+            />
+          }
+        />
+      }
+      overlays={
+        <>
+          {canCurateMetadata && (
+            <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+          )}
+          {canCurateMetadata && (
+            <MatchItemDialog
+              key={item.content_id}
+              item={item}
+              open={matchOpen}
+              onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
+            />
+          )}
+          {canCurateMetadata && (
+            <SplitItemDialog
+              key={`split-${item.content_id}`}
+              item={item}
+              open={splitOpen}
+              onOpenChange={setSplitOpen}
+            />
+          )}
+          <DownloadVersionPicker
+            open={downloadOpen}
+            onOpenChange={setDownloadOpen}
+            versions={item.versions}
+            title={title}
+          />
+          <SubtitleSearchDialog
+            open={subtitleSearchOpen}
+            onOpenChange={setSubtitleSearchOpen}
+            version={selectedVersion}
+            title={title}
+          />
+          {canCurateMetadata && (
+            <MediaInfoDialog
+              open={mediaInfoOpen}
+              onOpenChange={setMediaInfoOpen}
+              versions={item.versions}
+              title={title}
+              initialFileId={mediaInfoFileId}
+            />
+          )}
+          {watchTogether.sheet}
+        </>
+      }
+    >
+      {canCurateMetadata && (
+        <MediaLocations
+          title="Media locations"
+          versions={item.versions}
+          onShowMediaInfo={openMediaInfo}
         />
       )}
-      {watchTogether.sheet}
-    </div>
+
+      {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
+      {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
+
+      {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
+
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
+        </DetailSection>
+      )}
+
+      {/* More Like This */}
+      {similarLoading ? (
+        <RecommendationGridSkeleton />
+      ) : (
+        similarData?.items &&
+        similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
+      )}
+    </DetailLayout>
   );
 }

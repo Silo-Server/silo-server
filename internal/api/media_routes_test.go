@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 	"flag"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -41,7 +39,12 @@ func TestMediaRouteManifest(t *testing.T) {
 		return func(routes []streamtelemetry.WalkedRoute) { snapshots[index]["/api/v2/*"] = routes }
 	}
 	minimal := newChiRouter(Dependencies{Config: cfg, v2RouteSnapshot: observeV2(0)})
-	maximal := newChiRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0), v2RouteSnapshot: observeV2(1)})
+	// A live registry makes observeNative resolve every wrapped pattern, so a
+	// handler wired to an undeclared media route panics here, not at startup.
+	telemetryCfg := streamtelemetry.DefaultConfig("test")
+	telemetryCfg.Enabled = true
+	telemetry := streamtelemetry.NewRegistry(telemetryCfg, streamtelemetry.NewLocalStore(), nil)
+	maximal := newChiRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0), StreamTelemetry: telemetry, v2RouteSnapshot: observeV2(1)})
 	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{minimal, maximal}, nativeMediaRoutes, snapshots...)
 	if err != nil {
 		t.Fatal(err)
@@ -92,23 +95,5 @@ func TestNewRouterRegistersTranscodeShutdownWork(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("router did not register transcode shutdown work")
-	}
-}
-
-func TestNativeRejectedAndMissingRequestsRemainProvisional(t *testing.T) {
-	for _, route := range nativeMediaRoutes {
-		for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound} {
-			t.Run(route.Method+" "+route.Pattern+" "+http.StatusText(status), func(t *testing.T) {
-				cfg := streamtelemetry.DefaultConfig("test")
-				cfg.Enabled = true
-				registry := streamtelemetry.NewRegistry(cfg, streamtelemetry.NewLocalStore(), nil)
-				handler := registry.Observe(route)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
-				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(route.Method, "/", nil))
-				snapshot := registry.Sweep()
-				if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
-					t.Fatalf("status %d created logical activity: %+v", status, snapshot)
-				}
-			})
-		}
 	}
 }

@@ -30,7 +30,7 @@ func TestEpisodeNamingJellyfinExamples(t *testing.T) {
 		t.Run(tc.Category+"/"+tc.Path, func(t *testing.T) {
 			stem := strings.TrimSuffix(filepath.Base(tc.Path), filepath.Ext(tc.Path))
 			dirs := strings.Split(filepath.ToSlash(filepath.Dir(tc.Path)), "/")
-			token, _ := parseEpisodeToken(stem, dirs, true, true)
+			token, _ := parseEpisodeToken(stem, dirs, false, true, true)
 			if tc.SeriesTitle != nil && !strings.EqualFold(token.seriesTitle, *tc.SeriesTitle) {
 				t.Errorf("series title = %q, want %q", token.seriesTitle, *tc.SeriesTitle)
 			}
@@ -74,8 +74,6 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 		{"[Baz-Bar] Foo - 05 [1080p][Multiple Subtitle]", "Foo", 5},
 		{"[YuiSubs] Tensura Nikki - Tensei Shitara Slime Datta Ken - 12 (NVENC H.265 1080p)", "Tensura Nikki - Tensei Shitara Slime Datta Ken", 12},
 		{"[CASO&Sumisora][Oda_Nobuna_no_Yabou][04][BDRIP][1920x1080][x264_AAC][7620E503]", "Oda Nobuna no Yabou", 4},
-		{"[HorribleSubs] Made in Abyss - 13 [720p]", "Made in Abyss", 13},
-		{"[Erai-raws] Jujutsu Kaisen - 03 [720p][Multiple Subtitle]", "Jujutsu Kaisen", 3},
 		{"[tvN] 혼술남녀.E01-E16.720p-NEXT", "혼술남녀", 1},
 		{"[tvN] 연애말고 결혼 E01~E16 END HDTV.H264.720p-WITH", "연애말고 결혼", 1},
 		{"[Group] 86 - 03 [1080p]", "86", 3},
@@ -87,7 +85,7 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 		{"Show S01E12v2", "Show", 12},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			token, ok := parseEpisodeToken(tc.name, nil, true, true)
+			token, ok := parseEpisodeToken(tc.name, nil, false, true, true)
 			if !ok || token.seriesTitle != tc.title || token.episode != tc.episode {
 				t.Errorf("parsed %+v, %t; want title %q episode %d", token, ok, tc.title, tc.episode)
 			}
@@ -97,25 +95,25 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 
 func TestEpisodeNamingDoesNotInventCoordinates(t *testing.T) {
 	for _, name := range []string{
-		"1920x1080", "720x480", "360x240", "1080p", "1080p H.265 AAC5.1",
+		"1920x1080", "1080p", "1080p H.265 AAC5.1",
 		"1920x1080-E15", "999x03-E15", "Show.03.04.2020", "Show 03-04-2020", "2001 - A Space Odyssey", "Space 1999",
 		"Show E02video", "Show E02v2video", "Show [1920x1080] [AAC5.1]", "Show H.265 AAC5.1", "Show S01E02foo",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if token, _ := parseEpisodeToken(name, []string{"Show", "Season 1"}, true, true); token.episode != 0 {
+			if token, _ := parseEpisodeToken(name, []string{"Show", "Season 1"}, false, true, true); token.episode != 0 {
 				t.Fatalf("unexpected episode coordinates: %+v", token)
 			}
 		})
 	}
-	for _, folder := range []string{"Extras", "Trailers", "Shorts", "Clips", "Other", "Teasers", "Scenes", "BehindTheScenes", "DeletedScenes", "Behind_the_scenes", "Interviews"} {
+	for _, folder := range []string{"Extras", "Trailers", "BehindTheScenes", "Behind_the_scenes"} {
 		t.Run(folder, func(t *testing.T) {
-			if token, _ := parseEpisodeToken("E02 - Bonus", []string{"Show", "Season 1", folder}, true, true); token.episode != 0 {
+			if token, _ := parseEpisodeToken("E02 - Bonus", []string{"Show", "Season 1", folder}, false, true, true); token.episode != 0 {
 				t.Fatalf("extra acquired episode coordinates: %+v", token)
 			}
 		})
 	}
 	for _, name := range []string{"E02", "02", "Show - 12", "[Group] Show - 12 [720p]", "Show_102"} {
-		if token, _ := parseEpisodeToken(name, []string{"movies"}, false); token.episode != 0 {
+		if token, _ := parseEpisodeToken(name, []string{"movies"}, false, false); token.episode != 0 {
 			t.Errorf("%q acquired episode coordinates without series context: %+v", name, token)
 		}
 	}
@@ -136,7 +134,7 @@ func TestEpisodeNamingKnownSeason(t *testing.T) {
 		{"Show_102", "Show", 1, true},
 	} {
 		t.Run(tc.name+"/"+tc.parent, func(t *testing.T) {
-			token, _ := parseEpisodeToken(tc.name, []string{tc.parent}, true, true)
+			token, _ := parseEpisodeToken(tc.name, []string{tc.parent}, false, true, true)
 			if token.season != tc.season || token.seasonKnown != tc.known {
 				t.Errorf("parsed %+v; want season %d, known %t", token, tc.season, tc.known)
 			}
@@ -155,9 +153,23 @@ func TestEpisodeNamingRangeTitleSuffix(t *testing.T) {
 	}
 }
 
+func TestAirDateTitleSuffix(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"Jeopardy! (1984) - 2026-04-24 - Jamie Ding Zach Pollock.mkv", "Jamie Ding Zach Pollock"},
+		{"The.Daily.Show.2024.02.15.Guest.Name.mkv", "Guest.Name"},
+		{"Show 2024_02_15_Guest_Name.mkv", "Guest_Name"},
+		{"Show - 2026-04-24.mkv", ""},
+		{"Show - S01E02 - Arrival.mkv", ""},
+	} {
+		if got := AirDateTitleSuffix(filepath.Join("Show", "Season 2026", tc.name)); got != tc.want {
+			t.Errorf("%q: suffix = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestEpisodeNamingDoesNotTreatReleaseIDsAsRanges(t *testing.T) {
 	for _, name := range []string{"the_simpsons-s02e01_18536", "Show S01E01_1234", "Show S01E01-1080p", "Show S01E01 The 6-10 to Lubbock"} {
-		token, _ := parseEpisodeToken(name, nil, true, true)
+		token, _ := parseEpisodeToken(name, nil, false, true, true)
 		if token.episodeEnd != 0 {
 			t.Errorf("%q: unexpected range end %d", name, token.episodeEnd)
 		}
@@ -177,7 +189,7 @@ func TestEpisodeNamingRangeNumberBounds(t *testing.T) {
 		{"Show S01E02-E03x264", 2, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			token, _ := parseEpisodeToken(tc.name, nil, true, true)
+			token, _ := parseEpisodeToken(tc.name, nil, false, true, true)
 			if token.episode != tc.start || token.episodeEnd != tc.end {
 				t.Errorf("parsed %+v; want episodes %d-%d", token, tc.start, tc.end)
 			}

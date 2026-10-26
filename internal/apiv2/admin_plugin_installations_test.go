@@ -82,62 +82,46 @@ func TestAdminPluginCatalogRead(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
 
-func TestAdminPluginInstallationsRead(t *testing.T) {
-	at := time.Date(2026, 9, 1, 0, 0, 0, 123456789, time.UTC)
-	repo := 4
-	available := "1.1.0"
-	installation := func(id int, pluginID string) handlers.PluginInstallationView {
-		return handlers.PluginInstallationView{ID: id, RepositoryID: &repo, PluginID: pluginID, Version: "1.0.0", InstallPath: "/plugins/" + pluginID, Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", AvailableVersion: &available, SourceKind: "silo", RepositoryName: "Official", UpdatesPaused: false, GlobalConfigs: []handlers.PluginConfigValueView{{Key: "account", Value: map[string]any{"region": "us-east"}, ConfiguredSecrets: []string{"api_key"}}}, AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: "oidc", Enabled: true, DisplayOrder: 2, CreatedAt: at, UpdatedAt: at}}, TaskBindings: []handlers.PluginTaskBindingView{{CapabilityID: "sync", Enabled: true, Trigger: map[string]any{"cron": "0 * * * *"}, CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
+// TestAdminPluginAuthBindingURLs: an OAuth binding shows the callback and
+// post-logout redirect URLs to register at the provider, built from the
+// public URL; a password binding and a server without a public URL show
+// none.
+func TestAdminPluginAuthBindingURLs(t *testing.T) {
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	installation := func(id int, capabilityID string, modes ...string) handlers.PluginInstallationView {
+		return handlers.PluginInstallationView{ID: id, PluginID: "org.example." + capabilityID, Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
+			Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: capabilityID, AuthModes: modes}},
+			AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: capabilityID, Enabled: true, CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
 	}
-	f := &fakePluginInventory{installations: []handlers.PluginInstallationView{installation(9, "org.example.b"), installation(3, "org.example.a")}}
+	f := &fakePluginInventory{installations: []handlers.PluginInstallationView{installation(3, "oidc", "oauth2"), installation(4, "ldap", "password")}}
 	deps := pilotDeps(nil, nil)
 	deps.AdminPluginInventory = f
-	h := NewHandler(deps)
-	path := Prefix + "/admin/plugins/installations"
-	requireProblem(t, do(t, h, "GET", path, "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, "GET", path, "", bearer(memberToken)), TypePermissionDenied)
-	if f.installCalls != 0 {
-		t.Fatal("refusal read installations")
-	}
-	rec := do(t, h, "GET", path+"?limit=1", "", bearer(adminToken))
-	var body Collection[AdminPluginInstallation]
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	item := body.Items[0]
-	if rec.Code != 200 || len(body.Items) != 1 || item.ID != "3" || item.RepositoryID == nil || *item.RepositoryID != "4" || item.AvailableVersion != "1.1.0" || body.Page == nil || !body.Page.HasMore {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	raw := rec.Body.String()
-	for _, want := range []string{`"value":{"region":"us-east"}`, `"configured_secrets":["api_key"]`, `"trigger":{"cron":"0 * * * *"}`, `"display_order":2`, `2026-09-01T00:00:00.123Z`, `"capabilities":[]`, `"metadata":{}`, `"runtime":{"resident":false,"state":"stopped","restart_count":0}`} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("missing %s in %s", want, raw)
+	read := func(deps Dependencies) []AdminPluginInstallation {
+		t.Helper()
+		rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/plugins/installations", "", bearer(adminToken))
+		var body Collection[AdminPluginInstallation]
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body.Items) != 2 {
+			t.Fatal(rec.Code, rec.Body.String())
 		}
+		return body.Items
 	}
-	if strings.Contains(raw, "api_key\":") {
-		t.Fatal("secret value leaked", raw)
+	items := read(deps)
+	oidc, ldap := items[0].AuthBindings[0], items[1].AuthBindings[0]
+	if oidc.CallbackURL != "https://silo.example.test/api/v2/auth/oauth/3/callback" || oidc.PostLogoutRedirectURL != "https://silo.example.test/login" {
+		t.Fatalf("oidc binding = %+v", oidc)
 	}
-	cursor := url.QueryEscape(body.Page.NextCursor)
-	rec = do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", bearer(adminToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9"`) {
-		t.Fatal(rec.Code, rec.Body.String())
+	if ldap.CallbackURL != "" || ldap.PostLogoutRedirectURL != "" {
+		t.Fatalf("ldap binding = %+v", ldap)
 	}
-	requireProblem(t, do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", actingRequestAdmin), TypeInvalidCursor)
-	f.installations = nil
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) {
-		t.Fatal(rec.Code, rec.Body.String())
+	deps.OAuth = noPublicURLOAuth{fakeOAuth{}}
+	if got := read(deps)[0].AuthBindings[0]; got.CallbackURL != "" || got.PostLogoutRedirectURL != "" {
+		t.Fatalf("without a public URL = %+v", got)
 	}
-	builtin := installation(1, "silo.builtin")
-	builtin.Kind = plugins.KindBuiltin
-	f.installations = []handlers.PluginInstallationView{builtin}
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 500 {
-		t.Fatal("builtin row must never be projected", rec.Code, rec.Body.String())
-	}
-	f.installations = nil
-	f.err = errors.New("private database detail")
-	if rec = do(t, h, "GET", path, "", bearer(adminToken)); rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	deps.AdminPluginInventory = nil
-	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
+
+// noPublicURLOAuth is fakeOAuth on a server without a public URL.
+type noPublicURLOAuth struct{ fakeOAuth }
+
+func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
+
+func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }

@@ -3,7 +3,8 @@ import type { OverlayData } from "./types";
 // Sample OverlayData used by the settings preview cards so users can see how
 // the configured overlays will actually look. Two variants — movie and show —
 // because some overlays (show_status, edition) only render for one or the
-// other in real data.
+// other in real data. A third, a requested title the library doesn't have
+// yet, shows the request_status badge and its download bar.
 
 export const SAMPLE_MOVIE_DATA: OverlayData = {
   resolution: "2160p",
@@ -22,6 +23,7 @@ export const SAMPLE_MOVIE_DATA: OverlayData = {
   rating_rt_critic: 96,
   rating_rt_audience: 92,
   content_rating: "PG-13",
+  advisory_age: 13,
   year: 2024,
   runtime: 148,
   original_language: "EN",
@@ -44,4 +46,30 @@ export const SAMPLE_SHOW_DATA: OverlayData = {
   show_status: "returning",
   rt_certified_fresh: false,
   imdb_top_250: null,
+};
+
+// A watchlist title outside the library: TMDB data only, no file badges.
+export const SAMPLE_REQUEST_DATA: OverlayData = {
+  rating_tmdb: 8.1,
+  content_rating: "PG-13",
+  year: 2026,
+  request_status: "Downloading 43%",
+  request_status_icon: "download",
+  request_status_attention: false,
+  request_download_percent: 43,
+};
+
+/** The samples the settings preview offers. */
+export type OverlayPreviewVariant = "movie" | "show" | "requested";
+
+export const OVERLAY_PREVIEW_VARIANTS: readonly OverlayPreviewVariant[] = [
+  "movie",
+  "show",
+  "requested",
+];
+
+export const OVERLAY_PREVIEW_SAMPLES: Readonly<Record<OverlayPreviewVariant, OverlayData>> = {
+  movie: SAMPLE_MOVIE_DATA,
+  show: SAMPLE_SHOW_DATA,
+  requested: SAMPLE_REQUEST_DATA,
 };

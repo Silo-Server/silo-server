@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -34,6 +35,10 @@ func (r *UserRepository) GetAdminSnapshot(ctx context.Context, id int) (AdminUse
 // validation and session revocation in the same transaction. A nil input deletes.
 // Group locking precedes account locking, matching group policy propagation.
 func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revision int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (AdminUserSnapshot, error) {
+	passwordHash, err := hashUpdatePassword(ctx, input)
+	if err != nil {
+		return AdminUserSnapshot{}, err
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return AdminUserSnapshot{}, err
@@ -49,6 +54,7 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if revision != -1 && current.Revision != revision {
 		return current, ErrAdminUserRevision
 	}
+	before := current.User
 	revoke, err := validate(current.User, tx)
 	if err != nil {
 		return current, err
@@ -61,7 +67,7 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if input == nil {
 		_, err = tx.Exec(ctx, `DELETE FROM users WHERE id=$1`, id)
 	} else {
-		err = updateUser(ctx, tx, id, *input)
+		err = updateUser(ctx, tx, id, *input, passwordHash)
 		if err == nil {
 			current, err = adminUserSnapshot(tx.QueryRow(ctx, `SELECT `+allColumns+`, admin_revision FROM users WHERE id=$1`, id))
 		}
@@ -69,8 +75,17 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if err != nil {
 		return current, err
 	}
+	after := current.User
+	if input == nil {
+		after = nil
+	}
+	audit, err := auditmutation.RecordUserMutation(ctx, tx, before, after, input != nil && input.Password != nil)
+	if err != nil {
+		return current, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return current, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return current, nil
 }

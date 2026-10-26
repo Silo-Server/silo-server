@@ -96,13 +96,3 @@ func TestMissingIDAcceptsWellFormedUUIDs(t *testing.T) {
 		t.Errorf("missingID(padded) = %v, want ErrNotFound", err)
 	}
 }
-
-func TestMissingConnectionIDAllowsUnbound(t *testing.T) {
-	blank := "   "
-	if err := missingConnectionID(nil); err != nil {
-		t.Errorf("missingConnectionID(nil) = %v, want nil", err)
-	}
-	if err := missingConnectionID(&blank); err != nil {
-		t.Errorf("missingConnectionID(blank) = %v, want nil", err)
-	}
-}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -39,6 +40,10 @@ type Provider struct {
 	password string
 	limiter  *subtitles.RateLimiter
 
+	// fileClient fetches the link a download answer names. The provider
+	// chooses that address, so it may reach public hosts only.
+	fileClient *http.Client
+
 	mu    sync.Mutex
 	token string
 }
@@ -50,7 +55,7 @@ func New(cfg Config) *Provider {
 		base = defaultBaseURL
 	}
 	return &Provider{
-		client:   &http.Client{Timeout: 15 * time.Second},
+		client:   &http.Client{Timeout: 15 * time.Second, CheckRedirect: subtitles.SameOriginRedirects},
 		baseURL:  base,
 		username: cfg.Username,
 		password: cfg.Password,
@@ -58,6 +63,7 @@ func New(cfg Config) *Provider {
 			MaxRequests: 40,
 			Window:      10 * time.Second,
 		}),
+		fileClient: netguard.NewClient(15 * time.Second),
 	}
 }
 
@@ -113,12 +119,11 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("opensubtitles: search returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("opensubtitles: search returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	var searchResp searchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(resp.Body)).Decode(&searchResp); err != nil {
 		return nil, fmt.Errorf("opensubtitles: decode response: %w", err)
 	}
 
@@ -190,8 +195,7 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("opensubtitles: download returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, "", fmt.Errorf("opensubtitles: download returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	return p.fetchDownloadLink(ctx, resp.Body)
@@ -216,8 +220,7 @@ func (p *Provider) downloadWithToken(ctx context.Context, fileID int, token stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("opensubtitles: download returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, "", fmt.Errorf("opensubtitles: download returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	return p.fetchDownloadLink(ctx, resp.Body)
@@ -225,7 +228,7 @@ func (p *Provider) downloadWithToken(ctx context.Context, fileID int, token stri
 
 func (p *Provider) fetchDownloadLink(ctx context.Context, body io.Reader) ([]byte, subtitles.SubtitleFormat, error) {
 	var dlResp downloadResponse
-	if err := json.NewDecoder(body).Decode(&dlResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(body)).Decode(&dlResp); err != nil {
 		return nil, "", fmt.Errorf("opensubtitles: decode download response: %w", err)
 	}
 
@@ -235,13 +238,16 @@ func (p *Provider) fetchDownloadLink(ctx context.Context, body io.Reader) ([]byt
 	if err != nil {
 		return nil, "", err
 	}
-	fileResp, err := p.client.Do(fileReq)
+	fileResp, err := p.fileClient.Do(fileReq)
 	if err != nil {
 		return nil, "", fmt.Errorf("opensubtitles: fetch file: %w", err)
 	}
 	defer fileResp.Body.Close()
+	if fileResp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("opensubtitles: file download returned %d: %s", fileResp.StatusCode, subtitles.ProviderErrorBody(fileResp.Body))
+	}
 
-	data, err := io.ReadAll(fileResp.Body)
+	data, err := subtitles.ReadProviderResponse(fileResp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("opensubtitles: read file: %w", err)
 	}
@@ -278,12 +284,11 @@ func (p *Provider) ensureToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("login returned %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("login returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	var loginResp loginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(resp.Body)).Decode(&loginResp); err != nil {
 		return "", fmt.Errorf("decode login response: %w", err)
 	}
 

@@ -27,10 +27,59 @@ export function formatCodecLabel(codec?: string, fallback = "—"): string {
   return CODEC_LABELS[normalized.toLowerCase()] ?? normalized.toUpperCase();
 }
 
-/** Fuzzy audio-family label for quality badges ("truehd atmos" → "Atmos"). */
-export function mapAudioLabel(codec: string): string {
+const ATMOS_WORD = /\batmos\b/i;
+
+// Codec families that cannot carry Atmos. A compatibility track of one of
+// them is often titled after its source ("AC3 5.1 (from TrueHD Atmos)"), so
+// its titles are not evidence. E-AC-3 contains "ac-3" and is checked first.
+const NON_ATMOS_CODECS = [
+  "aac",
+  "ac3",
+  "ac-3",
+  "dts",
+  "flac",
+  "mp3",
+  "opus",
+  "vorbis",
+  "pcm",
+  "alac",
+];
+
+function codecCanCarryAtmos(lowerCodec: string): boolean {
+  if (
+    lowerCodec.includes("truehd") ||
+    lowerCodec.includes("eac3") ||
+    lowerCodec.includes("e-ac-3")
+  ) {
+    return true;
+  }
+  return !NON_ATMOS_CODECS.some((family) => lowerCodec.includes(family));
+}
+
+/** Whether text names Atmos as a word ("Atmospheric" does not). */
+export function mentionsAtmos(text?: string): boolean {
+  return Boolean(text && ATMOS_WORD.test(text));
+}
+
+function namesAtmos(lowerCodec: string, atmosEvidence?: string): boolean {
+  if (lowerCodec.includes("atmos")) return true;
+  return mentionsAtmos(atmosEvidence) && codecCanCarryAtmos(lowerCodec);
+}
+
+/**
+ * Fuzzy audio-family label for quality badges. The stored codec of an Atmos
+ * track is plain "eac3" or "truehd", so atmosEvidence carries any other text
+ * that can name Atmos, such as the track's FFprobe profile ("Dolby Digital
+ * Plus + Dolby Atmos"). It counts only for a codec that can carry Atmos or
+ * an unknown one. audioTrackLabel builds it from a track.
+ */
+export function mapAudioLabel(codec: string, atmosEvidence?: string): string {
   const lower = codec.toLowerCase();
-  if (lower.includes("atmos")) return "Atmos";
+  if (namesAtmos(lower, atmosEvidence)) {
+    if (lower.includes("truehd")) return "TrueHD Atmos";
+    if (lower.includes("eac3") || lower.includes("e-ac-3")) return "DD+ Atmos";
+    return "Atmos";
+  }
   if (lower.includes("truehd")) return "TrueHD";
   if (lower.includes("dts-hd") || lower.includes("dts:x")) return "DTS-HD";
   if (lower.includes("dts")) return "DTS";
@@ -38,6 +87,33 @@ export function mapAudioLabel(codec: string): string {
   if (lower.includes("aac")) return "AAC";
   if (lower.includes("flac")) return "FLAC";
   return codec.toUpperCase();
+}
+
+/** The audio track fields that can identify a codec and Atmos. */
+export interface AudioTrackFormat {
+  codec?: string;
+  profile?: string;
+  title?: string;
+  embedded_title?: string;
+}
+
+/**
+ * Text beyond the codec that can name Atmos: the FFprobe profile, and the
+ * track titles, which some releases tag "Atmos" when the profile is empty.
+ */
+export function audioTrackAtmosEvidence(track: AudioTrackFormat): string {
+  return [track.profile, track.title, track.embedded_title].filter(Boolean).join(" ");
+}
+
+/** Whether a track's codec, profile, or titles name Atmos, as audioTrackLabel reads them. */
+export function audioTrackHasAtmos(track: AudioTrackFormat): boolean {
+  const codec = track.codec?.toLowerCase();
+  return codec ? namesAtmos(codec, audioTrackAtmosEvidence(track)) : false;
+}
+
+/** Audio-family label for one track ("DD+ Atmos", "TrueHD", …), or "" without a codec. */
+export function audioTrackLabel(track: AudioTrackFormat): string {
+  return track.codec ? mapAudioLabel(track.codec, audioTrackAtmosEvidence(track)) : "";
 }
 
 interface FormatFileSizeOptions {

@@ -1,4 +1,11 @@
 # Replace targets with private main/worker listener addresses. Never add the debug port.
+# The main server answers /metrics with 404 on its application port; it serves
+# metrics only on the separate SILO_METRICS_LISTEN listener. Bind that listener to
+# a private address Prometheus can reach (for example SILO_METRICS_LISTEN=0.0.0.0:9091
+# on an internal network). 127.0.0.1 inside the Silo container is not reachable
+# from a separate Prometheus container.
+# Proxy and transcode nodes serve /metrics on their application listener;
+# SILO_METRICS_LISTEN has no effect on them.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -10,7 +17,7 @@ scrape_configs:
     scrape_timeout: 10s
     sample_limit: 20000
     static_configs:
-      - targets: [silo-api:8080]
+      - targets: [silo-api:9091]
         labels:
           cluster: example
           process_role: api

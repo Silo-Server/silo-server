@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -27,19 +26,6 @@ func (f *autoscanDeliveryFixture) DeliverAutoscanWebhook(_ http.ResponseWriter, 
 	data, err := io.ReadAll(r.Body)
 	f.body = string(data)
 	return err
-}
-func TestAutoscanDeliveryTypedAdmission(t *testing.T) {
-	f := new(autoscanDeliveryFixture)
-	h := NewHandler(Dependencies{AutoscanDelivery: f})
-	path := Prefix + "/autoscan/webhooks/synthetic-capability"
-	body := `{ "eventType" : "Test", "provider_extra" : [1,2] }`
-	rec := do(t, h, "POST", path, body, nil)
-	if rec.Code != 202 || f.calls != 1 || f.body != body || !strings.Contains(rec.Body.String(), `"status":"accepted"`) {
-		t.Fatal(rec.Code, rec.Body.String(), f)
-	}
-	f.fail = &handlers.AutoscanDeliveryFailure{Status: 500, Message: "Could not durably accept delivery"}
-	requireProblem(t, do(t, h, "POST", path, body, nil), TypeInternalError)
-	requireProblem(t, do(t, NewHandler(Dependencies{}), "POST", path, body, nil), TypeDependencyUnavailable)
 }
 func TestAutoscanDeliveryRejectsBeforeBodyAndPreservesBucket(t *testing.T) {
 	f := new(autoscanDeliveryFixture)

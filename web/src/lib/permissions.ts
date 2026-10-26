@@ -8,7 +8,9 @@ export const PERMISSION_MARKER_EDIT = "marker_edit";
  * reserved for the admin account's primary (household parent) profile; any
  * other profile on the account (e.g. a kid's profile) is treated as a regular
  * viewer. With no profile selected (e.g. right after login) the account keeps
- * admin powers so the admin area stays reachable.
+ * admin powers, as the server does while no profile on the account has a PIN
+ * or an access limit; RequireAdmin still sends it to the profile picker before
+ * the admin area opens.
  *
  * This is the single client-side definition of the policy — route gates,
  * chrome, and per-item admin actions must all go through it (usually via the

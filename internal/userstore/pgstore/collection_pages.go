@@ -65,8 +65,10 @@ func (s *PostgresUserStore) ListCollectionItemsPage(ctx context.Context, collect
 	return page, nil
 }
 
+// CollectionFeatures reports no personal collection groups: since #1615 each
+// profile has one flat order of its own collections.
 func (s *PostgresUserStore) CollectionFeatures() userstore.CollectionFeatures {
-	return userstore.CollectionFeatures{Groups: true, Imports: true, Artwork: true, ItemReorder: true}
+	return userstore.CollectionFeatures{Imports: true, Artwork: true, ItemReorder: true, Description: true}
 }
 
 // CollectionRevision is a durable fence for access and definition reads made

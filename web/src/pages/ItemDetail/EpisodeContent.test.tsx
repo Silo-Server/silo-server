@@ -1,55 +1,28 @@
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { setAccessToken, setProfileId } from "@/api/client";
+import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
 import EpisodeContent from "./EpisodeContent";
+import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
 const mocks = vi.hoisted(() => {
-  let capturedActionBarProps: Record<string, unknown> | null = null;
-  let capturedDetailHeroProps: Record<string, unknown> | null = null;
-  let capturedMetadataBadgesProps: Record<string, unknown> | null = null;
-  let capturedQualityBadgesProps: Record<string, unknown> | null = null;
-
+  type Props = Record<string, unknown> | null;
   return {
-    capturedActionBarProps: {
-      get value() {
-        return capturedActionBarProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedActionBarProps = value;
-      },
-    },
-    capturedDetailHeroProps: {
-      get value() {
-        return capturedDetailHeroProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedDetailHeroProps = value;
-      },
-    },
-    capturedMetadataBadgesProps: {
-      get value() {
-        return capturedMetadataBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedMetadataBadgesProps = value;
-      },
-    },
-    capturedQualityBadgesProps: {
-      get value() {
-        return capturedQualityBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedQualityBadgesProps = value;
-      },
-    },
+    capturedActionBarProps: { value: null as Props },
+    capturedDetailHeroProps: { value: null as Props },
     useSeasonDetail: vi.fn(),
     useSeasonEpisodes: vi.fn(),
     useAuth: vi.fn(),
     useCurrentProfile: vi.fn(),
+    useRedetectItemMarkers: vi.fn(),
     useRedetectEpisodeIntro: vi.fn(),
+    useAdminMarkerCapabilities: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
@@ -95,7 +68,17 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
+  useMarkerDetectionKinds: () => undefined,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
+  useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useRedetectEpisodeIntro: mocks.useRedetectEpisodeIntro,
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
@@ -124,6 +107,12 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
   default: () => <div />,
 }));
 
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
+}));
+
 vi.mock("./DetailHero", () => ({
   default: (
     props: { context?: ReactNode; actions?: ReactNode; metadata?: ReactNode } & Record<
@@ -143,17 +132,11 @@ vi.mock("./DetailHero", () => ({
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
-  default: (props: Record<string, unknown>) => {
-    mocks.capturedMetadataBadgesProps.value = props;
-    return <div />;
-  },
+  default: () => <div />,
 }));
 
 vi.mock("./components/QualityBadges", () => ({
-  default: (props: Record<string, unknown>) => {
-    mocks.capturedQualityBadgesProps.value = props;
-    return <div />;
-  },
+  default: () => <div />,
 }));
 
 vi.mock("./components/ScoreRow", () => ({
@@ -197,67 +180,30 @@ vi.mock("./components/EpisodeCarousel", () => ({
   ),
 }));
 
-function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    resolution: overrides.resolution ?? "1080p",
-    codec_video: overrides.codec_video ?? "h264",
-    codec_audio: overrides.codec_audio ?? "aac",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "mkv",
-    file_size: overrides.file_size ?? 0,
-    duration: overrides.duration ?? 2520,
-    bitrate: overrides.bitrate ?? 0,
-    edition_raw: overrides.edition_raw,
-    edition_key: overrides.edition_key,
-    audio_tracks: overrides.audio_tracks,
-  };
-}
-
-function makeEpisodeItem(
-  overrides: Partial<ItemDetail & { type: "episode" }> = {},
-): ItemDetail & { type: "episode" } {
-  return {
-    content_id: "episode-1",
+function makeEpisodeItem(overrides: Partial<ItemDetail> = {}) {
+  return makeItemDetail("episode", {
     title: "Pilot",
-    year: 2024,
     overview: "Episode overview",
     runtime: 42,
     content_rating: "TV-14",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    first_air_date: null,
-    last_air_date: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    season_count: null,
     series_id: "series-1",
     series_title: "Example Series",
     season_number: 1,
     episode_number: 1,
     air_date: "2024-01-01",
-    versions: [makeFileVersion()],
-    subtitles: [],
-    intro: null,
-    credits: null,
+    versions: [makeFileVersion({ duration: 2520 })],
     ...overrides,
-    release_date: overrides.release_date ?? null,
-    type: "episode",
-  };
+  });
+}
+
+function renderEpisode() {
+  renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 function makeSeason(overrides: Partial<Season> = {}): Season {
@@ -283,8 +229,6 @@ describe("EpisodeContent", () => {
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;
-    mocks.capturedMetadataBadgesProps.value = null;
-    mocks.capturedQualityBadgesProps.value = null;
     mocks.useAuth.mockReturnValue({ user: null });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
     mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
@@ -292,10 +236,16 @@ describe("EpisodeContent", () => {
       mutate: vi.fn(),
       isPending: false,
     });
+    mocks.useRedetectItemMarkers.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    });
     mocks.useRedetectEpisodeIntro.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
     });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
@@ -309,63 +259,13 @@ describe("EpisodeContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
   });
 
-  it("updates hero metadata when the selected episode version changes", () => {
-    const hdrVersion = makeFileVersion({
-      file_id: 1,
-      resolution: "2160p",
-      codec_video: "hevc",
-      codec_audio: "eac3",
-      hdr: true,
-      duration: 2520,
-    });
-    const sdrVersion = makeFileVersion({
-      file_id: 2,
-      resolution: "1080p",
-      codec_video: "h264",
-      codec_audio: "aac",
-      hdr: false,
-      duration: 2700,
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ versions: [hdrVersion, sdrVersion] })} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "42m" });
-    expect(mocks.capturedQualityBadgesProps.value).toEqual({
-      summary: {
-        durationMinutes: 42,
-        resolution: "2160p",
-        videoRangeLabel: "HDR",
-        audioLabel: "EAC3",
-      },
-    });
-
-    act(() => {
-      const selectVersion = mocks.capturedActionBarProps.value?.onSelectVersion as
-        | ((version: FileVersion) => void)
-        | undefined;
-      selectVersion?.(sdrVersion);
-    });
-
-    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "45m" });
-    expect(mocks.capturedQualityBadgesProps.value).toEqual({
-      summary: {
-        durationMinutes: 45,
-        resolution: "1080p",
-        videoRangeLabel: "",
-        audioLabel: "AAC",
-      },
-    });
-  });
-
   it("links the season breadcrumb segment to the resolved season page", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/episode-1"]}>
+          <EpisodeContent item={makeEpisodeItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
@@ -379,198 +279,279 @@ describe("EpisodeContent", () => {
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter
-        initialEntries={[
-          {
-            pathname: "/item/episode-1",
-            state: {
-              parentSeasonHref: "/item/season-99",
-              parentSeasonLabel: "Season 99",
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: "/item/episode-1",
+              state: {
+                parentSeasonHref: "/item/season-99",
+                parentSeasonLabel: "Season 99",
+              },
             },
-          },
-        ]}
-      >
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
+          ]}
+        >
+          <EpisodeContent item={makeEpisodeItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
     expect(markup).toContain(">Season 99<");
   });
 
-  it("passes on-view translation controls to the hero", () => {
-    const onTranslate = vi.fn();
-    mocks.useOnViewTranslation.mockReturnValue({
-      translating: true,
-      onTranslate,
-    });
+  it("hides an unwatched episode's overview until the viewer reveals it", () => {
+    spoilerPrefs.hideOverviews = true;
+    try {
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={makeEpisodeItem({ user_data: { played: false } })} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(true);
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ pending_translation_language: "fr" })} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.useOnViewTranslation).toHaveBeenCalledWith(
-      expect.objectContaining({ content_id: "episode-1", type: "episode" }),
-    );
-    expect(mocks.capturedDetailHeroProps.value).toMatchObject({
-      overviewTranslating: true,
-      onTranslateOverview: onTranslate,
-    });
-  });
-
-  it("shows all season episodes in the carousel, not just nearby ones", () => {
-    const allEpisodes = Array.from({ length: 10 }, (_, i) => ({
-      content_id: `ep-${i + 1}`,
-      season_number: 1,
-      episode_number: i + 1,
-      title: `Episode ${i + 1} Title`,
-      overview: "",
-      air_date: null,
-      runtime: 42,
-      still_url: "",
-      still_thumbhash: "",
-      files: [],
-    }));
-
-    mocks.useSeasonEpisodes.mockReturnValue({
-      data: { episodes: allEpisodes },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ episode_number: 5 })} />
-      </MemoryRouter>,
-    );
-
-    // All 10 episodes should be rendered
-    for (let i = 1; i <= 10; i++) {
-      expect(markup).toContain(`Episode ${i} Title`);
+      act(() => {
+        (mocks.capturedDetailHeroProps.value?.onRevealOverview as () => void)();
+      });
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(false);
+    } finally {
+      spoilerPrefs.hideOverviews = false;
     }
-
-    // Current episode (5) should be marked
-    expect(markup).toContain('data-current="true"');
-    expect(countOccurrences(markup, 'data-current="true"')).toBe(1);
   });
 
-  it("hides the carousel when only one episode exists", () => {
-    mocks.useSeasonEpisodes.mockReturnValue({
-      data: {
-        episodes: [
-          {
-            content_id: "ep-1",
-            season_number: 1,
-            episode_number: 1,
-            title: "Only Episode",
-            overview: "",
-            air_date: null,
-            runtime: 42,
-            still_url: "",
-            still_thumbhash: "",
-            files: [],
-          },
-        ],
-      },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ episode_number: 1 })} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("More Episodes");
-    expect(markup).not.toContain("episode-detail-navigation");
-    expect(markup).not.toContain("episode-carousel");
-  });
-
-  it("passes restartHref when the episode is partially watched", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent
-          item={makeEpisodeItem({
-            user_data: {
-              played: false,
-              is_in_progress: true,
-              position_seconds: 300,
-              duration_seconds: 1800,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Resume",
-      restartHref: "/watch/episode-1?restart=1",
-    });
-  });
-
-  it("does not pass restartHref when the episode is completed", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent
-          item={makeEpisodeItem({
-            user_data: {
-              // Completed rows store position 0 (no resume point).
-              played: true,
-              position_seconds: 0,
-              duration_seconds: 1800,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Play Episode",
-    });
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      restartHref: undefined,
-    });
-  });
-
-  it("does not pass rating props to ActionBar", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("rating");
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
-  });
-
-  it("passes intro re-detection action only for admins", () => {
+  it("passes marker re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
-    mocks.useRedetectEpisodeIntro.mockReturnValue({
+    mocks.useAdminMarkerCapabilities.mockReturnValue({ data: { redetect_markers: true } });
+    mocks.useRedetectItemMarkers.mockReturnValue({
       mutate: redetect,
       isPending: false,
     });
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
+    renderEpisode();
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       isAdmin: true,
-      isRedetectingIntro: false,
+      isRedetectingMarkers: false,
     });
-    const onRedetectIntro = mocks.capturedActionBarProps.value?.onRedetectIntro;
-    expect(typeof onRedetectIntro).toBe("function");
-    (onRedetectIntro as () => void)();
-    expect(redetect).toHaveBeenCalledWith("episode-1");
+    expect(mocks.capturedActionBarProps.value?.redetectKind).toBeUndefined();
+    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+    expect(typeof onRedetectMarkers).toBe("function");
+    (onRedetectMarkers as (kind: string) => void)("intro");
+    expect(redetect).toHaveBeenCalledWith({ itemId: "episode-1", kind: "intro" });
+    expect(mocks.useRedetectItemMarkers).toHaveBeenCalledWith({ introFallback: true });
 
     mocks.useAuth.mockReturnValue({ user: null });
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
-    expect(mocks.capturedActionBarProps.value?.onRedetectIntro).toBeUndefined();
+    renderEpisode();
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
+  });
+
+  it.each([["a node without redetect_markers", { data: { movie_credits: true } }]])(
+    "keeps intro-only re-detection for %s",
+    (_label, capability) => {
+      const redetectIntro = vi.fn();
+      const redetectMarkers = vi.fn();
+      mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+      mocks.useAdminMarkerCapabilities.mockReturnValue(capability);
+      mocks.useRedetectEpisodeIntro.mockReturnValue({ mutate: redetectIntro, isPending: false });
+      mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetectMarkers, isPending: false });
+
+      renderEpisode();
+
+      expect(mocks.capturedActionBarProps.value).toMatchObject({ redetectKind: "intro" });
+      const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+      (onRedetectMarkers as (kind: string) => void)("intro");
+      expect(redetectIntro).toHaveBeenCalledWith("episode-1");
+      expect(redetectMarkers).not.toHaveBeenCalled();
+    },
+  );
+
+  describe("pre-play audio choice", () => {
+    const tracks = [
+      {
+        language: "en",
+        codec: "eac3",
+        channels: 6,
+        layout: "5.1",
+        title: "English",
+        default: true,
+      },
+      { language: "ja", codec: "aac", channels: 2, layout: "stereo", embedded_title: "Japanese" },
+      { language: "und", codec: "ac3", channels: 2 },
+    ];
+    type AudioProps = {
+      audioSelectionMode: string;
+      explicitAudioTrackIndex: number | null;
+      onSelectAudioTrack: (index: number) => void;
+      onResetAudioSelection: () => void;
+      onSelectVersion: (version: FileVersion) => void;
+    };
+    const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
+
+    function stubWrites(respond: (call: number) => Promise<Response>) {
+      const requests: { method: string; path: string; body: unknown }[] = [];
+      const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+        requests.push({
+          method: init?.method ?? "GET",
+          path: new URL(String(url), "http://silo.test").pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return respond(requests.length);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return requests;
+    }
+
+    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+      render(
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+        >
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={makeEpisodeItem({ versions })} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    }
+
+    beforeEach(() => {
+      installPolicyStorageMocks();
+      setAccessToken("account");
+      setProfileId("profile-1");
+    });
+    afterEach(() => {
+      cleanup();
+      vi.unstubAllGlobals();
+    });
+
+    it("saves picks for the series and forgets them on Auto, in the order chosen", async () => {
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+      const requests = stubWrites(async (call) => {
+        if (call === 1) await firstHeld;
+        return new Response(null, { status: 204 });
+      });
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onResetAudioSelection());
+      act(() => actionBar().onSelectAudioTrack(2));
+      await waitFor(() => expect(requests).toHaveLength(1));
+      // Auto and the second pick wait for the first pick to land.
+      await act(async () => {});
+      expect(requests).toHaveLength(1);
+      releaseFirst();
+      await waitFor(() => expect(requests).toHaveLength(3));
+
+      expect(requests).toEqual([
+        {
+          method: "PUT",
+          path: "/api/v2/audio-prefs/series-1",
+          body: {
+            audio_track_index: 1,
+            audio_language: "ja",
+            track_signature: {
+              language: "ja",
+              embedded_title: "Japanese",
+              codec: "aac",
+              layout: "stereo",
+              channels: 2,
+            },
+          },
+        },
+        { method: "DELETE", path: "/api/v2/audio-prefs/series-1", body: undefined },
+        {
+          method: "PUT",
+          path: "/api/v2/audio-prefs/series-1",
+          // An undetermined track sets no series language.
+          body: {
+            audio_track_index: 2,
+            track_signature: { language: "und", codec: "ac3", channels: 2 },
+          },
+        },
+      ]);
+      expect(actionBar()).toMatchObject({
+        audioSelectionMode: "explicit",
+        explicitAudioTrackIndex: 2,
+      });
+    });
+
+    it("puts the selector back when a pick is not saved", async () => {
+      stubWrites(async () =>
+        jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      expect(actionBar()).toMatchObject({
+        audioSelectionMode: "explicit",
+        explicitAudioTrackIndex: 1,
+      });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+
+    it("does not roll a failed pick back to another version's saved track", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const first = makeFileVersion({ file_id: 1, audio_tracks: tracks });
+      const second = makeFileVersion({ file_id: 2, audio_tracks: tracks });
+      renderWithTracks([first, second]);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(actionBar()).toMatchObject({ explicitAudioTrackIndex: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      act(() => actionBar().onSelectVersion(second));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+
+    it("keeps a saved pick when a quicker later pick fails", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+    });
+
+    it("puts the selector back to the last saved choice when quick picks all fail", async () => {
+      stubWrites(async () =>
+        jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
   });
 });

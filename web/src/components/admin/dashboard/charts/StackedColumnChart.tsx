@@ -21,7 +21,9 @@ export interface StackedColumnChartProps {
   /**
    * Take the height of the parent instead of `height`, so the columns follow
    * the widget's row height. The marks are laid out in CSS rather than in a
-   * viewBox, so a taller box simply gives every column more room.
+   * viewBox, so a taller box simply gives every column more room. Below lg
+   * the rows are content-sized, and `.admin-chart-fill` in app.css keeps the
+   * plot at a fixed-height chart's 10rem instead.
    */
   fill?: boolean;
   formatValue?: (value: number) => string;
@@ -96,7 +98,7 @@ export function StackedColumnChart({
         }))}
       />
       <div
-        className={cn("relative", fill && "min-h-0 flex-1")}
+        className={cn("relative", fill && "admin-chart-fill")}
         style={fill ? undefined : { height }}
       >
         <div

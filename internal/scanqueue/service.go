@@ -138,22 +138,25 @@ func (s *Service) EnqueueScan(ctx context.Context, folderID int, mode, path, tri
 }
 
 func (s *Service) EnqueueScans(ctx context.Context, targets []scantrigger.Target) error {
-	_, _, err := s.enqueueScans(ctx, targets, nil)
+	_, err := s.enqueueScans(ctx, targets, nil)
 	return err
 }
 
-func (s *Service) EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+// EnqueueAutoscanScans enqueues targets linked to an autoscan event and
+// reports, per target and in order, which run covers it and whether that run
+// was created or an existing queued/running run for the same scope was reused.
+func (s *Service) EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error) {
 	return s.enqueueScans(ctx, targets, &eventID)
 }
 
-func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target, autoscanEventID *int64) (int, int, error) {
+func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target, autoscanEventID *int64) ([]scantrigger.EnqueueOutcome, error) {
 	if s == nil || s.repo == nil {
-		return 0, 0, fmt.Errorf("scan queue is not configured")
+		return nil, fmt.Errorf("scan queue is not configured")
 	}
 	inputs := make([]CreateInput, 0, len(targets))
 	for _, target := range targets {
 		if target.Folder == nil {
-			return 0, 0, fmt.Errorf("scan queue: target is missing folder")
+			return nil, fmt.Errorf("scan queue: target is missing folder")
 		}
 		inputs = append(inputs, CreateInput{
 			LibraryID:       target.Folder.ID,
@@ -165,19 +168,23 @@ func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target
 	}
 	runs, created, err := s.repo.CreateBatch(ctx, inputs)
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
-	createdCount := 0
-	reusedCount := 0
+	outcomes := make([]scantrigger.EnqueueOutcome, 0, len(runs))
 	for i, run := range runs {
-		if i < len(created) && created[i] {
-			createdCount++
-			s.publish(ctx, "scan.accepted", run)
-		} else {
-			reusedCount++
+		outcome := scantrigger.EnqueueOutcome{Created: i < len(created) && created[i]}
+		if run != nil {
+			outcome.RunID = run.ID
+			// coalesceIntoActive owes a running run's scope one follow-up scan
+			// for queue-claimed triggers; that scan, not this run, covers it.
+			outcome.FollowUp = !outcome.Created && run.Status == StatusRunning && !isDirectTrigger(targets[i].Trigger)
 		}
+		if outcome.Created {
+			s.publish(ctx, "scan.accepted", run)
+		}
+		outcomes = append(outcomes, outcome)
 	}
-	return createdCount, reusedCount, nil
+	return outcomes, nil
 }
 
 func (s *Service) CancelAcceptedByLibrary(ctx context.Context, libraryID int) (int, error) {
@@ -288,17 +295,16 @@ func (s *Service) requeueStale() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	staleBefore := time.Now().UTC().Add(-s.staleAfter)
 	// The two recoveries are independent: a failure to abandon stale direct runs
 	// must not disable requeueing of runs abandoned by a crashed queue worker.
-	if failed, err := s.repo.FailStaleDirect(ctx, staleBefore); err != nil {
+	if failed, err := s.repo.FailStaleDirect(ctx, s.staleAfter); err != nil {
 		slog.Warn("scan queue: failed to abandon stale direct runs", "error", err)
 	} else if failed > 0 {
 		workmetrics.Recovered("scan", int64(failed))
 		slog.Info("scan queue: failed abandoned direct runs", "count", failed)
 	}
 
-	requeued, err := s.repo.RequeueStaleRunning(ctx, staleBefore)
+	requeued, err := s.repo.RequeueStaleRunning(ctx, s.staleAfter)
 	if err != nil {
 		slog.Warn("scan queue: failed to requeue stale runs", "error", err)
 		return
@@ -365,19 +371,29 @@ func (s *Service) process(run *models.ScanRun) {
 	ctx = libraryingest.WithProgressReporter(ctx, progressReporter.Report)
 
 	heartbeatStop := make(chan struct{})
-	go s.heartbeatLoop(ctx, run.ID, heartbeatStop)
-	defer close(heartbeatStop)
+	go s.heartbeatLoop(ctx, run, cancel, heartbeatStop)
+	// The heartbeat stops before the run's terminal write, so it cannot take
+	// that write for a lost claim.
+	stopHeartbeat := sync.OnceFunc(func() { close(heartbeatStop) })
+	defer stopHeartbeat()
 
 	folder, err := s.folders.GetByID(ctx, run.MediaFolderID)
 	switch {
 	case errors.Is(err, catalog.ErrFolderNotFound):
-		observation.Finish(s.cancelRun(run.ID))
+		stopHeartbeat()
+		observation.Finish(s.cancelRun(run))
+		return
+	case err != nil && s.shuttingDown():
+		stopHeartbeat()
+		observation.Finish(s.requeueRun(run))
 		return
 	case err != nil:
-		observation.Finish(s.failRun(run.ID, fmt.Errorf("load library for scan: %w", err)))
+		stopHeartbeat()
+		observation.Finish(s.failRun(run, fmt.Errorf("load library for scan: %w", err)))
 		return
 	case folder == nil || !folder.Enabled:
-		observation.Finish(s.cancelRun(run.ID))
+		stopHeartbeat()
+		observation.Finish(s.cancelRun(run))
 		return
 	}
 
@@ -392,13 +408,16 @@ func (s *Service) process(run *models.ScanRun) {
 	default:
 		err = fmt.Errorf("unsupported scan mode %q", run.Mode)
 	}
+	stopHeartbeat()
 	switch {
+	case err != nil && s.shuttingDown():
+		observation.Finish(s.requeueRun(run))
 	case errors.Is(err, context.Canceled):
-		observation.Finish(s.cancelRun(run.ID))
+		observation.Finish(s.cancelRun(run))
 	case err != nil:
-		observation.Finish(s.failRun(run.ID, err))
+		observation.Finish(s.failRun(run, err))
 	default:
-		observation.Finish(s.completeRun(run.ID, result))
+		observation.Finish(s.completeRun(run, result))
 	}
 }
 
@@ -438,7 +457,7 @@ func (r *scanProgressReporter) Report(update libraryingest.ProgressUpdate) {
 	r.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	run, err := r.service.repo.UpdateProgress(ctx, r.run.ID, &current)
+	run, err := r.service.repo.UpdateProgress(ctx, r.run.ID, r.run.StartedAt, &current)
 	cancel()
 	if err != nil && !errors.Is(err, ErrScanRunNotFound) {
 		slog.Warn("scan queue: failed to persist scan progress", "scan_id", r.run.ID, "error", err)
@@ -481,7 +500,10 @@ func (s *Service) untrackRunning(runID string) {
 	delete(s.runningCancels, runID)
 }
 
-func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan struct{}) {
+// heartbeatLoop keeps the worker's claim on run alive. When the run is no
+// longer that claim, because an admin canceled it on any replica or it was
+// requeued as stale, it stops the scan through stopScan.
+func (s *Service) heartbeatLoop(ctx context.Context, run *models.ScanRun, stopScan context.CancelFunc, stop <-chan struct{}) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 
@@ -493,40 +515,107 @@ func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan s
 			return
 		case <-ticker.C:
 			touchCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			err := s.repo.TouchHeartbeat(touchCtx, runID)
+			err := s.repo.TouchHeartbeat(touchCtx, run.ID, run.StartedAt)
 			cancel()
-			if err != nil && !errors.Is(err, ErrScanRunNotFound) {
-				slog.WarnContext(ctx, "scan queue: failed to touch heartbeat", "component", "scanqueue", "scan_id", runID, "error", err)
+			if errors.Is(err, ErrScanRunNotFound) {
+				select {
+				case <-stop:
+					// The worker's own terminal write ended the claim.
+					return
+				default:
+				}
+				slog.InfoContext(ctx, "scan queue: stopping scan whose run was canceled or requeued", "component", "scanqueue", "scan_id", run.ID)
+				stopScan()
+				return
+			}
+			if err != nil {
+				slog.WarnContext(ctx, "scan queue: failed to touch heartbeat", "component", "scanqueue", "scan_id", run.ID, "error", err)
 			}
 		}
 	}
 }
 
-func (s *Service) cancelRun(runID string) string {
+func (s *Service) cancelRun(claimed *models.ScanRun) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, changed, err := s.repo.MarkCancelled(ctx, runID)
+	run, err := s.repo.CancelClaim(ctx, claimed.ID, claimed.StartedAt)
+	if errors.Is(err, ErrScanRunNotFound) {
+		return s.claimLost(ctx, claimed)
+	}
 	if err != nil {
-		slog.Warn("scan queue: failed to mark cancelled", "scan_id", runID, "error", err)
+		slog.Warn("scan queue: failed to mark canceled", "scan_id", claimed.ID, "error", err)
 		return scanRunUnknown
 	}
-	if changed {
-		s.publish(context.Background(), "scan.cancelled", run)
+	s.publish(context.Background(), "scan.cancelled", run)
+	return run.Status
+}
+
+// claimLost ends an attempt whose terminal write found the run no longer
+// running under its claim: an admin canceled it, it was requeued as stale and
+// perhaps claimed again, or its library was deleted. The run belongs to that
+// cancel or claim, so nothing is published.
+func (s *Service) claimLost(ctx context.Context, claimed *models.ScanRun) string {
+	slog.InfoContext(ctx, "scan queue: leaving a run that is no longer this worker's claim",
+		"scan_id", claimed.ID,
+		"library_id", claimed.MediaFolderID,
+	)
+	run, err := s.repo.GetByID(ctx, claimed.ID)
+	if err != nil {
+		return scanRunUnknown
 	}
-	if run == nil {
+	return claimOutcome(run, claimed)
+}
+
+// claimOutcome is an attempt's outcome from its run's current row: the run's
+// status while it still carries the attempt's claim, for example after an
+// admin cancel, and unknown once it was requeued or claimed again.
+func claimOutcome(run, claimed *models.ScanRun) string {
+	if run == nil || run.StartedAt == nil || claimed.StartedAt == nil || !run.StartedAt.Equal(*claimed.StartedAt) {
 		return scanRunUnknown
 	}
 	return run.Status
 }
 
-func (s *Service) failRun(runID string, runErr error) string {
+// shuttingDown reports whether the process is stopping. Shutdown cancels every
+// running scan through the app context, so a run that ends with an error
+// after that was cut short, not stopped by a cancel or a failure of its own.
+func (s *Service) shuttingDown() bool {
+	return s.appCtx.Err() != nil
+}
+
+// requeueRun returns a run interrupted by shutdown to the queue, with its owed
+// follow-up, so the next process (or another replica) scans it again. Ending it
+// there would lose it for good: the stale-run requeue only revives
+// running rows, and only a finished run enqueues its follow-up. If the write
+// does not land before the process exits, the row stays running and the
+// stale-run requeue recovers it instead.
+func (s *Service) requeueRun(claimed *models.ScanRun) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, followUp, err := s.repo.FailWithFollowUp(ctx, runID, errString(runErr))
+	run, changed, err := s.repo.Requeue(ctx, claimed.ID, claimed.StartedAt)
 	if err != nil {
-		slog.Warn("scan queue: failed to mark failed", "scan_id", runID, "error", err)
+		slog.Warn("scan queue: failed to requeue scan interrupted by shutdown", "scan_id", claimed.ID, "error", err)
+		return scanRunUnknown
+	}
+	if changed {
+		slog.Info("scan queue: requeued scan interrupted by shutdown", "scan_id", run.ID, "library_id", run.MediaFolderID)
+		s.publish(context.Background(), "scan.accepted", run)
+	}
+	return claimOutcome(run, claimed)
+}
+
+func (s *Service) failRun(claimed *models.ScanRun, runErr error) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	run, followUp, err := s.repo.FailWithFollowUp(ctx, claimed.ID, claimed.StartedAt, errString(runErr))
+	if errors.Is(err, ErrScanRunNotFound) {
+		return s.claimLost(ctx, claimed)
+	}
+	if err != nil {
+		slog.Warn("scan queue: failed to mark failed", "scan_id", claimed.ID, "error", err)
 		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.failed", run)
@@ -554,13 +643,16 @@ func (s *Service) publishFollowUp(finished, followUp *models.ScanRun) {
 	s.publish(context.Background(), "scan.accepted", followUp)
 }
 
-func (s *Service) completeRun(runID string, result *libraryingest.Result) string {
+func (s *Service) completeRun(claimed *models.ScanRun, result *libraryingest.Result) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, followUp, err := s.repo.CompleteWithFollowUp(ctx, runID, scanResultFromIngest(result))
+	run, followUp, err := s.repo.CompleteWithFollowUp(ctx, claimed.ID, claimed.StartedAt, scanResultFromIngest(result))
+	if errors.Is(err, ErrScanRunNotFound) {
+		return s.claimLost(ctx, claimed)
+	}
 	if err != nil {
-		slog.Warn("scan queue: failed to mark completed", "scan_id", runID, "error", err)
+		slog.Warn("scan queue: failed to mark completed", "scan_id", claimed.ID, "error", err)
 		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.completed", run)
@@ -612,9 +704,6 @@ func scanResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		resp.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New

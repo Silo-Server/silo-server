@@ -1,0 +1,23 @@
+{
+  "server_enabled": true,
+  "libraries": [
+    {
+      "library_id": "1",
+      "enabled": true,
+      "state": "monitoring",
+      "backend": "inotify",
+      "detail": "",
+      "directories": 4812,
+      "node_id": "node-a",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "library_id": "2",
+      "enabled": true,
+      "state": "not_reporting",
+      "backend": "",
+      "detail": "No server node can see this library's folders",
+      "directories": 0
+    }
+  ]
+}

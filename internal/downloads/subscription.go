@@ -48,6 +48,7 @@ type Subscription struct {
 	TargetSeason    *int   // latest season at subscribe time when Mode == SubModeLatestSeason
 	DeleteWatched   bool   // client-enforced: delete episodes once watched
 	MaxStorageBytes int64  // 0 = unlimited; client-enforced, server soft-gates auto-registration
+	Quality         string // download quality preset for registered episodes (Quality* constants)
 	Active          bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -118,6 +119,7 @@ type SubscriptionRequest struct {
 	SeasonNumbers   []int
 	DeleteWatched   bool
 	MaxStorageBytes int64
+	Quality         string // "" defaults to original
 	ProfileID       string
 	DeviceID        string
 	DeviceName      string
@@ -131,5 +133,6 @@ type SubscriptionPatch struct {
 	SeasonNumbers   *[]int
 	DeleteWatched   *bool
 	MaxStorageBytes *int64
+	Quality         *string
 	Active          *bool
 }

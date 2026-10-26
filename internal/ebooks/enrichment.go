@@ -35,11 +35,6 @@ const (
 	defaultEnrichmentItemTimeout = 2 * time.Minute
 )
 
-// errEnrichmentSkipped preserves the direct helper contract for an item that
-// cannot be attempted. Queue-backed runs record a short skipped horizon instead
-// of counting the missing prerequisite as a provider failure.
-var errEnrichmentSkipped = errors.New("ebook enrichment skipped")
-
 type enrichmentClaimCheck func(context.Context) error
 
 type enrichmentClaimCheckContextKey struct{}
@@ -509,69 +504,6 @@ func (e *Enricher) discardJob(queue enrichmentQueue, job EnrichmentJob) error {
 	return queue.Discard(discardCtx, job)
 }
 
-func (e *Enricher) runBatch(
-	ctx context.Context,
-	items []enrichmentItemRow,
-	enrichFn func(context.Context, enrichmentItemRow) error,
-	recordFailure func(context.Context, enrichmentItemRow),
-) int {
-	workers := e.workers
-	if workers <= 0 {
-		workers = 1
-	}
-	if workers > len(items) {
-		workers = len(items)
-	}
-
-	ch := make(chan enrichmentItemRow, workers)
-	var (
-		wg       sync.WaitGroup
-		enriched int64
-	)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range ch {
-				if ctx.Err() != nil {
-					continue
-				}
-				if err := enrichFn(ctx, item); err != nil {
-					if errors.Is(err, errEnrichmentSkipped) {
-						slog.DebugContext(ctx, "ebook enrichment: item skipped", "component", "ebooks",
-							"content_id", item.ContentID,
-							"title", item.Title,
-							"reason", err,
-						)
-						continue
-					}
-					slog.WarnContext(ctx, "ebook enrichment: item failed", "component", "ebooks",
-						"content_id", item.ContentID,
-						"title", item.Title,
-						"error", err,
-					)
-					// A cancelled sweep says nothing about the item itself,
-					// so it does not count against the failure cap.
-					if recordFailure != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-						recordFailure(ctx, item)
-					}
-					continue
-				}
-				atomic.AddInt64(&enriched, 1)
-			}
-		}()
-	}
-	for _, item := range items {
-		if ctx.Err() != nil {
-			break
-		}
-		ch <- item
-	}
-	close(ch)
-	wg.Wait()
-	return int(enriched)
-}
-
 var loadEnrichmentItemsQuery = `
 	SELECT
 		mi.content_id,
@@ -693,14 +625,6 @@ func (e *Enricher) loadProviderIDs(
 	return nil
 }
 
-func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error {
-	outcome, err := e.enrichClaimedItem(ctx, item)
-	if err == nil && outcome == EnrichmentOutcomeSkipped {
-		return fmt.Errorf("%w: item %s is not ready", errEnrichmentSkipped, item.ContentID)
-	}
-	return err
-}
-
 func (e *Enricher) enrichClaimedItem(ctx context.Context, item enrichmentItemRow) (EnrichmentOutcome, error) {
 	if item.FolderID == 0 {
 		// The scanner inserts the library membership after the item upsert, so
@@ -757,22 +681,6 @@ func ebookMissingMetadataFields(item enrichmentItemRow) []string {
 		missing = append(missing, "cover")
 	}
 	return missing
-}
-
-// enrichWithProviders runs the provider chain for one claimed item. Outcomes:
-//   - metadata obtained: persist it and stamp last_refreshed (nil error);
-//   - providers answered but nothing matched: stamp last_refreshed so the
-//     item is not re-claimed every sweep (nil error);
-//   - one or more providers errored and no metadata was obtained: return an
-//     error so durable queue backoff engages, without stamping;
-//   - no providers configured: skip (no stamp, no failure) so the item is
-//     retried once a chain exists.
-func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) error {
-	outcome, err := e.enrichWithProvidersOutcome(ctx, item, providers)
-	if err == nil && outcome == EnrichmentOutcomeSkipped {
-		return fmt.Errorf("%w: no metadata providers configured for folder %d", errEnrichmentSkipped, item.FolderID)
-	}
-	return err
 }
 
 func (e *Enricher) enrichWithProvidersOutcome(

@@ -7,7 +7,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const postgresCursorConfig = "postgres-relevance-v1"
+// postgresCursorConfig names the meaning of the relevance keys a cursor
+// carries. Change it whenever a key's meaning changes, so a cursor issued
+// before the change is rejected rather than seeking with keys it cannot match.
+const postgresCursorConfig = "postgres-relevance-v2"
 
 func (p *PostgresSearchProvider) searchCursorPage(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
 	options := SearchCursorOptions{Definition: req.Definition, GroupByWork: req.GroupByWork}

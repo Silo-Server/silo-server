@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/subtitles/subsync"
 )
 
 type SubtitleReadService interface {
@@ -19,12 +20,17 @@ type StoredSubtitle struct {
 	ID              ID      `json:"id"`
 	MediaFileID     ID      `json:"media_file_id"`
 	Provider        string  `json:"provider"`
-	Language        string  `json:"language"`
+	Language        string  `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty when the stored value is not a recognizable language"`
 	Format          string  `json:"format"`
 	ReleaseName     string  `json:"release_name"`
 	Score           float64 `json:"score"`
 	HearingImpaired bool    `json:"hearing_impaired"`
 	CreatedAt       Instant `json:"created_at"`
+	// Timing is the correction delivery applies to the stored bytes.
+	Timing SubtitleTiming `json:"timing"`
+	// Sync is the subtitle's latest sync job; absent when it has none or the
+	// server does not sync subtitles.
+	Sync *SubtitleSyncJob `json:"sync,omitempty"`
 }
 
 type StoredSubtitles struct {
@@ -38,7 +44,7 @@ type StoredSubtitlesInput struct {
 type SubtitleSearchResult struct {
 	ID              ID       `json:"id"`
 	Provider        string   `json:"provider"`
-	Language        string   `json:"language"`
+	Language        string   `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)"`
 	ReleaseName     string   `json:"release_name"`
 	Format          string   `json:"format"`
 	Score           float64  `json:"score"`
@@ -53,14 +59,14 @@ type SubtitleSearchResults struct {
 }
 type SubtitleSearchBody struct {
 	MediaFileID ID       `json:"media_file_id"`
-	Languages   []string `json:"languages" maxItems:"100"`
+	Languages   []string `json:"languages" maxItems:"100" doc:"BCP 47 tags or ISO 639 codes, any case; recognized English language names are also accepted"`
 }
 type SubtitleSearchInput struct{ Body SubtitleSearchBody }
 type SubtitleSearchOutput struct{ Body SubtitleSearchResults }
 
 func registerSubtitleReads(reg *Registry) {
 	op := func(method, path, id string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+path, id, "subtitles", "Read subtitles for an accessible media file."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+		return Operation{Operation: humaOp(method, Prefix+path, id, "subtitles", "Read subtitles for an accessible media file."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	}
 	Register(reg, op(http.MethodGet, "/subtitles/{media_file_id}", "listStoredSubtitles"), func(ctx context.Context, in *StoredSubtitlesInput) (*StoredSubtitlesOutput, error) {
 		id, p := in.MediaFileID.positive("path.media_file_id")
@@ -75,14 +81,13 @@ func registerSubtitleReads(reg *Registry) {
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
-		out := StoredSubtitles{Subtitles: make([]StoredSubtitle, 0, len(rows))}
+		visible := make([]subtitles.DownloadedSubtitle, 0, len(rows))
 		for _, row := range rows {
-			if _, ok := subtitles.CanonicalProviderLanguage(row.Provider, row.Language); !ok {
-				continue
+			if _, ok := subtitles.CanonicalProviderLanguage(row.Provider, row.Language); ok {
+				visible = append(visible, row)
 			}
-			out.Subtitles = append(out.Subtitles, storedSubtitleView(row))
 		}
-		return &StoredSubtitlesOutput{Body: out}, nil
+		return &StoredSubtitlesOutput{Body: StoredSubtitles{Subtitles: reg.storedSubtitleViews(ctx, visible)}}, nil
 	})
 	search := op(http.MethodPost, "/subtitles/search", "searchSubtitles")
 	search.RetrySafety = RetrySafetyNaturalIdempotent
@@ -118,8 +123,9 @@ func registerSubtitleReads(reg *Registry) {
 			}
 			out.Results = append(out.Results, result)
 		}
-		// Provider errors can contain credential-bearing upstream URLs. The
-		// bridge preserves its old warnings; v2 exposes only a bounded summary.
+		// Provider errors can contain credential-bearing upstream URLs, so the
+		// manager reports each failed provider by name only; v2 goes further and
+		// exposes one bounded summary.
 		if len(view.Warnings) > 0 {
 			out.Warnings = append(out.Warnings, "One or more subtitle providers could not complete the search.")
 		}
@@ -140,5 +146,29 @@ func (reg *Registry) subtitleReadAccess(ctx context.Context) (catalogpkg.AccessF
 
 func storedSubtitleView(row subtitles.DownloadedSubtitle) StoredSubtitle {
 	language, _ := subtitles.CanonicalProviderLanguage(row.Provider, row.Language)
-	return StoredSubtitle{ID: ID(strconv.Itoa(row.ID)), MediaFileID: ID(strconv.Itoa(row.MediaFileID)), Provider: row.Provider, Language: language, Format: string(row.Format), ReleaseName: row.ReleaseName, Score: row.Score, HearingImpaired: row.HearingImpaired, CreatedAt: NewInstant(row.CreatedAt)}
+	return StoredSubtitle{ID: ID(strconv.Itoa(row.ID)), MediaFileID: ID(strconv.Itoa(row.MediaFileID)), Provider: row.Provider, Language: language, Format: string(row.Format), ReleaseName: row.ReleaseName, Score: row.Score, HearingImpaired: row.HearingImpaired, CreatedAt: NewInstant(row.CreatedAt), Timing: subtitleTimingView(row.Timing)}
+}
+
+// storedSubtitleViews projects authorized rows with their latest sync jobs.
+func (reg *Registry) storedSubtitleViews(ctx context.Context, rows []subtitles.DownloadedSubtitle) []StoredSubtitle {
+	out := make([]StoredSubtitle, 0, len(rows))
+	var jobs map[int]*subsync.Job
+	if reg.deps.SubtitleSync != nil && len(rows) > 0 {
+		ids := make([]int, len(rows))
+		for i, row := range rows {
+			ids[i] = row.ID
+		}
+		jobs = reg.deps.SubtitleSync.SubtitleSyncJobs(ctx, ids)
+	}
+	for _, row := range rows {
+		view := storedSubtitleView(row)
+		view.Sync = subtitleSyncJobView(jobs[row.ID])
+		out = append(out, view)
+	}
+	return out
+}
+
+// storedSubtitleWithSync projects one authorized row with its sync job.
+func (reg *Registry) storedSubtitleWithSync(ctx context.Context, row subtitles.DownloadedSubtitle) StoredSubtitle {
+	return reg.storedSubtitleViews(ctx, []subtitles.DownloadedSubtitle{row})[0]
 }

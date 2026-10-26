@@ -16,6 +16,7 @@ type targetRefreshProvider struct {
 	seasons          []SeasonResult
 	episodesBySeason map[int][]EpisodeResult
 	episodeRequests  []int
+	lastEpisodesReq  EpisodesRequest
 }
 
 func (p *targetRefreshProvider) Slug() string {
@@ -39,6 +40,7 @@ func (p *targetRefreshProvider) GetSeasons(context.Context, SeasonsRequest) ([]S
 
 func (p *targetRefreshProvider) GetEpisodes(_ context.Context, req EpisodesRequest) ([]EpisodeResult, error) {
 	p.episodeRequests = append(p.episodeRequests, req.SeasonNumber)
+	p.lastEpisodesReq = req
 	return append([]EpisodeResult(nil), p.episodesBySeason[req.SeasonNumber]...), nil
 }
 
@@ -114,7 +116,7 @@ func TestResolveSeriesRefreshProviderIDsUsesStaleSuppressedSelectionIdentity(t *
 	})
 	h.service.staleIDRepo = staleRepo
 
-	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en")
+	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false)
 	if err != nil {
 		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
 	}
@@ -207,5 +209,31 @@ func TestRefreshScheduledTargetSeasonPersistsSeasonScope(t *testing.T) {
 		if episode.Overview != wantOverview {
 			t.Fatalf("S05E%02d overview = %q, want %q", episodeNumber, episode.Overview, wantOverview)
 		}
+	}
+}
+
+// When the series' local files name another show, a single season or episode
+// refresh leaves the local provider out of the series ID resolution too, not
+// only out of the season and episode fetches.
+func TestResolveSeriesRefreshProviderIDsSkipsLocalSearchWhenAsked(t *testing.T) {
+	remote := &targetRefreshProvider{slug: contentid.ProviderTMDB}
+	h, seriesID, _, _ := seedTargetRefreshHarness(remote)
+	local := &localHintStubProvider{searchResults: []SearchResult{{
+		Name: "Other Show", Provider: "nfo", ProviderIDs: map[string]string{contentid.ProviderTMDB: "99999"},
+	}}}
+	h.service.chainCache["0:series"] = chainCacheEntry{providers: []Provider{local, remote}, expiresAt: time.Now().Add(time.Hour)}
+	series := h.itemRepo.items[seriesID]
+
+	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", true); err != nil {
+		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
+	}
+	if local.searchCalls != 0 {
+		t.Errorf("local provider searched %d times, want none", local.searchCalls)
+	}
+	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false); err != nil {
+		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
+	}
+	if local.searchCalls != 1 {
+		t.Errorf("local provider searched %d times without a conflict, want 1", local.searchCalls)
 	}
 }

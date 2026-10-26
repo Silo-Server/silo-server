@@ -36,8 +36,8 @@ func TestPolicyActingAdminMiddlewareParity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			legacy := captureActingAdminResponse(RequireActingAdmin(test.check), test.claims, test.profileID)
-			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, test.check), test.claims, test.profileID)
+			legacy := captureActingAdminResponse(RequireActingAdmin(test.check, nil), test.claims, test.profileID)
+			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, test.check, nil), test.claims, test.profileID)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}
@@ -91,6 +91,7 @@ func TestPolicyMetadataCurationMiddlewareParity(t *testing.T) {
 					fakePermissionUserLoader{user: test.user, err: test.userErr},
 					fakeTargetLibraryResolver{ids: test.targetIDs, err: test.targetErr},
 					test.check,
+					nil,
 				),
 				test.claims,
 				test.profileID,
@@ -101,6 +102,7 @@ func TestPolicyMetadataCurationMiddlewareParity(t *testing.T) {
 					fakePermissionUserLoader{user: test.user, err: test.userErr},
 					fakeTargetLibraryResolver{ids: test.targetIDs, err: test.targetErr},
 					test.check,
+					nil,
 					pdp,
 				),
 				test.claims,
@@ -112,9 +114,57 @@ func TestPolicyMetadataCurationMiddlewareParity(t *testing.T) {
 	}
 }
 
+func TestCurationScopeCarriesPolicyIntoTransactions(t *testing.T) {
+	for _, mode := range []string{"delegated", "non-primary-admin", "acting-admin", "unrestricted"} {
+		t.Run(mode, func(t *testing.T) {
+			role := "user"
+			if mode == "non-primary-admin" || mode == "acting-admin" {
+				role = "admin"
+			}
+			user := &models.User{ID: 7, Role: role, Enabled: true, LibraryIDs: []int{1}, Permissions: []string{policy.PermissionMetadataCuration}}
+			if mode == "unrestricted" {
+				user.LibraryIDs = nil
+			}
+			for _, legacy := range []bool{false, true} {
+				var gate metadataCurationGate = NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: user}, fakeTargetLibraryResolver{ids: []int{1}}, primaryChecker(false, true, nil), nil, newMiddlewarePolicyPDP(t))
+				if legacy {
+					gate = NewPermissionMiddleware(fakePermissionUserLoader{user: user}, fakeTargetLibraryResolver{ids: []int{1}}, primaryChecker(false, true, nil), nil)
+				}
+				next := gate.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assertCurationAuthority(t, context.WithoutCancel(r.Context()), mode, legacy)
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				req := requestWithItemID(role)
+				if mode == "non-primary-admin" {
+					req.Header.Set("X-Profile-Id", "synthetic-child")
+				}
+				rec := httptest.NewRecorder()
+				next.ServeHTTP(rec, req)
+				if rec.Code != http.StatusNoContent {
+					t.Fatalf("legacy=%v gate status=%d", legacy, rec.Code)
+				}
+			}
+		})
+	}
+}
+
+func assertCurationAuthority(t *testing.T, ctx context.Context, mode string, legacy bool) {
+	t.Helper()
+	if !access.HasMetadataCurationAuthorizer(ctx) {
+		t.Fatal("gate did not carry curation authority")
+	}
+	for _, libraries := range [][]int{{1}, {1, 2}, {}} {
+		err := access.AuthorizeMetadataCurationLibraries(ctx, libraries)
+		allowed := mode == "acting-admin" || len(libraries) > 0 && (mode == "unrestricted" || len(libraries) == 1)
+		if allowed && err != nil || !allowed && !errors.Is(err, access.ErrMetadataCurationScope) {
+			t.Fatalf("legacy=%v libraries=%v allowed=%v err=%v", legacy, libraries, allowed, err)
+		}
+	}
+}
+
 func TestPolicyActingAdminMiddlewareEvalErrorIsInternal(t *testing.T) {
 	rec := captureActingAdminResponse(
-		NewPolicyActingAdminMiddleware(errorPermissionDecider{}, nil),
+		NewPolicyActingAdminMiddleware(errorPermissionDecider{}, nil, nil),
 		adminClaims(),
 		"",
 	)
@@ -137,6 +187,7 @@ func TestPolicyMetadataCurationMiddlewareAppliesGroupPermissionMask(t *testing.T
 		NewPolicyPermissionMiddleware(
 			fakePermissionUserLoader{user: user},
 			fakeTargetLibraryResolver{ids: []int{1}},
+			nil,
 			nil,
 			newMiddlewarePolicyPDP(t),
 			middlewareGroupProvider{group: &access.GroupPolicy{
@@ -186,6 +237,7 @@ func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
 					fakePermissionUserLoader{user: test.user, err: test.userErr},
 					nil,
 					nil,
+					nil,
 				),
 				test.claims,
 			)
@@ -194,12 +246,37 @@ func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
 					fakePermissionUserLoader{user: test.user, err: test.userErr},
 					nil,
 					nil,
+					nil,
 					pdp,
 				),
 				test.claims,
 			)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
+	}
+}
+
+// The marker_edit decision reads no household fact, so a failing household
+// lookup must not turn a profile-less admin's marker write into a 500 that the
+// legacy gate would have let through.
+func TestPolicyMarkerEditMiddlewareSkipsHouseholdLookup(t *testing.T) {
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true}
+	household := func(context.Context, int) (bool, error) {
+		t.Fatal("marker edit must not look up the household")
+		return false, errors.New("unreachable")
+	}
+	rec := captureMarkerEditResponse(
+		NewPolicyPermissionMiddleware(
+			fakePermissionUserLoader{user: admin},
+			nil,
+			nil,
+			household,
+			newMiddlewarePolicyPDP(t),
+		),
+		adminClaims(),
+	)
+	if rec.code != http.StatusNoContent {
+		t.Fatalf("status = %d body = %s, want %d", rec.code, rec.body, http.StatusNoContent)
 	}
 }
 
@@ -215,6 +292,7 @@ func TestPolicyMarkerEditMiddlewareAppliesGroupPermissionMask(t *testing.T) {
 	rec := captureMarkerEditResponse(
 		NewPolicyPermissionMiddleware(
 			fakePermissionUserLoader{user: user},
+			nil,
 			nil,
 			nil,
 			newMiddlewarePolicyPDP(t),
@@ -237,6 +315,7 @@ func TestPolicyMarkerEditMiddlewareEvalErrorIsInternal(t *testing.T) {
 	rec := captureMarkerEditResponse(
 		NewPolicyPermissionMiddleware(
 			fakePermissionUserLoader{user: user},
+			nil,
 			nil,
 			nil,
 			errorPermissionDecider{},

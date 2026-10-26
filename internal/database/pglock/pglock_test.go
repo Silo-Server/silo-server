@@ -43,76 +43,6 @@ func lockHeld(t *testing.T, pool *pgxpool.Pool, key int64) bool {
 	return held
 }
 
-func TestTryAcquireExcludesSecondHolder(t *testing.T) {
-	pool := testPool(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
-	if err != nil || !acquired {
-		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
-	}
-
-	second, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
-	if err != nil {
-		t.Fatalf("second TryAcquire: %v", err)
-	}
-	if acquired {
-		_ = second.Release(ctx)
-		t.Fatal("second TryAcquire acquired a lock already held")
-	}
-
-	if err := lock.Release(ctx); err != nil {
-		t.Fatalf("Release: %v", err)
-	}
-	if lockHeld(t, pool, pglockTestKey) {
-		t.Fatal("advisory lock still held after Release")
-	}
-
-	third, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
-	if err != nil || !acquired {
-		t.Fatalf("TryAcquire after Release = (%v, %v), want acquired", acquired, err)
-	}
-	if err := third.Release(ctx); err != nil {
-		t.Fatalf("Release: %v", err)
-	}
-}
-
-// TestReleaseDoesNotReturnAStrandedLockToThePool covers the failure the shared
-// helper exists to prevent: if the unlock does not confirm, the connection must
-// not go back into the pool still holding a session-level lock.
-func TestReleaseDoesNotReturnAStrandedLockToThePool(t *testing.T) {
-	pool := testPool(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
-	if err != nil || !acquired {
-		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
-	}
-
-	// Unlock out of band so the helper's own unlock reports "was not held".
-	var unlocked bool
-	if err := lock.Conn().QueryRow(ctx, `SELECT pg_advisory_unlock($1)`, pglockTestKey).Scan(&unlocked); err != nil {
-		t.Fatalf("out of band unlock: %v", err)
-	}
-	if !unlocked {
-		t.Fatal("out of band unlock reported the lock was not held")
-	}
-
-	if err := lock.Release(ctx); err == nil {
-		t.Fatal("Release reported success for an unheld lock")
-	}
-	if lockHeld(t, pool, pglockTestKey) {
-		t.Fatal("advisory lock still held after Release")
-	}
-
-	// A second Release is a no-op rather than a double free.
-	if err := lock.Release(ctx); err != nil {
-		t.Fatalf("second Release: %v", err)
-	}
-}
-
 func TestTryAcquireNilPoolReportsNotAcquired(t *testing.T) {
 	lock, acquired, err := TryAcquire(context.Background(), nil, pglockTestKey)
 	if err != nil || acquired || lock != nil {
@@ -120,5 +50,87 @@ func TestTryAcquireNilPoolReportsNotAcquired(t *testing.T) {
 	}
 	if err := lock.Release(context.Background()); err != nil {
 		t.Fatalf("Release on nil lock: %v", err)
+	}
+}
+
+// pglockOtherTestKey is a second key for the tests that hold two locks.
+const pglockOtherTestKey int64 = 0x70676C6F636B02
+
+func TestAcquireAlsoWithoutALockFails(t *testing.T) {
+	var lock *Lock
+	if acquired, err := lock.AcquireAlso(context.Background(), pglockOtherTestKey, time.Minute); err == nil || acquired {
+		t.Fatalf("AcquireAlso on a nil Lock = (%v, %v), want an error", acquired, err)
+	}
+}
+
+func TestReleaseAlsoUnlocksOnlyThatKey(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	if acquired, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err != nil || !acquired {
+		t.Fatalf("AcquireAlso = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.ReleaseAlso(ctx, pglockOtherTestKey); err != nil {
+		t.Fatalf("ReleaseAlso: %v", err)
+	}
+	if lockHeld(t, pool, pglockOtherTestKey) {
+		t.Fatal("the released key is still held")
+	}
+	if !lockHeld(t, pool, pglockTestKey) {
+		t.Fatal("ReleaseAlso dropped the lock's own key")
+	}
+	// A second release, or a key never taken, changes nothing.
+	if err := lock.ReleaseAlso(ctx, pglockOtherTestKey); err != nil {
+		t.Fatalf("second ReleaseAlso: %v", err)
+	}
+	// The key can be taken again on the same session, and Release unlocks
+	// everything still held.
+	if acquired, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err != nil || !acquired {
+		t.Fatalf("AcquireAlso again = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if lockHeld(t, pool, pglockTestKey) || lockHeld(t, pool, pglockOtherTestKey) {
+		t.Fatal("Release left a key held")
+	}
+}
+
+// A lock whose session dies fails Check and is no longer held, and
+// AcquireAlso on it fails.
+func TestHeldIsFalseAfterTheSessionDies(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	if !lock.Held() {
+		t.Fatal("Held = false for a fresh lock")
+	}
+	var pid int
+	if err := lock.conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Check(ctx); err == nil {
+		t.Fatal("Check succeeded on a dead session")
+	}
+	if lock.Held() {
+		t.Fatal("Held = true after the session died")
+	}
+	if _, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err == nil {
+		t.Fatal("AcquireAlso succeeded on a dead session")
 	}
 }

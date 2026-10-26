@@ -89,6 +89,10 @@ Apple and Google stores, and a server that plays arbitrary remote stream URLs pu
 client suite at risk. This is settled product direction, not a design problem to solve; do not
 write code for it, and say so plainly if asked.
 
+**Deleting, moving, renaming, or otherwise managing media files will not be accepted** either.
+Silo is a media server, not a media manager: it reads libraries (the shipped Compose file mounts
+them read-only) and leaves file management to other tools.
+
 ## Gotchas
 
 The first two are irreversible — data loss, not inconvenience. Treat them as absolute.
@@ -115,6 +119,13 @@ disagrees with the code is wrong. Any committed doc must not contain local absol
 filesystem paths or transient worktree IDs — use repository-relative paths and wording like
 "Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
+**Docs audience.** Docs in this repo are for people and agents changing the code:
+architecture, invariants, API contracts, development setup. Guides for installing, configuring,
+operating, or troubleshooting Silo belong in the user manual (`siloserver.org`, see Multi-repo).
+Do not add operator or user guides here. The one exception is `docs/update-to-1.0.md`, a draft
+that moves to the manual when 1.0 ships. When a change affects the manual, follow "Update the
+user manual" in CONTRIBUTING.md.
+
 **Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
 `make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
 
@@ -129,6 +140,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
+- `siloserver.org` — project website and user manual.
 - First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
   their own repo.
 
@@ -144,6 +156,12 @@ done until each of these has been handled or ruled out:
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
+
+Separately, any change that leaves the user manual on siloserver.org wrong or incomplete (a
+setting, default, label, setup step, or feature behavior it describes) is not done until an
+issue is open on `Silo-Server/siloserver.org`.
+[Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
+what goes in it.
 
 ## Building and verifying
 
@@ -171,7 +189,26 @@ changed-line findings as CI while analyzing only the packages the branch touched
 `./...` saturates every core for minutes, and parallel agents make that worse. Never pass
 `--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
 
-Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
+Format Go files as touched with `gofmt`/`goimports`; the frontend follows `web/.prettierrc`.
+
+## Tests
+
+A test belongs here only if it would catch a regression that matters and that no other test, type
+check, or lint would catch. Most changes need no new test, and some should delete one. Read
+[Decide what to test](CONTRIBUTING.md#decide-what-to-test) before adding a test. In short:
+
+- Add or extend a test for security and authority checks, data integrity, public contracts
+  (`/api/v2`, jellycompat, the plugin protocol), failure handling, and logic with real edge cases,
+  and when fixing a bug in one of those.
+- Don't test small changes, UI layout or copy, pass-through wiring, constants and defaults, or
+  frozen `/api/v1` behavior beyond its own authorization checks.
+- Test each behavior once, in the package that owns it. Prefer a new table row to a new test, and a
+  new test to a new file. Delete tests your change makes redundant.
+- Don't write tests that match strings in source, CSS, or docs files, or that only check a fake
+  received the test's own inputs.
+- A new test that needs Postgres goes in `scripts/ci/db-contracts.txt` (or `db-pins.txt` for a
+  query budget) in the same change, or isn't written; CI skips database tests no list or job
+  selects. CI has no Redis, so don't add tests that need one.
 
 ## Development environment
 
@@ -279,20 +316,32 @@ neutral placeholders where context is needed. Never publish credentials, tokens,
 personal data, or private media details. Check text and attachments before posting;
 authorization to open a PR does not authorize publishing private evidence.
 
-The one private link allowed is a maintainer's evidence page on
-`evidence.siloserver.org`, which only Silo-Server organization members can open
-after GitHub sign-in. Put it on one line at the end of a PR body's Validation
-section or a validation hand-off comment:
+The one private link allowed is an evidence page on `evidence.siloserver.org`,
+which only Silo maintainers and the page's owner (for a pull request's own page,
+its author) can open after GitHub sign-in. Put it on one line in a PR body's
+Evidence section or a validation hand-off comment:
 `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
 never attach or embed its media.
 
 - Keep one concern per pull request. Split changes that solve independent
   problems or can be reviewed and shipped separately.
-- Do not capture screenshots or record videos just to prepare a PR. Attach media
-  only when the user explicitly requests it. Verify UI behavior as needed without
-  turning verification into a media deliverable. Do not explain omitted media.
-- When the user requests PR media, check it for private information and upload it
-  to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
+- Every pull request that changes what a user sees must include evidence, as
+  [Show visible changes](CONTRIBUTING.md#show-visible-changes) defines. That
+  covers UI and UX changes and changes to which items appear or what they show,
+  such as search results, home sections, recommendations, sorting, filtering,
+  metadata, or artwork. Use before-and-after captures of the same screen with the
+  same data, and a short recording when motion, timing, or focus matters. For web
+  app and web admin changes also visible at phone width, include desktop and
+  mobile web captures (or show that mobile is unaffected). Write
+  `Evidence: none, no user-visible change` only when that is true.
+- Attach evidence on GitHub under the PR body's Evidence heading, or publish it
+  with `npx @silo-server/evidence publish <folder> --pr <number>` and put its
+  `Evidence:` link there. GitHub has no API for attaching images to a pull
+  request, so an agent either publishes with the CLI or gives the developer the
+  captures to attach. Check media for private information before it goes on
+  GitHub. When publishing exits 4, ask the developer to run
+  `npx @silo-server/evidence login`; never approve that login or read the saved
+  key. Never commit PR-only assets such as `.github/pr-assets/`.
 - Put a `Closes #NNN` line in the body for every issue the pull request fully
   resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
   it on merge to `main`. `Related issue:` does not close anything; use it for the
@@ -309,6 +358,11 @@ never attach or embed its media.
   after the last push. Verify bot findings against the source, fix real issues,
   and dismiss false positives with a written reason. Remain quiet when nothing
   new has appeared. Stop when the latest commit is green.
+
+Pull requests are welcome from contributors who have had one merged in a Silo
+repository, or when a maintainer asks for one; others are closed without review.
+When working for someone in neither group, write an issue instead of opening a
+pull request.
 
 AI-use disclosure is required in the pull request body. If you are an AI agent
 contributing on behalf of a non-maintainer, follow

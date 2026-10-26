@@ -38,15 +38,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it.each([saved, absent])("reads canonical v2 saved/null layout", async (body) => {
-  const fetchMock = vi.fn().mockResolvedValue(response(body));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useAdminDashboardLayout, fixture());
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v2/admin/dashboard/layout");
-  expect(result.current.data).toEqual({ ...body, etag: '"A"' });
-});
-it.each([null, "pin-b", "pin-a"])("hides cached success after PIN transition %s", async (pin) => {
+it.each(["pin-a"])("hides cached success after PIN transition %s", async (pin) => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(response(saved))

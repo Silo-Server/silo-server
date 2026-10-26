@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -59,6 +60,7 @@ func (s *Server) handleReprobeCapabilities(w http.ResponseWriter, r *http.Reques
 
 	playback.InvalidateHWProbeCache()
 	tonemap.InvalidateProbeCache()
+	mediasample.InvalidateCapabilities()
 	// The resource sampler retires nvidia-smi after repeated failure, and a
 	// driver that was broken at start is exactly what an operator reaches for
 	// this route after. A proxy samples the same GPU a transcode node does — it

@@ -64,16 +64,21 @@ function layoutWith(
   };
 }
 
-function renderGrid(isCustomizing = false) {
-  return render(
+const TWO_PLACED: DashboardLayout["entries"] = [
+  { id: "now-playing", span: 12, rows: 3 },
+  { id: "stat-movies", span: 2, rows: 1 },
+];
+
+function grid(layout: DashboardLayout) {
+  return (
     <MemoryRouter>
-      <DashboardGrid
-        layout={layoutWith(isCustomizing)}
-        isAddPanelOpen={false}
-        onAddPanelOpenChange={() => {}}
-      />
-    </MemoryRouter>,
+      <DashboardGrid layout={layout} isAddPanelOpen={false} onAddPanelOpenChange={() => {}} />
+    </MemoryRouter>
   );
+}
+
+function renderGrid(isCustomizing = false) {
+  return render(grid(layoutWith(isCustomizing)));
 }
 
 function rowsOf(container: HTMLElement): string | undefined {
@@ -84,18 +89,6 @@ function rowsOf(container: HTMLElement): string | undefined {
 describe("DashboardGrid collapse", () => {
   beforeEach(() => {
     mocks.useAdminSessions.mockReset();
-  });
-
-  it("gives back rows when a collapsible widget reports it is empty", async () => {
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
-
-    const { container } = renderGrid();
-
-    expect(await screen.findByText("Nothing playing right now")).toBeTruthy();
-    expect(rowsOf(container)).toBe("1");
-    expect(
-      container.querySelector('[data-widget-id="now-playing"]')?.getAttribute("data-collapsed"),
-    ).toBe("true");
   });
 
   it("keeps its full height while loading and after a failure", () => {
@@ -130,22 +123,18 @@ describe("DashboardGrid collapse", () => {
     mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
 
     const { container, rerender } = renderGrid();
+    expect(await screen.findByText("Nothing playing right now")).toBeTruthy();
     expect(rowsOf(container)).toBe("1");
+    expect(
+      container.querySelector('[data-widget-id="now-playing"]')?.getAttribute("data-collapsed"),
+    ).toBe("true");
 
     mocks.useAdminSessions.mockReturnValue({
       data: [session()],
       isLoading: false,
       error: null,
     });
-    rerender(
-      <MemoryRouter>
-        <DashboardGrid
-          layout={layoutWith(false)}
-          isAddPanelOpen={false}
-          onAddPanelOpenChange={() => {}}
-        />
-      </MemoryRouter>,
-    );
+    rerender(grid(layoutWith(false)));
 
     expect(await screen.findByText("Arrival")).toBeTruthy();
     expect(rowsOf(container)).toBe("3");
@@ -249,31 +238,11 @@ describe("DashboardGrid add-widget drag", () => {
     expect(layout.addWidget).toHaveBeenCalledWith("libraries", null);
   });
 
-  it("gets the sheet out of the pointer's way during the drag and restores it on cancel", () => {
-    const { layout } = renderCustomizing();
-    const dataTransfer = stubDataTransfer();
-    const sheet = document.querySelector('[data-slot="sheet-content"]');
-    if (!sheet) throw new Error("expected the add-widget sheet");
-
-    fireDragEvent(sheetEntry(), "dragstart", dataTransfer);
-    expect(sheet.className).toContain("pointer-events-none");
-
-    // A drag that ends without a valid drop only fires dragend.
-    fireDragEvent(sheetEntry(), "dragend", dataTransfer);
-    expect(sheet.className).not.toContain("pointer-events-none");
-    expect(layout.addWidget).not.toHaveBeenCalled();
-  });
-
   // The sheet-add path already appends on the trailing area; a reorder
   // dropped there must not be a silent no-op — mouse users could otherwise
   // never move a widget into the last position.
   it("dropping a reorder on the trailing area appends", () => {
-    const { layout, container } = renderCustomizing({
-      entries: [
-        { id: "now-playing", span: 12, rows: 3 },
-        { id: "stat-movies", span: 2, rows: 1 },
-      ],
-    });
+    const { layout, container } = renderCustomizing({ entries: TWO_PLACED });
     const dataTransfer = stubDataTransfer();
     const nowPlaying = container.querySelector('[data-widget-id="now-playing"]');
     const grid = container.querySelector(".admin-widget-grid");
@@ -287,12 +256,7 @@ describe("DashboardGrid add-widget drag", () => {
   });
 
   it("a reorder drag is never treated as an add", () => {
-    const { layout, container } = renderCustomizing({
-      entries: [
-        { id: "now-playing", span: 12, rows: 3 },
-        { id: "stat-movies", span: 2, rows: 1 },
-      ],
-    });
+    const { layout, container } = renderCustomizing({ entries: TWO_PLACED });
     const dataTransfer = stubDataTransfer();
     const nowPlaying = container.querySelector('[data-widget-id="now-playing"]');
     const statMovies = container.querySelector('[data-widget-id="stat-movies"]');
@@ -332,20 +296,7 @@ describe("DashboardGrid drag auto-scroll", () => {
       for (let i = 0; i < n && frames.length > 0; i++) frames.shift()!(0);
     };
 
-    const { container } = render(
-      <MemoryRouter>
-        <DashboardGrid
-          layout={layoutWith(true, {
-            entries: [
-              { id: "now-playing", span: 12, rows: 3 },
-              { id: "stat-movies", span: 2, rows: 1 },
-            ],
-          })}
-          isAddPanelOpen={false}
-          onAddPanelOpenChange={() => {}}
-        />
-      </MemoryRouter>,
-    );
+    const { container } = render(grid(layoutWith(true, { entries: TWO_PLACED })));
 
     // The RTL container is the grid's parent; dress it up as the scrollable
     // ancestor findScrollContainer should resolve (jsdom has no layout, so

@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Login from "./Login";
+import { cleanup, screen } from "@testing-library/react";
+import { renderLogin } from "./loginPage.test-support";
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
     loading: false,
@@ -26,17 +24,10 @@ vi.mock("@/api/v2/request", async () => ({
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: vi.fn() }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
 afterEach(cleanup);
-it("submits provider login as a browser POST to v2 and preserves the encoded local destination", () => {
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={["/login?redirect=%2Fme%3Ftab%3Dsettings"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  const form = screen.getByRole("button", { name: "Fixture provider" }).closest("form");
-  expect(form?.getAttribute("method")).toBe("post");
-  expect(form?.getAttribute("action")).toBe(
-    "/api/v2/auth/oauth/3/init?next=%2Fme%3Ftab%3Dsettings",
-  );
+it("starts provider login with a top-level GET to v2 and preserves the encoded local destination", () => {
+  renderLogin("/login?redirect=%2Fme%3Ftab%3Dsettings");
+  // Not a form post: the CSP's form-action 'self' would block the redirect to the provider.
+  const link = screen.getByRole("link", { name: "Fixture provider" });
+  expect(link.closest("form")).toBeNull();
+  expect(link.getAttribute("href")).toBe("/api/v2/auth/oauth/3/start?next=%2Fme%3Ftab%3Dsettings");
 });

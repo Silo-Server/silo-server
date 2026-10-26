@@ -14,12 +14,15 @@ type userStateEventPayload struct {
 	Played      *bool  `json:"played,omitempty"`
 	IsFavorite  *bool  `json:"is_favorite,omitempty"`
 	InWatchlist *bool  `json:"in_watchlist,omitempty"`
+	// NotInterested accompanies change "not_interested".
+	NotInterested *bool `json:"not_interested,omitempty"`
 }
 
 type userStateEventState struct {
-	Played      *bool
-	IsFavorite  *bool
-	InWatchlist *bool
+	Played        *bool
+	IsFavorite    *bool
+	InWatchlist   *bool
+	NotInterested *bool
 }
 
 const userStateChangedEvent = "user_state.changed"
@@ -35,13 +38,14 @@ func publishUserStateEvent(
 		return
 	}
 	_ = hub.PublishJSON(ctx, evt.ChannelUserState, userStateChangedEvent, userStateEventPayload{
-		ProfileID:   profileID,
-		ContentID:   contentID,
-		SeriesID:    seriesID,
-		Change:      change,
-		Played:      state.Played,
-		IsFavorite:  state.IsFavorite,
-		InWatchlist: state.InWatchlist,
+		ProfileID:     profileID,
+		ContentID:     contentID,
+		SeriesID:      seriesID,
+		Change:        change,
+		Played:        state.Played,
+		IsFavorite:    state.IsFavorite,
+		InWatchlist:   state.InWatchlist,
+		NotInterested: state.NotInterested,
 	}, evt.PublishOptions{
 		UserID:    userID,
 		ProfileID: profileID,

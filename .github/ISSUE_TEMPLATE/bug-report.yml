@@ -8,31 +8,35 @@ body:
       value: |
         Report behavior you reproduced on a real deployment. Include raw logs rather than AI summaries, and keep observations separate from suspected root cause. Redact credentials, tokens, personal data, and private media details, and mark each redaction.
 
+        [Reporting a problem](https://siloserver.org/docs/report-a-problem) explains where to find versions and logs. Using Claude Code or Codex? The [Silo troubleshooting skill](https://github.com/Silo-Server/silo-troubleshooting-skill) diagnoses your server and drafts this report, then has independent reviewers check it before you post. Problems only in the Apple or Android apps belong in [silo-apple](https://github.com/Silo-Server/silo-apple/issues/new/choose) or [silo-android](https://github.com/Silo-Server/silo-android/issues/new/choose).
+
         Fabricated or AI-hallucinated reports are an immediate block. Read [CONTRIBUTING.md](https://github.com/Silo-Server/silo-server/blob/main/CONTRIBUTING.md) and the [AI-assisted contribution policy](https://github.com/Silo-Server/silo-server/blob/main/docs/ai-contributions.md) first.
   - type: textarea
     id: what-happened
     attributes:
       label: What happened
-      description: What broke? What did you actually observe?
+      description: What broke? What did you actually observe? Include how often it happens (for example "3 of 3 attempts") and what still works.
     validations:
       required: true
   - type: textarea
     id: steps-to-reproduce
     attributes:
       label: Steps to reproduce
-      description: Exact steps you ran on a real deployment.
+      description: Exact steps you ran on a real deployment, from a stated starting point.
     validations:
       required: true
   - type: textarea
     id: expected-behavior
     attributes:
       label: Expected behavior
+      description: What should have happened, and where that expectation comes from (documentation, a setting's description, an earlier build).
     validations:
       required: true
   - type: input
     id: silo-version
     attributes:
       label: Silo version / commit
+      description: The **Build** value at the bottom of the admin sidebar, for example `412 · 1a2b3c4d`. Add the image tag if you pin one.
     validations:
       required: true
   - type: dropdown
@@ -40,9 +44,31 @@ body:
     attributes:
       label: Deployment
       options:
-        - Docker
+        - Docker Compose
+        - Unraid
+        - Docker (other)
+        - Kubernetes
         - Bare metal / systemd
         - Local dev build
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where the problem shows up. Pick the closest match.
+      options:
+        - Playback and transcoding
+        - Libraries, scanning, and metadata
+        - Search
+        - Web app
+        - Admin pages and settings
+        - Accounts, profiles, and sign-in
+        - Plugins
+        - Jellyfin-compatible clients
+        - Install, upgrade, and startup
+        - Performance
         - Other
     validations:
       required: true
@@ -56,11 +82,28 @@ body:
         - label: iOS/tvOS/macOS
         - label: Jellyfin-compat client (Infuse, Findroid, ...)
         - label: Other/not client-specific
+  - type: input
+    id: client-details
+    attributes:
+      label: Client app and device
+      description: For an app, its version and build (Settings > About), the device model, and the OS version. For a Jellyfin-compatible app, its name and version. For the web UI, the browser.
+      placeholder: Silo 1.0.0 (42) on Apple TV 4K (3rd generation), tvOS 26.1
+  - type: textarea
+    id: media-details
+    attributes:
+      label: Media and playback details
+      description: For playback problems. Admins can open a title's menu > **Media Info** in the web app for the container, video, audio, and subtitle formats. **Admin > Activity** shows how the session was played (Direct Play, Remux, Direct Stream, or Transcode) and the encoder.
+  - type: input
+    id: diagnostics-reference
+    attributes:
+      label: Diagnostics report reference
+      description: If a Silo app sent a report to Silo Diagnostics, paste its reference. In the app, open Settings > Support > Diagnostics (on TVs, Settings > Diagnostics).
+      placeholder: SILO-XXXXXXXX
   - type: textarea
     id: relevant-logs
     attributes:
       label: Relevant logs
-      description: Paste raw server logs.
+      description: Paste raw server logs from **Admin > Logs** (filter by playback session or component) or `docker compose logs --since 30m silo`. If they show nothing useful, raise the level in Admin > Settings > General > Logging, reproduce, and copy again.
       placeholder: paste raw server logs; write "no logs available" if genuinely none
       render: shell
     validations:
@@ -114,6 +157,8 @@ body:
     attributes:
       label: Confirmations
       options:
+        - label: I searched open and recently closed issues and pull requests, and this is not already reported
+          required: true
         - label: I reproduced this myself on a real deployment
           required: true
         - label: Any logs provided are raw apart from marked redactions and are not AI-summarized; if none were available, I said so above

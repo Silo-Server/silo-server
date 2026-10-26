@@ -2,8 +2,13 @@ package autoscan
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/logredact"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ScanSourceProvider yields changed paths for one source. The engine calls
@@ -80,4 +85,62 @@ func scanSourceScope(scope pluginv1.ScanSourceChangeScope) ChangeScope {
 	default:
 		return ChangeScopeAuto
 	}
+}
+
+const (
+	pollTimedOutMessage      = "Plugin timed out."
+	pollCanceledMessage      = "Poll canceled."
+	pollUnavailableMessage   = "Plugin unavailable."
+	pollUnimplementedMessage = "Plugin does not support polling for changes."
+)
+
+// pollErrorMessage turns a provider failure into the text the host stores on
+// the source (last_error) and the poll event (error_message), which the admin
+// UI shows verbatim.
+//
+// Plugin errors cross the go-plugin gRPC transport, so a plain
+// fmt.Errorf("...") inside a plugin arrives as
+// "rpc error: code = Unknown desc = ...". The framing tells an operator
+// nothing; the status's own description (the plugin's text) is the useful
+// part, whatever code the plugin chose.
+//
+// The exceptions are failures the host side produces, whose text is transport
+// detail (such as the plugin's local socket path) rather than anything an
+// operator can act on. They get a short host-written explanation instead:
+// the host's call deadline passing or the poll being canceled (the provider
+// wraps the context error, see pluginhost.ScanSourceClient.PollChanges), and
+// Unavailable, which grpc-go returns when the plugin process is gone and which
+// cannot be told apart from a plugin-chosen Unavailable. The full error stays
+// in the server log. Stored text is shown to admins, so credential assignments
+// and URL userinfo in it are masked.
+func pollErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return pollTimedOutMessage
+	case errors.Is(err, context.Canceled):
+		return pollCanceledMessage
+	}
+	var grpcErr interface{ GRPCStatus() *status.Status }
+	if !errors.As(err, &grpcErr) {
+		return logredact.SanitizeText(err.Error())
+	}
+	st := grpcErr.GRPCStatus()
+	if st.Code() == codes.Unavailable {
+		return pollUnavailableMessage
+	}
+	if desc := strings.TrimSpace(st.Message()); desc != "" {
+		return logredact.SanitizeText(desc)
+	}
+	switch st.Code() {
+	case codes.DeadlineExceeded:
+		return pollTimedOutMessage
+	case codes.Canceled:
+		return pollCanceledMessage
+	case codes.Unimplemented:
+		return pollUnimplementedMessage
+	}
+	return "Plugin error: " + st.Code().String()
 }

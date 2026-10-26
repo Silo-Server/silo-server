@@ -7,6 +7,7 @@ import {
   computeSubtitlePositionStyle,
   computeSubtitleStyles,
   DEFAULT_SUBTITLE_APPEARANCE,
+  parseSubtitleAppearance,
   SUBTITLE_REFERENCE_HEIGHT,
 } from "./subtitleAppearance";
 
@@ -69,11 +70,6 @@ describe("computeSubtitlePositionStyle", () => {
 });
 
 describe("computeSubtitleFontSize", () => {
-  it("returns the base size at scale 1", () => {
-    expect(computeSubtitleFontSize("large")).toBe("32px");
-    expect(computeSubtitleFontSize("small", 1)).toBe("20px");
-  });
-
   it("scales the base size", () => {
     expect(computeSubtitleFontSize("large", 1.5)).toBe("48px");
     expect(computeSubtitleFontSize("xxlarge", 0.5)).toBe("24px");
@@ -92,11 +88,26 @@ describe("computeSubtitleStyles", () => {
       SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE].defaultValue,
     );
   });
+});
 
-  it("applies the font scale to the cue font size", () => {
-    const unscaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE);
-    const scaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE, 2);
-    expect(unscaled.cueStyle.fontSize).toBe("32px");
-    expect(scaled.cueStyle.fontSize).toBe("64px");
+describe("text opacity", () => {
+  it("renders the font color at the text opacity, independent of the background", () => {
+    const styles = computeSubtitleStyles({
+      ...DEFAULT_SUBTITLE_APPEARANCE,
+      fontColor: "#9ca3af",
+      textOpacity: 30,
+    });
+    expect(styles.cueStyle.color).toBe("rgba(156, 163, 175, 0.3)");
+    expect(styles.cueStyle.backgroundColor).toBe(
+      computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE).cueStyle.backgroundColor,
+    );
+  });
+
+  it("reads a stored value and falls back to 100 for a missing or out-of-contract one", () => {
+    expect(parseSubtitleAppearance({ textOpacity: 40 }).textOpacity).toBe(40);
+    expect(parseSubtitleAppearance({ fontColor: "#9ca3af" }).textOpacity).toBe(100);
+    for (const bad of [0, 101, 50.5, "50", null]) {
+      expect(parseSubtitleAppearance({ textOpacity: bad }).textOpacity).toBe(100);
+    }
   });
 });

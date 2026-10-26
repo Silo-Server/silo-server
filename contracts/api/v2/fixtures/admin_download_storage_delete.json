@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "art-dune",
+      "outcome": "deleted",
+      "bytes": 14200000000
+    },
+    {
+      "id": "art-oppenheimer",
+      "outcome": "in_use",
+      "bytes": 11800000000
+    },
+    {
+      "id": "art-gone",
+      "outcome": "not_found",
+      "bytes": 0
+    }
+  ]
+}

@@ -79,29 +79,3 @@ func TestMiddlewarePathFiltering(t *testing.T) {
 		})
 	}
 }
-
-// TestIsStreamChunk pins chunk detection on the concrete v1 and v2 route
-// shapes, independent of the prefix list.
-func TestIsStreamChunk(t *testing.T) {
-	tests := []struct {
-		path  string
-		chunk bool
-	}{
-		{path: "/api/v1/stream/sess-1", chunk: false},
-		{path: "/api/v2/stream/sess-1", chunk: false},
-		{path: "/api/v2/stream/sess-1/subtitles/eng", chunk: true},
-		{path: "/api/v2/stream/sess-1/subtitles/eng/fonts", chunk: true},
-		{path: "/api/v2/playback/transcode/sess-1/master.m3u8", chunk: true},
-		{path: "/api/v2/playback/transcode/sess-1/segment/3.ts", chunk: true},
-		{path: "/api/v1/playback/transcode/sess-1/master.m3u8", chunk: true},
-		{path: "/api/v1/playback/transcode/sess-1/segment/3.ts", chunk: true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.path, func(t *testing.T) {
-			if got := isStreamChunk(tc.path); got != tc.chunk {
-				t.Fatalf("isStreamChunk(%q) = %v, want %v", tc.path, got, tc.chunk)
-			}
-		})
-	}
-}

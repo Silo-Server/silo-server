@@ -6,21 +6,25 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
 type deliveryTestChecker struct {
 	existing    map[string]bool
 	available   map[string]bool
 	err         error
+	errKeys     map[string]bool
 	beforeCheck func() error
 	mu          sync.Mutex
 	hookErr     error
@@ -41,6 +45,9 @@ func (c *deliveryTestChecker) Stat(_ context.Context, key string) (blobstore.Obj
 	}
 	if c.err != nil {
 		return blobstore.ObjectInfo{}, c.err
+	}
+	if c.errKeys[key] {
+		return blobstore.ObjectInfo{}, errors.New("storage probe timed out")
 	}
 	if c.existing != nil && !c.existing[key] {
 		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
@@ -63,7 +70,7 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	original := fmt.Sprintf("tmdb/movies/delivery-%d/poster/original.rev.webp", time.Now().UnixNano())
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
 	keys := []string{original, large, medium}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
@@ -212,88 +219,70 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 
 }
 
-func TestDeliveryCheckerConcurrentHook(t *testing.T) {
-	var calls atomic.Int32
-	hookFailure := errors.New("publication failed")
-	checker := &deliveryTestChecker{beforeCheck: func() error {
-		calls.Add(1)
-		return hookFailure
-	}}
-	var group sync.WaitGroup
-	for range 32 {
-		group.Go(func() { _, _ = checker.Stat(t.Context(), "key") })
-	}
-	group.Wait()
-	if calls.Load() != 1 {
-		t.Fatalf("hook called %d times", calls.Load())
-	}
-	if !errors.Is(checker.hookErr, hookFailure) {
-		t.Fatalf("lost hook error: %v", checker.hookErr)
-	}
-}
-
-func TestArtworkDeliveryVerifiesLegacyManifests(t *testing.T) {
+func artworkDeliveryTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	prefix := fmt.Sprintf("tmdb/movies/legacy-delivery-%d", time.Now().UnixNano())
-	complete := prefix + "/poster/original.rev.webp"
-	partial := prefix + "/backdrop/original.rev.webp"
-	completeKeys := []string{complete, variantKey(complete, "w780")}
-	partialKeys := []string{partial, variantKey(partial, "w1920")}
+	return pool
+}
+
+// posterLargeRung is the widest poster rung, the one the latest ladder version
+// added and the one an unverified delivery must not advertise.
+var posterLargeRung = imagesize.Variant(artworkkey.ImagePoster, imagesize.Large)
+
+// Local storage and direct S3 never verify delivery, but a ladder change still
+// leaves existing revisions without the new widest rung until the backfill
+// regenerates them. Their reader answers from the publication manifest alone,
+// so a client asking for that rung gets the widest one the revision published.
+func TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery(t *testing.T) {
+	pool := artworkDeliveryTestPool(t)
+	ctx := t.Context()
+	original := fmt.Sprintf("tmdb/movies/delivery-local-%d/poster/original.rev.webp", time.Now().UnixNano())
+	large, previousLarge := variantKey(original, posterLargeRung), variantKey(original, "w780")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, []string{complete, partial})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
 	})
-	for path, keys := range map[string][]string{complete: completeKeys, partial: partialKeys} {
-		if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates(original_path,object_keys,not_before) VALUES($1,$2,NOW())`, path, keys); err != nil {
-			t.Fatal(err)
+	// The revision predates the current ladder: it has the previous ladder's
+	// widest rung, not the current one.
+	if err := catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision(ctx, original, "poster",
+		[]string{original, previousLarge, variantKey(original, "w500"), variantKey(original, "w300")}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := NewPluginImageResolver()
+	t.Cleanup(resolver.Close)
+	resolver.SetArtworkResolver(noProbeStore{t})
+	resolver.SetArtworkAvailabilityReader(NewArtworkDeliveryStore(pool, "local|delivery-local", false))
+	if got := resolver.ResolveImageURL(ctx, large, "large"); got != "https://images.example/"+previousLarge {
+		t.Fatalf("resolved %q, want the widest published rung %s", got, previousLarge)
+	}
+}
+
+func TestArtworkDeliveryRecheckAfter(t *testing.T) {
+	for failures, want := range map[int]time.Duration{
+		0: 7 * 24 * time.Hour, 1: 15 * time.Minute, 2: 30 * time.Minute, 3: time.Hour,
+		7: 16 * time.Hour, 8: 24 * time.Hour, 1000: 24 * time.Hour,
+	} {
+		if got := artworkDeliveryRecheckAfter(failures); got != want {
+			t.Errorf("artworkDeliveryRecheckAfter(%d) = %s, want %s", failures, got, want)
 		}
 	}
-	store := NewArtworkDeliveryStore(pool, "legacy-endpoint", true)
-	states, err := store.ArtworkAvailability(ctx, []string{complete, partial})
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestArtworkDeliveryErrorTextRedactsURLQueries(t *testing.T) {
+	err := fmt.Errorf("probe: %w", errors.New(`Get "https://cdn.example/poster/w500.rev.webp?X-Amz-Signature=secret&token=abc": dial tcp: timeout`))
+	got := artworkDeliveryErrorText(err)
+	if strings.Contains(got, "secret") || strings.Contains(got, "token=") || !strings.Contains(got, "https://cdn.example/poster/w500.rev.webp?[redacted]") {
+		t.Fatalf("error text = %q", got)
 	}
-	if len(states) != 0 {
-		t.Fatal("unverified legacy manifests became publication records")
-	}
-	checker := &deliveryTestChecker{
-		existing:  map[string]bool{complete: true, completeKeys[1]: true, partial: true},
-		available: map[string]bool{complete: true, completeKeys[1]: true, partial: true},
-	}
-	if _, err := store.Reconcile(ctx, checker); err != nil {
-		t.Fatal(err)
-	}
-	states, err = store.ArtworkAvailability(ctx, []string{complete, partial})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !states[complete].Verified || len(states[complete].Published) != 2 {
-		t.Fatal("storage-verified legacy artwork was not promoted")
-	}
-	if state := states[partial]; !state.Verified || len(state.Published) != 0 || selectPublishedVariant(partialKeys[1], state, true) != partial {
-		t.Fatal("partial legacy delivery verdict did not select the surviving original")
-	}
-	checker.existing[partialKeys[1]] = true
-	checker.available[partialKeys[1]] = true
-	if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET delivery_next_check=NOW() WHERE original_path=$1`, partial); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Reconcile(ctx, checker); err != nil {
-		t.Fatal(err)
-	}
-	states, err = store.ArtworkAvailability(ctx, []string{partial})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !states[partial].Verified || len(states[partial].Published) != 2 {
-		t.Fatal("repaired legacy artwork was not promoted")
+	if got := artworkDeliveryErrorText(errors.New(strings.Repeat("é", 400))); len(got) > 500 || !utf8.ValidString(got) {
+		t.Fatalf("long error text was not capped cleanly: %d bytes", len(got))
 	}
 }

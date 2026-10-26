@@ -24,6 +24,13 @@ type MediaFolder struct {
 	AutoTranslateMetadata    bool   // AI-translate descriptions when providers lack this language
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
+	// TrickplayEnabled generates seek-bar previews for the library's video
+	// files (internal/trickplay). Off by default.
+	TrickplayEnabled bool
+	// RealtimeMonitoring is the library's real-time monitoring switch. It
+	// takes effect only while the server-wide scanner.realtime_monitoring
+	// setting is on and the library is enabled.
+	RealtimeMonitoring bool
 	// TrailerKinds is the allow-list of remote video kinds (ExtraKind values)
 	// fetched during metadata refresh for this library. Empty disables remote
 	// videos entirely.
@@ -72,6 +79,7 @@ type MediaFile struct {
 	SubtitleTracks               []SubtitleTrack    // JSONB
 	ExternalSubtitles            []ExternalSubtitle // JSONB
 	Chapters                     []MediaChapter     // JSONB; nil means not yet probed for chapters
+	MarkerThumbnails             []MarkerThumbnail  `json:"-"`
 	ChapterThumbnailRetryAfter   *time.Time
 	ChapterThumbnailFailureCount int
 	ChapterThumbnailLastError    string
@@ -129,11 +137,15 @@ type MediaFile struct {
 	MultiplePPSScanMtime *time.Time `json:"-"`
 	ProbeSource          string     // arrs, local
 	ProbeUpdatedAt       *time.Time
+	ProbeFailedAt        *time.Time // last local ffprobe rejected the file; cleared by a successful probe (see ProbeRejected)
 	MatchAttemptedAt     *time.Time
 	MissingSince         *time.Time
 	FirstSeenScanRunID   string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+
+	// Non-nil only for an ephemeral on-demand overlay; fences canonical edits.
+	MarkerThumbnailBaseSegments []MarkerSegment `json:"-"`
 }
 
 // MediaChapter represents a single media chapter derived from embedded file metadata.
@@ -309,6 +321,20 @@ func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
 	return f.AudioOnlyProbeFacts().HasLegacyAttachedPictureVideo()
 }
 
+// ProbeRejected reports whether ffprobe rejected this file and no usable
+// stream metadata exists for it: no successful probe has been recorded and
+// nothing describes a video or audio stream. Such a file cannot be played until
+// it is replaced, as opposed to a file that has simply not been probed yet.
+// Rows that still carry stream metadata from an earlier probe or an import are
+// not rejected, so a transient probe failure never hides a known-good source.
+func (f *MediaFile) ProbeRejected() bool {
+	if f == nil || f.ProbeFailedAt == nil || f.ProbeUpdatedAt != nil {
+		return false
+	}
+	return strings.TrimSpace(f.CodecVideo) == "" && strings.TrimSpace(f.CodecAudio) == "" &&
+		len(f.VideoTracks) == 0 && len(f.AudioTracks) == 0
+}
+
 // IsAudioOnly reports whether a probed file carries no playable video stream —
 // audiobooks and podcasts, as opposed to a video file whose probe is incomplete.
 // It also normalizes legacy audiobook/podcast cover-art rows until a repair
@@ -413,6 +439,12 @@ type VideoTrack struct {
 	// safety scan cannot establish that video stream-copy is safe. It is
 	// runtime-only so transient scan failures are retried on a later request.
 	VideoCopyUnsafe bool `json:"-"`
+	// HDR10PlusUnchecked records that the track's HDR10+ status was never
+	// read from a decoded frame: it was probed before frame-level detection,
+	// by playback's quick repair, or when the frame read failed transiently.
+	// MarshalJSON writes hdr10_plus only for checked tracks, so a stored PQ
+	// track without the key is checked by the HDR10+ backfill task.
+	HDR10PlusUnchecked bool `json:"-"`
 }
 
 // UnmarshalJSON preserves raw-key presence so rolling older scanners cannot
@@ -431,14 +463,28 @@ func (v *VideoTrack) UnmarshalJSON(data []byte) error {
 	current := raw["dv_config_present"] != nil && raw["dv_bl_compat_id_present"] != nil
 	*v = VideoTrack(decoded)
 	v.DVProvenanceCurrent = &current
+	v.HDR10PlusUnchecked = raw["hdr10_plus"] == nil
 	return nil
+}
+
+// MarshalJSON writes hdr10_plus, false included, for a track whose HDR10+
+// status was checked, and leaves it out of an unchecked one.
+func (v VideoTrack) MarshalJSON() ([]byte, error) {
+	type videoTrackAlias VideoTrack
+	if v.HDR10PlusUnchecked {
+		return json.Marshal(videoTrackAlias(v))
+	}
+	return json.Marshal(struct {
+		videoTrackAlias
+		HDR10Plus bool `json:"hdr10_plus"`
+	}{videoTrackAlias(v), v.HDR10Plus})
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.
 type AudioTrack struct {
 	Title         string `json:"title,omitempty"`
 	EmbeddedTitle string `json:"embedded_title,omitempty"`
-	Language      string `json:"language,omitempty"`
+	Language      string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 	Codec         string `json:"codec,omitempty"`
 	Profile       string `json:"profile,omitempty"`
 	Layout        string `json:"layout,omitempty"`
@@ -490,6 +536,8 @@ const (
 	PersonKindComposer  PersonKind = 6
 	PersonKindAuthor    PersonKind = 7
 	PersonKindNarrator  PersonKind = 8
+	// PersonKindCreator credits a series' creators, who are not its directors.
+	PersonKindCreator PersonKind = 9
 )
 
 // String returns the Jellyfin-compatible type string for this PersonKind.
@@ -511,6 +559,8 @@ func (k PersonKind) String() string {
 		return "Author"
 	case PersonKindNarrator:
 		return "Narrator"
+	case PersonKindCreator:
+		return "Creator"
 	default:
 		return "Unknown"
 	}
@@ -521,6 +571,8 @@ func PersonKindFromJob(job string) PersonKind {
 	switch strings.ToLower(strings.TrimSpace(job)) {
 	case "director":
 		return PersonKindDirector
+	case "creator":
+		return PersonKindCreator
 	case "writer", "screenplay", "story", "novel":
 		return PersonKindWriter
 	case "composer", "original music composer", "music":
@@ -562,6 +614,11 @@ type ItemPerson struct {
 	Kind      PersonKind
 	Character string
 	SortOrder int
+	// LocalPhotoSource is a photo the item's local metadata (an NFO actor
+	// <thumb>) names for the person: a file:// sidecar or an http(s) URL. It
+	// travels through the metadata pipeline only; the person's photo takes it
+	// when the person has no cached photo (see metadata.applyLocalPersonPhotos).
+	LocalPhotoSource string
 }
 
 // AudiobookSeriesMembership captures a book's membership in an audiobook
@@ -679,6 +736,41 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// MachineTranslatedFields is transient presentation metadata set by
+	// localization: the fields ("overview", "tagline") whose localized text
+	// came from AI translation rather than a provider or a person.
+	MachineTranslatedFields []string `json:"-"`
+	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
+	// set by the query that picks an episode card's artwork: true when the
+	// path is the episode's own still, false for season or series artwork, nil
+	// when no such query loaded the item. They travel with the paths so a
+	// cached item never pairs old artwork with newer provenance. json:"-"
+	// because some frozen v1 responses serialize MediaItem directly.
+	PosterIsEpisodeStill   *bool `json:"-"`
+	BackdropIsEpisodeStill *bool `json:"-"`
+	// Banner, thumb (landscape), clear art and disc art follow the poster,
+	// backdrop and logo slots. Clear art and disc art are cut-outs and, like
+	// the logo, carry no thumbhash. json:"-" for the same frozen v1 responses.
+	BannerPath         string `json:"-"`
+	BannerSourcePath   string `json:"-"`
+	BannerThumbhash    string `json:"-"`
+	ThumbPath          string `json:"-"`
+	ThumbSourcePath    string `json:"-"`
+	ThumbThumbhash     string `json:"-"`
+	ClearArtPath       string `json:"-"`
+	ClearArtSourcePath string `json:"-"`
+	DiscPath           string `json:"-"`
+	DiscSourcePath     string `json:"-"`
+}
+
+// ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops
+// row. Ordinal 1 is the second backdrop the item shows.
+type ItemBackdrop struct {
+	ID         int64
+	Ordinal    int
+	Path       string
+	SourcePath string
+	Thumbhash  string
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.
@@ -707,6 +799,8 @@ type Season struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // Episode represents a row in the episodes table.
@@ -734,6 +828,12 @@ type Episode struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage is transient presentation metadata set by
+	// batch localization: the viewer's language this episode's description is
+	// missing, so an episode list can start on-view translation.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.
@@ -772,8 +872,8 @@ type EpisodeLibrary struct {
 
 // Localization field provenance values. Precedence when writing:
 // manual beats provider beats ai — a provider refresh may overwrite an AI
-// translation but never a manual edit, and AI never overwrites either
-// (except provider, when the admin explicitly forces a re-translation).
+// translation but never a manual edit, and AI never overwrites either, not
+// even when the admin forces a re-translation.
 const (
 	LocalizationSourceProvider = "provider"
 	LocalizationSourceAI       = "ai"

@@ -23,6 +23,8 @@ export type AdminImportRun = Omit<HistoryImportRun, "status"> & {
   status: HistoryImportRun["status"] | "canceling";
   terminal: boolean;
   cancelable: boolean;
+  /** The lookback cutoff; absent for a full import. */
+  played_since?: string;
   location?: string;
   retryAfterMs?: number;
 };
@@ -253,6 +255,7 @@ function adminRunOf(run: components["schemas"]["AdminHistoryImportRun"]): AdminI
     status: run.status as AdminImportRun["status"],
     terminal: run.terminal,
     cancelable: run.cancelable,
+    played_since: run.played_since,
   };
 }
 export const importRunActive = (run: Pick<AdminImportRun, "terminal">) => !run.terminal;
@@ -275,10 +278,17 @@ export async function getAdminImportRun(
     location: location ?? `/api/v2/admin/history-imports/runs/${encodeURIComponent(id)}`,
   };
 }
-export async function createAdminImportRun(id: number): Promise<AdminImportRun> {
+/** The run body: a lookback window in hours, or none for a full import. */
+const runBody = (lookbackHours?: number) =>
+  lookbackHours ? { lookback_hours: lookbackHours } : undefined;
+export async function createAdminImportRun(
+  id: number,
+  lookbackHours?: number,
+): Promise<AdminImportRun> {
   const h = headers();
   const body = await v2("POST /api/v2/admin/history-imports/mappings/{id}/run", {
     path: { id: String(id) },
+    body: runBody(lookbackHours),
     profileContext: importAuthority(),
     onResponse: h.onResponse,
   });
@@ -316,9 +326,10 @@ export async function cancelAdminImportRun(id: string) {
   });
   return { ...adminRunOf(body), ...h.run() };
 }
-export async function bulkAdminImportRuns(id: number) {
+export async function bulkAdminImportRuns(id: number, lookbackHours?: number) {
   const result = await v2("POST /api/v2/admin/history-imports/sources/{id}/bulk-run", {
     path: { id: String(id) },
+    body: runBody(lookbackHours),
     profileContext: importAuthority(),
   });
   return {

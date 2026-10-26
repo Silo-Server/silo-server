@@ -40,8 +40,6 @@ const (
 	dispatchFailed    = "failed"
 )
 
-var errEmailVerificationCrashInjected = errors.New("crash injected between send and record")
-
 // emailVerificationClaim is one claimed outbox row plus the pending-state
 // observations needed to authorize the send under the claim.
 type emailVerificationClaim struct {
@@ -161,22 +159,6 @@ func (r *EmailPrefsRepository) ExhaustVerificationDispatch(ctx context.Context, 
 	return tag.RowsAffected(), nil
 }
 
-// VerificationDispatchState reports a row's dispatch outcome for tests and
-// diagnostics.
-type VerificationDispatchState struct {
-	State       string
-	Attempts    int
-	Error       string
-	CompletedAt *time.Time
-	HasPayload  bool
-}
-
-func (r *EmailPrefsRepository) VerificationDispatchState(ctx context.Context, id string) (VerificationDispatchState, error) {
-	var s VerificationDispatchState
-	err := r.pool.QueryRow(ctx, `SELECT dispatch_state,dispatch_attempts,dispatch_error,dispatch_completed_at,payload_ciphertext<>'' FROM notification_email_verifications WHERE id=$1`, id).Scan(&s.State, &s.Attempts, &s.Error, &s.CompletedAt, &s.HasPayload)
-	return s, err
-}
-
 // RetireVerificationDispatch applies bounded retention: the encrypted payload
 // is dropped from terminal rows once the link itself has expired (the receipt
 // stays), and whole rows go once expiry is older than the receipt window.
@@ -206,9 +188,6 @@ type emailVerificationDispatcher struct {
 	logger *slog.Logger
 	nudge  chan struct{}
 	now    func() time.Time
-	// afterSend runs between provider hand-off and record. Tests inject a
-	// crash here; production leaves it nil.
-	afterSend func(ctx context.Context, id string) error
 }
 
 func newEmailVerificationDispatcher(repo *EmailPrefsRepository, cipher *secret.Cipher, sender mail.Sender) *emailVerificationDispatcher {
@@ -279,9 +258,6 @@ func (d *emailVerificationDispatcher) runPass(ctx context.Context) {
 			return
 		}
 		if err := d.dispatch(ctx, claim); err != nil {
-			if errors.Is(err, errEmailVerificationCrashInjected) {
-				return
-			}
 			d.logger.ErrorContext(ctx, "email verification dispatch failed", "intent", claim.ID, "attempt", claim.Attempts, "error", err)
 			if errors.Is(err, mail.ErrNotConfigured) {
 				return
@@ -325,11 +301,6 @@ func (d *emailVerificationDispatcher) dispatch(ctx context.Context, c *emailVeri
 	msg.Headers["Message-ID"] = emailVerificationMessageID(c.ID)
 
 	sendErr := d.sender.Send(ctx, msg)
-	if d.afterSend != nil {
-		if err := d.afterSend(ctx, c.ID); err != nil {
-			return err
-		}
-	}
 	if sendErr == nil {
 		if err := d.repo.RecordVerificationDispatch(ctx, c.ID, c.Attempts, dispatchDelivered, "", d.now()); err != nil {
 			return err

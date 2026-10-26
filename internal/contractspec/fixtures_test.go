@@ -16,36 +16,58 @@ func TestCommittedFixturesValidate(t *testing.T) {
 	if findings := ValidateFixtures(contracts.FS, contracts.OpenAPI); len(findings) != 0 {
 		t.Fatalf("committed fixtures fail validation:\n  %s", strings.Join(findings, "\n  "))
 	}
+	if findings := ValidateFixtures(seededFixtures(t), seedDocument(t)); len(findings) != 0 {
+		t.Fatalf("seed fixtures fail validation: %v", findings)
+	}
 	entries, err := fs.ReadDir(contracts.FS, contracts.FixturesDir)
 	if err != nil || len(entries) < 2 {
 		t.Fatalf("fixtures dir: %v, %d entries", err, len(entries))
 	}
 }
 
-// seededFixtures copies the committed fixture tree into a mutable fs so a
-// test can break one thing at a time.
+// seededFixtures keeps the existing index entries and bodies targeted by the
+// mutation matrix. The complete committed tree is validated above.
 func seededFixtures(t *testing.T) fstest.MapFS {
 	t.Helper()
-	m := fstest.MapFS{}
-	for _, p := range []string{contracts.FixturesSchemaPath} {
-		b, err := fs.ReadFile(contracts.FS, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		m[p] = &fstest.MapFile{Data: b}
-	}
-	entries, err := fs.ReadDir(contracts.FS, contracts.FixturesDir)
+	schema, err := contracts.FS.ReadFile(contracts.FixturesSchemaPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range entries {
-		p := contracts.FixturesDir + "/" + e.Name()
-		b, err := fs.ReadFile(contracts.FS, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		m[p] = &fstest.MapFile{Data: b}
+	raw, err := contracts.FS.ReadFile("fixtures/index.json")
+	if err != nil {
+		t.Fatal(err)
 	}
+	var index struct {
+		Fixtures []map[string]any `json:"fixtures"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatal(err)
+	}
+	m := fstest.MapFS{contracts.FixturesSchemaPath: {Data: schema}}
+	kept := index.Fixtures[:0]
+	for _, fixture := range index.Fixtures {
+		switch fixture["name"] {
+		case "not_found", "get_system_info_ok", "guarded_delete_ok", "rate_limited":
+			kept = append(kept, fixture)
+			if body, ok := fixture["body_file"].(string); ok {
+				path := contracts.FixturesDir + "/" + body
+				data, err := contracts.FS.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				m[path] = &fstest.MapFile{Data: data}
+			}
+		}
+	}
+	if len(kept) != 4 {
+		t.Fatalf("seed fixtures missing: got %d, want 4", len(kept))
+	}
+	index.Fixtures = kept
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m["fixtures/index.json"] = &fstest.MapFile{Data: data}
 	return m
 }
 
@@ -80,7 +102,7 @@ func TestFixtureValidationAcceptsHeadFallback(t *testing.T) {
 		return f
 	})
 	delete(m, "fixtures/not_found.json")
-	if findings := ValidateFixtures(m, contracts.OpenAPI); len(findings) != 0 {
+	if findings := ValidateFixtures(m, seedDocument(t)); len(findings) != 0 {
 		t.Fatalf("a bodyless HEAD 404 fallback fixture should validate, got:\n%s", strings.Join(findings, "\n"))
 	}
 }
@@ -204,7 +226,7 @@ func TestFixtureValidationSeededFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := seededFixtures(t)
 			tc.seed(t, m)
-			findings := ValidateFixtures(m, contracts.OpenAPI)
+			findings := ValidateFixtures(m, seedDocument(t))
 			joined := strings.Join(findings, "\n")
 			if !strings.Contains(joined, tc.want) {
 				t.Fatalf("want a finding containing %q, got:\n%s", tc.want, joined)

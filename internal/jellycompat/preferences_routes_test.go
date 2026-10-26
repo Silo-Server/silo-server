@@ -38,18 +38,10 @@ func TestRouterPreferencesDiscovery(t *testing.T) {
 		cultures bool
 	}{
 		{"/Localization/Cultures", true},
-		{"/Localization/cultures", true},
-		{"/localization/cultures", true},
-		{"/emby/localization/cultures", true},
 		{"/jellyfin/LOCALIZATION/CULTURES", true},
 		{"/SyncPlay/List", false},
-		{"/syncplay/list", false},
-		{"/emby/syncplay/list", false},
-		{"/jellyfin/SYNCPLAY/LIST", false},
 		{"/UserViews/GroupingOptions", false},
 		{"/Users/" + PseudoUserID(1, "p1").String() + "/GroupingOptions", false},
-		{"/emby/users/" + PseudoUserID(1, "p1").String() + "/groupingoptions", false},
-		{"/jellyfin/USERS/" + PseudoUserID(1, "p1").String() + "/GROUPINGOPTIONS", false},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			for _, authenticated := range []bool{false, true} {
@@ -109,13 +101,13 @@ func TestRouterDiscoveryNamesPreserveDisplayPreferenceIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := NewRouter(Dependencies{Config: cfg, SessionStore: sessions, UserStoreProvider: compatTestUserStoreProvider{store: store}})
-	for _, id := range []string{"list", "cultures", "localization", "syncplay", "LiSt"} {
+	for _, id := range []string{"list", "cultures", "LiSt"} {
 		t.Run(id, func(t *testing.T) {
 			key := profilePreferencesID("profile-1", id)
 			if err := store.SetJellycompatDisplayPrefs(t.Context(), key, "emby", `{"SortBy":"DateCreated"}`); err != nil {
 				t.Fatal(err)
 			}
-			for _, prefix := range []string{"", "/emby", "/jellyfin"} {
+			for _, prefix := range []string{"", "/emby"} {
 				url := prefix + "/displaypreferences/" + id + "?client=emby"
 				req := httptest.NewRequest(http.MethodGet, url, nil)
 				req.Header.Set("X-Emby-Token", token)

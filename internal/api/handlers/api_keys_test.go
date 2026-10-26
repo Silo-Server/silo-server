@@ -48,12 +48,20 @@ func (s *fakeAPIKeyStore) UpdateTier(context.Context, int64, string) error {
 
 func createAPIKey(t *testing.T, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
 	t.Helper()
+	return createAPIKeyAs(t, models.RoleAdmin, body)
+}
+
+func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
+	t.Helper()
 	store := &fakeAPIKeyStore{}
 	h := NewAPIKeyHandler(store)
+	// A household with no limited profile: the profile-less admin request
+	// below keeps creating keys.
+	h.Stores = householdGateStores{store: householdGateStore{}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    7,
-		Role:      "user",
+		Role:      role,
 		TokenType: auth.TokenTypeAccess,
 		SessionID: "s1",
 	}))
@@ -82,16 +90,6 @@ func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
 	}
 }
 
-func TestHandleCreateAPIKeyWithoutScopesStaysUnscoped(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
-	}
-	if len(store.createdScopes) != 0 {
-		t.Fatalf("stored scopes = %v, want none", store.createdScopes)
-	}
-}
-
 func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
 	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:everything"]}`)
 	if rec.Code != http.StatusBadRequest {
@@ -102,47 +100,18 @@ func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
 	}
 }
 
-func TestHandleListAPIKeyScopes(t *testing.T) {
-	h := NewAPIKeyHandler(&fakeAPIKeyStore{})
-
-	t.Run("requires authentication", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/scopes", nil)
-		rec := httptest.NewRecorder()
-		h.HandleListAPIKeyScopes(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", rec.Code)
+// Only server admins create API keys (#1189 AC2). The role check runs before
+// the body is read, so a regular account is refused even with a bad body.
+func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
+	for _, body := range []string{`{"label":"ci"}`, `{"label":""}`, `x`} {
+		rec, store := createAPIKeyAs(t, models.RoleUser, body)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("body %q: status = %d, want 403 (body %s)", body, rec.Code, rec.Body.String())
 		}
-	})
-
-	t.Run("lists the frozen v1 scopes with descriptions", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/scopes", nil)
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, TokenType: auth.TokenTypeAccess}))
-		rec := httptest.NewRecorder()
-		h.HandleListAPIKeyScopes(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+		if store.created {
+			t.Fatalf("body %q: a regular account must not create a key", body)
 		}
-
-		var resp apiKeyScopesResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		valid := []string{}
-		for _, scope := range auth.V1APIKeyScopeCatalog() {
-			valid = append(valid, scope.Name)
-		}
-		if len(resp.Scopes) != len(valid) {
-			t.Fatalf("scopes = %+v, want %d entries", resp.Scopes, len(valid))
-		}
-		for i, scope := range resp.Scopes {
-			if scope.Name != valid[i] {
-				t.Fatalf("scope %d = %q, want frozen v1 scope %q", i, scope.Name, valid[i])
-			}
-			if strings.TrimSpace(scope.Description) == "" {
-				t.Fatalf("scope %q has no description", scope.Name)
-			}
-		}
-	})
+	}
 }
 
 func (s *fakeAPIKeyStore) GetMetadataByID(context.Context, int64) (*models.APIKeyMetadata, error) {

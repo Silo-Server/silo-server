@@ -28,10 +28,13 @@ afterEach(() => {
 });
 
 describe("DetailBreadcrumb", () => {
-  it("renders every crumb, linking all but the current page", () => {
+  it("navigates backwards to a crumb this page load never recorded", () => {
+    // Landing straight on the episode — a shared link, or a reload — leaves the
+    // map empty, so the crumb pushes. The motion is still backwards.
     render(
       <MemoryRouter initialEntries={["/item/episode"]}>
         <DetailBreadcrumb segments={segments} />
+        <RouteOutput />
       </MemoryRouter>,
     );
 
@@ -42,27 +45,6 @@ describe("DetailBreadcrumb", () => {
     expect(screen.getByRole("link", { name: "Season 1" })).toHaveAttribute("href", "/item/season");
     expect(screen.queryByRole("link", { name: "Episode 1" })).not.toBeInTheDocument();
     expect(screen.getByText("Episode 1")).toHaveAttribute("aria-current", "page");
-  });
-
-  it("renders nothing without segments", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <DetailBreadcrumb segments={[]} />
-      </MemoryRouter>,
-    );
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("navigates backwards to a crumb this page load never recorded", () => {
-    // Landing straight on the episode — a shared link, or a reload — leaves the
-    // map empty, so the crumb pushes. The motion is still backwards.
-    render(
-      <MemoryRouter initialEntries={["/item/episode"]}>
-        <DetailBreadcrumb segments={segments} />
-        <RouteOutput />
-      </MemoryRouter>,
-    );
 
     fireEvent.click(screen.getByRole("link", { name: "Season 1" }));
 

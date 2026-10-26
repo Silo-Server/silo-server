@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -173,10 +175,41 @@ func attrValue(v slog.Value) any {
 	case slog.KindTime:
 		return v.Time().UTC().Format(time.RFC3339Nano)
 	case slog.KindAny:
+		// Error types from errors.New and fmt.Errorf have no exported fields
+		// and would encode as {}, hiding the failure cause. Record the text,
+		// as the console handler does.
+		if err, ok := v.Any().(error); ok && err != nil {
+			return errorText(err)
+		}
 		return snapshot(v.Any())
 	default:
 		return v.String()
 	}
+}
+
+// errorText records an error's message for the stored entry. Requested URLs
+// inside the chain are sanitized with logredact.SanitizeURLError, the same
+// helper transport errors pass through elsewhere, so signed stream URLs and
+// query-string tokens are not written to the database. Secret key=value pairs
+// left in plain text, such as a plugin's gRPC status description, are masked
+// with logredact.RedactSecretAssignments. A URL quoted in the text rather
+// than carried as a *url.Error (a presigned S3 URL in an SDK error, say) loses
+// its query, fragment and userinfo, and logredact.SanitizeText masks userinfo
+// in other schemes' URLs. A typed-nil pointer
+// that satisfies error is recorded as a placeholder instead of calling Error
+// on a nil receiver, and a panicking Error method is contained.
+func errorText(err error) (text string) {
+	if rv := reflect.ValueOf(err); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return fmt.Sprintf("<nil %T>", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			text = fmt.Sprintf("<%T: Error panicked>", err)
+		}
+	}()
+	msg := logredact.SanitizeURLError(err).Error()
+	msg = urlInText.ReplaceAllStringFunc(msg, sanitizeURLToken)
+	return logredact.SanitizeText(logredact.RedactSecretAssignments(msg))
 }
 
 // snapshot encodes a value the caller still owns, such as a map, slice or
@@ -190,6 +223,25 @@ func snapshot(v any) any {
 		return fmt.Sprint(v)
 	}
 	return json.RawMessage(raw)
+}
+
+// urlInText matches an http(s) URL token inside free text. It takes the
+// whole non-space run, so text glued to a query or fragment is dropped with
+// it, and anything unparseable fails closed.
+var urlInText = regexp.MustCompile(`(?i)https?://\S+`)
+
+// sanitizeURLToken removes the userinfo, query and fragment of a URL token.
+// Trailing quotes and punctuation, such as the `":` after a *url.Error's
+// quoted URL, stay outside the URL so they are neither escaped into its path
+// nor make it unparseable; a run of punctuation cannot hold a credential. A
+// token without @, ? or # cannot carry one either and is kept as written, the
+// same rule logredact uses for requested URLs.
+func sanitizeURLToken(token string) string {
+	raw := strings.TrimRight(token, `"'),.:;>]}`)
+	if !strings.ContainsAny(raw, "@?#") {
+		return token
+	}
+	return logredact.SanitizeURL(raw) + token[len(raw):]
 }
 
 func inferComponent(message string) string {

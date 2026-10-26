@@ -13,6 +13,7 @@ import type {
   RequestMediaType,
   RequestSearchMediaType,
   RequestTarget,
+  RequestUserState,
 } from "@/api/types";
 import { v2, type V2Body } from "@/api/v2/request";
 import type { components, paths } from "@/api/v2/schema";
@@ -34,12 +35,13 @@ function requestTargetFromV2(t: Schemas["RequestTarget"]): RequestTarget {
 }
 
 export function mediaRequestFromV2(r: Schemas["MediaRequest"]): MediaRequest {
-  const { requested_by_user_id, targets, media_type, status, outcome, ...rest } = r;
+  const { requested_by_user_id, targets, media_type, status, outcome, state, ...rest } = r;
   return {
     ...rest,
     media_type: media_type as RequestMediaType,
     status: status as MediaRequestStatus,
     outcome: outcome as MediaRequestOutcome,
+    state: state as RequestUserState,
     ...(requested_by_user_id !== undefined
       ? { requested_by_user_id: Number(requested_by_user_id) }
       : {}),
@@ -49,6 +51,27 @@ export function mediaRequestFromV2(r: Schemas["MediaRequest"]): MediaRequest {
 
 export function createMediaRequestV2(body: V2Body<"POST /api/v2/requests">): Promise<MediaRequest> {
   return v2("POST /api/v2/requests", { body }).then(mediaRequestFromV2);
+}
+
+// The server lets an owner cancel only while the request is still pending.
+export function cancelMediaRequestV2(id: string, reason?: string): Promise<MediaRequest> {
+  return v2("POST /api/v2/requests/{id}/cancel", { path: { id }, body: { reason } }).then(
+    mediaRequestFromV2,
+  );
+}
+
+// Following is keyed by title: a viewer asks to hear when a title someone else
+// already requested becomes available.
+export function followRequestMediaV2(mediaType: RequestMediaType, tmdbID: number) {
+  return v2("PUT /api/v2/requests/follows/{media_type}/{tmdb_id}", {
+    path: { media_type: mediaType, tmdb_id: tmdbID },
+  });
+}
+
+export function unfollowRequestMediaV2(mediaType: RequestMediaType, tmdbID: number) {
+  return v2("DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}", {
+    path: { media_type: mediaType, tmdb_id: tmdbID },
+  });
 }
 
 // v2 pages by cursor with a page size of at most 50; callers that asked for a

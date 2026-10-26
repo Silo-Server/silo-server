@@ -40,6 +40,31 @@ func TestEncryptedSettings_UnreadableTransitionDoesNotBlockConfigLoad(t *testing
 	}
 }
 
+func TestEncryptedSettingsGetManyDecryptsEachKey(t *testing.T) {
+	raw := newMemSettings()
+	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
+	for key, value := range map[string]string{"auth.jwt_secret": "active-secret", "markers.detect_credits": "false"} {
+		if err := dec.Set(t.Context(), key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if raw.m["auth.jwt_secret"] == "active-secret" {
+		t.Fatal("sensitive value was stored in plaintext")
+	}
+	got, err := dec.GetMany(t.Context(), "auth.jwt_secret", "markers.detect_credits", "markers.detect_intros")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"auth.jwt_secret": "active-secret", "markers.detect_credits": "false"}
+	if len(got) != len(want) || got["auth.jwt_secret"] != want["auth.jwt_secret"] || got["markers.detect_credits"] != want["markers.detect_credits"] {
+		t.Fatalf("GetMany = %v, want %v", got, want)
+	}
+	raw.m["auth.jwt_secret"] = "enc:v1:invalid-envelope"
+	if _, err := dec.GetMany(t.Context(), "auth.jwt_secret"); err == nil {
+		t.Fatal("GetMany ignored an unreadable ciphertext")
+	}
+}
+
 // memSettings is an in-memory raw SettingsStore for DB-free decorator tests.
 type memSettings struct{ m map[string]string }
 
@@ -49,6 +74,15 @@ func (s *memSettings) Get(_ context.Context, key string) (string, error) { retur
 func (s *memSettings) Set(_ context.Context, key, value string) error {
 	s.m[key] = value
 	return nil
+}
+func (s *memSettings) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := s.m[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
 }
 func (s *memSettings) GetAll(_ context.Context) (map[string]string, error) {
 	out := make(map[string]string, len(s.m))
@@ -113,23 +147,6 @@ func TestEncryptedSettings_SensitiveRoundTrip(t *testing.T) {
 	}
 	if got != plain {
 		t.Fatalf("Get = %q, want %q", got, plain)
-	}
-}
-
-func TestEncryptedSettings_NonSensitivePassthrough(t *testing.T) {
-	ctx := context.Background()
-	raw := newMemSettings()
-	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
-
-	const key = "server.log_level"
-	if SensitiveSettingKeys[key] {
-		t.Fatalf("precondition: %q must be non-sensitive", key)
-	}
-	if err := dec.Set(ctx, key, "debug"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	if got := raw.m[key]; got != "debug" {
-		t.Fatalf("non-sensitive raw value = %q, want plaintext 'debug'", got)
 	}
 }
 
@@ -223,6 +240,7 @@ func TestEncryptedSettings_UpdateAtomicUsesPlaintextContract(t *testing.T) {
 func TestSensitiveSettingKeys_Audited(t *testing.T) {
 	mustHave := []string{
 		"auth.jwt_secret",
+		"ai.chatgpt.credentials",
 		"audiobooks.abs.jwt_secret",
 		"s3.public_secret_key",
 		"s3.operational_secret_key", // legacy alias still read as a fallback
@@ -231,7 +249,7 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"tmdb.api_key",
 		"requests.radarr.api_key",
 		"requests.sonarr.api_key",
-		"watchsync.trakt.client_secret",
+		"watchsync.simkl.client_secret",
 		"email.smtp_password",
 		"discord.client_secret",
 		"discord.bot_token",

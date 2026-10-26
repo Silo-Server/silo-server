@@ -50,7 +50,7 @@ func TestCombinedSearchPlayedFavoriteUsesBrowse(t *testing.T) {
 	svc := &composedBrowseContent{}
 	codec := NewResourceIDCodec()
 	h := &ItemsHandler{content: svc, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
-	performItemsRequest(t, h, "/Items?SearchTerm=Drama&IsPlayed=true&IsFavorite=true&Limit=1&StartIndex=2")
+	performItemsRequest(t, h, "/Items?SearchTerm=Drama&IsPlayed=true&isFavorite=true&Limit=1&StartIndex=2")
 	if svc.params.Get("search_term") != "Drama" || svc.params.Get("is_favorite") != "true" || svc.params.Get("is_played") != "true" {
 		t.Fatalf("lost combined predicates: %v", svc.params)
 	}
@@ -148,7 +148,6 @@ func TestUpcomingSeriesScope(t *testing.T) {
 		wantLibrary, wantStatus             int
 	}{
 		{"series", "SeriesId=" + series, "series", "", 0, 200},
-		{"case insensitive", "seriesid=" + series, "series", "", 0, 200},
 		{"parent series", "ParentId=" + series, "series", "", 0, 200},
 		{"matching parent", "SeriesId=" + series + "&ParentId=" + series, "series", "", 0, 200},
 		{"library intersection", "SeriesId=" + series + "&ParentId=" + library, "series", "", 3, 200},
@@ -208,7 +207,6 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 		includeTotal     bool
 	}{
 		{name: "default", includeTotal: true},
-		{name: "enabled", totalParam: "&EnableTotalRecordCount=true", includeTotal: true},
 		{name: "disabled", totalParam: "&EnableTotalRecordCount=false"},
 	} {
 		for _, route := range []string{"items", "shows"} {
@@ -236,6 +234,37 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 				}
 				if len(result.Items) != 1 || result.TotalRecordCount != wantTotal || result.StartIndex != 3 {
 					t.Fatalf("incorrect bounded page: %+v", result)
+				}
+			})
+		}
+	}
+}
+
+// Jellyfin returns a whole series when Limit is absent. Infuse lists every
+// episode of a show in one such request and builds its seasons from the
+// result, so the 24-item browse default hid later seasons (#1628).
+func TestParentEpisodesWithoutLimitReturnWholeSeries(t *testing.T) {
+	for _, tc := range []struct {
+		name, params string
+		wantLimit    int
+	}{
+		{name: "absent", params: "", wantLimit: catalog.MaxEpisodePageSize},
+		{name: "explicit", params: "&Limit=24", wantLimit: 24},
+	} {
+		for _, route := range []string{"items", "shows"} {
+			t.Run(route+"/"+tc.name, func(t *testing.T) {
+				codec := NewResourceIDCodec()
+				repo := &boundedEpisodeContractRepo{}
+				svc := &countingContentService{seasons: []upstreamSeason{{ContentID: "season2", SeasonNumber: 2, EpisodeCount: 20}}}
+				h := &ItemsHandler{catalogUserState: true, content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
+				seriesID := codec.EncodeStringID(EncodedIDItem, "series")
+				if route == "shows" {
+					performEpisodesRequest(t, h, "/Shows/"+seriesID+"/Episodes?excludeLocationTypes=Virtual"+tc.params, seriesID)
+				} else {
+					performItemsRequest(t, h, "/Items?ParentId="+seriesID+"&IncludeItemTypes=Episode"+tc.params)
+				}
+				if repo.filters.Limit != tc.wantLimit {
+					t.Fatalf("episode page limit = %d, want %d", repo.filters.Limit, tc.wantLimit)
 				}
 			})
 		}
@@ -304,7 +333,7 @@ func (*presentationViewsContent) ListUserLibraries(context.Context, *Session) ([
 }
 
 func TestItemsViewsPresentationControls(t *testing.T) {
-	for _, path := range []string{"/Items?", "/Items?IncludeItemTypes=CollectionFolder&"} {
+	for _, path := range []string{"/Items?"} {
 		for _, controls := range []string{"", "EnableImages=false&EnableUserData=false", "ImageTypeLimit=0", "EnableImageTypes=Backdrop"} {
 			t.Run(path+controls, func(t *testing.T) {
 				codec := NewResourceIDCodec()

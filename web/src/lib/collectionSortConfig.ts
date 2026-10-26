@@ -20,10 +20,16 @@ export interface CollectionDefaultSortOption {
  */
 export function collectionDefaultSortOptions(
   allowPersonalized: boolean,
+  shownRatingSources?: ReadonlySet<string>,
+  keepSortField?: string,
 ): CollectionDefaultSortOption[] {
   return [
     { value: COLLECTION_SOURCE_ORDER, label: "Collection order (default)" },
-    ...getQuerySortOptions({ includePersonalized: allowPersonalized }).map((option) => ({
+    ...getQuerySortOptions({
+      includePersonalized: allowPersonalized,
+      shownRatingSources,
+      keepSortField,
+    }).map((option) => ({
       value: `${option.value}:${option.defaultOrder}`,
       label: option.label,
     })),

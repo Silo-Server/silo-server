@@ -78,6 +78,64 @@ func TestExternalIDsCompatible(t *testing.T) {
 	}
 }
 
+func TestCanResolvePersonByName(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b models.Person
+		want bool
+	}{
+		{
+			name: "shared tmdb identity",
+			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
+			b:    models.Person{Name: "Tom Holland", TmdbID: "1136406", ImdbID: "nm4043618"},
+			want: true,
+		},
+		{
+			name: "shared tvdb identity",
+			a:    models.Person{Name: "Jane Doe", TvdbID: "42"},
+			b:    models.Person{Name: "Jane Doe", TvdbID: "42"},
+			want: true,
+		},
+		{
+			name: "two name-only placeholders",
+			a:    models.Person{Name: "Jane Doe"},
+			b:    models.Person{Name: "jane doe"},
+			want: true,
+		},
+		{
+			name: "same name with disjoint provider identities",
+			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
+			b:    models.Person{Name: "Tom Holland", TmdbID: "64796"},
+			want: false,
+		},
+		{
+			name: "same name with ids from different providers but no shared proof",
+			a:    models.Person{Name: "Tom Holland", TmdbID: "1136406"},
+			b:    models.Person{Name: "Tom Holland", ImdbID: "nm0276169"},
+			want: false,
+		},
+		{
+			name: "identified person does not consume name-only placeholder",
+			a:    models.Person{Name: "Jane Doe", TmdbID: "123"},
+			b:    models.Person{Name: "Jane Doe"},
+			want: false,
+		},
+		{
+			name: "different names with shared identity",
+			a:    models.Person{Name: "Jane Doe", TmdbID: "123"},
+			b:    models.Person{Name: "Janet Doe", TmdbID: "123"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canResolvePersonByName(tt.a, tt.b); got != tt.want {
+				t.Fatalf("canResolvePersonByName = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCanMergePeople(t *testing.T) {
 	tests := []struct {
 		name string

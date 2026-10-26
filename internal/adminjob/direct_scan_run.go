@@ -25,9 +25,9 @@ const (
 type directScanRunRepository interface {
 	Create(ctx context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error)
 	Start(ctx context.Context, id string) (*models.ScanRun, error)
-	TouchHeartbeat(ctx context.Context, id string) error
-	Complete(ctx context.Context, id string, result *events.ScanRunResult) (*models.ScanRun, error)
-	Fail(ctx context.Context, id string, errorMessage string) (*models.ScanRun, error)
+	TouchHeartbeat(ctx context.Context, id string, startedAt *time.Time) error
+	Complete(ctx context.Context, id string, startedAt *time.Time, result *events.ScanRunResult) (*models.ScanRun, error)
+	Fail(ctx context.Context, id string, startedAt *time.Time, errorMessage string) (*models.ScanRun, error)
 	MarkCancelled(ctx context.Context, id string) (*models.ScanRun, bool, error)
 }
 
@@ -46,7 +46,7 @@ func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun,
 	if run == nil {
 		return func() {}
 	}
-	runID := run.ID
+	runID, startedAt := run.ID, run.StartedAt
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -59,7 +59,7 @@ func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun,
 				return
 			case <-ticker.C:
 				touchCtx, touchCancel := context.WithTimeout(ctx, directScanHeartbeatTimeout)
-				err := repo.TouchHeartbeat(touchCtx, runID)
+				err := repo.TouchHeartbeat(touchCtx, runID, startedAt)
 				touchCancel()
 				if err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("direct scan heartbeat failed", "scan_id", runID, "error", err)
@@ -98,8 +98,8 @@ func beginDirectSubtreeScan(
 		// concurrent refresh, or a direct run still inside the stale window). Fall
 		// back to the pre-scan-run behavior and ingest without owning a run rather
 		// than failing the refresh. Files first seen here get a NULL
-		// first_seen_scan_run_id, which is the documented legacy provenance path
-		// (they render as series cards in Recently Added).
+		// first_seen_scan_run_id, the legacy provenance path; Recently Added
+		// groups by arrival time, so they render like any other arrival.
 		slog.InfoContext(ctx, "direct scan proceeding without scan-run provenance: scope already claimed",
 			"library_id", libraryID,
 			"path", path,
@@ -129,7 +129,7 @@ func completeDirectScan(ctx context.Context, repo directScanRunRepository, run *
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
 	defer cancel()
-	if _, err := repo.Complete(finishCtx, run.ID, scanRunResultFromIngest(result)); err != nil {
+	if _, err := repo.Complete(finishCtx, run.ID, run.StartedAt, scanRunResultFromIngest(result)); err != nil {
 		return fmt.Errorf("complete scan run: %w", err)
 	}
 	return nil
@@ -141,7 +141,7 @@ func failDirectScan(ctx context.Context, repo directScanRunRepository, run *mode
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
 	defer cancel()
-	if _, err := repo.Fail(finishCtx, run.ID, scanErr.Error()); err != nil {
+	if _, err := repo.Fail(finishCtx, run.ID, run.StartedAt, scanErr.Error()); err != nil {
 		return errors.Join(scanErr, fmt.Errorf("fail scan run: %w", err))
 	}
 	return scanErr
@@ -155,9 +155,6 @@ func scanRunResultFromIngest(result *libraryingest.Result) *events.ScanRunResult
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		out.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		out.New = result.ScanResult.New

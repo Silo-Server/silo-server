@@ -42,11 +42,13 @@ func New(settings SettingsReader) *Service {
 // handler dereferences MediaStore from many request paths and a nil store
 // would panic on the first request. BuildABSHandler validates this at startup.
 type ABSHandlerDeps struct {
-	Pool           *pgxpool.Pool
-	Items          *catalog.ItemRepository
-	Files          *scanner.FileRepository
-	Settings       catalog.SettingsStore // encrypting decorator in production
-	Auth           absAuthAdapter        // see BuildABSHandler below
+	Pool     *pgxpool.Pool
+	Items    *catalog.ItemRepository
+	Files    *scanner.FileRepository
+	Settings catalog.SettingsStore // encrypting decorator in production
+	// Auth signs ABS clients in and rechecks each token's profile. Nil
+	// leaves standalone login unavailable.
+	Auth           *SiloCredValidator
 	AccessResolver abs.AccessResolver
 	// Recs is the recommendations repository used to power the
 	// /items/{id}/similar endpoint via embedding nearest-neighbor search.
@@ -62,11 +64,24 @@ type ABSHandlerDeps struct {
 	SessionSyncer abs.PlaybackSessionSyncer
 }
 
-// absAuthAdapter is the narrow slice of internal/auth that BuildABSHandler
-// needs. Defined as an interface to avoid an import cycle between the
-// audiobooks package and internal/auth. main.go satisfies it with the
-// concrete *auth.Service + *pgxpool.Pool pair via SiloCredValidator.
-type absAuthAdapter = abs.ProfileCredentialValidator
+// absSocketTokenValidator refuses a Socket.io connection whose access token
+// is revoked or no longer accepted by its profile, the same checks bearerAuth
+// makes on the HTTP routes. A nil verifier skips the profile check.
+func absSocketTokenValidator(tokens abs.TokenStore, verifier abs.ProfileVerifier) abssocket.TokenValidator {
+	return func(ctx context.Context, claims *abs.Claims) (bool, error) {
+		tok, err := tokens.GetTokenByJTI(ctx, claims.JTI)
+		if err != nil {
+			return false, err
+		}
+		if tok.RevokedAt != nil {
+			return true, nil
+		}
+		if verifier != nil {
+			return false, verifier.VerifyTokenProfile(ctx, claims.UserID, claims.ProfileID, claims.PINRevision)
+		}
+		return false, nil
+	}
+}
 
 // BuildABSHandler wires all production adapters and returns a ready-to-mount
 // *abs.Handler. Callers pass the handler to service.ABSHandler and to the
@@ -126,6 +141,20 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		configProvider = &ABSConfigProvider{Settings: deps.Settings}
 	}
 
+	// GET /me only has the token's userID; source a resolver from the
+	// SiloCredValidator (which holds the pgx pool) so /me can show the real
+	// display username instead of the numeric id. The same validator signs
+	// clients in and rechecks each token's profile PIN revision. Nil
+	// interface values, not typed nils, when it is absent.
+	var credValidator abs.ProfileCredentialValidator
+	var profileVerifier abs.ProfileVerifier
+	var usernameResolver func(ctx context.Context, userID, profileID string) string
+	if deps.Auth != nil {
+		credValidator = deps.Auth
+		profileVerifier = deps.Auth
+		usernameResolver = deps.Auth.ResolveUsername
+	}
+
 	// Socket.io server: secretFn reads the JWT secret at connection time so
 	// a secret-rotate takes effect without a restart.
 	var socketServer *abssocket.Server
@@ -134,31 +163,14 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 			secret, _ := configProvider.JWTSecret(context.Background())
 			return secret
 		}
-		var tokenValidator abssocket.TokenValidator
-		if ts := tokenStore; ts != nil {
-			tokenValidator = func(ctx context.Context, jti string) (bool, error) {
-				tok, err := ts.GetTokenByJTI(ctx, jti)
-				if err != nil {
-					return false, err
-				}
-				return tok.RevokedAt != nil, nil
-			}
-		}
-		socketServer = abssocket.New(secretFn, tokenValidator, nil, nil)
-	}
-
-	// GET /me only has the token's userID; source a resolver from the concrete
-	// SiloCredValidator (which holds the pgx pool) so /me can show the real
-	// display username instead of the numeric id.
-	var usernameResolver func(ctx context.Context, userID, profileID string) string
-	if scv, ok := deps.Auth.(*SiloCredValidator); ok {
-		usernameResolver = scv.ResolveUsername
+		socketServer = abssocket.New(secretFn, absSocketTokenValidator(tokenStore, profileVerifier), nil, nil)
 	}
 
 	h := abs.New(abs.Dependencies{
 		MediaStore:           mediaStore,
 		TokenStore:           tokenStore,
-		CredValidator:        deps.Auth,
+		CredValidator:        credValidator,
+		ProfileVerifier:      profileVerifier,
 		AccessResolver:       deps.AccessResolver,
 		UsernameResolver:     usernameResolver,
 		Config:               configProvider,

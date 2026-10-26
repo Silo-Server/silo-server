@@ -17,7 +17,7 @@ export default function QualityBadges({ summary }: QualityBadgesProps) {
       {badges.map((label) => (
         <span
           key={label}
-          className="bg-primary/10 text-primary border-primary/20 inline-flex items-center rounded-sm border px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
+          className="bg-primary/10 text-primary border-primary/20 inline-flex items-center rounded-sm border px-2 py-0.5 text-[0.6875rem] font-semibold tracking-wide uppercase"
         >
           {label}
         </span>

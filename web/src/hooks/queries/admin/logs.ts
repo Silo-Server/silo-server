@@ -9,6 +9,10 @@ import type { AuditLogListResponse, OperationalLogListResponse } from "@/api/typ
 import { adminKeys } from "../keys";
 
 export interface AdminLogQuery {
+  action?: string;
+  actor_user_id?: string;
+  target_type?: string;
+  target_id?: string;
   from?: string;
   to?: string;
   cursor?: string;
@@ -84,6 +88,10 @@ export function useOperationalLogs(params: AdminLogQuery, enabled = true) {
 export function useAuditLogs(params: AdminLogQuery, enabled = true) {
   const profileContext = captureProfileRequestContext();
   const query = {
+    action: params.action,
+    actor_user_id: params.actor_user_id,
+    target_type: params.target_type,
+    target_id: params.target_id,
     cursor: params.cursor,
     limit: params.limit,
     from: params.from,

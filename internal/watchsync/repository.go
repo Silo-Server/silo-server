@@ -22,6 +22,8 @@ type Repository interface {
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
+	UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error
+	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error
@@ -35,7 +37,7 @@ type Repository interface {
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
-	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExports(ctx context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error)
 	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
@@ -43,6 +45,7 @@ type Repository interface {
 	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
 	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
 	ListPendingListItemRemovals(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
+	ListListItemsWithSharedKeyHeld(ctx context.Context, connectionID string, kind ListKind, mediaItemIDs []string) (map[string]bool, error)
 	MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error
 	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
@@ -54,6 +57,12 @@ type Repository interface {
 	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
 	WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error)
+	WithTokenRefreshLock(ctx context.Context, connectionID string, fn func(context.Context) error) error
+	ListDroppedEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
+	ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error)
+	UpsertDroppedSyncStates(ctx context.Context, states []DroppedSyncState) error
+	DeleteDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) error
+	ClearDroppedSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
@@ -85,10 +94,10 @@ const connectionColumns = `
 	import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
 	import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 	sync_watchlist_order_enabled, scrobble_enabled, import_ratings_enabled,
-	export_ratings_enabled, last_inbound_sync_at,
+	export_ratings_enabled, sync_dropped_enabled, last_inbound_sync_at,
 	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
 	last_watchlist_sync_at, last_scrobble_error_at, last_error,
-	rate_limited_until, sync_cursors, created_at, updated_at`
+	rate_limited_until, sync_cursors, connection_settings, created_at, updated_at`
 
 // syncRunColumns is the canonical select/returning column list for
 // watch_provider_sync_runs, in the exact order scanSyncRun reads.
@@ -105,6 +114,22 @@ const syncRunColumns = `
 	outbound_ratings_found, outbound_ratings_sent,
 	warning, error, started_at, completed_at, created_at`
 
+// listItemKeyHeldElsewhere is true when another library item of the same kind,
+// still on the local list, holds the provider key of the list row aliased item.
+// Removing that key from the provider would take the other item off too.
+const listItemKeyHeldElsewhere = `EXISTS (
+	SELECT 1 FROM watch_provider_list_items other
+	WHERE other.connection_id = item.connection_id
+	  AND other.list_kind = item.list_kind
+	  AND item.provider_item_key <> ''
+	  AND other.provider_item_key <> ''
+	  AND other.provider_item_key = item.provider_item_key
+	  AND other.kind = item.kind
+	  AND other.media_item_id <> item.media_item_id
+	  AND other.local_present = true
+	  AND EXISTS (SELECT 1 FROM media_items m WHERE m.content_id = other.media_item_id)
+)`
+
 // listItemStateColumns is the canonical select column list for
 // watch_provider_list_items, in the exact order scanListItemStates reads.
 const listItemStateColumns = `
@@ -115,40 +140,59 @@ const listItemStateColumns = `
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
 	cipher *secret.Cipher
-	// ratingLockSlots admits one caller per connection on this node to the
-	// rating sync lock, so waiters cannot pile up database sessions.
-	ratingLockSlots sync.Map
-	// ratingLockSessions caps the lock sessions this node holds at once
-	// across all connections; see ratingLockSessionLimit.
-	ratingLockSessionsOnce sync.Once
-	ratingLockSessions     chan struct{}
+	// ratingLock serializes a connection's rating reconciliation; see
+	// WithRatingSyncLock.
+	ratingLock connectionLock
+	// tokenRefreshLock serializes a connection's token refresh; see
+	// WithTokenRefreshLock.
+	tokenRefreshLock connectionLock
 }
 
-// maxRatingLockSessions bounds the database sessions one node opens for
-// rating sync locks, which sit outside the pool's own limit.
-const maxRatingLockSessions = 4
+// connectionLock is one class of cluster-wide advisory lock keyed by
+// connection. Each class keeps its own admission state, so holding a lock of
+// one class never waits on a slot or session of another.
+type connectionLock struct {
+	// class namespaces the advisory lock keys so classes cannot collide.
+	class int32
+	// name labels errors.
+	name string
+	// slots admits one caller per connection on this node, so waiters cannot
+	// pile up database sessions.
+	slots sync.Map
+	// sessions caps the lock sessions this node holds at once across all
+	// connections; see sessionLimit.
+	sessionsOnce sync.Once
+	sessions     chan struct{}
+}
 
-// ratingLockSessionLimit returns the semaphore of lock sessions, sized to at
-// most maxRatingLockSessions and never more than the pool's own size, so a
-// small deployment adds at most as many sessions as it configured.
-func (r *PostgresRepository) ratingLockSessionLimit() chan struct{} {
-	r.ratingLockSessionsOnce.Do(func() {
-		limit := min(maxRatingLockSessions, max(1, int(r.pool.Config().MaxConns)))
-		r.ratingLockSessions = make(chan struct{}, limit)
+// maxLockSessions bounds the database sessions one node opens for each lock
+// class, which sit outside the pool's own limit.
+const maxLockSessions = 4
+
+// sessionLimit returns the semaphore of lock sessions, sized to at most
+// maxLockSessions and never more than the pool's own size, so a small
+// deployment adds at most as many sessions per class as it configured.
+func (l *connectionLock) sessionLimit(pool *pgxpool.Pool) chan struct{} {
+	l.sessionsOnce.Do(func() {
+		limit := min(maxLockSessions, max(1, int(pool.Config().MaxConns)))
+		l.sessions = make(chan struct{}, limit)
 	})
-	return r.ratingLockSessions
+	return l.sessions
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
-	return &PostgresRepository{pool: pool, cipher: cipher}
+	r := &PostgresRepository{pool: pool, cipher: cipher}
+	r.ratingLock.class, r.ratingLock.name = ratingSyncLockClass, "rating sync"
+	r.tokenRefreshLock.class, r.tokenRefreshLock.name = tokenRefreshLockClass, "token refresh"
+	return r
 }
 
 // TokenAAD binds an access/refresh token ciphertext to its connection. It uses
 // the stable UNIQUE business key (provider, user_id, profile_id) rather than the
 // surrogate id, because UpsertConnection lets Postgres assign/keep the id (ON
 // CONFLICT), so the id is not known before the write — the tuple is, and it
-// identifies the row just as uniquely. Exported so the (raw-SQL) Trakt
-// collection-token resolver binds tokens identically.
+// identifies the row just as uniquely. The secret backfill builds the same
+// key for rows it encrypts.
 func TokenAAD(column, provider string, userID int, profileID string) string {
 	return secret.RowAAD("watch_provider_connections", column, provider+":"+strconv.Itoa(userID)+":"+profileID)
 }
@@ -174,6 +218,30 @@ func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (
 		return "", fmt.Errorf("decrypt server_settings %q: %w", key, err)
 	}
 	return out, nil
+}
+
+// SetServerSetting stores a plain, non-secret server setting.
+func (r *PostgresRepository) SetServerSetting(ctx context.Context, key, value string) error {
+	if _, err := r.pool.Exec(ctx,
+		`INSERT INTO server_settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		key, value,
+	); err != nil {
+		return fmt.Errorf("server_settings set %q: %w", key, err)
+	}
+	return nil
+}
+
+// HasConnections reports whether any profile is connected to providerKey.
+func (r *PostgresRepository) HasConnections(ctx context.Context, providerKey string) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM watch_provider_connections WHERE provider = $1)`,
+		providerKey,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check %s watch provider connections: %w", providerKey, err)
+	}
+	return exists, nil
 }
 
 func (r *PostgresRepository) UpsertAuthSession(
@@ -250,7 +318,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
 	}
-	pluginCredentials, err := r.pluginCredentialsForConnection(conn)
+	pluginCredentials, err := r.encodePluginCredentials(conn)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -263,13 +331,14 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
 			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
-			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled
+			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled,
+			sync_dropped_enabled, connection_settings
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb,
-			$32, $33
+			$32, $33, $34, $35::jsonb
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -323,12 +392,60 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		encodeSyncCursors(conn.SyncCursors),
 		conn.ImportRatingsEnabled,
 		conn.ExportRatingsEnabled,
+		conn.SyncDroppedEnabled,
+		encodeStoredConnectionSettings(conn.ConnectionSettings),
 	)
 	saved, err := r.scanConnection(row)
 	if err != nil {
 		return Connection{}, fmt.Errorf("upsert watch provider connection: %w", err)
 	}
 	return saved, nil
+}
+
+// UpdateConnectionSyncState writes one flow's bookkeeping to the saved
+// connection with id. Tokens, credentials and settings are never written, so
+// a token refresh during a long sync survives it, and a connection that was
+// disconnected meanwhile stays gone: there is no row to update, and no error.
+// A cleared error is kept while a deferral that has not ended explains it.
+func (r *PostgresRepository) UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error {
+	if id == "" {
+		return nil
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections
+		SET last_inbound_sync_at = COALESCE($2::timestamptz, last_inbound_sync_at),
+		    last_progress_sync_at = COALESCE($3::timestamptz, last_progress_sync_at),
+		    last_outbound_sync_at = COALESCE($4::timestamptz, last_outbound_sync_at),
+		    last_favorites_sync_at = COALESCE($5::timestamptz, last_favorites_sync_at),
+		    last_watchlist_sync_at = COALESCE($6::timestamptz, last_watchlist_sync_at),
+		    last_error = CASE
+		        WHEN $7::text IS NULL THEN last_error
+		        WHEN $7::text = '' AND rate_limited_until > $9::timestamptz THEN last_error
+		        ELSE $7::text
+		    END,
+		    rate_limited_until = CASE
+		        WHEN $8::timestamptz IS NOT NULL THEN $8::timestamptz
+		        WHEN rate_limited_until <= $9::timestamptz THEN NULL
+		        ELSE rate_limited_until
+		    END,
+		    sync_cursors = sync_cursors || $10::jsonb,
+		    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE id = $1::uuid
+	`,
+		id,
+		update.LastInboundSyncAt,
+		update.LastProgressSyncAt,
+		update.LastOutboundSyncAt,
+		update.LastFavoritesSyncAt,
+		update.LastWatchlistSyncAt,
+		update.LastError,
+		update.RateLimitedUntil,
+		update.ClearRateLimitBy,
+		encodeSyncCursors(mergeSyncCursors(nil, update.SyncCursors)),
+	); err != nil {
+		return fmt.Errorf("update watch provider connection sync state: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetConnection(
@@ -397,7 +514,6 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				import_watched_enabled
 				OR import_progress_enabled
 				OR export_watched_enabled
-				OR export_unwatched_enabled
 				OR import_favorites_enabled
 				OR export_favorites_enabled
 				OR sync_favorite_removals_enabled
@@ -407,6 +523,7 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				OR scrobble_enabled
 				OR import_ratings_enabled
 				OR export_ratings_enabled
+				OR sync_dropped_enabled
 			)
 		ORDER BY provider, user_id, profile_id
 	`, now)
@@ -621,8 +738,6 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 	switch kind {
 	case LocalWatchEventMarkedWatched:
 		predicate = "export_watched_enabled = true"
-	case LocalWatchEventMarkedUnwatched:
-		predicate = "export_unwatched_enabled = true"
 	default:
 		return nil, nil
 	}
@@ -764,7 +879,11 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 		return nil
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		bound, err := lockBoundRatingAccounts(ctx, tx, states)
+		pairs := make([]ratingBinding, len(states))
+		for i, state := range states {
+			pairs[i] = ratingBinding{state.ConnectionID, state.ProviderAccountID}
+		}
+		bound, err := lockBoundRatingAccounts(ctx, tx, pairs)
 		if err != nil {
 			return err
 		}
@@ -780,12 +899,13 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 
 type ratingBinding struct{ connectionID, providerAccountID string }
 
-// lockBoundRatingAccounts share-locks the connections the states belong to and
-// reports which (connection, account) pairs are still bound.
-func lockBoundRatingAccounts(ctx context.Context, tx pgx.Tx, states []RatingSyncState) (map[ratingBinding]bool, error) {
+// lockBoundRatingAccounts share-locks the connections of the given
+// (connection, account) pairs and reports which pairs are still bound. Rating
+// and dropped-show sync states share it.
+func lockBoundRatingAccounts(ctx context.Context, tx pgx.Tx, bindings []ratingBinding) (map[ratingBinding]bool, error) {
 	pairs := make(map[ratingBinding]bool)
-	for _, state := range states {
-		pairs[ratingBinding{state.ConnectionID, state.ProviderAccountID}] = false
+	for _, binding := range bindings {
+		pairs[binding] = false
 	}
 	for pair := range pairs {
 		var found bool
@@ -863,9 +983,11 @@ func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connect
 	return nil
 }
 
-// ratingSyncLockClass namespaces the advisory locks that serialize rating
-// reconciliation, so they cannot collide with other advisory locks.
-const ratingSyncLockClass = 0x57535254
+// Advisory lock classes, one per connectionLock.
+const (
+	ratingSyncLockClass   = 0x57535254
+	tokenRefreshLockClass = 0x57535446
+)
 
 // WithRatingSyncLock runs fn while holding a cluster-wide advisory lock for the
 // connection's rating reconciliation. Every node runs the scheduled sync, so
@@ -873,17 +995,31 @@ const ratingSyncLockClass = 0x57535254
 // agreed ratings describing an older state than the provider holds.
 //
 // With wait false it reports false when the lock is held elsewhere; with wait
-// true it blocks until the lock is free or ctx ends. The lock lives on its own
-// database session opened outside the pool, so holding it never takes a pool
-// connection that fn needs, even in a one-connection pool. On this node only
-// one caller per connection holds or waits for that session, and at most
-// ratingLockSessionLimit sessions are open at once. Closing the session
-// releases the lock, including when a node dies.
+// true it blocks until the lock is free or ctx ends.
 func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
-	slotValue, _ := r.ratingLockSlots.LoadOrStore(connectionID, make(chan struct{}, 1))
+	return r.withConnectionLock(ctx, &r.ratingLock, connectionID, wait, fn)
+}
+
+// WithTokenRefreshLock runs fn while holding a cluster-wide advisory lock for
+// the connection's token refresh, waiting until the lock is free or ctx ends.
+func (r *PostgresRepository) WithTokenRefreshLock(ctx context.Context, connectionID string, fn func(context.Context) error) error {
+	_, err := r.withConnectionLock(ctx, &r.tokenRefreshLock, connectionID, true, fn)
+	return err
+}
+
+// withConnectionLock runs fn while holding lock's advisory lock for
+// connectionID. With wait false it reports false when the lock is held
+// elsewhere; with wait true it blocks until the lock is free or ctx ends. The
+// lock lives on its own database session opened outside the pool, so holding
+// it never takes a pool connection that fn needs, even in a one-connection
+// pool. On this node only one caller per connection holds or waits for that
+// session, and at most maxLockSessions sessions per class are open at once.
+// Closing the session releases the lock, including when a node dies.
+func (r *PostgresRepository) withConnectionLock(ctx context.Context, lock *connectionLock, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
+	slotValue, _ := lock.slots.LoadOrStore(connectionID, make(chan struct{}, 1))
 	slot, ok := slotValue.(chan struct{})
 	if !ok {
-		return false, fmt.Errorf("rating sync lock slot has type %T", slotValue)
+		return false, fmt.Errorf("%s lock slot has type %T", lock.name, slotValue)
 	}
 	if wait {
 		select {
@@ -902,7 +1038,7 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 
 	// A try that finds every session in use reports the lock as busy rather
 	// than waiting, so a scheduled sync moves on to its next connection.
-	sessions := r.ratingLockSessionLimit()
+	sessions := lock.sessionLimit(r.pool)
 	if wait {
 		select {
 		case sessions <- struct{}{}:
@@ -920,7 +1056,7 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 
 	session, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig)
 	if err != nil {
-		return false, fmt.Errorf("open rating sync lock session: %w", err)
+		return false, fmt.Errorf("open %s lock session: %w", lock.name, err)
 	}
 	// Closing the session releases the lock, whatever state a canceled
 	// lock call left it in.
@@ -930,13 +1066,13 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 		_ = session.Close(closeCtx)
 	}()
 	if wait {
-		if _, err := session.Exec(ctx, `SELECT pg_advisory_lock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID); err != nil {
-			return false, fmt.Errorf("wait for rating sync lock: %w", err)
+		if _, err := session.Exec(ctx, `SELECT pg_advisory_lock($1, hashtext($2))`, lock.class, connectionID); err != nil {
+			return false, fmt.Errorf("wait for %s lock: %w", lock.name, err)
 		}
 	} else {
 		var locked bool
-		if err := session.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID).Scan(&locked); err != nil {
-			return false, fmt.Errorf("try rating sync lock: %w", err)
+		if err := session.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, hashtext($2))`, lock.class, connectionID).Scan(&locked); err != nil {
+			return false, fmt.Errorf("try %s lock: %w", lock.name, err)
 		}
 		if !locked {
 			return false, nil
@@ -981,6 +1117,151 @@ func (r *PostgresRepository) UpdateRatingCursors(ctx context.Context, connection
 	return nil
 }
 
+// ListDroppedEventConnections returns the profile's connections that sync
+// dropped shows, i.e. should mirror a local drop or undrop to the provider.
+func (r *PostgresRepository) ListDroppedEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+connectionColumns+`
+		FROM watch_provider_connections
+		WHERE user_id = $1 AND profile_id = $2 AND sync_dropped_enabled = true
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
+		ORDER BY provider
+	`, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list dropped event connections: %w", err)
+	}
+	defer rows.Close()
+
+	var conns []Connection
+	for rows.Next() {
+		conn, scanErr := r.scanConnection(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan dropped event connection: %w", scanErr)
+		}
+		conns = append(conns, conn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dropped event connections: %w", err)
+	}
+	return conns, nil
+}
+
+// ListDroppedSyncStates returns a connection's agreed drops with the given
+// provider account, like ListRatingSyncStates. A nil seriesIDs returns every
+// state; otherwise only the listed series.
+func (r *PostgresRepository) ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error) {
+	query := `
+		SELECT connection_id::text, provider_account_id, series_id, provider_item_key, remote_seen, updated_at
+		FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id = $2`
+	args := []any{connectionID, providerAccountID}
+	if seriesIDs != nil {
+		query += ` AND series_id = ANY($3)`
+		args = append(args, seriesIDs)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list dropped sync states: %w", err)
+	}
+	defer rows.Close()
+	var states []DroppedSyncState
+	for rows.Next() {
+		var state DroppedSyncState
+		if err := rows.Scan(&state.ConnectionID, &state.ProviderAccountID, &state.SeriesID, &state.ProviderItemKey, &state.RemoteSeen, &state.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan dropped sync state: %w", err)
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dropped sync states: %w", err)
+	}
+	return states, nil
+}
+
+// UpsertDroppedSyncStates records agreed drops, only while each row's
+// connection is still bound to the row's provider account (see
+// UpsertRatingSyncStates).
+func (r *PostgresRepository) UpsertDroppedSyncStates(ctx context.Context, states []DroppedSyncState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		pairs := make([]ratingBinding, len(states))
+		for i, state := range states {
+			pairs[i] = ratingBinding{state.ConnectionID, state.ProviderAccountID}
+		}
+		bound, err := lockBoundRatingAccounts(ctx, tx, pairs)
+		if err != nil {
+			return err
+		}
+		var connectionIDs, accountIDs, seriesIDs, keys []string
+		var seen []bool
+		for _, state := range states {
+			if !bound[ratingBinding{state.ConnectionID, state.ProviderAccountID}] {
+				continue
+			}
+			connectionIDs = append(connectionIDs, state.ConnectionID)
+			accountIDs = append(accountIDs, state.ProviderAccountID)
+			seriesIDs = append(seriesIDs, state.SeriesID)
+			keys = append(keys, state.ProviderItemKey)
+			seen = append(seen, state.RemoteSeen)
+		}
+		if len(seriesIDs) == 0 {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO watch_provider_dropped_items (
+				connection_id, provider_account_id, series_id, provider_item_key, remote_seen
+			)
+			SELECT input.connection_id::uuid, input.provider_account_id, input.series_id,
+				input.provider_item_key, input.remote_seen
+			FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::boolean[])
+				AS input(connection_id, provider_account_id, series_id, provider_item_key, remote_seen)
+			ON CONFLICT (connection_id, series_id) DO UPDATE SET
+				provider_account_id = EXCLUDED.provider_account_id,
+				provider_item_key = CASE
+					WHEN EXCLUDED.provider_item_key <> '' THEN EXCLUDED.provider_item_key
+					ELSE watch_provider_dropped_items.provider_item_key
+				END,
+				remote_seen = EXCLUDED.remote_seen,
+				updated_at = now()
+		`, connectionIDs, accountIDs, seriesIDs, keys, seen)
+		if err != nil {
+			return fmt.Errorf("upsert dropped sync states: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteDroppedSyncStates forgets agreed drops recorded for one provider
+// account, leaving rows another account has since agreed on.
+func (r *PostgresRepository) DeleteDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) error {
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id = $2 AND series_id = ANY($3)
+	`, connectionID, providerAccountID, seriesIDs)
+	if err != nil {
+		return fmt.Errorf("delete dropped sync states: %w", err)
+	}
+	return nil
+}
+
+// ClearDroppedSyncStates forgets a connection's agreed drops with every
+// provider account other than keepAccountID, used after a rebind.
+func (r *PostgresRepository) ClearDroppedSyncStates(ctx context.Context, connectionID, keepAccountID string) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_dropped_items
+		WHERE connection_id = $1::uuid AND provider_account_id <> $2
+	`, connectionID, keepAccountID)
+	if err != nil {
+		return fmt.Errorf("clear dropped sync states: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresRepository) GetMediaDuration(ctx context.Context, mediaItemID string) (float64, error) {
 	var duration float64
 	err := r.pool.QueryRow(ctx, mediaDurationQuery, mediaItemID).Scan(&duration)
@@ -1018,6 +1299,44 @@ func (r *PostgresRepository) GetListMediaItems(ctx context.Context, mediaItemIDs
 	return result, nil
 }
 
+// GetMediaTitles loads the display titles of movies, series and episodes by
+// media item id; see MediaTitles. Unknown ids are absent from the result.
+func (r *PostgresRepository) GetMediaTitles(ctx context.Context, mediaItemIDs []string) (map[string]MediaTitles, error) {
+	result := make(map[string]MediaTitles, len(mediaItemIDs))
+	if len(mediaItemIDs) == 0 {
+		return result, nil
+	}
+	// An id in both tables is read as the episode, so one row comes back per id.
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.content_id, m.type, m.title, COALESCE(m.year, 0), '', 0
+		FROM media_items m
+		WHERE m.content_id = ANY($1)
+			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = m.content_id)
+		UNION ALL
+		SELECT e.content_id, 'episode', COALESCE(e.title, ''), COALESCE(s.year, 0),
+			COALESCE(s.title, ''), COALESCE(s.year, 0)
+		FROM episodes e
+		LEFT JOIN media_items s ON s.content_id = e.series_id
+		WHERE e.content_id = ANY($1)
+	`, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get media titles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var titles MediaTitles
+		if err := rows.Scan(&id, &titles.Kind, &titles.Title, &titles.Year, &titles.SeriesTitle, &titles.SeriesYear); err != nil {
+			return nil, fmt.Errorf("scan media titles: %w", err)
+		}
+		result[id] = titles
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate media titles: %w", err)
+	}
+	return result, nil
+}
+
 const mediaDurationQuery = `
 		SELECT COALESCE(MAX(duration), 0)
 		FROM media_files
@@ -1050,9 +1369,18 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 	return nil
 }
 
-func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
+func (r *PostgresRepository) ListPendingHistoryExports(
+	ctx context.Context,
+	connectionID string,
+	after HistoryExportCursor,
+	limit int,
+) ([]HistoryExport, error) {
+	if limit <= 0 || limit > maxHistoryExportPage {
+		limit = maxHistoryExportPage
+	}
+	var afterID any
+	if after.ID != "" {
+		afterID = after.ID
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
@@ -1061,9 +1389,12 @@ func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, conn
 		WHERE connection_id = $1::uuid
 		  AND status IN ('pending', 'failed')
 		  AND attempt_count < 5
-		ORDER BY watched_at ASC
+		  AND ($3::uuid IS NULL OR (watched_at, id) > ($4::timestamptz, $3::uuid))
+		-- Qualified: a bare "id" would sort by the id::text output column,
+		-- not the uuid the cursor compares.
+		ORDER BY watched_at ASC, watch_provider_history_exports.id ASC
 		LIMIT $2
-	`, connectionID, limit)
+	`, connectionID, limit, afterID, after.WatchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("list pending history exports: %w", err)
 	}
@@ -1263,12 +1594,13 @@ func (r *PostgresRepository) ListPendingListItemRemovals(ctx context.Context, co
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+listItemStateColumns+`
-		FROM watch_provider_list_items
+		FROM watch_provider_list_items item
 		WHERE connection_id = $1::uuid
 		  AND list_kind = $2
 		  AND local_present = false
 		  AND remote_present = true
 		  AND last_error = ''
+		  AND NOT `+listItemKeyHeldElsewhere+`
 		ORDER BY last_removed_local_at ASC NULLS LAST, updated_at ASC
 		LIMIT $3
 	`, connectionID, string(kind), limit)
@@ -1277,6 +1609,39 @@ func (r *PostgresRepository) ListPendingListItemRemovals(ctx context.Context, co
 	}
 	defer rows.Close()
 	return scanListItemStates(rows)
+}
+
+// ListListItemsWithSharedKeyHeld reports which of the media items' rows share
+// their provider key with another library item of the same kind still on the
+// local list.
+func (r *PostgresRepository) ListListItemsWithSharedKeyHeld(ctx context.Context, connectionID string, kind ListKind, mediaItemIDs []string) (map[string]bool, error) {
+	held := make(map[string]bool)
+	if len(mediaItemIDs) == 0 {
+		return held, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT item.media_item_id
+		FROM watch_provider_list_items item
+		WHERE item.connection_id = $1::uuid
+		  AND item.list_kind = $2
+		  AND item.media_item_id = ANY($3)
+		  AND `+listItemKeyHeldElsewhere+`
+	`, connectionID, string(kind), mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list list items with shared key held: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan list item with shared key held: %w", err)
+		}
+		held[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate list items with shared key held: %w", err)
+	}
+	return held, nil
 }
 
 func (r *PostgresRepository) MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error {
@@ -1698,6 +2063,7 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	var conn Connection
 	var rawSyncCursors []byte
+	var rawConnectionSettings []byte
 	var rawPluginCredentials string
 	err := row.Scan(
 		&conn.ID,
@@ -1724,6 +2090,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.ScrobbleEnabled,
 		&conn.ImportRatingsEnabled,
 		&conn.ExportRatingsEnabled,
+		&conn.SyncDroppedEnabled,
 		&conn.LastInboundSyncAt,
 		&conn.LastProgressSyncAt,
 		&conn.LastOutboundSyncAt,
@@ -1733,6 +2100,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.LastError,
 		&conn.RateLimitedUntil,
 		&rawSyncCursors,
+		&rawConnectionSettings,
 		&conn.CreatedAt,
 		&conn.UpdatedAt,
 	)
@@ -1751,6 +2119,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		return Connection{}, err
 	}
 	conn.SyncCursors = decodeSyncCursors(rawSyncCursors)
+	conn.ConnectionSettings = decodeStoredConnectionSettings(rawConnectionSettings)
 	return conn, nil
 }
 
@@ -1763,16 +2132,10 @@ type storedPluginCredentials struct {
 	SecretAttributes map[string]string `json:"secret_attributes,omitempty"`
 }
 
-func (r *PostgresRepository) pluginCredentialsForConnection(conn Connection) (string, error) {
-	if !strings.HasPrefix(conn.Provider, providerSourcePlugin+":") {
-		// Built-in providers have legacy token writers that update the dedicated
-		// token columns directly. Keeping a second authoritative bundle for them
-		// would let that bundle become stale and overwrite freshly rotated tokens.
-		return "", nil
-	}
-	return r.encodePluginCredentials(conn)
-}
-
+// encodePluginCredentials encodes the authoritative credential bundle every
+// connection stores next to the dedicated token columns. A row written by a
+// former built-in provider has only the columns; decodePluginCredentials leaves
+// them in place when the bundle is empty, and the next write adds the bundle.
 func (r *PostgresRepository) encodePluginCredentials(conn Connection) (string, error) {
 	payload, err := json.Marshal(storedPluginCredentials{
 		AccessToken:      conn.AccessToken,
@@ -1830,13 +2193,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return result
 }
 
-type listItemStateRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 	var states []ListItemState
 	for rows.Next() {
 		var state ListItemState

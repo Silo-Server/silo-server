@@ -108,7 +108,7 @@ func TestResidentSupervisorNewGenerationNeverAdoptsInFlightOlderLaunch(t *testin
 	host := newSeqFakeHost()
 	service := &Service{installations: store, host: host}
 	service.resident = newResidentSupervisor(service, ResidentOptions{MinBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond})
-	service.AddLifecycleHook(func(context.Context) { service.invalidateInstallationCache() })
+	service.AddLifecycleHook(func(context.Context) { service.InvalidateInstallationCache() })
 	service.AddLifecycleHook(func(ctx context.Context) { service.resident.Reconcile(ctx) })
 	t.Cleanup(func() {
 		host.release.Do(func() { close(host.gate) })

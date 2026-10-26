@@ -26,14 +26,31 @@ func NewRatingSourceRepository(pool *pgxpool.Pool) *RatingSourceRepository {
 
 // Upsert stores the item's rating sources. With replace false, a source that
 // already has a row keeps it (the fill-empty merge); with replace true, the
-// incoming row overwrites it (replace-unlocked). Sources absent from the input
-// are never removed.
+// incoming row overwrites it. Sources absent from the input are never removed.
+// A trigger copies the 'tmdb' row's vote count and average onto media_items.
 func (r *RatingSourceRepository) Upsert(ctx context.Context, contentID string, sources []models.ItemRatingSource, replace bool) error {
 	contentID = strings.TrimSpace(contentID)
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	return upsertRatingSources(ctx, r.pool, contentID, ratingSourceColumnsOf(sources), replace)
+	columns := ratingSourceColumnsOf(sources)
+	if len(columns.names) == 0 {
+		return nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin upsert rating sources transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := lockRatingSourceItem(ctx, tx, contentID); err != nil {
+		return err
+	}
+	if err := upsertRatingSources(ctx, tx, contentID, columns, replace); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Replace makes sources the item's complete set of rating sources: it writes
@@ -52,6 +69,9 @@ func (r *RatingSourceRepository) Replace(ctx context.Context, contentID string, 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := lockRatingSourceItem(ctx, tx, contentID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM media_item_rating_sources
 		WHERE content_id = $1 AND source <> ALL($2::text[])`,
@@ -62,6 +82,18 @@ func (r *RatingSourceRepository) Replace(ctx context.Context, contentID string, 
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// lockRatingSourceItem locks the item's row before its rating sources are
+// written. The trigger that copies the TMDB vote pair updates the item after the
+// source row, while a catalog import or a content-ID rename locks the item
+// first; taking the item first here puts every writer in that order, so they
+// wait for one another instead of deadlocking.
+func lockRatingSourceItem(ctx context.Context, tx pgx.Tx, contentID string) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID); err != nil {
+		return fmt.Errorf("lock item for rating sources: %w", err)
+	}
+	return nil
 }
 
 // ratingSourceColumns holds rating sources as the parallel arrays the upsert

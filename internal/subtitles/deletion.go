@@ -17,14 +17,9 @@ type SubtitleRevisionDeleter interface {
 }
 
 func (r *PgRepository) DeleteDownloadedSubtitleWithRevision(ctx context.Context, id int, revision *int64) (*DownloadedSubtitle, error) {
-	var sub DownloadedSubtitle
-	err := r.pool.QueryRow(ctx, `DELETE FROM downloaded_subtitles
+	sub, err := scanDownloadedSubtitle(r.pool.QueryRow(ctx, `DELETE FROM downloaded_subtitles
  WHERE id = $1 AND ($2::bigint IS NULL OR revision = $2)
- RETURNING id, media_file_id, provider, language, format, release_name,
- s3_key, score, hearing_impaired, downloaded_by, created_at, COALESCE(content_sha256, ''), revision`, id, revision,
-	).Scan(&sub.ID, &sub.MediaFileID, &sub.Provider, &sub.Language, &sub.Format,
-		&sub.ReleaseName, &sub.S3Key, &sub.Score, &sub.HearingImpaired,
-		&sub.DownloadedBy, &sub.CreatedAt, &sub.ContentSHA256, &sub.Revision)
+ RETURNING `+downloadedSubtitleColumns, id, revision))
 	if errors.Is(err, pgx.ErrNoRows) {
 		current, lookupErr := r.GetDownloadedSubtitle(ctx, id)
 		if lookupErr != nil {
@@ -38,7 +33,7 @@ func (r *PgRepository) DeleteDownloadedSubtitleWithRevision(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("delete subtitle with revision: %w", err)
 	}
-	return &sub, nil
+	return sub, nil
 }
 
 // DeleteSubtitleWithRevision removes only the captured row version. A nil revision

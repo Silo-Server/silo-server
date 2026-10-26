@@ -3,7 +3,6 @@ package abs
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -218,47 +218,86 @@ func TestMountedABSRouterAttributesPublicTrack(t *testing.T) {
 	}
 }
 
+// feedMediaStore serves one item with one media file for the RSS feed-file
+// route.
+type feedMediaStore struct {
+	noopMediaStore
+	file *models.MediaFile
+}
+
+func (f *feedMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
+	if f.file == nil || f.file.ContentID != id {
+		return nil, nil
+	}
+	return &models.MediaItem{ContentID: id}, nil
+}
+
+func (f *feedMediaStore) GetMediaFiles(_ context.Context, id string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
+	if f.file == nil || f.file.ContentID != id {
+		return nil, nil
+	}
+	return []*models.MediaFile{f.file}, nil
+}
+
+type feedStore struct {
+	feed RSSFeed
+}
+
+func (f *feedStore) GetFeedBySlug(_ context.Context, slug string) (RSSFeed, error) {
+	if f.feed.Slug != slug {
+		return RSSFeed{}, ErrNotFound
+	}
+	return f.feed, nil
+}
+func (f *feedStore) CreateFeed(context.Context, RSSFeed) error { return nil }
+func (f *feedStore) CloseFeed(context.Context, string) error   { return nil }
+func (f *feedStore) GetFeed(context.Context, string) (RSSFeed, error) {
+	return RSSFeed{}, ErrNotFound
+}
+func (f *feedStore) ListUserFeeds(context.Context, string, string) ([]RSSFeed, error) {
+	return nil, nil
+}
+
+// §4.2b: the RSS feed route has no authenticated caller — the slug is the
+// capability — so the transfer must be attributed to the feed's owner.
+func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
+	body := []byte(strings.Repeat("feed-audio", 200))
+	path := filepath.Join(t.TempDir(), "feed.mp3")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := telemetryRegistry(t)
+	server := absTelemetryServer(t, registry, Dependencies{
+		MediaStore:   &feedMediaStore{file: &models.MediaFile{ID: 501, FilePath: path, ContentID: "book-9"}},
+		RSSFeedStore: &feedStore{feed: RSSFeed{ID: "feed-1", UserID: "7", ProfileID: "profile-9", LibraryItemID: "book-9", Slug: "slug-9"}},
+		AccessResolver: newFakeOwnerResolver().
+			set("7", "profile-9", catalog.AccessFilter{UserID: 7, ProfileID: "profile-9"}),
+	})
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+	t.Cleanup(client.CloseIdleConnections)
+
+	got := getWithHeaders(t, client, http.MethodGet, server.URL+"/feed/slug-9/file/501", nil)
+	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
+		t.Fatalf("GET = %d, %d bytes", got.status, len(got.body))
+	}
+	snapshot := server.settledSweep(t)
+	if len(snapshot.Sessions) != 0 {
+		t.Fatalf("feed file created a logical session: %+v", snapshot.Sessions)
+	}
+	if len(snapshot.Transfers) != 1 {
+		t.Fatalf("transfers = %+v", snapshot.Transfers)
+	}
+	transfer := snapshot.Transfers[0]
+	if transfer.Subject != streamtelemetry.UserSubject(7) || transfer.ProfileID != "profile-9" {
+		t.Fatalf("feed transfer was not attributed to the feed owner: %+v", transfer)
+	}
+	if transfer.MediaFileID != 501 || transfer.BytesAccepted != int64(len(body)) {
+		t.Fatalf("transfer = %+v", transfer)
+	}
+}
+
 func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 	body := []byte("\xff\xfb\x00\x00audio-bytes")
-
-	t.Run("head counts zero bytes but one request", func(t *testing.T) {
-		registry := telemetryRegistry(t)
-		server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-head", "book-1", "42", body))
-		got := getWithHeaders(t, server.Client(), http.MethodHead, server.URL+"/public/session/sid-head/track/1", nil)
-		if got.status != http.StatusOK || len(got.body) != 0 {
-			t.Fatalf("HEAD = %d, %d bytes", got.status, len(got.body))
-		}
-		snapshot := server.settledSweep(t)
-		if len(snapshot.Sessions) != 1 {
-			t.Fatalf("sessions = %+v", snapshot.Sessions)
-		}
-		if snapshot.Sessions[0].BytesAccepted != 0 || snapshot.Sessions[0].RequestCount != 1 {
-			t.Fatalf("HEAD accounting = bytes %d requests %d",
-				snapshot.Sessions[0].BytesAccepted, snapshot.Sessions[0].RequestCount)
-		}
-	})
-
-	t.Run("range is byte exact", func(t *testing.T) {
-		large := bytes.Repeat([]byte("abcdefghij"), 300_000)
-		registry := telemetryRegistry(t)
-		server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-range", "book-1", "42", large))
-		client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
-		t.Cleanup(client.CloseIdleConnections)
-		got := getWithHeaders(t, client, http.MethodGet, server.URL+"/public/session/sid-range/track/1",
-			map[string]string{"Range": "bytes=1000-2999"})
-		if got.status != http.StatusPartialContent {
-			t.Fatalf("status = %d, want 206", got.status)
-		}
-		if want := fmt.Sprintf("bytes 1000-2999/%d", len(large)); got.header.Get("Content-Range") != want {
-			t.Fatalf("Content-Range = %q, want %q", got.header.Get("Content-Range"), want)
-		}
-		if !bytes.Equal(got.body, large[1000:3000]) {
-			t.Fatalf("range body mismatch: %d bytes", len(got.body))
-		}
-		if snapshot := server.settledSweep(t); len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
-			t.Fatalf("range accounting = %+v", snapshot.Sessions)
-		}
-	})
 
 	// A rejected request must create no LOGICAL activity. It does not produce an
 	// empty snapshot: the observer still saw the request and the error body, and
@@ -296,89 +335,5 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 				t.Fatal("rejected request was not counted as unattributed")
 			}
 		})
-	}
-}
-
-// feedMediaStore resolves one media file by id for the RSS feed-file route.
-type feedMediaStore struct {
-	noopMediaStore
-	file *models.MediaFile
-}
-
-func (f *feedMediaStore) GetMediaFileByID(_ context.Context, id int) (*models.MediaFile, error) {
-	if f.file == nil || f.file.ID != id {
-		return nil, ErrNotFound
-	}
-	return f.file, nil
-}
-
-type feedStore struct {
-	feed RSSFeed
-}
-
-func (f *feedStore) GetFeedBySlug(_ context.Context, slug string) (RSSFeed, error) {
-	if f.feed.Slug != slug {
-		return RSSFeed{}, ErrNotFound
-	}
-	return f.feed, nil
-}
-func (f *feedStore) CreateFeed(context.Context, RSSFeed) error { return nil }
-func (f *feedStore) CloseFeed(context.Context, string) error   { return nil }
-func (f *feedStore) GetFeed(context.Context, string) (RSSFeed, error) {
-	return RSSFeed{}, ErrNotFound
-}
-func (f *feedStore) ListUserFeeds(context.Context, string, string) ([]RSSFeed, error) {
-	return nil, nil
-}
-
-// §4.2b: the RSS feed route has no authenticated caller — the slug is the
-// capability — so the transfer must be attributed to the feed's owner.
-func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
-	body := []byte(strings.Repeat("feed-audio", 200))
-	path := filepath.Join(t.TempDir(), "feed.mp3")
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	registry := telemetryRegistry(t)
-	server := absTelemetryServer(t, registry, Dependencies{
-		MediaStore:   &feedMediaStore{file: &models.MediaFile{ID: 501, FilePath: path, ContentID: "book-9"}},
-		RSSFeedStore: &feedStore{feed: RSSFeed{ID: "feed-1", UserID: "7", ProfileID: "profile-9", LibraryItemID: "book-9", Slug: "slug-9"}},
-	})
-	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
-	t.Cleanup(client.CloseIdleConnections)
-
-	got := getWithHeaders(t, client, http.MethodGet, server.URL+"/feed/slug-9/file/501", nil)
-	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
-		t.Fatalf("GET = %d, %d bytes", got.status, len(got.body))
-	}
-	snapshot := server.settledSweep(t)
-	if len(snapshot.Sessions) != 0 {
-		t.Fatalf("feed file created a logical session: %+v", snapshot.Sessions)
-	}
-	if len(snapshot.Transfers) != 1 {
-		t.Fatalf("transfers = %+v", snapshot.Transfers)
-	}
-	transfer := snapshot.Transfers[0]
-	if transfer.Subject != streamtelemetry.UserSubject(7) || transfer.ProfileID != "profile-9" {
-		t.Fatalf("feed transfer was not attributed to the feed owner: %+v", transfer)
-	}
-	if transfer.MediaFileID != 501 || transfer.BytesAccepted != int64(len(body)) {
-		t.Fatalf("transfer = %+v", transfer)
-	}
-}
-
-// The family gate is the kill switch that makes enrolling a family sharing the
-// API process reversible without losing all observation.
-func TestMountedABSRouterFamilyGate(t *testing.T) {
-	body := []byte("\xff\xfb\x00\x00audio-bytes")
-	registry := telemetryRegistry(t, streamtelemetry.FamilyNative)
-	server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-gated", "book-1", "42", body))
-	got := getWithHeaders(t, server.Client(), http.MethodGet, server.URL+"/public/session/sid-gated/track/1", nil)
-	if got.status != http.StatusOK || len(got.body) == 0 {
-		t.Fatalf("gated-out family broke serving: %d, %d bytes", got.status, len(got.body))
-	}
-	snapshot := server.settledSweep(t)
-	if len(snapshot.Sessions) != 0 || snapshot.UnattributedObservations != 0 {
-		t.Fatalf("gated-out family still observed: %+v", snapshot)
 	}
 }

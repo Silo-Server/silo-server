@@ -27,6 +27,12 @@ type ServerConfig struct {
 	LogFormat string `yaml:"log_format"`
 	LogQuiet  string `yaml:"log_quiet"`
 	PublicURL string `yaml:"public_url"`
+	// LANDiscovery advertises the API server on the local network with
+	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
+	LANDiscovery bool `yaml:"-"`
+	// LocalURL is the API server's local-network address for signed-in
+	// clients. Settings key server.local_url; empty when unset.
+	LocalURL string `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.
@@ -140,6 +146,10 @@ type ScannerConfig struct {
 	MaxConcurrentScoped    int           `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool          `yaml:"-"`
 	FileRemovalGrace       time.Duration `yaml:"-"`
+	// RealtimeMonitoring is the server-wide real-time monitoring switch
+	// (scanner.realtime_monitoring). It hot-reloads; each library also has
+	// its own switch.
+	RealtimeMonitoring bool `yaml:"-"`
 }
 
 // scannerConfigRaw is the raw YAML representation with duration strings.
@@ -149,6 +159,7 @@ type scannerConfigRaw struct {
 	MaxConcurrentLibraries int    `yaml:"max_concurrent_libraries"`
 	MaxConcurrentScoped    int    `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool   `yaml:"empty_trash_after_scan"`
+	RealtimeMonitoring     bool   `yaml:"realtime_monitoring"`
 }
 
 // MatcherConfig holds metadata matching settings.
@@ -181,20 +192,43 @@ type PlaybackConfig struct {
 	// identical paths on every node; devices absent on a node fall out of
 	// that node's rotation. The admin hw-accel endpoint reports each node's
 	// inventory so the UI can flag divergence.
-	HWDevice                     string                `yaml:"hw_device"`
-	ChapterThumbnailWorkers      int                   `yaml:"chapter_thumbnail_workers"`
-	ChapterThumbnailExecution    string                `yaml:"chapter_thumbnail_execution"`
-	ChapterThumbnailNodeCapacity int                   `yaml:"chapter_thumbnail_node_capacity"`
-	TranscodeEnabled             bool                  `yaml:"transcode_enabled"`
-	Routing                      PlaybackRoutingPolicy `yaml:"-"`
+	HWDevice                     string `yaml:"hw_device"`
+	ChapterThumbnailWorkers      int    `yaml:"chapter_thumbnail_workers"`
+	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
+	ChapterThumbnailNodeCapacity int    `yaml:"chapter_thumbnail_node_capacity"`
+	// SubtitleSyncNodeCapacity is how many media sampling runs (subtitle sync
+	// speech decoding) one transcode node admits at once, across every API
+	// server that sends it work (subtitles.sync_node_capacity).
+	SubtitleSyncNodeCapacity int                   `yaml:"-"`
+	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
+	Routing                  PlaybackRoutingPolicy `yaml:"-"`
+	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
+	// from one complete keyframe-planned playlist (#1466).
+	KeyframePlaylist bool `yaml:"-"`
+	// AutomaticBandwidthProbeOff is playback.bandwidth_probe_automatic turned
+	// off, so a zero config keeps automatic speed tests on.
+	AutomaticBandwidthProbeOff bool `yaml:"-"`
+	// BandwidthProbeMaxAgeDays is playback.bandwidth_probe_max_age_days; 0
+	// means DefaultBandwidthProbeMaxAgeDays.
+	BandwidthProbeMaxAgeDays int `yaml:"-"`
+}
+
+// BandwidthProbeMaxAge is how long a connection speed reading lasts.
+func (c PlaybackConfig) BandwidthProbeMaxAge() time.Duration {
+	days := c.BandwidthProbeMaxAgeDays
+	if days <= 0 {
+		days = DefaultBandwidthProbeMaxAgeDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // RedisConfig holds Redis connection settings.
 type RedisConfig struct {
-	URL               string   `yaml:"url"`
-	SentinelMaster    string   `yaml:"sentinel_master"`
-	SentinelAddresses []string `yaml:"sentinel_addresses"`
-	SentinelPassword  string   `yaml:"sentinel_password"`
+	// URL names one Redis server or a Sentinel deployment; see ParseRedisURL.
+	URL string `yaml:"url"`
+	// DB is the redis.db setting. When it is not empty it replaces the
+	// database number in URL; see Options.
+	DB string `yaml:"-"`
 }
 
 // RateLimitConfig holds rate limiting infrastructure settings.
@@ -282,6 +316,8 @@ type RecommendationsConfig struct {
 // transcription (operators often run a dedicated Whisper server). Settings
 // load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
 type AIConfig struct {
+	AuthMode          string `yaml:"-"`
+	ReasoningEffort   string `yaml:"-"`
 	BaseURL           string `yaml:"-"`
 	APIKey            string `yaml:"-"`
 	ChatModel         string `yaml:"-"`
@@ -336,7 +372,20 @@ type DownloadConfig struct {
 	TranscodeEnabled      bool   `yaml:"-"` // server gate for transcode-to-file (default false)
 	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
 	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
-	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
+	ArtifactMaxBytes      int64  `yaml:"-"` // storage budget for prepared artifacts at each location (0 = none)
+	// ArtifactCacheHours is how long a prepared file no download is waiting
+	// on stays after its last use; 0 deletes it once nothing needs it and it
+	// has gone unused for ten minutes, the grace that protects a download
+	// being linked to it.
+	ArtifactCacheHours int `yaml:"-"`
+	// ArtifactDiskCeilingPercent is the filesystem fill at which clean-up
+	// deletes cached prepared files early, whatever the budget says.
+	ArtifactDiskCeilingPercent int `yaml:"-"`
+
+	// Playback transcode switches that also govern converted downloads, read
+	// from their playback setting keys so both surfaces follow one toggle.
+	Allow4KTranscode  bool `yaml:"-"` // allow_4k_transcode: 4K sources may be converted
+	AllowHEVCEncoding bool `yaml:"-"` // playback.allow_hevc_encoding: HEVC output when the device decodes it
 }
 
 // PolicyConfig holds embedded policy engine settings.
@@ -361,6 +410,13 @@ type MetadataConfig struct {
 	// ImageWorkers is how many artwork encodes run at once. Zero means one
 	// per CPU core.
 	ImageWorkers int `yaml:"-"`
+	// PersonRefreshPerMinute caps background person metadata lookups per API
+	// node (metadata.person_refresh_per_minute).
+	PersonRefreshPerMinute int `yaml:"-"`
+	// FallbackLanguage is the language refreshes fall back to before the
+	// original language (metadata.fallback_language). Empty means none: the
+	// setting's "original" value. An empty stored setting is the default, en.
+	FallbackLanguage string `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.
@@ -438,6 +494,19 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 const playbackTranscodeDirSettingKey = "playback.transcode_dir"
 const downloadArtifactDirSettingKey = "download.artifact_dir"
 
+// Prepared-download retention settings.
+const (
+	DownloadArtifactCacheHoursSettingKey      = "download.artifact_cache_hours"
+	DownloadArtifactDiskCeilingSettingKey     = "download.artifact_disk_ceiling_percent"
+	DefaultDownloadArtifactCacheHours         = 72
+	MaxDownloadArtifactCacheHours             = 720
+	DefaultDownloadArtifactDiskCeilingPercent = 85
+	// The ceiling stays at or below the 95% scratch fill at which a node stops
+	// taking playback sessions, so prepared files alone never trip it.
+	MinDownloadArtifactDiskCeilingPercent = 50
+	MaxDownloadArtifactDiskCeilingPercent = 95
+)
+
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
 // artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).
 const DefaultTranscodeDir = "/tmp/silo-transcode"
@@ -463,6 +532,10 @@ const DefaultJellyfinCompatEmulatedServerVersion = "12.1.0"
 const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
+
+// defaultJellyfinCompatPlaybackSessionTTL matches playback.MaxTokenTTL, the
+// lifetime the compat router gives a play session when nothing overrides it.
+const defaultJellyfinCompatPlaybackSessionTTL = "24h"
 
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
@@ -518,6 +591,7 @@ func setDefaults() *configRaw {
 			Workers:                8,
 			MaxConcurrentLibraries: 1,
 			MaxConcurrentScoped:    2,
+			RealtimeMonitoring:     true,
 		},
 		Artwork: ArtworkConfig{StorageBackend: artworkBackendAuto, LocalPath: "/var/lib/silo/artwork"},
 		Matcher: MatcherConfig{
@@ -533,6 +607,7 @@ func setDefaults() *configRaw {
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",
 			ChapterThumbnailNodeCapacity: 1,
+			SubtitleSyncNodeCapacity:     1,
 			TranscodeEnabled:             true,
 		},
 		RateLimit: RateLimitConfig{
@@ -555,7 +630,7 @@ func setDefaults() *configRaw {
 			WebDir:                DefaultJellyfinWebDir,
 			WebInstallDir:         DefaultJellyfinWebInstallDir,
 			SessionTTL:            "87600h",
-			PlaybackSessionTTL:    "6h",
+			PlaybackSessionTTL:    defaultJellyfinCompatPlaybackSessionTTL,
 		},
 	}
 }
@@ -576,11 +651,10 @@ func (c *Config) Validate() error {
 		errs = append(errs, "database.url is required for "+c.Server.Mode+" mode")
 	}
 
-	// Redis required for proxy and transcode modes (URL or Sentinel).
+	// Redis required for proxy and transcode modes.
 	needsRedis := c.Server.Mode == "proxy" || c.Server.Mode == "transcode"
-	hasRedis := c.Redis.URL != "" || (c.Redis.SentinelMaster != "" && len(c.Redis.SentinelAddresses) > 0)
-	if needsRedis && !hasRedis {
-		errs = append(errs, "redis.url or redis sentinel config is required for "+c.Server.Mode+" mode")
+	if needsRedis && c.Redis.URL == "" {
+		errs = append(errs, "redis.url is required for "+c.Server.Mode+" mode")
 	}
 
 	if len(errs) > 0 {

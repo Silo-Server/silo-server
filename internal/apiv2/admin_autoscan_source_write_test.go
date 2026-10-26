@@ -3,14 +3,11 @@ package apiv2
 import (
 	"context"
 	"errors"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type fakeSourceWrites struct {
@@ -30,12 +27,15 @@ func (f *fakeSourceWrites) UpdateAdminAutoscanSource(_ context.Context, id strin
 	return f.CreateAdminAutoscanSource(context.Background(), in)
 }
 func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
+	f := new(fakeSourceWrites)
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	deps.AdminAutoscanSourceWrites = nil
+	missing := NewHandler(deps)
 	for _, method := range []string{"POST", "PUT"} {
 		t.Run(method, func(t *testing.T) {
-			f := new(fakeSourceWrites)
-			deps := pilotDeps(nil, nil)
-			deps.AdminAutoscanSourceWrites = f
-			h := NewHandler(deps)
+			*f = fakeSourceWrites{}
 			path := Prefix + "/admin/autoscan/sources"
 			status := 201
 			body := `{"plugin_id":"plugin","capability_id":"cap","enabled":true,"path_rewrites":[{"from":"a","to":"b"}]}`
@@ -56,7 +56,7 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 			if method == "PUT" && (f.id != "source" || f.input.ConnectionID != nil) {
 				t.Fatal(f)
 			}
-			rec = do(t, h, method, path, `{"enabled":true,"path_rewrites":[],"plugin_id":"p","capability_id":"c","poll_interval_seconds":0}`, bearer(adminToken))
+			rec = do(t, h, method, path, strings.TrimSuffix(body, "}")+`,"poll_interval_seconds":0}`, bearer(adminToken))
 			if rec.Code != 422 || f.calls != 1 {
 				t.Fatal(rec.Code, f.calls)
 			}
@@ -70,20 +70,30 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			deps.AdminAutoscanSourceWrites = nil
-			requireProblem(t, do(t, NewHandler(deps), method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }
 
-func TestAdminAutoscanSourceWriteNullableSchemas(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[AdminAutoscanSourceCreateBody](), reflect.TypeFor[AdminAutoscanSourceWriteBody]()} {
-		registry := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
-		schema := huma.SchemaFromType(registry, typ)
-		for _, field := range []string{"connection_id", "poll_interval_seconds"} {
-			if !schema.Properties[field].Nullable || slices.Contains(schema.Required, field) {
-				t.Fatalf("%s.%s must allow explicit null and omission", typ.Name(), field)
-			}
+// A missing required server is a validation problem that names the field, so
+// a client can point the operator at the connection picker.
+func TestAdminAutoscanSourceWriteConnectionRequiredProblem(t *testing.T) {
+	f := &fakeSourceWrites{err: handlers.ErrAdminAutoscanSourceConnectionRequired}
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	for method, path := range map[string]string{
+		"POST": Prefix + "/admin/autoscan/sources",
+		"PUT":  Prefix + "/admin/autoscan/sources/source",
+	} {
+		body := `{"plugin_id":"silo.autoscan.arr","capability_id":"arr","enabled":true,"path_rewrites":[]}`
+		if method == "PUT" {
+			body = `{"enabled":true,"connection_id":null,"path_rewrites":[]}`
+		}
+		rec := do(t, h, method, path, body, bearer(adminToken))
+		requireProblem(t, rec, TypeValidationFailed)
+		if !strings.Contains(rec.Body.String(), `"location":"body.connection_id"`) || !strings.Contains(rec.Body.String(), `"code":"required"`) {
+			t.Fatalf("%s problem = %s, want a required body.connection_id error", method, rec.Body.String())
 		}
 	}
 }

@@ -2,7 +2,12 @@ import { createElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
+import {
+  setAccessToken,
+  setRefreshToken,
+  setProfileId,
+  StaleApiRequestContextError,
+} from "@/api/client";
 import { useAdminSettingValue } from "./settings";
 function wrapper(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return ({ children }: { children: ReactNode }) =>
@@ -67,8 +72,9 @@ it("rejects metadata decoded under a different account or profile", async () => 
   const captured = client.getQueryCache().getAll()[0]!;
   await act(async () => {
     setProfileId("profile-b");
-    finish(JSON.stringify({ status: "available" }));
+    finish(JSON.stringify({ key: "redis.url", value: "configured", restart_required: true }));
   });
   await waitFor(() => expect(captured.state.status).toBe("error"));
+  expect(captured.state.error).toBeInstanceOf(StaleApiRequestContextError);
   expect(captured.state.data).toBeUndefined();
 });

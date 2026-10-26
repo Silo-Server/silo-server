@@ -125,14 +125,14 @@ export function MarkerTasksCard() {
       <TaskActionRow
         task={detectTask}
         fallbackName="Detect markers on this server"
-        fallbackDescription="Analyzes files for intros in libraries with marker detection enabled."
+        fallbackDescription="Analyzes files for intros and credits in libraries with marker detection enabled."
         onRun={() => void run("detect_intro_markers")}
         pending={pendingTasks.has("detect_intro_markers")}
       />
       <TaskActionRow
         task={contributeTask}
-        fallbackName="Share intro markers"
-        fallbackDescription="Sends eligible intros detected on this server to providers with automatic sharing enabled."
+        fallbackName="Share detected markers"
+        fallbackDescription="Sends eligible intros and credits detected on this server to providers with automatic sharing enabled, and manual corrections a save could not deliver to providers that accept corrections."
         onRun={() => void run("contribute_markers")}
         pending={pendingTasks.has("contribute_markers")}
       />

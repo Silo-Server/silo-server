@@ -262,7 +262,7 @@ type capabilityScopeProbeOutput struct {
 func TestCapabilityAllowedSchemaRespectsEveryUsage(t *testing.T) {
 	for _, first := range []Class{ClassPublic, ClassAuthenticated} {
 		t.Run(string(first), func(t *testing.T) {
-			NewHandler(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				register := func(class Class, id string) {
 					Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/probe/"+id, id, "probe", "Capability schema scope probe"), Class: class}, func(context.Context, *CapabilityInput) (*capabilityScopeProbeOutput, error) {
 						return &capabilityScopeProbeOutput{Body: capabilityScopeProbe{Capability: Capability{State: StateAvailable}}}, nil
@@ -281,7 +281,7 @@ func TestCapabilityAllowedSchemaRespectsEveryUsage(t *testing.T) {
 				if slices.Contains(schema.Required, "allowed") {
 					t.Fatalf("mixed usage requires allowed: %v", schema.Required)
 				}
-			}})
+			})
 		})
 	}
 }

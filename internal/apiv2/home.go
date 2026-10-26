@@ -36,12 +36,12 @@ type CalendarEvent struct {
 	SeriesID        *string  `json:"series_id,omitempty" example:"series:severance"`
 	SeasonNumber    *int     `json:"season_number,omitempty" example:"2"`
 	EpisodeNumber   *int     `json:"episode_number,omitempty" example:"1"`
-	AirDate         string   `json:"air_date" doc:"The source air date, YYYY-MM-DD" example:"2026-01-09"`
+	AirDate         string   `json:"air_date" format:"date" doc:"The source air date, YYYY-MM-DD" example:"2026-01-09"`
 	AirTime         *string  `json:"air_time,omitempty" doc:"Wall-clock time in the network's zone, HH:MM" example:"21:00"`
 	AirAt           *Instant `json:"air_at,omitempty" doc:"The airing as an instant, when the network's time and zone are known"`
 	AirTimezone     *string  `json:"air_timezone,omitempty" doc:"The network's IANA zone" example:"America/New_York"`
-	LocalAirDate    string   `json:"local_air_date" doc:"The air date in the viewer's zone, YYYY-MM-DD; the day this event is listed under" example:"2026-01-10"`
-	PosterURL       string   `json:"poster_url,omitempty" example:"https://s3.example.test/poster.jpg"`
+	LocalAirDate    string   `json:"local_air_date" format:"date" doc:"The air date in the viewer's zone, YYYY-MM-DD; the day this event is listed under" example:"2026-01-10"`
+	PosterURL       string   `json:"poster_url,omitempty" format:"uri-reference" example:"https://s3.example.test/poster.jpg"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
 	Watched         bool     `json:"watched" example:"false"`
 	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale; empty, never null"`
@@ -49,7 +49,7 @@ type CalendarEvent struct {
 
 // CalendarDay is one local day with its events in airing order.
 type CalendarDay struct {
-	Date  string          `json:"date" doc:"YYYY-MM-DD in the viewer's zone" example:"2026-01-10"`
+	Date  string          `json:"date" format:"date" doc:"YYYY-MM-DD in the viewer's zone" example:"2026-01-10"`
 	Items []CalendarEvent `json:"items" doc:"Empty, never null"`
 }
 
@@ -72,7 +72,7 @@ type HomeDismissalInput struct {
 // HomeDismissal is what a dismissal is anchored to, by surface.
 type HomeDismissal struct {
 	SeriesID          string   `json:"series_id,omitempty" doc:"Required for next_up: the series the episode card belongs to" example:"series:severance"`
-	ProgressUpdatedAt *Instant `json:"progress_updated_at,omitempty" doc:"Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again"`
+	ProgressUpdatedAt *Instant `json:"progress_updated_at,omitempty" doc:"Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again."`
 }
 
 // HomeDismissalUpsertInput is the dismissHomeItem request.
@@ -81,15 +81,49 @@ type HomeDismissalUpsertInput struct {
 	Body HomeDismissal
 }
 
+// HomeLayoutInput is the getHomeLayout query.
+type HomeLayoutInput struct {
+	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
+	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
+	IncludeItems int `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	ArtworkQuery
+}
+
+// HomeLayout is the home page's sections in display order and, on request,
+// the cards of the first of them.
+type HomeLayout struct {
+	Sections         []SectionLayoutEntry `json:"sections" doc:"Empty, never null"`
+	IncludedSections []Section            `json:"included_sections" doc:"The first include_items sections with their cards, in display order, each exactly as getHomeSectionItems answers it for the same viewer and image_size. A section whose cards failed to load or were not ready in time is absent; fetch it with getHomeSectionItems. Empty, never null"`
+}
+
+// HomeLayoutOutput is the getHomeLayout response.
+type HomeLayoutOutput struct {
+	Body HomeLayout
+}
+
+// HomeCapabilities is the getHomeCapabilities body.
+type HomeCapabilities struct {
+	Capability
+	IncludeItemsMax int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+}
+
+// HomeCapabilitiesOutput is the getHomeCapabilities response.
+type HomeCapabilitiesOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         HomeCapabilities
+}
+
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // HomeSectionItemsInput is the getHomeSectionItems query.
 type HomeSectionItemsInput struct {
-	ID        string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ID string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	ArtworkQuery
 }
 
 // RecipePreset is one gallery preset: a recipe plus the config it starts from.
@@ -109,7 +143,7 @@ type RecipeDefinition struct {
 	Presets          []RecipePreset `json:"presets" doc:"Empty, never null"`
 	AvoidDuplicates  bool           `json:"avoid_duplicates" example:"true"`
 	SupportsRotation bool           `json:"supports_rotation" example:"false"`
-	AdminOnly        bool           `json:"admin_only" example:"false"`
+	AdminOnly        bool           `json:"admin_only" doc:"Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has" example:"false"`
 }
 
 // RecipeCategory is one gallery category with its recipes.
@@ -122,6 +156,38 @@ type RecipeCategory struct {
 // grouped by category, categories in key order.
 type RecipeCatalog struct {
 	Categories []RecipeCategory `json:"categories" doc:"Empty, never null"`
+}
+
+// SeasonalVibe is one curated take on a holiday: a public MDBList list whose
+// titles a Seasonal Picks row shows, most popular on IMDb first.
+type SeasonalVibe struct {
+	Key         string `json:"key" doc:"Stored in the row's vibes config; stable" example:"family"`
+	Name        string `json:"name" example:"Family Halloween"`
+	Title       string `json:"title" doc:"The row's title while this vibe is in season, unless the row sets its own" example:"Family Halloween"`
+	Description string `json:"description" example:"Spooky fun for all ages."`
+	ListURL     string `json:"list_url" format:"uri" doc:"The MDBList list behind the vibe" example:"https://mdblist.com/lists/purple_smurf/halloween-family2"`
+}
+
+// SeasonalTheme is one holiday a Seasonal Picks row can follow.
+type SeasonalTheme struct {
+	Key           string         `json:"key" doc:"Stored in the row's enabled_themes config; stable" example:"halloween"`
+	Name          string         `json:"name" example:"Halloween"`
+	When          string         `json:"when" doc:"When the holiday is in season by default, for display" example:"October"`
+	Start         string         `json:"start,omitempty" doc:"First day of the default window, MM-DD. Absent when the holiday moves (Easter) or recurs weekly." example:"10-01"`
+	End           string         `json:"end,omitempty" doc:"Last day of the default window, MM-DD, inclusive; before start when the window wraps across New Year" example:"10-31"`
+	DatesEditable bool           `json:"dates_editable" doc:"Whether a row may set its own yearly window for this holiday in theme_dates. False for weekly themes."`
+	Vibes         []SeasonalVibe `json:"vibes" doc:"The first vibe is the default; never empty"`
+}
+
+// SeasonalThemeCatalog is the listSeasonalThemes response.
+type SeasonalThemeCatalog struct {
+	Themes            []SeasonalTheme `json:"themes" doc:"In calendar order, for display: dated holidays by their usual start, then the weekly ones"`
+	MaxCustomHolidays int             `json:"max_custom_holidays" doc:"The most custom holidays one row may define" example:"12"`
+}
+
+// SeasonalThemeCatalogOutput wraps SeasonalThemeCatalog.
+type SeasonalThemeCatalogOutput struct {
+	Body SeasonalThemeCatalog
 }
 
 // RecipeCatalogOutput is the listSectionRecipes response.
@@ -158,35 +224,36 @@ const (
 	opDismissHomeItem             = "dismissHomeItem"
 	opUndismissHomeItem           = "undismissHomeItem"
 	opGetHomeLayout               = "getHomeLayout"
+	opGetHomeCapabilities         = "getHomeCapabilities"
 	opListHomeSections            = "listHomeSections"
 	opGetHomeSectionItems         = "getHomeSectionItems"
 	opListSectionRecipes          = "listSectionRecipes"
 	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
+	opListSeasonalThemes          = "listSeasonalThemes"
 )
-
-// homeOperationIDs is every operation the catalog-home section registers.
-var homeOperationIDs = []string{opGetCalendar, opDismissHomeItem, opUndismissHomeItem, opGetHomeLayout, opListHomeSections, opGetHomeSectionItems, opListSectionRecipes, opListSectionRecipeCandidates}
 
 func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
 
 	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
-		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.")
+		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider.")
 	dismiss.DefaultStatus = http.StatusNoContent
 	dismissOp := viewerOperation(dismiss)
 	dismissOp.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, dismissOp, reg.dismissHomeItem)
 
 	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", opUndismissHomeItem, "home",
-		"Show a dismissed card again; an item that was not dismissed is left as is.")
+		"Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show.")
 	undismiss.DefaultStatus = http.StatusNoContent
 	undismissOp := viewerOperation(undismiss)
 	undismissOp.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, undismissOp, reg.undismissHomeItem)
 
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/capabilities", opGetHomeCapabilities, "home",
+		"The home page features this server supports, such as the cards of the first sections on getHomeLayout.")), reg.getHomeCapabilities)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
-		"The home page's section layout for the acting profile, without items.")), reg.getHomeLayout)
+		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), reg.getHomeLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
 		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
@@ -201,6 +268,8 @@ func registerHome(reg *Registry) {
 		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), reg.listSectionRecipes)
 	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
 		"The values a parameterized recipe offers for its parameter.")), reg.listSectionRecipeCandidates)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/sections/seasonal-themes", opListSeasonalThemes, "home",
+		"The holidays a Seasonal Picks row can follow, with the curated vibes each offers."), Class: ClassProfileScoped, ProfileOptional: true}, reg.listSeasonalThemes)
 }
 
 func (reg *Registry) recipes() (RecipeService, *Problem) {
@@ -356,7 +425,17 @@ func (reg *Registry) undismissHomeItem(ctx context.Context, in *HomeDismissalInp
 	return nil, nil
 }
 
-func (reg *Registry) getHomeLayout(ctx context.Context, _ *struct{}) (*SectionLayoutOutput, error) {
+func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) (*HomeCapabilitiesOutput, error) {
+	if reg.deps.HomeSections == nil {
+		return &HomeCapabilitiesOutput{Body: HomeCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
+	}
+	return &HomeCapabilitiesOutput{Body: HomeCapabilities{
+		Capability:      Capability{State: StateAvailable},
+		IncludeItemsMax: handlers.MaxHomeLayoutIncludedSections,
+	}}, nil
+}
+
+func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*HomeLayoutOutput, error) {
 	svc, p := reg.homeSections()
 	if p != nil {
 		return nil, p
@@ -364,11 +443,18 @@ func (reg *Registry) getHomeLayout(ctx context.Context, _ *struct{}) (*SectionLa
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayout(ctx)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.Artwork()), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionLayoutOutput{Body: sectionLayoutOf(view)}, nil
+	out := HomeLayout{Sections: sectionLayoutOf(view.Layout).Sections, IncludedSections: make([]Section, 0, len(view.IncludedSections))}
+	if len(view.IncludedSections) > 0 {
+		sel := reg.ratingSelection(ctx)
+		for _, s := range view.IncludedSections {
+			out.IncludedSections = append(out.IncludedSections, sectionOf(s, sel))
+		}
+	}
+	return &HomeLayoutOutput{Body: out}, nil
 }
 
 func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput) (*SectionCollectionOutput, error) {
@@ -379,13 +465,14 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	sel := reg.ratingSelection(ctx)
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, sectionOf(s))
+		out.Sections = append(out.Sections, sectionOf(s, sel))
 	}
 	return &SectionCollectionOutput{Body: out}, nil
 }
@@ -398,11 +485,11 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionOutput{Body: sectionOf(view)}, nil
+	return &SectionOutput{Body: sectionOf(view, reg.ratingSelection(ctx))}, nil
 }
 
 // recipeDefaultConfigOf decodes a recipe's raw config document; anything that is
@@ -443,6 +530,32 @@ func (reg *Registry) listSectionRecipes(ctx context.Context, _ *struct{}) (*Reci
 		out.Categories = append(out.Categories, RecipeCategory{Category: cat.Category, Recipes: defs})
 	}
 	return &RecipeCatalogOutput{Body: out}, nil
+}
+
+func (reg *Registry) listSeasonalThemes(ctx context.Context, _ *struct{}) (*SeasonalThemeCatalogOutput, error) {
+	if claimsFrom(ctx) == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	out := SeasonalThemeCatalog{Themes: []SeasonalTheme{}, MaxCustomHolidays: recipes.MaxSeasonalCustomHolidays}
+	themes := reg.deps.SeasonalThemes
+	if themes == nil {
+		themes = recipes.SeasonalThemes
+	}
+	for _, theme := range themes {
+		if theme.Hidden {
+			continue
+		}
+		vibes := make([]SeasonalVibe, 0, len(theme.Vibes))
+		for _, v := range theme.Vibes {
+			vibes = append(vibes, SeasonalVibe{Key: v.Key, Name: v.Name, Title: v.Title, Description: v.Description, ListURL: v.ListURL})
+		}
+		out.Themes = append(out.Themes, SeasonalTheme{
+			Key: theme.Key, Name: theme.Name, When: theme.When,
+			Start: theme.Start, End: theme.End, DatesEditable: !theme.Weekly,
+			Vibes: vibes,
+		})
+	}
+	return &SeasonalThemeCatalogOutput{Body: out}, nil
 }
 
 func (reg *Registry) listSectionRecipeCandidates(ctx context.Context, in *RecipeCandidatesInput) (*RecipeCandidateCollectionOutput, error) {

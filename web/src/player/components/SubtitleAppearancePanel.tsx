@@ -12,9 +12,9 @@ interface SubtitleAppearancePanelProps {
  * In-player subtitle styling panel modelled on Plex's "Playback Settings"
  * sheet — lets a viewer tune font size, colour, position, background, and
  * outline without leaving the player. Every change writes
- * playback.subtitle_appearance at profile_device scope, so the rendered
- * subtitles update live through the shared effective-settings cache and the
- * choice stays on this device.
+ * playback.subtitle_appearance for the profile, so the rendered subtitles
+ * update live through the shared effective-settings cache and the choice
+ * follows the profile to its other devices.
  *
  * The visual chrome lives in {@link SubtitleAppearancePanelView}; this
  * wrapper only binds the panel to the canonical setting.

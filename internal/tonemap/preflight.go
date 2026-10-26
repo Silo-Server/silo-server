@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -239,7 +240,7 @@ func sourcePreflightKey(ctx context.Context, request SourcePreflightRequest, run
 // ffmpegVersionForPreflight coalesces version lookups and invalidates cached
 // output when the resolved binary's identity changes.
 func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run CommandRunner) ([]byte, error) {
-	resolved, cacheKey, cacheable := ffmpegBinaryCacheKey(ffmpegPath)
+	resolved, cacheKey, cacheable := FFmpegBinaryIdentity(ffmpegPath)
 	if !cacheable {
 		return runBounded(ctx, run, ffmpegPath, "-version")
 	}
@@ -286,9 +287,13 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 	}
 }
 
-// ffmpegBinaryCacheKey resolves a regular FFmpeg binary and derives an identity
-// that changes when the executable is replaced in place.
-func ffmpegBinaryCacheKey(ffmpegPath string) (string, string, bool) {
+// FFmpegBinaryIdentity resolves a regular FFmpeg binary and derives an identity
+// that changes when the executable is replaced in place. It returns the
+// resolved path, the identity, and whether the binary resolved to a regular
+// file; when it did not, the path is returned unchanged and the identity is
+// empty. Other per-binary caches, such as mediasample's capability inventory,
+// key on the same identity.
+func FFmpegBinaryIdentity(ffmpegPath string) (resolved, identity string, ok bool) {
 	resolved, err := exec.LookPath(strings.TrimSpace(ffmpegPath))
 	if err != nil {
 		return ffmpegPath, "", false
@@ -392,10 +397,24 @@ func sourcePreflightPositions(duration float64) []float64 {
 // preflightFrame is the minimal decoded-frame metadata needed to confirm a base
 // signal classification.
 type preflightFrame struct {
-	ColorRange     string `json:"color_range"`
-	ColorSpace     string `json:"color_space"`
-	ColorTransfer  string `json:"color_transfer"`
-	ColorPrimaries string `json:"color_primaries"`
+	ColorRange     string           `json:"color_range"`
+	ColorSpace     string           `json:"color_space"`
+	ColorTransfer  string           `json:"color_transfer"`
+	ColorPrimaries string           `json:"color_primaries"`
+	SideData       []sideDataRecord `json:"side_data_list"`
+}
+
+// sideDataRecord is one FFprobe side-data entry, identified by its label.
+type sideDataRecord struct {
+	Type string `json:"side_data_type"`
+}
+
+// hasDolbyVisionMetadata reports whether the decoder attached a parsed RPU,
+// which FFprobe labels "Dolby Vision Metadata".
+func (frame preflightFrame) hasDolbyVisionMetadata() bool {
+	return slices.ContainsFunc(frame.SideData, func(sideData sideDataRecord) bool {
+		return strings.EqualFold(strings.TrimSpace(sideData.Type), "Dolby Vision Metadata")
+	})
 }
 
 // inspectSourceFrame reads color metadata from one decoded frame at position.
@@ -404,7 +423,7 @@ func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, pos
 	args := []string{
 		"-v", ffmpegErrorLogLevel, "-read_intervals", interval, "-select_streams", "v:0",
 		"-show_frames",
-		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries",
+		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries:frame_side_data=side_data_type",
 		"-of", "json", request.InputPath,
 	}
 	output, err := runBounded(ctx, run, request.FFprobePath, args...)
@@ -421,8 +440,13 @@ func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, pos
 }
 
 // frameMatchesSourceKind requires complete decoded-frame metadata compatible
-// with the frozen base-signal classification.
+// with the frozen base-signal classification. The only Dolby Vision base that
+// is preflighted is a PQ-tagged compatibility id 0 (Profile 5 needs none), so
+// its frames must keep the PQ transfer and carry the RPU that maps them.
 func frameMatchesSourceKind(frame preflightFrame, kind SourceKind) bool {
+	if kind == SourceDolbyVision {
+		return frame.hasDolbyVisionMetadata() && transferIsPQ(normalizeColorValue(frame.ColorTransfer))
+	}
 	complete, compatible := sourceMetadataCompatibility(kind, SourceMetadata{
 		ColorRange: frame.ColorRange, ColorPrimaries: frame.ColorPrimaries,
 		ColorTransfer: frame.ColorTransfer, ColorSpace: frame.ColorSpace,
@@ -451,6 +475,7 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 				device = defaultDRIRenderDevice
 			}
 			args = append(args, VAAPIInitDeviceArgs("va", device)...)
+			args = append(args, VAAPIOpenCLInitArgs("va", request.Filter, request.Kind)...)
 			args = append(args, "-filter_hw_device", "va")
 			if !request.SoftwareVideoDecode {
 				args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
@@ -501,23 +526,30 @@ func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 		if IsSDRSource(request.Kind) {
 			return "hwdownload,format=" + NVENCSoftwareFallbackPixelFormat(request.SourceBitDepth) + "," + SoftwareFilter(request.Kind, "") + ",format=nv12,hwupload_cuda"
 		}
-		return SourceParameters(request.Kind) + "," + CUDAFilter() + "," + HDRMetadataRemovalFilter()
+		return SourceParameters(request.Kind) + "," + CUDAFilter(request.Kind) + "," + HDRMetadataRemovalFilter()
+	}
+	if request.Backend == BackendQSV || request.Filter == HardwareFilterOpenCL {
+		filter := IntelFilter(request.Kind, 0)
+		if request.Backend == BackendQSV {
+			filter += "," + QSVInteropFilter()
+		}
+		return intelOpenCLPreflightUpload(request) + filter + "," + HDRMetadataRemovalFilter()
 	}
 	filter := VAAPIFilter(request.Kind)
-	if request.SoftwareVideoDecode && (request.Backend == BackendQSV || request.Backend == BackendVAAPI) {
-		filter = "format=nv12,hwupload," + filter
-	}
-	if request.Backend == BackendQSV {
-		filter = QSVFilter(request.Kind) + "," + QSVInteropFilter()
-		if request.SoftwareVideoDecode {
-			format := "nv12"
-			if !IsSDRSource(request.Kind) {
-				format = "p010le"
-			}
-			filter = "format=" + format + ",hwupload," + filter
-		}
+	if request.SoftwareVideoDecode {
+		filter = SoftwareUploadFilter(request.Kind) + filter
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
+}
+
+// intelOpenCLPreflightUpload uploads CPU-decoded frames for IntelFilter at the
+// depth playback uploads them: 10-bit for HDR, which the OpenCL tone mapper
+// reads, and 8-bit for SDR bases.
+func intelOpenCLPreflightUpload(request SourcePreflightRequest) string {
+	if !request.SoftwareVideoDecode {
+		return ""
+	}
+	return SoftwareUploadFilter(request.Kind)
 }
 
 // sourcePreflightEncoder returns the encoder paired with the selected mode.
@@ -541,9 +573,6 @@ func inspectPreflightOutput(ctx context.Context, ffprobePath, outputPath string,
 	if err != nil {
 		return fmt.Errorf("%w: inspect tone-map preflight output: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
 	}
-	type sideDataRecord struct {
-		Type string `json:"side_data_type"`
-	}
 	var payload struct {
 		Streams []struct {
 			CodecName      string           `json:"codec_name"`
@@ -554,13 +583,7 @@ func inspectPreflightOutput(ctx context.Context, ffprobePath, outputPath string,
 			ColorPrimaries string           `json:"color_primaries"`
 			SideData       []sideDataRecord `json:"side_data_list"`
 		} `json:"streams"`
-		Frames []struct {
-			ColorRange     string           `json:"color_range"`
-			ColorSpace     string           `json:"color_space"`
-			ColorTransfer  string           `json:"color_transfer"`
-			ColorPrimaries string           `json:"color_primaries"`
-			SideData       []sideDataRecord `json:"side_data_list"`
-		} `json:"frames"`
+		Frames []preflightFrame `json:"frames"`
 	}
 	if err := decodeCommandJSON(output, &payload); err != nil || len(payload.Streams) != 1 {
 		return fmt.Errorf("%w: tone-map preflight output metadata unavailable", ErrSourcePreflightRejected)

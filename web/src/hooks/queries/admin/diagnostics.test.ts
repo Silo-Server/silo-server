@@ -1,6 +1,3 @@
-import { createElement, type ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DiagnosticReport } from "@/api/types";
@@ -41,7 +38,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { downloadDiagnosticReport, useUpdateDiagnosticsUploadsEnabled } from "./diagnostics";
+import { downloadDiagnosticReport } from "./diagnostics";
 
 const report = {
   id: "83fd3186-bd4f-42e1-8285-58107c503685",
@@ -82,75 +79,5 @@ describe("downloadDiagnosticReport", () => {
     objectURL.mockRestore();
     revokeObjectURL.mockRestore();
     click.mockRestore();
-  });
-
-  it("propagates request failures to the caller", async () => {
-    mocks.bundle.mockRejectedValue(new Error("Diagnostic report bundle not found"));
-
-    await expect(downloadDiagnosticReport(report)).rejects.toThrow(
-      "Diagnostic report bundle not found",
-    );
-  });
-});
-
-describe("useUpdateDiagnosticsUploadsEnabled", () => {
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.update.mockReset();
-    mocks.bundle.mockReset();
-    mocks.toastError.mockReset();
-    mocks.toastSuccess.mockReset();
-  });
-
-  function createWrapper(queryClient: QueryClient) {
-    return function Wrapper({ children }: { children: ReactNode }) {
-      return createElement(QueryClientProvider, { client: queryClient }, children);
-    };
-  }
-
-  it.each([
-    [true, "true", "Client diagnostic uploads enabled"],
-    [false, "false", "Client diagnostic uploads disabled"],
-  ] as const)("persists %s and refreshes diagnostics status", async (enabled, value, message) => {
-    const queryClient = new QueryClient({
-      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-    });
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    mocks.update.mockResolvedValue({ key: "diagnostics.uploads_enabled", value });
-    const { result } = renderHook(() => useUpdateDiagnosticsUploadsEnabled(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await act(async () => {
-      await result.current.mutateAsync(enabled);
-    });
-
-    expect(mocks.update).toHaveBeenCalledWith({ key: "diagnostics.uploads_enabled", value });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["diagnostics", "status"] });
-    expect(mocks.toastSuccess).toHaveBeenCalledWith(message);
-  });
-
-  it("surfaces storage validation errors", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-    });
-    const error = new Error("diagnostics uploads require configured private object storage");
-    mocks.update.mockRejectedValue(error);
-    const { result } = renderHook(() => useUpdateDiagnosticsUploadsEnabled(), {
-      wrapper: createWrapper(queryClient),
-    });
-    let caught: unknown;
-
-    await act(async () => {
-      try {
-        await result.current.mutateAsync(true);
-      } catch (mutationError) {
-        caught = mutationError;
-      }
-    });
-
-    expect(caught).toBe(error);
-    expect(mocks.toastError).toHaveBeenCalledWith(error.message);
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
   });
 });

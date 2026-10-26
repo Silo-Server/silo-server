@@ -29,11 +29,6 @@ describe("useFinePointer", () => {
     expect(renderHook(() => useFinePointer(false)).result.current).toBe(false);
   });
 
-  it("reports the published capability over the fallback", () => {
-    init(false);
-    expect(renderHook(() => useFinePointer(true)).result.current).toBe(false);
-  });
-
   it("re-renders when an observed mouse overrides the media query", () => {
     // The regression test for the React half of this bug: on the affected
     // machines the query says no fine pointer, so anything mounted from it

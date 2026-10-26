@@ -121,7 +121,7 @@ func TestDeliveryProbeFollowsRedirectsWithSharedPool(t *testing.T) {
 	}
 }
 
-func TestSharedTransportCapsConnections(t *testing.T) {
+func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 	tr := sharedTransport()
 	if tr.MaxConnsPerHost <= 0 || tr.MaxConnsPerHost != tr.MaxIdleConnsPerHost {
 		t.Fatalf("connection caps = %d/%d", tr.MaxConnsPerHost, tr.MaxIdleConnsPerHost)
@@ -133,9 +133,7 @@ func TestSharedTransportCapsConnections(t *testing.T) {
 	if ta != tb {
 		t.Fatal("clients do not share transport")
 	}
-}
 
-func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 	type connectionState struct {
 		active bool
 		closed bool
@@ -211,7 +209,7 @@ func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 		mu.Unlock()
 		unblock := sync.OnceFunc(func() { close(gate) })
 		// Also release handlers if waitFor fails before the normal release.
-		defer unblock()
+		defer unblock() //nolint:gocritic,revive // every round must release its handlers if the test stops early
 
 		var wg sync.WaitGroup
 		for range 3 * s3MaxConnsPerHost {

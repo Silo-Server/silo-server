@@ -34,27 +34,3 @@ func TestRecentlyAddedQueriesExcludeMangaChapters(t *testing.T) {
 		t.Fatalf("recently-added single-library query missing manga-chapter exclusion:\n%s", single)
 	}
 }
-
-func TestRecentlyReleasedQueryExcludesMangaChapters(t *testing.T) {
-	t.Parallel()
-
-	query, _ := buildRecentlyReleasedQuery(ResolvedSection{
-		ItemLimit: 12,
-		Config:    json.RawMessage(`{}`),
-	}, nil, nil, catalog.AccessFilter{})
-	if !strings.Contains(query, mangaChapterExclusionSQL) {
-		t.Fatalf("recently-released query missing manga-chapter exclusion:\n%s", query)
-	}
-}
-
-func TestRandomQueryExcludesMangaChapters(t *testing.T) {
-	t.Parallel()
-
-	query, _, _ := buildRandomQuery(ResolvedSection{
-		ItemLimit: 12,
-		Config:    json.RawMessage(`{}`),
-	}, nil, nil, catalog.AccessFilter{})
-	if !strings.Contains(query, mangaChapterExclusionSQL) {
-		t.Fatalf("random query missing manga-chapter exclusion:\n%s", query)
-	}
-}

@@ -1,46 +1,27 @@
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileVersion, ItemDetail } from "@/api/types";
+import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 import MovieContent from "./MovieContent";
 
 const mocks = vi.hoisted(() => {
-  let capturedActionBarProps: Record<string, unknown> | null = null;
-  let capturedMetadataBadgesProps: Record<string, unknown> | null = null;
-  let capturedQualityBadgesProps: Record<string, unknown> | null = null;
-
+  type Props = Record<string, unknown> | null;
   return {
-    capturedActionBarProps: {
-      get value() {
-        return capturedActionBarProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedActionBarProps = value;
-      },
-    },
-    capturedMetadataBadgesProps: {
-      get value() {
-        return capturedMetadataBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedMetadataBadgesProps = value;
-      },
-    },
-    capturedQualityBadgesProps: {
-      get value() {
-        return capturedQualityBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedQualityBadgesProps = value;
-      },
-    },
+    capturedActionBarProps: { value: null as Props },
+    capturedMetadataBadgesProps: { value: null as Props },
+    capturedQualityBadgesProps: { value: null as Props },
     useIsFavorite: vi.fn(),
     useToggleFavorite: vi.fn(),
     useIsInWatchlist: vi.fn(),
     useToggleWatchlist: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
+    useRedetectItemMarkers: vi.fn(),
+    useAdminMarkerCapabilities: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
     useSetRating: vi.fn(),
@@ -69,8 +50,22 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: mocks.useToggleWatchlist,
 }));
 
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
+  useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));
 
@@ -114,10 +109,6 @@ vi.mock("@/components/CastCarousel", () => ({
   default: () => <div />,
 }));
 
-vi.mock("@/components/CrewList", () => ({
-  default: () => <div />,
-}));
-
 vi.mock("@/components/DownloadVersionPicker", () => ({
   default: () => <div />,
 }));
@@ -127,6 +118,10 @@ vi.mock("@/components/EditMetadataDialog", () => ({
 }));
 
 vi.mock("@/components/MatchItemDialog", () => ({
+  default: () => <div />,
+}));
+
+vi.mock("@/components/SplitItemDialog", () => ({
   default: () => <div />,
 }));
 
@@ -176,67 +171,34 @@ vi.mock("./components/ActionBar", () => ({
   },
 }));
 
-function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    resolution: overrides.resolution ?? "1080p",
-    codec_video: overrides.codec_video ?? "h264",
-    codec_audio: overrides.codec_audio ?? "aac",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "mkv",
-    file_size: overrides.file_size ?? 0,
-    duration: overrides.duration ?? 7200,
-    bitrate: overrides.bitrate ?? 0,
-    edition_raw: overrides.edition_raw,
-    edition_key: overrides.edition_key,
-    audio_tracks: overrides.audio_tracks,
-  };
-}
+const movieVersion = (overrides: Partial<FileVersion> = {}) =>
+  makeFileVersion({ duration: 7200, ...overrides });
 
-function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}): ItemDetail & {
-  type: "movie";
-} {
-  return {
-    content_id: "movie-1",
-    type: "movie",
+function makeMovieItem(overrides: Partial<ItemDetail> = {}) {
+  return makeItemDetail("movie", {
     title: "Example Movie",
-    year: 2024,
     overview: "Movie overview",
     runtime: 120,
     content_rating: "PG-13",
-    genres: [],
     rating_imdb: 8.2,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    first_air_date: null,
-    last_air_date: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    season_count: null,
     series_id: "",
     series_title: "",
     season_number: null,
     episode_number: null,
     air_date: null,
-    versions: [makeFileVersion()],
-    subtitles: [],
-    intro: null,
-    credits: null,
+    versions: [movieVersion()],
     ...overrides,
-    release_date: overrides.release_date ?? null,
-  };
+  });
+}
+
+function renderMovie(item = makeMovieItem()) {
+  renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={item} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 describe("MovieContent", () => {
@@ -249,6 +211,9 @@ describe("MovieContent", () => {
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
     mocks.useToggleWatchlist.mockReturnValue({ mutate: vi.fn() });
     mocks.useRefreshItemMetadata.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
     mocks.useSetRating.mockReturnValue({ mutate: vi.fn() });
@@ -258,8 +223,9 @@ describe("MovieContent", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
   });
 
-  it("updates hero metadata when the selected version changes", () => {
-    const standard = makeFileVersion({
+  // A pick is pinned at start (S3); the default version may still be swapped.
+  it("updates hero metadata and marks the version picked when the viewer selects one", () => {
+    const standard = movieVersion({
       file_id: 1,
       resolution: "2160p",
       codec_video: "hevc",
@@ -267,7 +233,7 @@ describe("MovieContent", () => {
       hdr: true,
       duration: 9780,
     });
-    const directorsCut = makeFileVersion({
+    const directorsCut = movieVersion({
       file_id: 2,
       resolution: "1080p",
       codec_video: "h264",
@@ -279,12 +245,17 @@ describe("MovieContent", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent item={makeMovieItem({ runtime: 163, versions: [standard, directorsCut] })} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/movie-1"]}>
+          <MovieContent
+            item={makeMovieItem({ runtime: 163, versions: [standard, directorsCut] })}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "2h 43m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: false });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 163,
@@ -302,6 +273,7 @@ describe("MovieContent", () => {
     });
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "3h 16m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: true });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 196,
@@ -312,70 +284,52 @@ describe("MovieContent", () => {
     });
   });
 
-  it("passes restartHref when the movie is partially watched", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent
-          item={makeMovieItem({
-            user_data: {
-              played: false,
-              is_in_progress: true,
-              position_seconds: 600,
-              duration_seconds: 3600,
-            },
-          })}
-        />
-      </MemoryRouter>,
+  it("opens on the remembered version when the movie has no resume point", () => {
+    const uhd = movieVersion({ file_id: 1, resolution: "2160p", codec_audio: "truehd", hdr: true });
+    const hd = movieVersion({ file_id: 2, resolution: "1080p", codec_audio: "dts", hdr: false });
+
+    // The server omits a zero position, so the remembered version arrives on
+    // its own beside the counts every user_data carries.
+    renderMovie(
+      makeMovieItem({
+        versions: [uhd, hd],
+        user_data: {
+          played: false,
+          watched_count: 0,
+          unplayed_count: 0,
+          in_progress_count: 0,
+          last_file_id: 2,
+        } as ItemDetail["user_data"],
+      }),
     );
 
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Resume",
-      restartHref: "/watch/movie-1?restart=1",
+    expect(mocks.capturedQualityBadgesProps.value).toMatchObject({
+      summary: { resolution: "1080p" },
     });
   });
 
-  it("does not pass restartHref when the movie is already completed", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent
-          item={makeMovieItem({
-            user_data: {
-              // Completed rows store position 0 (no resume point).
-              played: true,
-              position_seconds: 0,
-              duration_seconds: 3600,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
+  it.each([
+    [
+      "passes restartHref when the movie is partially watched",
+      { played: false, is_in_progress: true, position_seconds: 600, duration_seconds: 3600 },
+      { playLabel: "Resume", restartHref: "/watch/movie-1?restart=1" },
+    ],
+    [
+      // Completed rows store position 0 (no resume point).
+      "does not pass restartHref when the movie is already completed",
+      { played: true, position_seconds: 0, duration_seconds: 3600 },
+      { playLabel: "Play", restartHref: undefined },
+    ],
+    [
+      // Rewatch in flight: watched latch stays, live resume point.
+      "offers resume and restart during a rewatch of a completed movie",
+      { played: true, position_seconds: 600, duration_seconds: 3600 },
+      { playLabel: "Resume", restartHref: "/watch/movie-1?restart=1" },
+    ],
+  ])("%s", (_name, user_data, expected) => {
+    renderMovie(makeMovieItem({ user_data }));
 
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Play",
-      restartHref: undefined,
-    });
-  });
-
-  it("offers resume and restart during a rewatch of a completed movie", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent
-          item={makeMovieItem({
-            user_data: {
-              // Rewatch in flight: watched latch stays, live resume point.
-              played: true,
-              position_seconds: 600,
-              duration_seconds: 3600,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Resume",
-      restartHref: "/watch/movie-1?restart=1",
-    });
+    expect(mocks.capturedActionBarProps.value).toMatchObject(expected);
   });
 
   it("allows marker editing without metadata curation permission", () => {
@@ -383,15 +337,63 @@ describe("MovieContent", () => {
       user: { role: "user", permissions: ["marker_edit"], download_allowed: true },
     });
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent item={makeMovieItem()} />
-      </MemoryRouter>,
-    );
+    renderMovie();
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       canCurateMetadata: false,
       canEditMarkers: true,
     });
+  });
+
+  it.each([
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: true } }, true],
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: false } }, false],
+  ])("offers seek-preview status to %o with capability %o: %s", (user, capability, offered) => {
+    mocks.useAuth.mockReturnValue({ user });
+    mocks.useLibraryCapabilities.mockReturnValue(capability);
+
+    renderMovie();
+
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(true);
+  });
+
+  it("passes credits re-detection only for admins", () => {
+    const redetect = vi.fn();
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetect, isPending: false });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({
+      data: { redetect_markers: true, movie_credits: true },
+    });
+
+    renderMovie();
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      isAdmin: true,
+      redetectKind: "credits",
+      isRedetectingMarkers: false,
+    });
+    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+    expect(typeof onRedetectMarkers).toBe("function");
+    (onRedetectMarkers as (kind: string) => void)("credits");
+    expect(redetect).toHaveBeenCalledWith({ itemId: "movie-1", kind: "credits" });
+
+    mocks.useAuth.mockReturnValue({ user: null });
+    renderMovie();
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    ["a node without redetect_markers", { data: { movie_credits: true } }],
+    ["a node without movie_credits", { data: { redetect_markers: true } }],
+  ])("offers no credits re-detection for %s", (_label, capability) => {
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useAdminMarkerCapabilities.mockReturnValue(capability);
+
+    renderMovie();
+
+    expect(mocks.capturedActionBarProps.value?.isAdmin).toBe(true);
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
   });
 });

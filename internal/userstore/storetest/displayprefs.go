@@ -8,8 +8,7 @@ import (
 )
 
 // RunJellycompatDisplayPrefs runs the Jellyfin DisplayPreferences storage
-// conformance tests. It is exposed separately from RunSuite so each backend
-// pins this behavior alongside its own migration tests: the blobs are opaque
+// conformance tests alongside each backend's migration tests. The blobs are opaque
 // Jellyfin client JSON and must round-trip byte-for-byte through the dedicated
 // jellycompat_displayprefs table.
 func RunJellycompatDisplayPrefs(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {

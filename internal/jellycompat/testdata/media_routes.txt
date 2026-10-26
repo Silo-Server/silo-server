@@ -9,6 +9,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -26,8 +28,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media
@@ -37,6 +42,7 @@ GET /Items/{id}/SpecialFeatures	non-media
 GET /Items/{id}/ThemeMedia	non-media
 GET /Items/{id}/ThemeSongs	non-media
 GET /Items/{id}/ThemeVideos	non-media
+GET /Library/MediaFolders	non-media
 GET /Library/VirtualFolders	non-media
 GET /Localization/Cultures	non-media
 GET /MediaSegments/{id}	non-media
@@ -44,7 +50,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -61,12 +71,14 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media
@@ -80,6 +92,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media
@@ -108,6 +121,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
@@ -115,9 +129,15 @@ GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
@@ -129,6 +149,8 @@ HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
+GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media
@@ -143,6 +165,7 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
+QUERY /web/*	non-media
 TRACE /web/*	non-media
 # fixture 2
 GET /	non-media
@@ -155,6 +178,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -172,8 +197,11 @@ GET /Items/{id}/Ancestors	non-media
 GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images	non-media
 GET /Items/{id}/Images/{imageType}	non-media
+HEAD /Items/{id}/Images/{imageType}	non-media
 GET /Items/{id}/Images/{imageType}/{index}	non-media
+HEAD /Items/{id}/Images/{imageType}/{index}	non-media
 GET /Items/{id}/Intros	non-media
 GET /Items/{id}/LocalTrailers	non-media
 GET /Items/{id}/PlaybackInfo	non-media
@@ -183,6 +211,7 @@ GET /Items/{id}/SpecialFeatures	non-media
 GET /Items/{id}/ThemeMedia	non-media
 GET /Items/{id}/ThemeSongs	non-media
 GET /Items/{id}/ThemeVideos	non-media
+GET /Library/MediaFolders	non-media
 GET /Library/VirtualFolders	non-media
 GET /Localization/Cultures	non-media
 GET /MediaSegments/{id}	non-media
@@ -190,7 +219,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -207,12 +240,14 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media
@@ -226,6 +261,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media
@@ -254,6 +290,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
@@ -261,9 +298,15 @@ GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hevc-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/remux-dv-v1/master.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/remux-ts-v1/master.m3u8	media	manifest	viewer_egress	true	true
@@ -275,6 +318,8 @@ HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
+GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media
@@ -289,4 +334,5 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
+QUERY /web/*	non-media
 TRACE /web/*	non-media

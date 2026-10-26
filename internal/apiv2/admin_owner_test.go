@@ -22,6 +22,9 @@ func (ownerRefusingAccounts) UpdateAdminAccount(context.Context, int, int64, int
 func (ownerRefusingAccounts) DeleteAdminAccount(context.Context, int, int64, int64) error {
 	return ownerRefusal
 }
+func (ownerRefusingAccounts) TransferAdminOwnership(context.Context, int) error {
+	return ownerRefusal
+}
 
 func TestOwnerRefusalsRenderAsPermissionDenied(t *testing.T) {
 	deps := requestDeps(fixtureRequests())
@@ -40,6 +43,7 @@ func TestOwnerRefusalsRenderAsPermissionDenied(t *testing.T) {
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"update account", http.MethodPut, account, `{"enabled":false}`},
 		{"delete account", http.MethodDelete, account, ""},
+		{"transfer ownership", http.MethodPost, account + "/transfer-ownership", ""},
 		{"issue reset", http.MethodPost, account + "/password-reset", `{"delivery":"link"}`},
 		{"create API key", http.MethodPost, Prefix + adminAPIKeyPath, `{"label":"takeover","user_id":"7"}`},
 		{"change key tier", http.MethodPut, key + "/tier", `{"rate_tier":"elevated"}`},

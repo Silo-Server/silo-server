@@ -77,7 +77,7 @@ type AdminCatalogSearchIndexStateStatus struct {
 type AdminCatalogSearchTaskLink struct {
 	Key  string `json:"key"`
 	Name string `json:"name"`
-	Href string `json:"href"`
+	Href string `json:"href" format:"uri-reference"`
 }
 
 func adminCatalogSearchRuntimeStatusOf(in catalogsvc.CatalogSearchRuntimeStatus) AdminCatalogSearchRuntimeStatus {

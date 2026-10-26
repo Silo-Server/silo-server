@@ -253,6 +253,27 @@ function CalendarSkeleton() {
   );
 }
 
+// Links in the empty state always lead to the other preset views, never the
+// one on screen. "all" is the legacy spelling of "everything".
+const EMPTY_STATE_LINKS: { value: CalendarFilter; label: string }[] = [
+  { value: "following", label: "Following" },
+  { value: "trending", label: "Trending" },
+  { value: "everything", label: "Show everything" },
+];
+
+function calendarEmptyMessage(view: string) {
+  switch (view) {
+    case "following":
+      return "Nothing upcoming from shows you follow this week.";
+    case "trending":
+      return "Nothing trending this week.";
+    case "everything":
+      return "Nothing scheduled this week.";
+    default:
+      return "No events this week for this view.";
+  }
+}
+
 function CalendarEmpty({
   filter,
   onSelectPreset,
@@ -260,37 +281,25 @@ function CalendarEmpty({
   filter: string;
   onSelectPreset: (f: string) => void;
 }) {
-  const isEverything = filter === "everything" || filter === "all";
+  const view = filter === "all" ? "everything" : filter;
+  const links = EMPTY_STATE_LINKS.filter((link) => link.value !== view);
   return (
     <div className="surface-panel flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 py-16 text-center">
       <CalendarDays className="text-muted-foreground h-10 w-10" strokeWidth={1.5} />
-      <p className="text-muted-foreground text-sm">
-        {filter === "following"
-          ? "Nothing upcoming from shows you follow this week."
-          : isEverything
-            ? "Nothing scheduled this week."
-            : "No events this week for this view."}
-      </p>
-      {!isEverything && (
-        <div className="flex flex-wrap items-center justify-center gap-2">
+      <p className="text-muted-foreground text-sm">{calendarEmptyMessage(view)}</p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {links.map((link) => (
           <Button
+            key={link.value}
             variant="link"
             size="sm"
             className="text-primary text-sm"
-            onClick={() => onSelectPreset("trending")}
+            onClick={() => onSelectPreset(link.value)}
           >
-            Trending
+            {link.label}
           </Button>
-          <Button
-            variant="link"
-            size="sm"
-            className="text-primary text-sm"
-            onClick={() => onSelectPreset("everything")}
-          >
-            Show everything
-          </Button>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }

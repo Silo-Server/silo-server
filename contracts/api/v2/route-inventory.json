@@ -20,25 +20,25 @@
       "id": "operational_debug",
       "entrypoint": "internal/debugserver.newHandler",
       "description": "Optional literal-loopback operational profiling listener, separate from every client-facing port.",
-      "route_count": 81
+      "route_count": 90
     },
     {
       "id": "operational_metrics",
       "entrypoint": "cmd/silo.newMetricsHandler",
       "description": "Optional operator metrics listener, separate from every client-facing port.",
-      "route_count": 9
+      "route_count": 10
     },
     {
       "id": "root",
       "entrypoint": "cmd/silo.newRootHandler",
       "description": "Process root listener on the primary port: the http.ServeMux that delegates /api/ to the API listener and serves the frontend at /; metrics use a separate opt-in listener.",
-      "route_count": 27
+      "route_count": 30
     },
     {
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
-      "route_count": 702
+      "route_count": 704
     },
     {
       "id": "api_v2",
@@ -50,19 +50,19 @@
       "id": "proxy",
       "entrypoint": "internal/proxy.(*Server).Handler",
       "description": "Proxy node listener: media relay, node control, and its own health/metrics probes.",
-      "route_count": 31
+      "route_count": 32
     },
     {
       "id": "transcode_node",
       "entrypoint": "internal/transcodenode.(*Server).Handler",
       "description": "Transcode node listener: transcode/remux session control, artifacts, and probes.",
-      "route_count": 19
+      "route_count": 23
     }
   ],
   "totals": {
-    "routes": 869,
-    "conditional_routes": 691,
-    "streaming_routes": 44,
+    "routes": 889,
+    "conditional_routes": 692,
+    "streaming_routes": 45,
     "websocket_routes": 4
   },
   "middleware_chains": [
@@ -80,7 +80,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)"
       ]
     },
     {
@@ -93,7 +94,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth"
       ]
     },
@@ -107,7 +109,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]"
       ]
@@ -122,7 +125,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]"
@@ -138,7 +142,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
@@ -155,7 +160,8 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
@@ -173,12 +179,13 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
         "viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
-        "markerEditAccess"
+        "householdProfileGate"
       ]
     },
     {
@@ -191,12 +198,14 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
         "viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
-        "metadataItemAccess"
+        "householdProfileGate",
+        "markerEditAccess"
       ]
     },
     {
@@ -209,12 +218,13 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
         "demoGuard.Guard [when demoGuard != nil]",
         "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
         "viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
-        "requireActingAdmin"
+        "metadataItemAccess"
       ]
     },
     {
@@ -227,9 +237,13 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
-        "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]"
+        "demoGuard.Guard [when demoGuard != nil]",
+        "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]",
+        "viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
+        "requireActingAdmin"
       ]
     },
     {
@@ -242,9 +256,10 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
-        "optionalProfileViewerAccess(viewerAccessMiddleware)"
+        "deps.RateLimitMW.Handler [when deps.RateLimitMW != nil]"
       ]
     },
     {
@@ -257,9 +272,10 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
-        "passwordChangeMiddlewares"
+        "deviceDecisionMiddlewares"
       ]
     },
     {
@@ -272,9 +288,10 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
-        "requireActingAdmin"
+        "optionalProfileViewerAccess(viewerAccessMiddleware)"
       ]
     },
     {
@@ -287,9 +304,10 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
         "authMiddleware.RequireAuth",
-        "viewerAccessMiddleware.RequireViewerAccess"
+        "passwordChangeMiddlewares"
       ]
     },
     {
@@ -302,8 +320,10 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"autoscan_webhook\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "authMiddleware.RequireAuth",
+        "requireActingAdmin"
       ]
     },
     {
@@ -316,8 +336,11 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_lookup\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "authMiddleware.RequireAuth",
+        "viewerAccessMiddleware.RequireViewerAccess",
+        "deviceDecisionMiddlewares"
       ]
     },
     {
@@ -330,8 +353,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_poll\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"autoscan_webhook\")"
       ]
     },
     {
@@ -344,8 +368,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"device_start\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_lookup\")"
       ]
     },
     {
@@ -358,8 +383,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"invitation\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_poll\")"
       ]
     },
     {
@@ -372,8 +398,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"login\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"device_start\")"
       ]
     },
     {
@@ -386,8 +413,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"setup\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"invitation\")"
       ]
     },
     {
@@ -400,8 +428,9 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "deps.RateLimitMW.AuthEndpointHandler(\"signup\")"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"login\")"
       ]
     },
     {
@@ -414,25 +443,39 @@
         "middleware.Recoverer",
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
-        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID) [when deps.ActivityLogWriter != nil]",
-        "displayMiddlewares"
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"setup\")"
       ]
     },
     {
       "id": 24,
       "middleware": [
-        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
-        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })"
+        "apimw.RequestID",
+        "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
+        "apimw.RequestLogger(deps.NodeID)",
+        "middleware.Recoverer",
+        "apimw.Metrics",
+        "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "deps.RateLimitMW.AuthEndpointHandler(\"signup\")"
       ]
     },
     {
       "id": 25,
       "middleware": [
-        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
-        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
-        "s.meterEgress"
+        "apimw.RequestID",
+        "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
+        "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
+        "apimw.RequestLogger(deps.NodeID)",
+        "middleware.Recoverer",
+        "apimw.Metrics",
+        "httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded)",
+        "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "apimw.ProvideActingAdmin(actingAdmin)",
+        "displayMiddlewares"
       ]
     },
     {
@@ -440,12 +483,29 @@
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
-        "s.requireBearer"
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })"
       ]
     },
     {
       "id": 27,
+      "middleware": [
+        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
+        "s.meterEgress"
+      ]
+    },
+    {
+      "id": 28,
+      "middleware": [
+        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
+        "s.requireBearer"
+      ]
+    },
+    {
+      "id": 29,
       "middleware": [
         "s.requireBearer"
       ]
@@ -655,6 +715,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/",
+      "route_group": "/",
+      "handler": "g.wrap(indexName, http.HandlerFunc(g.index))",
+      "handler_expr": "g.wrap(indexName, http.HandlerFunc(g.index))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/",
       "route_group": "/",
@@ -880,6 +965,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/allocs",
+      "route_group": "/",
+      "handler": "g.wrap(allocsName, pprof.Handler(allocsName))",
+      "handler_expr": "g.wrap(allocsName, pprof.Handler(allocsName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/allocs",
       "route_group": "/",
@@ -1105,6 +1215,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/block",
+      "route_group": "/",
+      "handler": "g.wrap(blockName, pprof.Handler(blockName))",
+      "handler_expr": "g.wrap(blockName, pprof.Handler(blockName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/block",
       "route_group": "/",
@@ -1330,6 +1465,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/goroutine",
+      "route_group": "/",
+      "handler": "g.wrap(goroutineName, pprof.Handler(goroutineName))",
+      "handler_expr": "g.wrap(goroutineName, pprof.Handler(goroutineName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/goroutine",
       "route_group": "/",
@@ -1555,6 +1715,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/heap",
+      "route_group": "/",
+      "handler": "g.wrap(heapName, pprof.Handler(heapName))",
+      "handler_expr": "g.wrap(heapName, pprof.Handler(heapName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/heap",
       "route_group": "/",
@@ -1780,6 +1965,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/mutex",
+      "route_group": "/",
+      "handler": "g.wrap(mutexName, pprof.Handler(mutexName))",
+      "handler_expr": "g.wrap(mutexName, pprof.Handler(mutexName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/mutex",
       "route_group": "/",
@@ -2005,6 +2215,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/profile",
+      "route_group": "/",
+      "handler": "g.wrap(profileName, http.HandlerFunc(pprof.Profile))",
+      "handler_expr": "g.wrap(profileName, http.HandlerFunc(pprof.Profile))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/profile",
       "route_group": "/",
@@ -2230,6 +2465,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/threadcreate",
+      "route_group": "/",
+      "handler": "g.wrap(threadcreateName, pprof.Handler(threadcreateName))",
+      "handler_expr": "g.wrap(threadcreateName, pprof.Handler(threadcreateName))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/threadcreate",
       "route_group": "/",
@@ -2455,6 +2715,31 @@
     {
       "listener": "operational_debug",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/debug/pprof/trace",
+      "route_group": "/",
+      "handler": "g.wrap(traceName, http.HandlerFunc(pprof.Trace))",
+      "handler_expr": "g.wrap(traceName, http.HandlerFunc(pprof.Trace))",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "operational_debug",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/debug/pprof/trace",
       "route_group": "/",
@@ -2680,6 +2965,31 @@
     {
       "listener": "operational_metrics",
       "namespace": "operational",
+      "method": "QUERY",
+      "path": "/metrics",
+      "route_group": "/",
+      "handler": "promhttp.Handler()",
+      "handler_expr": "promhttp.Handler()",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "cmd/silo/metrics_listener.go"
+    },
+    {
+      "listener": "operational_metrics",
+      "namespace": "operational",
       "method": "TRACE",
       "path": "/metrics",
       "route_group": "/",
@@ -2905,6 +3215,31 @@
     {
       "listener": "root",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/",
+      "route_group": "/",
+      "handler": "server.FrontendHandler()",
+      "handler_expr": "server.FrontendHandler()",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "cmd/silo/root_handler.go"
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/",
       "route_group": "/",
@@ -3146,6 +3481,33 @@
     {
       "listener": "root",
       "namespace": "legacy_unversioned",
+      "method": "QUERY",
+      "path": "/api/",
+      "route_group": "/",
+      "handler": "listener:api",
+      "handler_expr": "apiRouter",
+      "handler_kind": "delegation",
+      "handler_resolved": true,
+      "middleware_chain": 0,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "api",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "cmd/silo/root_handler.go"
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
       "method": "TRACE",
       "path": "/api/",
       "route_group": "/",
@@ -3373,6 +3735,31 @@
     {
       "listener": "root",
       "namespace": "operational",
+      "method": "QUERY",
+      "path": "/metrics",
+      "route_group": "/",
+      "handler": "http.NotFoundHandler()",
+      "handler_expr": "http.NotFoundHandler()",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "cmd/silo/root_handler.go"
+    },
+    {
+      "listener": "root",
+      "namespace": "operational",
       "method": "TRACE",
       "path": "/metrics",
       "route_group": "/",
@@ -3405,7 +3792,7 @@
       "handler_expr": "accessGroupHandler.HandleList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3440,7 +3827,7 @@
       "handler_expr": "accessGroupHandler.HandleCreate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3475,7 +3862,7 @@
       "handler_expr": "accessGroupHandler.HandleDelete",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3510,7 +3897,7 @@
       "handler_expr": "accessGroupHandler.HandleGet",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3545,7 +3932,7 @@
       "handler_expr": "accessGroupHandler.HandleUpdate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3580,7 +3967,7 @@
       "handler_expr": "apiKeyHandler.HandleAdminListAllAPIKeys",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3615,7 +4002,7 @@
       "handler_expr": "apiKeyHandler.HandleAdminCreateAPIKey",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3650,7 +4037,7 @@
       "handler_expr": "apiKeyHandler.HandleAdminDeleteAPIKey",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3685,7 +4072,7 @@
       "handler_expr": "apiKeyHandler.HandleAdminUpdateTier",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3720,7 +4107,7 @@
       "handler_expr": "autoscanHandler.HandleListConnections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3755,7 +4142,7 @@
       "handler_expr": "autoscanHandler.HandleCreateConnection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3790,7 +4177,7 @@
       "handler_expr": "autoscanHandler.HandleTestConnection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3825,7 +4212,7 @@
       "handler_expr": "autoscanHandler.HandleDeleteConnection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3860,7 +4247,7 @@
       "handler_expr": "autoscanHandler.HandleUpdateConnection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3895,7 +4282,7 @@
       "handler_expr": "autoscanHandler.HandleListEvents",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3930,7 +4317,7 @@
       "handler_expr": "autoscanHandler.HandleListAvailableScanSources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3965,7 +4352,7 @@
       "handler_expr": "autoscanHandler.HandleListScans",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4000,7 +4387,7 @@
       "handler_expr": "autoscanHandler.HandleGetSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4035,7 +4422,7 @@
       "handler_expr": "autoscanHandler.HandleUpdateSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4070,7 +4457,7 @@
       "handler_expr": "autoscanHandler.HandleListSources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4105,7 +4492,7 @@
       "handler_expr": "autoscanHandler.HandleCreateSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4140,7 +4527,7 @@
       "handler_expr": "autoscanHandler.HandleDeleteSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4175,7 +4562,7 @@
       "handler_expr": "autoscanHandler.HandleUpdateSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4210,7 +4597,7 @@
       "handler_expr": "autoscanHandler.HandleRewriteSuggestions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4245,7 +4632,7 @@
       "handler_expr": "autoscanHandler.HandleDeleteSourceWebhook",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4280,7 +4667,7 @@
       "handler_expr": "autoscanHandler.HandleCreateSourceWebhook",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4315,7 +4702,7 @@
       "handler_expr": "autoscanHandler.HandleRotateSourceWebhook",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4350,7 +4737,7 @@
       "handler_expr": "autoscanHandler.HandleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4385,7 +4772,7 @@
       "handler_expr": "autoscanHandler.HandleTrigger",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4420,7 +4807,7 @@
       "handler_expr": "brandingHandler.HandleDeleteAsset",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4455,7 +4842,7 @@
       "handler_expr": "brandingHandler.HandleUploadAsset",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4490,7 +4877,7 @@
       "handler_expr": "catalogSeedHandler.HandleExport",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4525,7 +4912,7 @@
       "handler_expr": "catalogSeedHandler.HandleCreateExportJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4560,7 +4947,7 @@
       "handler_expr": "catalogSeedHandler.HandlePublishExportJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4595,7 +4982,7 @@
       "handler_expr": "catalogSeedHandler.HandleImport",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4630,7 +5017,7 @@
       "handler_expr": "catalogSeedHandler.HandleCreateImportJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4665,7 +5052,7 @@
       "handler_expr": "catalogSeedHandler.HandleListImportSources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4700,7 +5087,7 @@
       "handler_expr": "catalogSeedHandler.HandleListLocalImportSources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4735,7 +5122,7 @@
       "handler_expr": "adminHandler.HandleGetCatalogSearchStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4769,7 +5156,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleReorderCollectionsInGroup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4804,7 +5191,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleDeleteGroup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4839,7 +5226,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleUpdateGroup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4874,7 +5261,7 @@
       "handler_expr": "libraryCollectionHandler.HandleListAdminCollections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4909,7 +5296,7 @@
       "handler_expr": "libraryCollectionHandler.HandleCreateAdminCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4944,7 +5331,7 @@
       "handler_expr": "libraryCollectionHandler.HandleImportMDBList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4979,7 +5366,7 @@
       "handler_expr": "libraryCollectionHandler.HandleImportTMDBCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5014,7 +5401,7 @@
       "handler_expr": "libraryCollectionHandler.HandleImportTraktCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5049,7 +5436,7 @@
       "handler_expr": "libraryCollectionHandler.HandleReorderAdminCollections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5084,7 +5471,7 @@
       "handler_expr": "libraryCollectionHandler.HandlePreviewAdminCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5119,7 +5506,7 @@
       "handler_expr": "libraryCollectionHandler.HandleListTemplateBundles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5154,7 +5541,7 @@
       "handler_expr": "libraryCollectionHandler.HandleApplyTemplateBundle",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5189,7 +5576,7 @@
       "handler_expr": "libraryCollectionHandler.HandleApplyTemplateBundleJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5224,7 +5611,7 @@
       "handler_expr": "collectionTemplateHandler.HandleListTemplates",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5259,7 +5646,7 @@
       "handler_expr": "libraryCollectionHandler.HandleDeleteAdminCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5294,7 +5681,7 @@
       "handler_expr": "libraryCollectionHandler.HandleUpdateAdminCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5329,7 +5716,7 @@
       "handler_expr": "libraryCollectionHandler.HandleDeleteCollectionImage",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5364,7 +5751,7 @@
       "handler_expr": "libraryCollectionHandler.HandleReorderAdminCollectionItems",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5399,7 +5786,7 @@
       "handler_expr": "libraryCollectionHandler.HandleRemoveAdminCollectionItem",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5434,7 +5821,7 @@
       "handler_expr": "libraryCollectionHandler.HandleAddAdminCollectionItem",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5469,7 +5856,7 @@
       "handler_expr": "libraryCollectionHandler.HandleSyncAdminCollection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5504,7 +5891,7 @@
       "handler_expr": "adminHandler.HandleGetDashboardCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5538,7 +5925,7 @@
       "handler_expr": "adminHandler.HandleDeleteDashboardLayout",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5572,7 +5959,7 @@
       "handler_expr": "adminHandler.HandleGetDashboardLayout",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5606,7 +5993,7 @@
       "handler_expr": "adminHandler.HandlePutDashboardLayout",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5640,7 +6027,7 @@
       "handler_expr": "adminHandler.HandleListDevices",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5674,7 +6061,7 @@
       "handler_expr": "adminHandler.HandleGetDevice",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5708,7 +6095,7 @@
       "handler_expr": "h.HandleAdminListReports",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5743,7 +6130,7 @@
       "handler_expr": "h.HandleAdminDeleteReport",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5778,7 +6165,7 @@
       "handler_expr": "h.HandleAdminGetReport",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5813,7 +6200,7 @@
       "handler_expr": "h.HandleAdminDownloadReport",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5848,7 +6235,7 @@
       "handler_expr": "emailHandler.HandleTest",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5883,7 +6270,7 @@
       "handler_expr": "markersHandler.HandleContributeFile",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5918,7 +6305,7 @@
       "handler_expr": "markersHandler.HandleListFileContributions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5953,7 +6340,7 @@
       "handler_expr": "filesystemHandler.HandleBrowse",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5987,7 +6374,7 @@
       "handler_expr": "historyImportHandler.HandleAdminListSources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6022,7 +6409,7 @@
       "handler_expr": "historyImportHandler.HandleAdminCreateSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6057,7 +6444,7 @@
       "handler_expr": "historyImportHandler.HandleAdminDeleteSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6092,7 +6479,7 @@
       "handler_expr": "historyImportHandler.HandleAdminUpdateSource",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6127,7 +6514,7 @@
       "handler_expr": "historyImportHandler.HandleAdminListMappings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6162,7 +6549,7 @@
       "handler_expr": "historyImportHandler.HandleAdminCreateMapping",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6197,7 +6584,7 @@
       "handler_expr": "historyImportHandler.HandleAdminDeleteMapping",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6232,7 +6619,7 @@
       "handler_expr": "historyImportHandler.HandleAdminUpdateMapping",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6267,7 +6654,7 @@
       "handler_expr": "historyImportHandler.HandleAdminCreateRun",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6302,7 +6689,7 @@
       "handler_expr": "historyImportHandler.HandleAdminPlexLogin",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6337,7 +6724,7 @@
       "handler_expr": "historyImportHandler.HandleAdminListRuns",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6372,7 +6759,7 @@
       "handler_expr": "historyImportHandler.HandleAdminGetRun",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6407,7 +6794,7 @@
       "handler_expr": "historyImportHandler.HandleAdminCancelRun",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6442,7 +6829,7 @@
       "handler_expr": "historyImportHandler.HandleAdminBulkRun",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6477,7 +6864,7 @@
       "handler_expr": "historyImportHandler.HandleAdminClearSourceToken",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6512,7 +6899,7 @@
       "handler_expr": "historyImportHandler.HandleAdminSetSourceToken",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6547,7 +6934,7 @@
       "handler_expr": "historyImportHandler.HandleAdminDiscoverUsers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6582,7 +6969,7 @@
       "handler_expr": "adminInvitationHandler.HandleListInvitations",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6617,7 +7004,7 @@
       "handler_expr": "adminInvitationHandler.HandleCreateInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6652,7 +7039,7 @@
       "handler_expr": "adminInvitationHandler.HandleRevokeInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6687,7 +7074,7 @@
       "handler_expr": "adminInvitationHandler.HandleResendInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6722,7 +7109,7 @@
       "handler_expr": "inviteCodeHandler.HandleListInviteCodes",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6757,7 +7144,7 @@
       "handler_expr": "inviteCodeHandler.HandleCreateInviteCode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6792,7 +7179,7 @@
       "handler_expr": "inviteCodeHandler.HandleDeleteInviteCode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6827,7 +7214,7 @@
       "handler_expr": "inviteCodeHandler.HandleUpdateInviteCode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6862,7 +7249,7 @@
       "handler_expr": "inviteCodeHandler.HandleTopUpInviteCode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6897,7 +7284,7 @@
       "handler_expr": "adminIPHandler.HandleGetIPUsers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6932,7 +7319,7 @@
       "handler_expr": "adminSplitHandler.HandleListItemFiles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -6967,7 +7354,7 @@
       "handler_expr": "adminImageHandler.HandleGetItemImages",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7002,7 +7389,7 @@
       "handler_expr": "adminImageHandler.HandleApplyItemImage",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7037,7 +7424,7 @@
       "handler_expr": "adminMatchHandler.HandleApplyItemMatch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7072,7 +7459,7 @@
       "handler_expr": "adminMatchHandler.HandleSearchItemMatchCandidates",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7107,7 +7494,7 @@
       "handler_expr": "adminSplitHandler.HandleMergeItem",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7142,7 +7529,7 @@
       "handler_expr": "adminHandler.HandleUpdateItemMetadata",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7176,7 +7563,7 @@
       "handler_expr": "metadataAIHandler.HandleTranslate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7211,7 +7598,7 @@
       "handler_expr": "metadataAIHandler.HandleListJobs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7246,7 +7633,7 @@
       "handler_expr": "metadataAIHandler.HandleCancelJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7281,7 +7668,7 @@
       "handler_expr": "adminIntroHandler.HandleRedetectEpisodeIntro",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7316,7 +7703,7 @@
       "handler_expr": "adminIntroHandler.HandleRefreshEpisodeMarkers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7351,7 +7738,7 @@
       "handler_expr": "adminHandler.HandleRefreshItemMetadata",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7385,7 +7772,7 @@
       "handler_expr": "adminSplitHandler.HandleSplitItem",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7420,7 +7807,7 @@
       "handler_expr": "adminHandler.HandleUpdateJellyfinCompatSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7454,7 +7841,7 @@
       "handler_expr": "adminHandler.HandleGetJellyfinCompatStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7488,7 +7875,7 @@
       "handler_expr": "adminHandler.HandleInstallJellyfinCompatWeb",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7522,7 +7909,7 @@
       "handler_expr": "adminHandler.HandleRemoveJellyfinCompatWeb",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7556,7 +7943,7 @@
       "handler_expr": "adminHandler.HandleUpdateJellyfinCompatWeb",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7590,7 +7977,7 @@
       "handler_expr": "adminJobsHandler.HandleList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7659,7 +8046,7 @@
       "handler_expr": "adminJobsHandler.HandleCancel",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7694,7 +8081,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleListGroups",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7729,7 +8116,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleCreateGroup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7764,7 +8151,7 @@
       "handler_expr": "libraryCollectionGroupHandler.HandleReorderGroups",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7799,7 +8186,7 @@
       "handler_expr": "literaryWorkHandler.HandleListCandidates",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7834,7 +8221,7 @@
       "handler_expr": "literaryWorkHandler.HandleLinkItems",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7869,7 +8256,7 @@
       "handler_expr": "literaryWorkHandler.HandleConfirmMatch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7904,7 +8291,7 @@
       "handler_expr": "literaryWorkHandler.HandleIgnoreMatch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7939,7 +8326,7 @@
       "handler_expr": "literaryWorkHandler.HandleUnlinkItem",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7974,7 +8361,7 @@
       "handler_expr": "adminLogsHandler.HandleListOperationalLogs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8009,7 +8396,7 @@
       "handler_expr": "adminLogsHandler.HandleListAuditLogs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8044,7 +8431,7 @@
       "handler_expr": "adminLogsHandler.HandleLogStreamWebSocket",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8079,7 +8466,7 @@
       "handler_expr": "markersHandler.HandleListFileMarkerHistory",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8114,7 +8501,7 @@
       "handler_expr": "markersHandler.HandleListMarkerHistory",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8149,7 +8536,7 @@
       "handler_expr": "markersHandler.HandleListItemMarkerHistory",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8184,7 +8571,7 @@
       "handler_expr": "adminMarkerProvidersHandler.HandleListProviders",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8219,7 +8606,7 @@
       "handler_expr": "adminMarkerProvidersHandler.HandleUpdateProvider",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8254,7 +8641,7 @@
       "handler_expr": "adminMarkerProvidersHandler.HandleValidateProvider",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8289,7 +8676,7 @@
       "handler_expr": "nodeHandler.HandleListSessions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8324,7 +8711,7 @@
       "handler_expr": "nodeHandler.HandleListNodes",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8359,7 +8746,7 @@
       "handler_expr": "nodeHandler.HandleCreateNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8394,7 +8781,7 @@
       "handler_expr": "nodeHandler.HandleForceReloadNodes",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8429,7 +8816,7 @@
       "handler_expr": "nodeHandler.HandleDeleteNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8464,7 +8851,7 @@
       "handler_expr": "nodeHandler.HandleUpdateNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8499,7 +8886,7 @@
       "handler_expr": "nodeHandler.HandleCheckNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8534,7 +8921,7 @@
       "handler_expr": "nodeHandler.HandleForceReloadNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8569,7 +8956,7 @@
       "handler_expr": "nodeHandler.HandleReprobeNode",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8604,7 +8991,7 @@
       "handler_expr": "discordNotificationsHandler.HandleAdminTest",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8639,7 +9026,7 @@
       "handler_expr": "applePushHandler.HandleTest",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8675,7 +9062,7 @@
       "handler_expr": "applePushHandler.HandleTestAndroid",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8711,7 +9098,7 @@
       "handler_expr": "applePushHandler.HandleClearRelay",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8747,7 +9134,7 @@
       "handler_expr": "applePushHandler.HandleRegisterRelay",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8783,7 +9170,7 @@
       "handler_expr": "serverChannelsHandler.HandleList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8818,7 +9205,7 @@
       "handler_expr": "serverChannelsHandler.HandleCreate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8853,7 +9240,7 @@
       "handler_expr": "serverChannelsHandler.HandleDelete",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8888,7 +9275,7 @@
       "handler_expr": "serverChannelsHandler.HandleUpdate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8923,7 +9310,7 @@
       "handler_expr": "serverChannelsHandler.HandleRotateSecret",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8958,7 +9345,7 @@
       "handler_expr": "serverChannelsHandler.HandleTest",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8993,7 +9380,7 @@
       "handler_expr": "peopleHandler.HandleAdminUpdatePerson",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9028,7 +9415,7 @@
       "handler_expr": "peopleHandler.HandleAdminRefreshPerson",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9063,7 +9450,7 @@
       "handler_expr": "adminHandler.HandleListPlaybackHistory",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9097,7 +9484,7 @@
       "handler_expr": "adminHandler.HandleGetPlaybackRoutingCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9131,7 +9518,7 @@
       "handler_expr": "pluginHandler.HandleCatalog",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9166,7 +9553,7 @@
       "handler_expr": "pluginHandler.HandleGetCatalogSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9201,7 +9588,7 @@
       "handler_expr": "pluginHandler.HandlePutCatalogSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9236,7 +9623,7 @@
       "handler_expr": "pluginHandler.HandleListInstallations",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9271,7 +9658,7 @@
       "handler_expr": "pluginHandler.HandleCreateInstallation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9306,7 +9693,7 @@
       "handler_expr": "pluginHandler.HandleDeleteInstallation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9341,7 +9728,7 @@
       "handler_expr": "pluginHandler.HandleUpdateInstallation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9376,7 +9763,7 @@
       "handler_expr": "pluginHandler.HandlePutAuthBinding",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9411,7 +9798,7 @@
       "handler_expr": "pluginHandler.HandlePutInstallationConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9446,7 +9833,7 @@
       "handler_expr": "pluginHandler.HandleTestInstallationConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9481,7 +9868,7 @@
       "handler_expr": "pluginHandler.HandlePutTaskBinding",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9516,7 +9903,7 @@
       "handler_expr": "pluginHandler.HandleApplyUpdate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9551,7 +9938,7 @@
       "handler_expr": "pluginHandler.HandleListRepositories",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9586,7 +9973,7 @@
       "handler_expr": "pluginHandler.HandleCreateRepository",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9621,7 +10008,7 @@
       "handler_expr": "pluginHandler.HandleDeleteRepository",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9656,7 +10043,7 @@
       "handler_expr": "pluginHandler.HandleUpdateRepository",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9691,7 +10078,7 @@
       "handler_expr": "pluginHandler.HandleUploadInstallation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9726,7 +10113,7 @@
       "handler_expr": "pluginHandler.HandleCreateChunkedUpload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9761,7 +10148,7 @@
       "handler_expr": "pluginHandler.HandleCancelChunkedUpload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9796,7 +10183,7 @@
       "handler_expr": "pluginHandler.HandleUploadChunk",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9831,7 +10218,7 @@
       "handler_expr": "pluginHandler.HandleCompleteChunkedUpload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9866,7 +10253,7 @@
       "handler_expr": "policyHandler.HandleListDecisions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9901,7 +10288,7 @@
       "handler_expr": "policyHandler.HandleGetDecision",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9936,7 +10323,7 @@
       "handler_expr": "policyHandler.HandleListDocuments",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9971,7 +10358,7 @@
       "handler_expr": "policyHandler.HandleCreateDocument",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10006,7 +10393,7 @@
       "handler_expr": "policyHandler.HandleDeleteDocument",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10041,7 +10428,7 @@
       "handler_expr": "policyHandler.HandleGetDocument",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10076,7 +10463,7 @@
       "handler_expr": "policyHandler.HandleSetDocumentEnabled",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10111,7 +10498,7 @@
       "handler_expr": "policyHandler.HandleListVersions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10146,7 +10533,7 @@
       "handler_expr": "policyHandler.HandleCreateVersion",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10181,7 +10568,7 @@
       "handler_expr": "policyHandler.HandleGetVersion",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10216,7 +10603,7 @@
       "handler_expr": "policyHandler.HandleActivateVersion",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10251,7 +10638,7 @@
       "handler_expr": "policyHandler.HandleSimulate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10286,7 +10673,7 @@
       "handler_expr": "policyHandler.HandleValidate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10321,7 +10708,7 @@
       "handler_expr": "policyHandler.HandleListVendor",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10356,7 +10743,7 @@
       "handler_expr": "rateLimitHandler.HandleGetConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10391,7 +10778,7 @@
       "handler_expr": "rateLimitHandler.HandleUpdateConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10426,7 +10813,7 @@
       "handler_expr": "adminRecsHandler.HandleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10461,7 +10848,7 @@
       "handler_expr": "adminRecsHandler.HandleTriggerCowatch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10496,7 +10883,7 @@
       "handler_expr": "adminRecsHandler.HandleTriggerEmbeddings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10531,7 +10918,7 @@
       "handler_expr": "adminRecsHandler.HandleTriggerRecommendations",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10566,7 +10953,7 @@
       "handler_expr": "adminRecsHandler.HandleTriggerTasteProfiles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10601,7 +10988,7 @@
       "handler_expr": "requestHandler.HandleListIntegrations",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10636,7 +11023,7 @@
       "handler_expr": "requestHandler.HandleCreateIntegration",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10671,7 +11058,7 @@
       "handler_expr": "requestHandler.HandleDeleteIntegration",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10706,7 +11093,7 @@
       "handler_expr": "requestHandler.HandleUpdateIntegration",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10741,7 +11128,7 @@
       "handler_expr": "requestHandler.HandleLoadIntegrationOptions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10776,7 +11163,7 @@
       "handler_expr": "requestHandler.HandleGetSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10811,7 +11198,7 @@
       "handler_expr": "requestHandler.HandleUpdateSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10846,7 +11233,7 @@
       "handler_expr": "requestHandler.HandleGetUserLimit",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10881,7 +11268,7 @@
       "handler_expr": "requestHandler.HandleUpdateUserLimit",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10916,7 +11303,7 @@
       "handler_expr": "requestHandler.HandleAdminList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10951,7 +11338,7 @@
       "handler_expr": "requestHandler.HandleApprove",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10986,7 +11373,7 @@
       "handler_expr": "requestHandler.HandleCancel",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11021,7 +11408,7 @@
       "handler_expr": "requestHandler.HandleDecline",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11056,7 +11443,7 @@
       "handler_expr": "requestHandler.HandleRetry",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11091,7 +11478,7 @@
       "handler_expr": "sectionHandler.HandleListSections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11126,7 +11513,7 @@
       "handler_expr": "sectionHandler.HandleCreateSection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11161,7 +11548,7 @@
       "handler_expr": "sectionBulkHandler.HandleBulkCreate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11197,7 +11584,7 @@
       "handler_expr": "sectionHandler.HandlePreview",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11232,7 +11619,7 @@
       "handler_expr": "sectionHandler.HandleReorderSections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11267,7 +11654,7 @@
       "handler_expr": "sectionHandler.HandleRestoreDefaults",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11302,7 +11689,7 @@
       "handler_expr": "sectionHandler.HandleDeleteSection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11337,7 +11724,7 @@
       "handler_expr": "sectionHandler.HandleUpdateSection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11372,7 +11759,7 @@
       "handler_expr": "serverControlHandler.HandleRestart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11406,7 +11793,7 @@
       "handler_expr": "adminHandler.HandleGetServerStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11440,7 +11827,7 @@
       "handler_expr": "adminHandler.HandleListSessions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11474,7 +11861,7 @@
       "handler_expr": "adminHandler.HandleGetSessionsCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11508,7 +11895,7 @@
       "handler_expr": "adminPlaybackControlHandler.HandleMessageSession",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11543,7 +11930,7 @@
       "handler_expr": "adminPlaybackControlHandler.HandlePauseSession",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11578,7 +11965,7 @@
       "handler_expr": "adminPlaybackControlHandler.HandleResumeSession",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11613,7 +12000,7 @@
       "handler_expr": "adminPlaybackControlHandler.HandleStopSession",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11648,7 +12035,7 @@
       "handler_expr": "adminPlaybackControlHandler.HandleTerminateSession",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11683,7 +12070,7 @@
       "handler_expr": "adminHandler.HandleGetSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11717,7 +12104,7 @@
       "handler_expr": "adminHandler.HandleUpdateSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11751,7 +12138,7 @@
       "handler_expr": "adminHandler.HandleCheckSettingsConnection",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11785,7 +12172,7 @@
       "handler_expr": "adminHandler.HandleGetEffectiveSettings",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11819,7 +12206,7 @@
       "handler_expr": "adminHandler.HandleGetRestartKeys",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11853,7 +12240,7 @@
       "handler_expr": "sectionSettingsHandler.HandleGet",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11888,7 +12275,7 @@
       "handler_expr": "sectionSettingsHandler.HandlePut",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11923,7 +12310,7 @@
       "handler_expr": "adminHandler.HandleGetSensitiveStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11957,7 +12344,7 @@
       "handler_expr": "adminHandler.HandleGetSetting",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11991,7 +12378,7 @@
       "handler_expr": "adminHandler.HandleUpdateSetting",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12025,7 +12412,7 @@
       "handler_expr": "adminHandler.HandleGetStats",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12059,7 +12446,7 @@
       "handler_expr": "adminHandler.HandleGetDownloadsStats",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12093,7 +12480,7 @@
       "handler_expr": "adminHandler.HandleGetPlaybackActivity",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12127,7 +12514,7 @@
       "handler_expr": "adminHandler.HandleGetTimeseries",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12161,7 +12548,7 @@
       "handler_expr": "adminHandler.HandleGetTopActivity",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12195,7 +12582,7 @@
       "handler_expr": "(&handlers.StreamTelemetryParityHandler{ Registry: deps.StreamTelemetry, ViewCache: deps.StreamTelemetryViewCache, Pool: deps.DB, Redis: deps.RedisClient, }).HandleGetStreamTelemetryParity",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12229,7 +12616,7 @@
       "handler_expr": "adminSubtitleHandler.HandleListProviders",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12264,7 +12651,7 @@
       "handler_expr": "adminSubtitleHandler.HandleUpdateProvider",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12299,7 +12686,7 @@
       "handler_expr": "adminSubtitleHandler.HandleTestProvider",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12334,7 +12721,7 @@
       "handler_expr": "adminSubtitleHandler.HandleListDownloadedSubtitles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12369,7 +12756,7 @@
       "handler_expr": "adminSubtitleHandler.HandleDeleteDownloadedSubtitle",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12404,7 +12791,7 @@
       "handler_expr": "adminSubtitleHandler.HandlePatchDownloadedSubtitle",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12439,7 +12826,7 @@
       "handler_expr": "adminSubtitleHandler.HandleDownloadDownloadedSubtitle",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12474,7 +12861,7 @@
       "handler_expr": "systemHandler.HandleBuildInfo",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12508,7 +12895,7 @@
       "handler_expr": "systemHandler.HandleHWAccel",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12542,7 +12929,7 @@
       "handler_expr": "systemHandler.HandleSystemResources",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12576,7 +12963,7 @@
       "handler_expr": "taskHandler.HandleListTasks",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12611,7 +12998,7 @@
       "handler_expr": "taskHandler.HandleGetTask",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12646,7 +13033,7 @@
       "handler_expr": "taskHandler.HandleCancelTask",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12681,7 +13068,7 @@
       "handler_expr": "taskHandler.HandleGetHistory",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12716,7 +13103,7 @@
       "handler_expr": "taskHandler.HandleGetMetrics",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12751,7 +13138,7 @@
       "handler_expr": "taskHandler.HandleRunTask",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12786,7 +13173,7 @@
       "handler_expr": "taskHandler.HandleUpdateTriggers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12821,7 +13208,7 @@
       "handler_expr": "adminHandler.HandleListUnmatched",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12855,7 +13242,7 @@
       "handler_expr": "adminHandler.HandleListUsers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12889,7 +13276,7 @@
       "handler_expr": "adminHandler.HandleCreateUser",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12923,7 +13310,7 @@
       "handler_expr": "adminHandler.HandleDeleteUser",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12957,7 +13344,7 @@
       "handler_expr": "adminHandler.HandleGetUser",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12991,7 +13378,7 @@
       "handler_expr": "adminHandler.HandleUpdateUser",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13025,7 +13412,7 @@
       "handler_expr": "adminHandler.HandleImpersonateUser",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13059,7 +13446,7 @@
       "handler_expr": "adminIPHandler.HandleGetUserIPs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13094,7 +13481,7 @@
       "handler_expr": "adminHandler.HandleListUserProfiles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13128,7 +13515,7 @@
       "handler_expr": "settingValuesHandler.HandleAdminListUserSettingValues",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13163,7 +13550,7 @@
       "handler_expr": "settingValuesHandler.HandleAdminDeleteUserSettingValue",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13198,7 +13585,7 @@
       "handler_expr": "settingValuesHandler.HandleAdminSetUserSettingValue",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13233,7 +13620,7 @@
       "handler_expr": "apiKeyHandler.HandleAdminListUserAPIKeys",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13490,7 +13877,7 @@
       "handler_expr": "authHandler.HandleAccountPasswordCapability",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 11,
+      "middleware_chain": 13,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -13521,7 +13908,7 @@
       "handler_expr": "authHandler.HandleChangePassword",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 12,
+      "middleware_chain": 14,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -13581,7 +13968,7 @@
       "handler_expr": "authHandler.HandleDeviceLookup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 16,
+      "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -13611,10 +13998,11 @@
       "handler_expr": "authHandler.HandleDeviceApprove",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 2,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -13641,10 +14029,11 @@
       "handler_expr": "authHandler.HandleDeviceApproveHandoff",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 14,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
+        "rate_limited",
         "viewer_access"
       ],
       "conditions": [
@@ -13700,10 +14089,11 @@
       "handler_expr": "authHandler.HandleDeviceDeny",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 2,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -13758,7 +14148,7 @@
       "handler_expr": "authHandler.HandleDevicePoll",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 17,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -13816,7 +14206,7 @@
       "handler_expr": "authHandler.HandleDeviceStart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 18,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -13904,7 +14294,7 @@
       "handler_expr": "authHandler.HandleLogin",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 20,
+      "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -14078,7 +14468,7 @@
       "handler_expr": "authHandler.HandlePluginLaunch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 11,
+      "middleware_chain": 13,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -14278,7 +14668,7 @@
       "handler_expr": "authHandler.HandleSetup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 21,
+      "middleware_chain": 23,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -14363,7 +14753,7 @@
       "handler_expr": "authHandler.HandleSignup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 22,
+      "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -14421,7 +14811,7 @@
       "handler_expr": "autoscanHandler.HandleWebhookDelivery",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 15,
+      "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -14513,11 +14903,12 @@
       "handler_expr": "catalogHandler.HandleGetCatalog",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14546,11 +14937,12 @@
       "handler_expr": "catalogHandler.HandleGetAudiobookGroups",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14579,11 +14971,12 @@
       "handler_expr": "catalogHandler.HandleGetCatalogFilters",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14612,11 +15005,12 @@
       "handler_expr": "catalogHandler.HandleGetCatalogFacetSearch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14645,11 +15039,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetItemDetail",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14679,11 +15074,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetItemEpisodes",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14713,11 +15109,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetMangaFiles",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14747,11 +15144,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetItemVersions",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14781,11 +15179,12 @@
       "handler_expr": "catalogHandler.HandlePostCatalogQuery",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14814,11 +15213,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetSeasons",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14848,11 +15248,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetSeason",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -14882,11 +15283,12 @@
       "handler_expr": "catalogResourceHandler.HandleGetEpisodes",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -15808,7 +16210,7 @@
       "handler_expr": "compatConnectInfoHandler.HandleGetConnectInfo",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 10,
+      "middleware_chain": 11,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -16160,11 +16562,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodGet, \"/api/v1/direct-download\", downloadHandler.HandleDirectDownload)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16192,11 +16595,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodHead, \"/api/v1/direct-download\", downloadHandler.HandleDirectDownload)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16224,11 +16628,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodGet, \"/api/v1/direct-download-proxy\", downloadHandler.HandleDirectDownloadViaProxy)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16256,11 +16661,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodHead, \"/api/v1/direct-download-proxy\", downloadHandler.HandleDirectDownloadViaProxy)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16288,11 +16694,12 @@
       "handler_expr": "downloadHandler.HandleListDownloads",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16320,11 +16727,12 @@
       "handler_expr": "downloadHandler.HandleCreateDownload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16608,11 +17016,12 @@
       "handler_expr": "downloadHandler.HandleDeleteDownload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16704,11 +17113,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodGet, \"/api/v1/downloads/{id}/file\", downloadHandler.HandleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16736,11 +17146,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodHead, \"/api/v1/downloads/{id}/file\", downloadHandler.HandleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16768,11 +17179,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodGet, \"/api/v1/downloads/{id}/file-proxy\", downloadHandler.HandleDownloadFileViaProxy)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -16800,11 +17212,12 @@
       "handler_expr": "observeNative(deps.StreamTelemetry, http.MethodHead, \"/api/v1/downloads/{id}/file-proxy\", downloadHandler.HandleDownloadFileViaProxy)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -18061,7 +18474,7 @@
       "handler_expr": "invitationHandler.HandleLookupInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 19,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -18121,7 +18534,7 @@
       "handler_expr": "invitationHandler.HandleAcceptInvitation",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 19,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -18185,11 +18598,12 @@
       "handler_expr": "itemsHandler.HandleRequestTrailersRefresh",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -18219,11 +18633,12 @@
       "handler_expr": "metadataAIHandler.HandleTranslateOnView",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -18253,7 +18668,7 @@
       "handler_expr": "libraryHandler.HandleListLibraries",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18287,7 +18702,7 @@
       "handler_expr": "libraryHandler.HandleCreateLibrary",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18321,7 +18736,7 @@
       "handler_expr": "libraryHandler.HandleListMetadataMatchQueues",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18355,7 +18770,7 @@
       "handler_expr": "libraryHandler.HandleGetLibraryProviderDefaults",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18389,7 +18804,7 @@
       "handler_expr": "libraryHandler.HandleReorderLibraries",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18423,7 +18838,7 @@
       "handler_expr": "libraryHandler.HandleListRoots",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18457,7 +18872,7 @@
       "handler_expr": "libraryHandler.HandleDeleteRootOverride",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18491,7 +18906,7 @@
       "handler_expr": "libraryHandler.HandleUpsertRootOverride",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18525,7 +18940,7 @@
       "handler_expr": "libraryHandler.HandleListSkippedRoots",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18559,7 +18974,7 @@
       "handler_expr": "libraryHandler.HandleListStaleIDs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18593,7 +19008,7 @@
       "handler_expr": "libraryHandler.HandleRematchStaleID",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18627,7 +19042,7 @@
       "handler_expr": "libraryHandler.HandleListUnmatchedItems",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18661,7 +19076,7 @@
       "handler_expr": "libraryHandler.HandleDeleteLibrary",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18695,7 +19110,7 @@
       "handler_expr": "libraryHandler.HandleUpdateLibrary",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18729,7 +19144,7 @@
       "handler_expr": "libraryHandler.HandleCheckLibraryMount",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18763,7 +19178,7 @@
       "handler_expr": "libraryHandler.HandleConfirmEmptyRootCleanup",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18797,7 +19212,7 @@
       "handler_expr": "libraryHandler.HandleGetMetadataMatchQueue",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18831,7 +19246,7 @@
       "handler_expr": "libraryHandler.HandleCancelMetadataMatchQueue",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18865,7 +19280,7 @@
       "handler_expr": "libraryHandler.HandleRetryMetadataMatchQueue",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18899,7 +19314,7 @@
       "handler_expr": "libraryHandler.HandleDeletePoster",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18933,7 +19348,7 @@
       "handler_expr": "libraryHandler.HandleUploadPoster",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18967,7 +19382,7 @@
       "handler_expr": "libraryHandler.HandleGetLibraryProviders",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -19001,7 +19416,7 @@
       "handler_expr": "libraryHandler.HandleSetLibraryProviders",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -19035,7 +19450,7 @@
       "handler_expr": "libraryHandler.HandleRefreshLibraryMetadata",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -19171,11 +19586,12 @@
       "handler_expr": "libraryCollectionHandler.HandleListLibraryCollections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -19204,11 +19620,12 @@
       "handler_expr": "libraryCollectionHandler.HandleGetLibraryCollectionItems",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -19339,11 +19756,12 @@
       "handler_expr": "libraryCollectionHandler.HandleListLibraryUserCollections",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -19372,11 +19790,12 @@
       "handler_expr": "markersHandler.HandleGetFileMarkers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -19405,11 +19824,12 @@
       "handler_expr": "markersHandler.HandleSetFileMarkers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -19439,11 +19859,12 @@
       "handler_expr": "markersHandler.HandleClearFileSegment",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -19473,11 +19894,12 @@
       "handler_expr": "markersHandler.HandleGetItemMarkers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -19506,11 +19928,12 @@
       "handler_expr": "markersHandler.HandleSetItemMarkers",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -20122,7 +20545,7 @@
       "handler_expr": "handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
@@ -20834,11 +21257,12 @@
       "handler_expr": "peopleHandler.HandleSearch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -20867,11 +21291,12 @@
       "handler_expr": "peopleHandler.HandleGetPerson",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -20900,11 +21325,12 @@
       "handler_expr": "peopleHandler.HandleRefreshPerson",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21670,6 +22096,33 @@
       "listener": "api",
       "namespace": "api_v1",
       "method": "PUT",
+      "path": "/api/v1/plugins/{installation_id}/*",
+      "route_group": "/api/v1",
+      "handler": "literal:api:/api/v1/plugins/{installation_id}/*",
+      "handler_expr": "func(w http.ResponseWriter, r *http.Request) { installationID, err := strconv.Atoi(chi.URLParam(r, \"installation_id\")) if err != nil { http.Error(w, \"invalid installation id\", http.StatusBadRequest) return } authenticated, admin, userID, profileID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo) ctx := plugins.WithPluginAccessUser(r.Context(), authenticated, admin, userID, profileID) deps.PluginHTTPProxy.ServeRoute(w, r.WithContext(ctx), installationID, authenticated, admin) }",
+      "handler_kind": "literal",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [
+        "deps.PluginHTTPProxy != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v1",
+      "method": "QUERY",
       "path": "/api/v1/plugins/{installation_id}/*",
       "route_group": "/api/v1",
       "handler": "literal:api:/api/v1/plugins/{installation_id}/*",
@@ -23417,7 +23870,7 @@
       "handler_expr": "libraryHandler.HandleScan",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -23451,7 +23904,7 @@
       "handler_expr": "libraryHandler.HandleScanCancel",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -24702,11 +25155,12 @@
       "handler_expr": "subtitleAIHandler.HandleListJobs",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24736,11 +25190,12 @@
       "handler_expr": "subtitleAIHandler.HandleGetJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24770,11 +25225,12 @@
       "handler_expr": "subtitleAIHandler.HandleCancelJob",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24906,11 +25362,12 @@
       "handler_expr": "subtitleAIHandler.HandleTranslate",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24973,11 +25430,12 @@
       "handler_expr": "subtitleSearchHandler.HandleDownload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25072,11 +25530,12 @@
       "handler_expr": "subtitleSearchHandler.HandleSearch",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25105,11 +25564,12 @@
       "handler_expr": "subtitleSearchHandler.HandleUpload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25138,11 +25598,12 @@
       "handler_expr": "subtitleSearchHandler.HandleDelete",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25171,11 +25632,12 @@
       "handler_expr": "subtitleSearchHandler.HandleList",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25323,7 +25785,7 @@
       "handler_expr": "themeHandler.HandleCatalogRefresh",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 13,
+      "middleware_chain": 15,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -26164,11 +26626,12 @@
       "handler_expr": "itemsHandler.HandleGetWatchDetail",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -26692,11 +27155,12 @@
       "handler_expr": "literaryWorkHandler.HandleGetWork",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -26935,6 +27399,33 @@
     {
       "listener": "api",
       "namespace": "api_v2",
+      "method": "QUERY",
+      "path": "/api/v2/*",
+      "route_group": "/",
+      "handler": "listener:api_v2",
+      "handler_expr": "apiv2.NewHandler(v2deps)",
+      "handler_kind": "delegation",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "api_v2",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "handle_all",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v2",
       "method": "TRACE",
       "path": "/api/v2/*",
       "route_group": "/",
@@ -26969,7 +27460,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -26997,7 +27488,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27025,7 +27516,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27053,7 +27544,7 @@
       "handler_expr": "s.handleHealth",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -27080,7 +27571,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27108,7 +27599,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27136,7 +27627,7 @@
       "handler_expr": "s.handleHWCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27164,7 +27655,7 @@
       "handler_expr": "promhttp.Handler()",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -27191,7 +27682,7 @@
       "handler_expr": "s.handleNetworkAccessStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27219,7 +27710,7 @@
       "handler_expr": "s.handleNetworkAccessConnect",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27247,7 +27738,7 @@
       "handler_expr": "s.handleNetworkAccessDisconnect",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27275,7 +27766,7 @@
       "handler_expr": "s.handleNetworkAccessProviderStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27303,7 +27794,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -27325,13 +27816,41 @@
       "listener": "proxy",
       "namespace": "legacy_unversioned",
       "method": "GET",
+      "path": "/stream/bandwidth-probe/{token}",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+      "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/bandwidth-probe/{token}\", s.handleBandwidthProbe)",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 27,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": true,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
       "path": "/stream/direct/{token}",
       "route_group": "/",
       "handler": "(*internal/proxy.Server).handleDirectPlay",
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27359,7 +27878,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27387,7 +27906,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27415,7 +27934,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27443,7 +27962,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27471,7 +27990,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27499,7 +28018,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}\", s.handleSubtitle)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27527,7 +28046,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}/fonts\", s.handleSubtitleFonts)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27555,7 +28074,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/theme/{token}\", s.handleThemeAudio)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27583,7 +28102,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/theme/{token}\", s.handleThemeAudio)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27611,7 +28130,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27639,7 +28158,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27667,7 +28186,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/segment/{name}\", s.handleTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27695,7 +28214,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27723,7 +28242,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27751,7 +28270,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27779,7 +28298,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27807,7 +28326,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/segment/{name}\", s.handleGrantTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -27835,7 +28354,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -27862,7 +28381,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -27889,7 +28408,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -27941,7 +28460,7 @@
       "handler_expr": "s.handleChapterThumbnailExtract",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -27961,6 +28480,33 @@
     {
       "listener": "transcode_node",
       "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/downloads/artifacts",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleListDownloadArtifacts",
+      "handler_expr": "s.handleListDownloadArtifacts",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
       "method": "DELETE",
       "path": "/downloads/artifacts/{artifact_id}",
       "route_group": "/",
@@ -27968,7 +28514,7 @@
       "handler_expr": "s.handleDeleteDownloadArtifact",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -27995,7 +28541,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28022,7 +28568,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/downloads/artifacts/{artifact_id}\", s.handleDownloadArtifact)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28049,7 +28595,7 @@
       "handler_expr": "s.handleDownloadPrepare",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28070,13 +28616,13 @@
       "listener": "transcode_node",
       "namespace": "legacy_unversioned",
       "method": "GET",
-      "path": "/hw-capabilities",
+      "path": "/downloads/prepare/{artifact_id}/progress",
       "route_group": "/",
-      "handler": "(*internal/transcodenode.Server).handleHWCapabilities",
-      "handler_expr": "s.handleHWCapabilities",
+      "handler": "(*internal/transcodenode.Server).handleDownloadPrepareProgress",
+      "handler_expr": "s.handleDownloadPrepareProgress",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28084,6 +28630,60 @@
       "conditions": [],
       "conditional": false,
       "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/hw-capabilities",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleHWCapabilities",
+      "handler_expr": "s.handleHWCapabilities",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/media-samples/run",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleMediaSample",
+      "handler_expr": "s.handleMediaSample",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
       "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,
@@ -28128,7 +28728,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28155,7 +28755,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodHead, \"/remux/{session_id}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28182,7 +28782,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28209,7 +28809,7 @@
       "handler_expr": "s.handleStart",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28236,7 +28836,7 @@
       "handler_expr": "s.handleStop",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28263,7 +28863,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/master.m3u8\", s.handleManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28290,7 +28890,7 @@
       "handler_expr": "observeNode(s.telemetry, http.MethodGet, \"/transcode/{session_id}/segment/{name}\", s.handleSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28317,7 +28917,7 @@
       "handler_expr": "s.handleSegmentDownloaded",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -28326,6 +28926,33 @@
       "conditional": false,
       "request_kind": "unknown",
       "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/trickplay/extract",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+      "handler_expr": "s.handleTrickplayExtract",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
+      "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,
       "upgrades_websocket": false,

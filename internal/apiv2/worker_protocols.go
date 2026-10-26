@@ -4,10 +4,11 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 const workerProtocolsExtension = "x-silo-worker-protocols"
@@ -36,15 +37,19 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations = append(operations, proxy.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolChapterExtraction(schemas))
+	operations = append(operations, transcodenode.ProtocolTrickplayExtraction(schemas))
+	operations = append(operations, transcodenode.ProtocolMediaSample(schemas))
 	operations = append(operations, transcodenode.ProtocolArtifacts()...)
 	operations = append(operations, proxy.ProtocolSubtitles(schemas)...)
 	operations = append(operations, transcodenode.ProtocolSegmentAcknowledgement())
 	operations = append(operations, transcodenode.ProtocolDownloadPreparation(schemas))
+	operations = append(operations, transcodenode.ProtocolDownloadPreparationProgress(schemas))
 	operations = append(operations, proxy.ProtocolDownloads()...)
 	operations = append(operations, proxy.ProtocolThemeAudio()...)
 	operations = append(operations, transcodenode.ProtocolLegacyStop())
 	operations = append(operations, transcodenode.ProtocolTranscodeStart(schemas))
 	operations = append(operations, proxy.ProtocolDirectPlayback()...)
+	operations = append(operations, proxy.ProtocolBandwidthProbe())
 	operations = append(operations, proxy.ProtocolStreaming()...)
 	operations = append(operations, transcodenode.ProtocolStreaming()...)
 	operations = append(operations, proxy.ProtocolNetworkAccess(schemas)...)

@@ -226,15 +226,31 @@ func TestSiloIgnoreSkipsMatchedFilesAndDirs(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "Sub", "notes.txt"), "test")
 	writeTestFile(t, filepath.Join(root, "Sub", "clip.mkv"), "test")
 	writeTestFile(t, filepath.Join(root, "Sub", "nested", "Episode 01.mkv"), "test")
-	writeTestFile(t, filepath.Join(root, ".siloignore"), `# comments and blanks are ignored
-
-sample.mkv
-Extras
-*.txt
-`)
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "# comments and blanks are ignored\n\n  sample.mkv  \n\tExtras\n*.txt\n")
 
 	files := collectTestFilePaths(t, root, "series")
 	assertFilePaths(t, files, root, []string{"Movie.mkv", "Sub/clip.mkv", "Sub/nested/Episode 01.mkv"})
+}
+
+// Names are fspath-encoded when listed; a pattern holding the raw bytes of a
+// non-UTF-8 name must match it, as it did before names were encoded.
+func TestIgnoreFilesMatchRawNonUTF8Names(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "B\xe5rd"), 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	writeTestFile(t, filepath.Join(root, "Movie.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Ylvis\xe5ker.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "B\xe5rd", "Episode 01.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Other", "S\xf8n.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Other", "Keep.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Ylvis\xe5ker.mkv\nB\xe5rd\n")
+	writeTestFile(t, filepath.Join(root, "Other", ".ignore"), "S?n.mkv\n")
+
+	files := collectTestFilePaths(t, root, "series")
+	assertFilePaths(t, files, root, []string{"Movie.mkv", "Other/Keep.mkv"})
 }
 
 func TestSiloIgnoreParentPatternsCascadeIntoSubdirectories(t *testing.T) {
@@ -291,21 +307,6 @@ func TestSymlinkedMarkerAndPatternFilesAreNotHonored(t *testing.T) {
 	// every media file stays scannable.
 	files := collectTestFilePaths(t, root, "series")
 	assertFilePaths(t, files, root, []string{"Episode 01.mkv", "Sub/Episode 02.mkv"})
-}
-
-func TestParseIgnorePatterns(t *testing.T) {
-	t.Parallel()
-
-	patterns := parseIgnorePatterns("# comment\n\n  sample.mkv  \nExtras\n\t*.txt\n")
-	want := []string{"sample.mkv", "Extras", "*.txt"}
-	if len(patterns) != len(want) {
-		t.Fatalf("patterns = %v, want %v", patterns, want)
-	}
-	for i := range want {
-		if patterns[i] != want[i] {
-			t.Fatalf("patterns[%d] = %q, want %q", i, patterns[i], want[i])
-		}
-	}
 }
 
 func TestSiloIgnoreDoesNotMatchAcrossPathSeparators(t *testing.T) {

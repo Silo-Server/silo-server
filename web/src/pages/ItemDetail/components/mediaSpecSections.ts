@@ -51,6 +51,7 @@ const DV_RANGE_TYPE_DETAILS: Record<string, string> = {
   DOVIWithEL: "EL",
   DOVIWithELHDR10Plus: "EL",
   DOVIWithHDR10: "HDR10 compatible",
+  DOVIWithHDR10Plus: "HDR10 compatible",
   DOVIWithSDR: "SDR compatible",
   DOVIWithHLG: "HLG compatible",
 };
@@ -123,7 +124,7 @@ function trimLevel(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-export function formatDurationSeconds(seconds?: number): string {
+function formatDurationSeconds(seconds?: number): string {
   if (!seconds || seconds <= 0) return "";
   const total = Math.floor(seconds);
   const h = Math.floor(total / 3600);

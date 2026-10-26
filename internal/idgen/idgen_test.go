@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/sony/sonyflake/v2"
 )
 
 func TestNextIDReturnsIncreasingDecimalIDs(t *testing.T) {
@@ -74,9 +72,9 @@ func TestNextIDRefusesIDMintedAfterLeaseExpiry(t *testing.T) {
 	}
 }
 
-func TestNewSonyflakeExplainsClockBeforeEpoch(t *testing.T) {
-	_, err := newSonyflake(sonyflake.Settings{StartTime: time.Now().Add(time.Hour)})
-	if !errors.Is(err, sonyflake.ErrStartTimeAhead) {
-		t.Fatalf("newSonyflake error = %v, want ErrStartTimeAhead", err)
-	}
+// restoreActive puts back the generator NextID used before the test.
+func restoreActive(t *testing.T) {
+	t.Helper()
+	prev := active.Load()
+	t.Cleanup(func() { active.Store(prev) })
 }

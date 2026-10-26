@@ -72,14 +72,6 @@ func NewViewCache(registry *Registry, ttl time.Duration, logger *slog.Logger) *V
 	return &ViewCache{registry: registry, ttl: ttl, logger: logger}
 }
 
-// TTL reports the configured staleness bound.
-func (c *ViewCache) TTL() time.Duration {
-	if c == nil {
-		return 0
-	}
-	return c.ttl
-}
-
 // View returns the merged global view and its freshness. It never panics on a
 // nil cache, a nil registry, or a registry with telemetry disabled: those report
 // Available false rather than an empty-but-complete view, which a consumer could

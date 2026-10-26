@@ -3,6 +3,7 @@ import {
   type SettingDefinition,
   type SettingKey,
 } from "@/lib/settingsContract";
+import { formatBitrateKbps } from "@/lib/bitrateOptions";
 import { languageOptionsFor, type SettingOption } from "@/lib/languageOptions";
 
 /**
@@ -60,17 +61,20 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * Enum members come straight from the contract. Open language tags use the
  * definition's generated advisory option set. A nullable definition gains a
  * leading, context-specific unset entry so a control can express clearing it.
+ * Deprecated members stay valid stored values but are not offered.
  */
 export function optionsFor(definition: SettingDisplay): SettingOption[] {
   if (definition.type === "language_tag") {
     return languageOptionsFor(definition.key);
   }
-  const members = (definition.values ?? []).map((member) => ({
-    value: String(member.value),
-    // The manifest leaves a label empty when the member is its own label
-    // (the date formats spell themselves).
-    label: member.label || String(member.value),
-  }));
+  const members = (definition.values ?? [])
+    .filter((member) => !member.deprecated)
+    .map((member) => ({
+      value: String(member.value),
+      // The manifest leaves a label empty when the member is its own label
+      // (the date formats spell themselves).
+      label: member.label || String(member.value),
+    }));
   if (definition.nullable) {
     return [{ value: "", label: "Unset" }, ...members];
   }
@@ -101,6 +105,13 @@ export function formatSettingValue(key: string, value: string | null | undefined
     const match = definition.values.find((member) => String(member.value) === fallback);
     return match ? match.label || String(match.value) : fallback || "Unset";
   }
+  if (definition.unit === "kbps") {
+    // A bandwidth cap reads in Mbps like its select; no value means no cap.
+    // A stored null is "No limit" even where the default is a cap.
+    const raw = value === null ? "" : value || defaultValueToString(definition);
+    const kbps = Number(raw);
+    return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : "No limit";
+  }
   if (definition.unit) {
     return `${value ?? defaultValueToString(definition) ?? "0"} ${definition.unit}`;
   }
@@ -120,6 +131,13 @@ export function defaultValueToString(definition: SettingDisplay): string {
 }
 
 /**
+ * Retired keys the manifest still accepts but no client reads. `ui.theme` stays
+ * so a stale web bundle's write does not fail; Silo paints one theme, so an
+ * override on it would do nothing.
+ */
+const RETIRED_DEVICE_SETTING_KEYS = new Set<string>(["ui.theme"]);
+
+/**
  * Every remote setting a device can override, in manifest order. The admin
  * "show all overrides" view iterates this so an admin can create an override on
  * any device-scoped setting, not only the ones that already have a row.
@@ -128,7 +146,11 @@ export const ALL_DEVICE_SETTING_KEYS: SettingKey[] = (
   Object.keys(SETTING_DEFINITIONS) as SettingKey[]
 ).filter((key) => {
   const definition = SETTING_DEFINITIONS[key];
-  return definition.persistence === "remote" && definition.scopes.includes("profile_device");
+  return (
+    definition.persistence === "remote" &&
+    definition.scopes.includes("profile_device") &&
+    !RETIRED_DEVICE_SETTING_KEYS.has(key)
+  );
 });
 
 /** Device-setting keys understood by a connected server contract revision. */

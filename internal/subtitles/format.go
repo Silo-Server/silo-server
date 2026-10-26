@@ -10,7 +10,8 @@ const (
 	// ProviderUpload identifies user-uploaded subtitles in downloaded_subtitles.
 	ProviderUpload = "upload"
 
-	// MaxUploadSize is the maximum allowed size for user-uploaded subtitle files.
+	// MaxUploadSize is the maximum size of a stored subtitle file, whether a
+	// user uploaded it or it came from a provider download or archive entry.
 	MaxUploadSize = 5 << 20 // 5 MB
 )
 

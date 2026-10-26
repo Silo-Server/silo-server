@@ -14,7 +14,7 @@ const AFTER_SETUP_LINKS = [
   { to: "/admin/libraries", label: "Scan and manage libraries" },
   { to: "/admin/users", label: "Invite people" },
   { to: "/admin/nodes", label: "Add transcode or proxy nodes" },
-  { to: "/admin/settings/general", label: "All settings" },
+  { to: "/admin/settings/general", label: "Server settings" },
 ];
 
 export function DoneStep() {

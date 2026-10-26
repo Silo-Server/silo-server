@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
@@ -83,6 +84,37 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	return false
 }
 
+// carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status
+// across playback's probe repair, which skips the frame read, when the
+// reprobed stream is the one that was checked. The fields a repair fills in
+// (a missing color range, legacy Dolby Vision provenance) don't count as a
+// difference. Any other difference leaves the track unchecked for the HDR10+
+// backfill.
+func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
+	if len(previous) == 0 || len(next) == 0 || previous[0].HDR10PlusUnchecked || !next[0].HDR10PlusUnchecked {
+		return
+	}
+	checked := previous[0]
+	if strings.TrimSpace(checked.ColorRange) == "" {
+		checked.ColorRange = next[0].ColorRange
+	}
+	if videoTracksHaveLegacyDVProvenance([]models.VideoTrack{checked}) {
+		checked.DVConfigPresent = next[0].DVConfigPresent
+		checked.DVBLCompatIDPresent = next[0].DVBLCompatIDPresent
+		checked.DVBLPresent = next[0].DVBLPresent
+		checked.DVELPresent = next[0].DVELPresent
+		checked.DVRPUPresent = next[0].DVRPUPresent
+	}
+	if tonemap.StreamSignatureForTrack(checked) != tonemap.StreamSignatureForTrack(next[0]) {
+		return
+	}
+	next[0].HDR10PlusUnchecked = false
+	next[0].HDR10Plus = previous[0].HDR10Plus
+	if previous[0].HDR10Plus {
+		next[0].VideoRangeType = mediaprobe.RangeTypeWithHDR10Plus(next[0])
+	}
+}
+
 // videoTracksHaveLegacyDVProvenance reports whether a Dolby Vision track was
 // written by a probe generation that predates the DV provenance columns. Those
 // rows decode to explicit false, which is indistinguishable from a genuine
@@ -125,6 +157,7 @@ type copySafetyWriter interface {
 type playbackProbeFileRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 	Upsert(ctx context.Context, file models.MediaFile) (*models.MediaFile, error)
+	MarkProbeFailed(ctx context.Context, fileID int, probedSize int64, probedMtime *time.Time) error
 }
 
 // PlaybackProbeEnsurer repairs missing playback-critical probe metadata on
@@ -139,7 +172,7 @@ type PlaybackProbeEnsurer struct {
 	ffmpegPath  string
 	livePaths   atomic.Pointer[probeBinaries]
 	timeout     time.Duration
-	// probeFile is the ffprobe entry point; nil means the package's ProbeFile.
+	// probeFile is the ffprobe entry point; nil means probeFileStreamsOnly.
 	// Tests substitute it to drive the coalescing behavior deterministically.
 	probeFile func(context.Context, string, string) (*ProbeData, error)
 	// probeRepair collapses concurrent repairs of the same source revision so a
@@ -430,14 +463,18 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		}
 		probeFile := e.probeFile
 		if probeFile == nil {
-			probeFile = ProbeFile
+			probeFile = probeFileStreamsOnly
 		}
 		probe, err := probeFile(probeCtx, ffprobePath, current.FilePath)
+		if err != nil && IsProbeRejection(probeCtx, current.FilePath, err) {
+			return e.recordProbeRejection(sharedCtx, current, err)
+		}
 		if err != nil || probe == nil {
 			return nil, err
 		}
 		updated := *current
 		applyProbeData(&updated, probe, "local")
+		carryCheckedHDR10Plus(current.VideoTracks, updated.VideoTracks)
 		return e.fileRepo.Upsert(probeCtx, updated)
 	})
 	select {
@@ -453,6 +490,51 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		}
 		return repaired, nil
 	}
+}
+
+// recordProbeRejection persists that ffprobe refused the file and returns the
+// row as stored afterwards, so the planner can answer with a terminal that
+// names the damaged file instead of one that suggests waiting for a scan. It
+// covers rows written before probe failures were recorded, whose next scan
+// would otherwise be the first to notice.
+//
+// The answer always comes from the row, never from the snapshot taken before
+// ffprobe ran: a scan or another replica may have probed a replacement file in
+// the meantime, in which case the conditional mark is skipped and the re-read
+// returns that repaired metadata. When the mark or the re-read fails, the
+// probe error is returned and the caller keeps the unmarked row, so playback
+// answers with the retryable source_metadata_incomplete rather than claiming a
+// damage the server could not confirm.
+func (e *PlaybackProbeEnsurer) recordProbeRejection(ctx context.Context, current *models.MediaFile, probeErr error) (*models.MediaFile, error) {
+	if current.ProbeUpdatedAt != nil {
+		return nil, probeErr
+	}
+	slog.WarnContext(ctx, "playback probe repair: ffprobe rejected the file",
+		"component", "scanner",
+		"file_id", current.ID,
+		"error", probeErr,
+	)
+	lookupTimeout := e.timeout
+	if lookupTimeout <= 0 {
+		lookupTimeout = 5 * time.Second
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	if current.ProbeFailedAt == nil {
+		if err := e.fileRepo.MarkProbeFailed(writeCtx, current.ID, current.FileSize, current.FileModifiedAt); err != nil {
+			slog.WarnContext(ctx, "playback probe repair: recording probe failure failed",
+				"component", "scanner",
+				"file_id", current.ID,
+				"error", err,
+			)
+			return nil, probeErr
+		}
+	}
+	stored, err := e.fileRepo.GetByID(writeCtx, current.ID)
+	if err != nil || stored == nil {
+		return nil, probeErr
+	}
+	return stored, nil
 }
 
 // ensureCopySafety resolves the multi-PPS copy-safety flag for H.264 files at

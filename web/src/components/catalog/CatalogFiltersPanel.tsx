@@ -1,13 +1,20 @@
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { useMemo, useState } from "react";
 
-import { createEmptyQueryDefinition, type QueryDefinition } from "@/api/types";
+import {
+  createEmptyQueryDefinition,
+  type QueryDefinition,
+  type QueryGroup,
+  type QuerySort,
+} from "@/api/types";
 import {
   queryDefinitionToGuidedState,
   guidedStateToQueryDefinition,
   type GuidedFormState,
 } from "@/components/collections/CollectionGuidedRulesEditor";
+import { isGuidedRepresentable } from "@/components/collections/guidedRepresentable";
 import { useCatalogFilters } from "@/hooks/queries/catalog";
+import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
 import {
   catalogSourceSupportsSourceOrder,
@@ -17,7 +24,7 @@ import {
 import ActiveFilterBadges from "./ActiveFilterBadges";
 import CatalogFilterBar, { CATALOG_SOURCE_ORDER_SORT_FIELD } from "./CatalogFilterBar";
 import CatalogFilterSheet from "./CatalogFilterSheet";
-import { countActiveFilters, getActiveFilterBadges } from "./catalogFilterBadges";
+import { getActiveFilterBadges } from "./catalogFilterBadges";
 
 export interface CatalogFiltersPanelProps {
   state: CatalogSearchState;
@@ -57,6 +64,12 @@ export default function CatalogFiltersPanel({
 
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
+  const guidedAvailable = useMemo(() => isGuidedRepresentable(qd), [qd]);
+  // Rules Guided can't show move the sheet to Advanced. It stays there once
+  // they're fixed, so the view doesn't jump back to Guided mid-edit.
+  if (!guidedAvailable && editorMode === "guided") {
+    setEditorMode("advanced");
+  }
   const toolbarGuidedState = usesSourceOrder
     ? { ...guidedState, sortField: CATALOG_SOURCE_ORDER_SORT_FIELD }
     : guidedState;
@@ -64,11 +77,16 @@ export default function CatalogFiltersPanel({
     libraryType === "audiobook" ||
     libraryType === "audiobooks" ||
     guidedState.mediaScope === "audiobook";
+  // Guided badges list every rule only when Guided can show them all. Otherwise
+  // they would hide rules, and clearing one would rebuild the definition
+  // without them, so the count comes from the rules and no badges show.
   const badges = useMemo(
-    () => getActiveFilterBadges(guidedState, { isAudiobookLibrary }),
-    [guidedState, isAudiobookLibrary],
+    () => (guidedAvailable ? getActiveFilterBadges(guidedState, { isAudiobookLibrary }) : []),
+    [guidedAvailable, guidedState, isAudiobookLibrary],
   );
-  const activeCount = useMemo(() => countActiveFilters(guidedState), [guidedState]);
+  const activeCount = guidedAvailable
+    ? badges.length
+    : qd.groups.reduce((count, group) => count + group.rules.length, 0);
 
   // Section surfaces are generated blocks and do not expose an overlay editor.
   if (isLocked) {
@@ -83,18 +101,51 @@ export default function CatalogFiltersPanel({
   const libraryOptions =
     libraries ?? state.query_definition.library_ids.map((id) => ({ id, name: `Library ${id}` }));
 
-  function update(patch: Partial<GuidedFormState>) {
+  // The toolbar sets only the media type and sort, so it patches those onto
+  // the definition and leaves the rules as they are. The one exception is
+  // narrator rules, which the server rejects for ebooks.
+  function updateToolbar(patch: Partial<GuidedFormState>) {
     const next = { ...toolbarGuidedState, ...patch };
     const nextUsesSourceOrder =
       supportsSourceOrder && next.sortField === CATALOG_SOURCE_ORDER_SORT_FIELD;
-    const nextForQuery = nextUsesSourceOrder
-      ? { ...next, sortField: guidedState.sortField, sortOrder: guidedState.sortOrder }
-      : next;
-    const nextQd = guidedStateToQueryDefinition(nextForQuery, qd);
+    const mediaScope = next.mediaScope === "all" ? undefined : next.mediaScope;
     onStateChange({
       ...state,
       uses_source_order: nextUsesSourceOrder,
+      query_definition: {
+        ...qd,
+        media_scope: mediaScope,
+        groups:
+          mediaScope === "ebook" && qd.media_scope !== "ebook"
+            ? withoutNarratorRules(qd.groups)
+            : qd.groups,
+        sort: nextUsesSourceOrder
+          ? qd.sort
+          : { field: next.sortField as QuerySort["field"], order: next.sortOrder },
+      },
+    });
+  }
+
+  // The sheet edits the whole definition, and Advanced has its own Sort by.
+  // A sort picked there leaves source order as one picked in the toolbar
+  // does; under source order the URL carries no sort, so it would be lost.
+  function updateDefinition(nextQd: QueryDefinition) {
+    const sortChanged =
+      usesSourceOrder && querySortToSelectValue(nextQd.sort) !== querySortToSelectValue(qd.sort);
+    onStateChange({
+      ...state,
+      ...(sortChanged ? { uses_source_order: false } : null),
       query_definition: nextQd,
+    });
+  }
+
+  // Badge removal and Clear All rebuild the definition through Guided. That
+  // loses nothing: badges show only when Guided can show every rule, and
+  // Clear All removes them all.
+  function updateGuided(patch: Partial<GuidedFormState>) {
+    onStateChange({
+      ...state,
+      query_definition: guidedStateToQueryDefinition({ ...guidedState, ...patch }, qd),
     });
   }
 
@@ -102,7 +153,7 @@ export default function CatalogFiltersPanel({
     <div className="space-y-3">
       <CatalogFilterBar
         state={toolbarGuidedState}
-        onUpdate={update}
+        onUpdate={updateToolbar}
         activeFilterCount={activeCount}
         onOpenFilters={() => setSheetOpen(true)}
         showMediaScopeSelector={showMediaScopeSelector}
@@ -122,7 +173,7 @@ export default function CatalogFiltersPanel({
         allowEpisodeMediaScope={!isCollectionSource}
       />
 
-      <ActiveFilterBadges badges={badges} onClear={update} />
+      <ActiveFilterBadges badges={badges} onClear={updateGuided} />
 
       {sheetOpen ? (
         <CatalogFilterSheetContainer
@@ -130,7 +181,7 @@ export default function CatalogFiltersPanel({
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           guidedState={guidedState}
-          onUpdate={update}
+          onUpdate={updateGuided}
           libraries={libraryOptions}
           allowLibrarySelection={allowLibrarySelection}
           showMediaScopeSelector={showMediaScopeSelector}
@@ -139,15 +190,20 @@ export default function CatalogFiltersPanel({
           sortRelevanceScope={sortRelevanceScope}
           editorMode={editorMode}
           onEditorModeChange={setEditorMode}
+          guidedAvailable={guidedAvailable}
           queryDefinition={qd}
-          onQueryDefinitionChange={(nextQd) =>
-            onStateChange({ ...state, query_definition: nextQd })
-          }
+          onQueryDefinitionChange={updateDefinition}
           libraryType={libraryType}
         />
       ) : null}
     </div>
   );
+}
+
+function withoutNarratorRules(groups: QueryGroup[]): QueryGroup[] {
+  return groups
+    .map((group) => ({ ...group, rules: group.rules.filter((rule) => rule.field !== "narrator") }))
+    .filter((group) => group.rules.length > 0);
 }
 
 export function CatalogFilterSheetContainer({
@@ -164,6 +220,7 @@ export function CatalogFilterSheetContainer({
   sortRelevanceScope,
   editorMode,
   onEditorModeChange,
+  guidedAvailable,
   queryDefinition,
   onQueryDefinitionChange,
   libraryType,
@@ -181,6 +238,7 @@ export function CatalogFilterSheetContainer({
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;
+  guidedAvailable?: boolean;
   queryDefinition: QueryDefinition;
   onQueryDefinitionChange: (nextQd: QueryDefinition) => void;
   libraryType?: string;
@@ -204,6 +262,7 @@ export function CatalogFilterSheetContainer({
       sortRelevanceScope={sortRelevanceScope}
       editorMode={editorMode}
       onEditorModeChange={onEditorModeChange}
+      guidedAvailable={guidedAvailable}
       queryDefinition={queryDefinition}
       onQueryDefinitionChange={onQueryDefinitionChange}
       filters={filtersQuery.data}

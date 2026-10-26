@@ -59,7 +59,11 @@ func pluginCreditPeople(count int, duplicates bool) []models.ItemPerson {
 }
 
 func TestPersonCreditPhotosThroughPluginResolver(t *testing.T) {
-	for _, size := range []imagesize.Size{imagesize.Unset, imagesize.Medium} {
+	for _, tc := range []struct {
+		size    imagesize.Size
+		variant string
+	}{{imagesize.Unset, "large"}, {imagesize.Medium, "featured"}} {
+		size := tc.size
 		t.Run(string(size), func(t *testing.T) {
 			resolver := metadata.NewPluginImageResolver()
 			t.Cleanup(resolver.Close)
@@ -82,7 +86,7 @@ func TestPersonCreditPhotosThroughPluginResolver(t *testing.T) {
 					if i == 99 {
 						path = "different.jpg"
 					}
-					if want := "https://example.invalid/featured/" + path; credit.PhotoURL != want {
+					if want := "https://example.invalid/" + tc.variant + "/" + path; credit.PhotoURL != want {
 						t.Fatalf("credit %d URL=%q, want %q", i, credit.PhotoURL, want)
 					}
 				}
@@ -95,42 +99,5 @@ func TestPersonCreditPhotosThroughPluginResolver(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func BenchmarkPersonCreditPhotosPluginResolver(b *testing.B) {
-	for _, count := range []int{10, 100, 500} {
-		for _, warm := range []bool{false, true} {
-			for _, duplicate := range []bool{false, true} {
-				b.Run(fmt.Sprintf("credits=%d/warm=%t/duplicates=%t", count, warm, duplicate), func(b *testing.B) {
-					resolver := metadata.NewPluginImageResolver()
-					b.Cleanup(resolver.Close)
-					source := &creditPhotoPlugin{expiresAt: new(time.Now().Add(time.Hour))}
-					registrations := []metadata.PluginImageResolverSourceRegistration{{Scheme: "photos", Source: source}}
-					resolver.ReplaceSources(registrations)
-					service := &catalog.DetailService{}
-					service.SetImageResolver(resolver)
-					people := pluginCreditPeople(count, duplicate)
-					filter := catalog.AccessFilter{}
-					if warm {
-						catalog.PersonCreditsForTesting(service, b.Context(), people, filter)
-					}
-					source.calls, source.paths = 0, 0
-					b.ReportAllocs()
-					for b.Loop() {
-						if !warm {
-							// Exclude cache invalidation: time only credit conversion and real
-							// resolver work with cold URL entries, using a zero-latency provider.
-							b.StopTimer()
-							resolver.ReplaceSources(registrations)
-							b.StartTimer()
-						}
-						catalog.PersonCreditsForTesting(service, b.Context(), people, filter)
-					}
-					b.ReportMetric(float64(source.calls)/float64(b.N), "provider-calls/op")
-					b.ReportMetric(float64(source.paths)/float64(b.N), "provider-paths/op")
-				})
-			}
-		}
 	}
 }

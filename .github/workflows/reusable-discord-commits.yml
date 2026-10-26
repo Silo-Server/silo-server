@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Send commit summary to Discord
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.webhook_url }}
           DISCORD_THREAD_ID: ${{ inputs.thread_id }}

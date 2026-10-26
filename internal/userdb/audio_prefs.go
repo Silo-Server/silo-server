@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -74,7 +75,7 @@ func getAudioPreference(exec preferenceSettingsExecutor, profileID, seriesID str
 		&signatureJSON,
 		&pref.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

@@ -247,18 +247,10 @@ func (r *CalendarRepository) appendContentRatingClause(miAlias string, f Calenda
 // belongs to multiple libraries, eliminating the need for DISTINCT.
 func (r *CalendarRepository) appendLibraryExistsClauses(contentIDExpr string, f CalendarFilter, conditions *[]string, args *[]any, argIdx *int) {
 	if f.LibraryID != nil {
-		if f.AllowedLibraryIDs != nil {
-			allowed := false
-			for _, id := range f.AllowedLibraryIDs {
-				if id == *f.LibraryID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				*conditions = append(*conditions, "1 = 0")
-				return
-			}
+		libraryAccess := AccessFilter{AllowedLibraryIDs: f.AllowedLibraryIDs, DisabledLibraryIDs: f.DisabledLibraryIDs}
+		if _, none := libraryAccess.LibraryScope([]int{*f.LibraryID}); none {
+			*conditions = append(*conditions, "1 = 0")
+			return
 		}
 
 		*conditions = append(*conditions, fmt.Sprintf(

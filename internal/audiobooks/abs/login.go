@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // ErrNotFound is returned by TokenStore when a JTI is absent.
@@ -82,13 +85,37 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	userID, profileID, displayName, err := h.deps.CredValidator.Validate(r.Context(), body.Username, body.Password)
+	principal, err := h.deps.CredValidator.Validate(r.Context(), body.Username, body.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			// The name has used its sign-in budget, shared with every other
+			// sign-in surface.
+			w.Header().Set("Retry-After", strconv.Itoa(ratelimit.RetryAfterSeconds(throttled.RetryAfter)))
+			http.Error(w, "too many failed sign-ins for this name; try again later", http.StatusTooManyRequests)
+		} else if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINRequired) {
+			http.Error(w, "this profile has a PIN: sign in as username#profile with password#PIN", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINIncorrect) {
+			http.Error(w, "incorrect profile PIN", http.StatusUnauthorized)
+		} else if errors.Is(err, ErrProfilePINLocked) {
+			// Fails like a wrong PIN, as on the Jellyfin-compatible listener;
+			// only the message names the lockout.
+			http.Error(w, "too many incorrect PINs for this profile; try again later", http.StatusUnauthorized)
+		} else if errors.Is(err, auth.ErrLocalLoginDisabled) {
+			// The server turned local passwords off; this beta surface has no
+			// external sign-in.
+			http.Error(w, "password sign-in is turned off on this server", http.StatusUnauthorized)
+		} else if errors.Is(err, auth.ErrNotPermitted) {
+			// A network sign-in provider such as Tailscale no longer allows
+			// the account's person.
+			http.Error(w, "this account is not permitted to sign in to this server", http.StatusUnauthorized)
 		} else if errors.Is(err, auth.ErrPasswordChangeRequired) {
 			// This client cannot run the change a temporary password requires.
 			http.Error(w, "sign in to Silo to replace your temporary password", http.StatusUnauthorized)
+		} else if errors.Is(err, passwordhash.ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(passwordhash.RetryAfterSeconds))
+			http.Error(w, "the server is busy; try again in a moment", http.StatusServiceUnavailable)
 		} else {
 			slog.ErrorContext(r.Context(), "abs login: cred validator failed", "component", "audiobooks", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
@@ -98,21 +125,26 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 
 	// If the validator didn't return a displayName, derive it from the username
 	// (the profile portion after '#', or the whole username).
-	if displayName == "" {
-		displayName = body.Username
-		if i := strings.LastIndexByte(displayName, '#'); i >= 0 && i < len(displayName)-1 {
-			displayName = displayName[i+1:]
+	if principal.DisplayName == "" {
+		principal.DisplayName = body.Username
+		if i := strings.LastIndexByte(principal.DisplayName, '#'); i >= 0 && i < len(principal.DisplayName)-1 {
+			principal.DisplayName = principal.DisplayName[i+1:]
 		}
 	}
 
 	slog.DebugContext(r.Context(), "abs standalone login: validator OK", "component", "audiobooks",
-		"username", body.Username, "user_id", userID, "profile_id", profileID)
-	h.completeLogin(w, r, userID, profileID, displayName)
+		"username", body.Username, "user_id", principal.UserID, "profile_id", principal.ProfileID)
+	h.completeLogin(w, r, principal)
 }
 
 // completeLogin mints ABS access + refresh JWTs for the validated user and
 // writes the login response.
-func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, profileID, displayName string) {
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, principal Principal) {
+	userID, profileID, displayName := principal.UserID, principal.ProfileID, principal.DisplayName
+	var pinRevision *int64
+	if profileID != "" {
+		pinRevision = &principal.PINRevision
+	}
 	if h.deps.Config == nil {
 		http.Error(w, "config not available", http.StatusServiceUnavailable)
 		return
@@ -140,12 +172,12 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	accessJTI := ulid.Make().String()
 	refreshJTI := ulid.Make().String()
 
-	access, err := IssueAccessToken(secret, userID, profileID, accessJTI, accessTTL)
+	access, err := IssueAccessToken(secret, userID, profileID, pinRevision, accessJTI, accessTTL)
 	if err != nil {
 		http.Error(w, "mint access token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	refresh, err := IssueRefreshToken(secret, userID, profileID, refreshJTI, refreshTTL)
+	refresh, err := IssueRefreshToken(secret, userID, profileID, pinRevision, refreshJTI, refreshTTL)
 	if err != nil {
 		http.Error(w, "mint refresh token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -427,7 +459,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 				accessTTL = 24 * time.Hour
 			}
 			newJTI := ulid.Make().String()
-			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, newJTI, accessTTL); mintErr == nil {
+			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, a.PINRevision, newJTI, accessTTL); mintErr == nil {
 				if persistErr := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
 					ID:        newJTI,
 					UserID:    a.UserID,
@@ -525,6 +557,11 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 		return
 	}
+	// A PIN set or changed since sign-in ends the refresh token too, so the
+	// client has to sign in again with the PIN.
+	if !h.verifyTokenProfile(w, r, claims) {
+		return
+	}
 	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
 	if err != nil {
 		slog.DebugContext(r.Context(), "abs refresh: jti revoke failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
@@ -563,13 +600,13 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	newAccessJTI := ulid.Make().String()
 	newRefreshJTI := ulid.Make().String()
-	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, newAccessJTI, accessTTL)
+	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, claims.PINRevision, newAccessJTI, accessTTL)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs refresh: mint access failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
-	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, newRefreshJTI, refreshTTL)
+	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, claims.PINRevision, newRefreshJTI, refreshTTL)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs refresh: mint refresh failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)

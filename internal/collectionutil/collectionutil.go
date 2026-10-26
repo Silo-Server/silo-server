@@ -2,6 +2,7 @@ package collectionutil
 
 import (
 	"errors"
+	"math"
 	"strings"
 )
 
@@ -10,27 +11,18 @@ var ErrOrderedIDsMismatch = errors.New("ordered_ids does not match the current s
 const (
 	collectionSourceFetchMultiplier = 4
 	collectionSourceFetchMin        = 100
-	collectionSourceFetchMax        = 500
 )
 
-// MaxExplicitItemLimit is the largest explicit per-collection item limit the
-// import APIs accept. Sync never scans more than collectionSourceFetchMax
-// source entries, so a larger explicit limit could never be satisfied anyway.
-// Mirrored by COLLECTION_MAX_ITEMS in web/src/lib/collectionTemplates.ts.
-const MaxExplicitItemLimit = collectionSourceFetchMax
-
+// SourceFetchLimit is how many source entries a sync reads for a collection
+// with an explicit item limit: a few times the limit, because some entries
+// don't match the catalog or the owner's access. It returns 0, meaning the
+// source's whole list, when the collection has no item limit or the scan
+// depth would overflow.
 func SourceFetchLimit(itemLimit *int) int {
-	if itemLimit == nil || *itemLimit <= 0 {
+	if itemLimit == nil || *itemLimit <= 0 || *itemLimit > math.MaxInt/collectionSourceFetchMultiplier {
 		return 0
 	}
-	limit := *itemLimit * collectionSourceFetchMultiplier
-	if limit < collectionSourceFetchMin {
-		limit = collectionSourceFetchMin
-	}
-	if limit > collectionSourceFetchMax {
-		limit = collectionSourceFetchMax
-	}
-	return limit
+	return max(*itemLimit*collectionSourceFetchMultiplier, collectionSourceFetchMin)
 }
 
 func ItemLimitReached(itemCount int, itemLimit *int) bool {

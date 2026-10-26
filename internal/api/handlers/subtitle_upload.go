@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,6 +10,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
+
+// unreadableSubtitleMessage is shown to the person who uploaded a file that
+// holds no subtitle cues, such as a renamed document or binary data.
+const unreadableSubtitleMessage = "This file doesn't contain readable subtitles. Upload an SRT, VTT, ASS, SSA or SUB subtitle file."
 
 // UploadStoredSubtitle applies the same file/parent access as provider download.
 func (h *SubtitleSearchHandler) UploadStoredSubtitle(ctx context.Context, access catalog.AccessFilter, req subtitles.UploadRequest) (*subtitles.DownloadedSubtitle, error) {
@@ -25,9 +30,12 @@ func (h *SubtitleSearchHandler) UploadStoredSubtitle(ctx context.Context, access
 func (h *SubtitleSearchHandler) uploadAuthorizedSubtitle(ctx context.Context, req subtitles.UploadRequest) (*subtitles.DownloadedSubtitle, error) {
 	sub, err := h.manager.Upload(ctx, req)
 	if err == nil {
+		h.requestAutoSync(ctx, sub)
 		return sub, nil
 	}
 	switch {
+	case errors.Is(err, subtitles.ErrUnreadableSubtitle):
+		return nil, apiError(http.StatusBadRequest, "bad_request", unreadableSubtitleMessage)
 	case strings.Contains(err.Error(), "unsupported subtitle format"), strings.Contains(err.Error(), "missing file extension"), strings.Contains(err.Error(), "empty subtitle file"), strings.Contains(err.Error(), "could not detect subtitle language"), strings.Contains(err.Error(), "invalid subtitle language"):
 		return nil, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	case strings.Contains(err.Error(), "exceeds maximum size"):

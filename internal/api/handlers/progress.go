@@ -10,13 +10,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/clientclock"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
-
-// progressClockSkew bounds how far ahead of server time a client-supplied
-// progress event time may sit before it is clamped to "now".
-const progressClockSkew = 2 * time.Minute
 
 const syncProgressStatusError = "error"
 
@@ -31,19 +28,6 @@ func parseClientEventTime(s string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// clampEventAt bounds a client event time to at most now+skew: a value past the
-// window is clamped to now, so a skewed or malicious clock can at most claim
-// "now" for its own profile and never lock in a far-future LWW win (invariant 1).
-func clampEventAt(client, now time.Time) time.Time {
-	if client.IsZero() {
-		return now
-	}
-	if client.After(now.Add(progressClockSkew)) {
-		return now
-	}
-	return client
-}
-
 // ProgressLibraryLookup resolves which progress items belong to a library.
 type ProgressLibraryLookup interface {
 	GetItemsInFolder(ctx context.Context, contentIDs []string, folderID int) (map[string]bool, error)
@@ -54,12 +38,11 @@ type ProgressLibraryLookup interface {
 
 // ProgressHandler handles watch progress and sync endpoints.
 type ProgressHandler struct {
-	storeProvider           userstore.UserStoreProvider
-	LibraryLookup           ProgressLibraryLookup
-	SettingsRepo            PlaybackSettingsReader
-	EventsHub               *evt.Hub
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
+	storeProvider   userstore.UserStoreProvider
+	LibraryLookup   ProgressLibraryLookup
+	SettingsRepo    PlaybackSettingsReader
+	EventsHub       *evt.Hub
+	signalsNotifier SignalsChangedNotifier
 }
 
 // NewProgressHandler creates a new ProgressHandler.
@@ -67,14 +50,10 @@ func NewProgressHandler(provider userstore.UserStoreProvider) *ProgressHandler {
 	return &ProgressHandler{storeProvider: provider}
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *ProgressHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *ProgressHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *ProgressHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 // --- Request/Response types ---
@@ -497,8 +476,8 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 			// never the timestamp alone.
 			client := item.UpdatedAt.UTC()
 			now := time.Now()
-			eventAt := clampEventAt(client, now)
-			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {
+			eventAt := clientclock.Clamp(client, now)
+			if !client.IsZero() && clientclock.TooFarAhead(client, now) {
 				slog.WarnContext(ctx, "clamped future-dated progress event time", "component", "api",
 					"profile_id", profileID, "media_item_id", item.MediaItemID)
 			}
@@ -524,7 +503,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 	}
 
 	if hadSuccessfulUpdate {
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 		for i, item := range updates {
 			if item.CheckAccess && results[i].Status != "ok" {
 				continue

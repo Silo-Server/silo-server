@@ -47,18 +47,6 @@ func (r *Registry) List() []Recipe {
 	return out
 }
 
-// ListByCategory returns recipes whose Definition().Category matches, sorted by type.
-func (r *Registry) ListByCategory(c Category) []Recipe {
-	all := r.List()
-	out := make([]Recipe, 0, len(all))
-	for _, rec := range all {
-		if rec.Definition().Category == c {
-			out = append(out, rec)
-		}
-	}
-	return out
-}
-
 // Default is the package-level registry. Recipes register into it via init().
 var Default = NewRegistry()
 
@@ -75,9 +63,4 @@ func Get(t string) (Recipe, bool) {
 // List is a shortcut for Default.List.
 func List() []Recipe {
 	return Default.List()
-}
-
-// ListByCategory is a shortcut for Default.ListByCategory.
-func ListByCategory(c Category) []Recipe {
-	return Default.ListByCategory(c)
 }

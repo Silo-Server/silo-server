@@ -1,4 +1,5 @@
-import type { SectionItem } from "@/api/types";
+import type { DisplayRating, SectionItem } from "@/api/types";
+import { primaryCardRating } from "@/components/ratings/ratings";
 
 function isPositiveFinite(value: number | undefined | null): value is number {
   return value != null && Number.isFinite(value) && value > 0;
@@ -30,6 +31,8 @@ function formatRuntime(seconds: number | undefined | null): string | null {
 export interface HeroMetadataEntry {
   key: string;
   label: string;
+  /** Set on the rating entry, which renders as its source mark and score. */
+  rating?: DisplayRating;
 }
 
 function isNonNegativeInteger(value: number | undefined | null): value is number {
@@ -57,13 +60,9 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
     entries.push({ key: "year", label: String(item.year) });
   }
   if (runtime) entries.push({ key: "runtime", label: runtime });
-  if (
-    item.rating_imdb != null &&
-    Number.isFinite(item.rating_imdb) &&
-    item.rating_imdb > 0 &&
-    item.rating_imdb <= 10
-  ) {
-    entries.push({ key: "imdb", label: `IMDb ${item.rating_imdb.toFixed(1)}` });
+  const rating = primaryCardRating(item);
+  if (rating) {
+    entries.push({ key: "rating", label: `${rating.name} ${rating.display}`, rating });
   }
 
   const genres = [...new Set((item.genres ?? []).map((genre) => genre.trim()).filter(Boolean))];

@@ -142,11 +142,19 @@ func (r *PgRepository) FailJob(ctx context.Context, id int64, status JobStatus, 
 	return nil
 }
 
+// Heartbeat keeps an active job alive. A job that is no longer pending or
+// running (canceled from another node, or reaped) reports
+// jobrunner.ErrJobTerminal, so the node still running it stops spending
+// provider calls on a job nobody waits for.
 func (r *PgRepository) Heartbeat(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE metadata_translation_jobs SET heartbeat_at = now() WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE metadata_translation_jobs SET heartbeat_at = now()
+		WHERE id = $1 AND status IN ('pending', 'running')`, id)
 	if err != nil {
 		return fmt.Errorf("heartbeat metadata translation job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return jobrunner.ErrJobTerminal
 	}
 	return nil
 }
@@ -180,7 +188,7 @@ func (r *PgRepository) ItemText(ctx context.Context, contentID string) (*ItemTex
 
 func (r *PgRepository) SeasonTexts(ctx context.Context, seriesID string) ([]ChildText, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT content_id, season_number, COALESCE(overview, '')
+		`SELECT content_id, season_number, COALESCE(overview, ''), COALESCE(default_metadata_language, '')
 		FROM seasons WHERE series_id = $1 ORDER BY season_number`, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("load season texts: %w", err)
@@ -189,7 +197,7 @@ func (r *PgRepository) SeasonTexts(ctx context.Context, seriesID string) ([]Chil
 	var out []ChildText
 	for rows.Next() {
 		var c ChildText
-		if err := rows.Scan(&c.ContentID, &c.SeasonNumber, &c.Overview); err != nil {
+		if err := rows.Scan(&c.ContentID, &c.SeasonNumber, &c.Overview, &c.DefaultLanguage); err != nil {
 			return nil, fmt.Errorf("scan season text: %w", err)
 		}
 		out = append(out, c)
@@ -197,10 +205,27 @@ func (r *PgRepository) SeasonTexts(ctx context.Context, seriesID string) ([]Chil
 	return out, rows.Err()
 }
 
+const episodeTextColumns = `content_id, season_number, episode_number, COALESCE(overview, ''),
+	COALESCE(default_metadata_language, '')`
+
 func (r *PgRepository) EpisodeTexts(ctx context.Context, seriesID string) ([]ChildText, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT content_id, season_number, episode_number, COALESCE(overview, '')
+	return r.episodeTexts(ctx, `SELECT `+episodeTextColumns+`
 		FROM episodes WHERE series_id = $1 ORDER BY season_number, episode_number`, seriesID)
+}
+
+// SeasonEpisodeTexts loads the episodes a season page lists: only that
+// season, and only episodes in a library (the catalog's season listing
+// filters the same way), so a season job never reads a long-running show's
+// other seasons or a partly collected season's provider-only episodes.
+func (r *PgRepository) SeasonEpisodeTexts(ctx context.Context, seasonContentID string) ([]ChildText, error) {
+	return r.episodeTexts(ctx, `SELECT `+episodeTextColumns+`
+		FROM episodes WHERE season_id = $1
+		  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = episodes.content_id)
+		ORDER BY episode_number`, seasonContentID)
+}
+
+func (r *PgRepository) episodeTexts(ctx context.Context, query string, arg string) ([]ChildText, error) {
+	rows, err := r.pool.Query(ctx, query, arg)
 	if err != nil {
 		return nil, fmt.Errorf("load episode texts: %w", err)
 	}
@@ -208,7 +233,7 @@ func (r *PgRepository) EpisodeTexts(ctx context.Context, seriesID string) ([]Chi
 	var out []ChildText
 	for rows.Next() {
 		var c ChildText
-		if err := rows.Scan(&c.ContentID, &c.SeasonNumber, &c.EpisodeNumber, &c.Overview); err != nil {
+		if err := rows.Scan(&c.ContentID, &c.SeasonNumber, &c.EpisodeNumber, &c.Overview, &c.DefaultLanguage); err != nil {
 			return nil, fmt.Errorf("scan episode text: %w", err)
 		}
 		out = append(out, c)
@@ -220,9 +245,9 @@ func (r *PgRepository) SeasonByID(ctx context.Context, contentID string) (*Child
 	var c ChildText
 	var seriesID string
 	err := r.pool.QueryRow(ctx,
-		`SELECT content_id, series_id, season_number, COALESCE(overview, '')
+		`SELECT content_id, series_id, season_number, COALESCE(overview, ''), COALESCE(default_metadata_language, '')
 		FROM seasons WHERE content_id = $1`, contentID).
-		Scan(&c.ContentID, &seriesID, &c.SeasonNumber, &c.Overview)
+		Scan(&c.ContentID, &seriesID, &c.SeasonNumber, &c.Overview, &c.DefaultLanguage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", nil
 	}
@@ -236,9 +261,10 @@ func (r *PgRepository) EpisodeByID(ctx context.Context, contentID string) (*Chil
 	var c ChildText
 	var seriesID string
 	err := r.pool.QueryRow(ctx,
-		`SELECT content_id, series_id, season_number, episode_number, COALESCE(overview, '')
+		`SELECT content_id, series_id, season_number, episode_number, COALESCE(overview, ''),
+			COALESCE(default_metadata_language, '')
 		FROM episodes WHERE content_id = $1`, contentID).
-		Scan(&c.ContentID, &seriesID, &c.SeasonNumber, &c.EpisodeNumber, &c.Overview)
+		Scan(&c.ContentID, &seriesID, &c.SeasonNumber, &c.EpisodeNumber, &c.Overview, &c.DefaultLanguage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", nil
 	}
@@ -249,8 +275,11 @@ func (r *PgRepository) EpisodeByID(ctx context.Context, contentID string) (*Chil
 }
 
 // CountMissingFields counts base fields with source text but no localized
-// value for the language. One round-trip; used to gate the auto-translate
-// enqueue so repeat refreshes of fully translated items are free.
+// value for the language. Seasons and episodes already written in the
+// language are not missing: jobs skip them (sameLanguage), and counting them
+// would keep the gate open forever. One round-trip; used to gate the
+// auto-translate enqueue so repeat refreshes of fully translated items are
+// free.
 func (r *PgRepository) CountMissingFields(ctx context.Context, itemContentID, language string) (int, error) {
 	var missing int
 	err := r.pool.QueryRow(ctx, `
@@ -266,14 +295,62 @@ func (r *PgRepository) CountMissingFields(ctx context.Context, itemContentID, la
 		+	(SELECT count(*) FROM seasons s
 				LEFT JOIN season_localizations sl ON sl.season_content_id = s.content_id AND sl.language = $2
 			 WHERE s.series_id = $1
-			   AND COALESCE(s.overview, '') <> '' AND COALESCE(sl.overview, '') = '')
+			   AND COALESCE(s.overview, '') <> '' AND COALESCE(sl.overview, '') = ''
+			   AND lower(btrim(COALESCE(s.default_metadata_language, ''))) <> lower($2))
 		+	(SELECT count(*) FROM episodes e
 				LEFT JOIN episode_localizations el ON el.episode_content_id = e.content_id AND el.language = $2
 			 WHERE e.series_id = $1
-			   AND COALESCE(e.overview, '') <> '' AND COALESCE(el.overview, '') = '')
+			   AND COALESCE(e.overview, '') <> '' AND COALESCE(el.overview, '') = ''
+			   AND lower(btrim(COALESCE(e.default_metadata_language, ''))) <> lower($2))
 	`, itemContentID, language).Scan(&missing)
 	if err != nil {
 		return 0, fmt.Errorf("count missing localization fields: %w", err)
 	}
 	return missing, nil
+}
+
+// LibraryItemsMissing lists the library's items with at least one
+// translatable field missing for language: an item overview or tagline, a
+// season overview, or an episode overview that has source text in another
+// language and no localized value. Each row's own language decides, so a
+// series in the target language still qualifies for its other-language
+// episodes.
+func (r *PgRepository) LibraryItemsMissing(ctx context.Context, libraryID int, language string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT mi.content_id
+		FROM media_items mi
+		JOIN media_item_libraries mil ON mil.content_id = mi.content_id AND mil.media_folder_id = $1
+		LEFT JOIN media_item_localizations l ON l.content_id = mi.content_id AND l.language = $2
+		WHERE (
+				lower(btrim(COALESCE(mi.default_metadata_language, ''))) <> lower($2)
+				AND ((COALESCE(mi.overview, '') <> '' AND COALESCE(l.overview, '') = '')
+				  OR (COALESCE(mi.tagline, '') <> '' AND COALESCE(l.tagline, '') = ''))
+			)
+			OR EXISTS (
+				SELECT 1 FROM seasons s
+				LEFT JOIN season_localizations sl ON sl.season_content_id = s.content_id AND sl.language = $2
+				WHERE s.series_id = mi.content_id
+				  AND lower(btrim(COALESCE(s.default_metadata_language, ''))) <> lower($2)
+				  AND COALESCE(s.overview, '') <> '' AND COALESCE(sl.overview, '') = '')
+			OR EXISTS (
+				SELECT 1 FROM episodes e
+				LEFT JOIN episode_localizations el ON el.episode_content_id = e.content_id AND el.language = $2
+				WHERE e.series_id = mi.content_id
+				  AND lower(btrim(COALESCE(e.default_metadata_language, ''))) <> lower($2)
+				  AND COALESCE(e.overview, '') <> '' AND COALESCE(el.overview, '') = '')
+		ORDER BY COALESCE(NULLIF(mi.sort_title, ''), mi.title), mi.content_id
+	`, libraryID, language)
+	if err != nil {
+		return nil, fmt.Errorf("list library items missing localization: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan library item: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

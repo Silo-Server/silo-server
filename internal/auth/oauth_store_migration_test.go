@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestPGOAuthStoreSurvivesTableRename(t *testing.T) {
+func TestPGOAuthStoreSurvivesTableRenameDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -62,13 +62,15 @@ func TestPGOAuthStoreSurvivesTableRename(t *testing.T) {
  CREATE INDEX idx_playback_history_admin_user_profile_ended ON playback_history_admin(user_id,profile_id,ended_at);
  INSERT INTO playback_history_admin(session_id,user_id) VALUES('preserved',1);`)
 	store := NewPGOAuthStore(pool, []byte("synthetic-migration-secret"))
-	completion := OAuthCompletion{Code: "legacy-code", AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", ExpiresIn: 900, ExpiresAt: time.Now().Add(time.Hour), NextURL: "/me"}
-	hash := oauthCompletionCodeHash(completion.Code)
-	ciphertext, err := store.encryptCompletionTokens(completion, hash)
+	// A row as the code before 20261002073703 wrote it: the token pair of a
+	// session the callback opened, sealed under the code hash.
+	hash := oauthCompletionCodeHash("legacy-code")
+	ciphertext, err := store.seal([]byte(`{"access_token":"synthetic-access","refresh_token":"synthetic-refresh"}`), hash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(t.Context(), `INSERT INTO oauth_completion(code_hash,token_ciphertext,expires_in,next_url,expires_at) VALUES($1,$2,$3,$4,$5)`, hash, ciphertext, completion.ExpiresIn, completion.NextURL, completion.ExpiresAt); err != nil {
+	if _, err = pool.Exec(t.Context(), `INSERT INTO oauth_completion(code_hash,token_ciphertext,expires_in,next_url,expires_at) VALUES($1,$2,$3,$4,$5)`,
+		hash, ciphertext, 900, "/me", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO oauth_session(state,install_id,redirect_uri,expires_at) VALUES('legacy-state','1','https://example.test/callback',now()+interval '1 hour')`)
@@ -86,12 +88,24 @@ func TestPGOAuthStoreSurvivesTableRename(t *testing.T) {
 			t.Fatalf("primary-key rename failed: %d %v", count, err)
 		}
 	}
-	out, err := store.GetAndDeleteCompletion(t.Context(), completion.Code)
-	if err != nil || out.AccessToken != completion.AccessToken || out.RefreshToken != completion.RefreshToken {
-		t.Fatalf("legacy completion did not survive: %v", err)
+	// Rows written before the browser-binding migration read as web flows.
+	apply("20261002073703_oauth_sign_in_flows", false)
+	open := func(context.Context, OAuthSessionDB, OAuthCompletion) (*TokenPair, error) {
+		t.Fatal("a legacy completion opened a session")
+		return nil, nil
 	}
-	if _, err = store.GetAndDeleteCompletion(t.Context(), completion.Code); !errors.Is(err, ErrOAuthCompletionNotFound) {
-		t.Fatalf("completion reused: %v", err)
+	// A row written before the completion cookie has no browser binding,
+	// so no browser can redeem it.
+	if _, err = store.RedeemCompletion(t.Context(), "legacy-code", "", "", open); !errors.Is(err, ErrOAuthCompletionBrowser) {
+		t.Fatalf("unbound legacy completion: %v", err)
+	}
+	// Nor does one bound to a browser that names no account: completion
+	// codes open their session at redemption now.
+	if _, err = pool.Exec(t.Context(), `UPDATE oauth_completions SET browser_hash = $1 WHERE code_hash = $2`, oauthBinderHash("browser"), hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.RedeemCompletion(t.Context(), "legacy-code", "", "browser", open); !errors.Is(err, ErrOAuthCompletionNotFound) {
+		t.Fatalf("legacy completion without an account: %v", err)
 	}
 	sess, err := store.GetAndDelete(t.Context(), "legacy-state")
 	if err != nil || sess.InstallID != "1" {
@@ -105,8 +119,7 @@ func TestPGOAuthStoreSurvivesTableRename(t *testing.T) {
 	if count, err := store.DeleteExpired(t.Context(), time.Now()); err != nil || count != 1 {
 		t.Fatalf("session expiry: %d %v", count, err)
 	}
-	completion.Code = "new-code"
-	completion.ExpiresAt = time.Now().Add(-time.Hour)
+	completion := OAuthCompletion{Code: "new-code", UserID: 1, BrowserHash: oauthBinderHash("browser"), ExpiresAt: time.Now().Add(-time.Hour)}
 	if err = store.InsertCompletion(t.Context(), completion); err != nil {
 		t.Fatal(err)
 	}

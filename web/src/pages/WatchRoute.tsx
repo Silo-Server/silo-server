@@ -35,6 +35,7 @@ export default function WatchRoute() {
         external_subtitle_path?: string;
         downloaded_subtitle_id?: number;
       } | null;
+      versionPicked?: boolean;
     } | null;
 
     return createWatchRouteRequest({
@@ -43,10 +44,12 @@ export default function WatchRoute() {
       libraryId: libraryIdParam ? Number.parseInt(libraryIdParam, 10) : undefined,
       roomId: searchParams.get("room_id") ?? undefined,
       roomToken: searchParams.get("room_token") ?? undefined,
+      shuffleId: searchParams.get("shuffle") ?? undefined,
       restart: searchParams.get("restart") === "1",
       audioTrackIndex: locationState?.audioTrackIndex,
       prePlaySubtitleMode: locationState?.prePlaySubtitleMode,
       prePlaySubtitleSelection: locationState?.prePlaySubtitleSelection,
+      versionPicked: locationState?.versionPicked,
       returnHref: locationState?.watchReturnHref,
     });
   }, [id, location.state, searchParams]);

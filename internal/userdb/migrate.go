@@ -1,11 +1,12 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
-const schemaVersion = 28
+const schemaVersion = 36
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -16,10 +17,16 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("unsupported sqlite schema version %d", version)
 	}
 	if version == 0 {
+		if _, err := db.Exec(profilePINRevisionSchema); err != nil {
+			return fmt.Errorf("creating profile PIN revision trigger: %w", err)
+		}
 		return setUserVersion(db, schemaVersion)
 	}
 	if version == schemaVersion {
-		return nil
+		// Stores already at the current version may have been opened before
+		// the trigger existed.
+		_, err := db.Exec(profilePINRevisionSchema)
+		return err
 	}
 
 	tx, err := db.Begin()
@@ -279,7 +286,144 @@ func runMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+	if version < 29 {
+		if err := retireProfileThemes(tx); err != nil {
+			return fmt.Errorf("migration v29 failed: %w", err)
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 29"); err != nil {
+			return err
+		}
+	}
+	// Builds of the collections revamp from before it merged main recorded
+	// login sharing as v30, without main's v30 pin_revision column. Such a
+	// store needs the column, and must not convert sharing a second time:
+	// collections shared since carry no allow list.
+	sharingApplied := version == 30 && !columnExists(tx, "profiles", "pin_revision")
+	if version < 30 || sharingApplied {
+		// Same reasoning as v27: a fresh profiles table already has the column.
+		// Profile tokens are bound to it; the Postgres store adds the same
+		// column in 20261006192309_profile_pin_revision.sql.
+		if !columnExists(tx, "profiles", "pin_revision") {
+			if _, err := tx.Exec(`ALTER TABLE profiles ADD COLUMN pin_revision INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migration v30 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 30"); err != nil {
+			return err
+		}
+	}
+	if version < 31 {
+		if !sharingApplied {
+			if err := applyCollectionLoginSharing(tx); err != nil {
+				return fmt.Errorf("migration v31 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 31"); err != nil {
+			return err
+		}
+	}
+	if version < 32 {
+		// A fresh user_devices table already has the column. The Postgres
+		// store adds the same column in 20261015140728_add_user_devices_custom_name.sql.
+		if !columnExists(tx, "user_devices", "custom_name") {
+			if _, err := tx.Exec(`ALTER TABLE user_devices ADD COLUMN custom_name TEXT`); err != nil {
+				return fmt.Errorf("migration v32 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 32"); err != nil {
+			return err
+		}
+	}
+	if version < 33 {
+		if err := retireTraktSectionOverrides(tx); err != nil {
+			return fmt.Errorf("migration v33 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 33"); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		// A Next Up row a profile added; the Postgres store deletes the same
+		// rows in 20261018213122_retire_next_up_rows.sql. The server inserts
+		// the only Next Up row itself and refuses new ones.
+		if _, err := tx.ExecContext(context.Background(), `
+DELETE FROM profile_section_overrides
+WHERE COALESCE(section_id, '') = ''
+  AND COALESCE(NULLIF(user_section_type, ''), section_type) = 'next_up'`); err != nil {
+			return fmt.Errorf("migration v34 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 34"); err != nil {
+			return err
+		}
+	}
+	if version < 35 {
+		// A fresh series_playback_preferences table already has the columns.
+		// The Postgres store adds the same columns in
+		// 20261023003343_add_item_version_choice.sql.
+		for _, c := range []struct{ name, ddl string }{
+			{"file_id", "ALTER TABLE series_playback_preferences ADD COLUMN file_id INTEGER"},
+			{"edition_key", "ALTER TABLE series_playback_preferences ADD COLUMN edition_key TEXT"},
+		} {
+			if columnExists(tx, "series_playback_preferences", c.name) {
+				continue
+			}
+			if _, err := tx.ExecContext(context.Background(), c.ddl); err != nil {
+				return fmt.Errorf("migration v35 failed: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 35"); err != nil {
+			return err
+		}
+	}
+	if version < 36 {
+		// The history-listing cutoff; the Postgres store adds the same column
+		// in 20261024034851_history_removal_cutoff.sql. NULL reads as
+		// hidden_before, so existing rows need no backfill.
+		if err := addHistoryRemovalCutoff(tx); err != nil {
+			return fmt.Errorf("migration v36 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 36"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(profilePINRevisionSchema); err != nil {
+		return fmt.Errorf("creating profile PIN revision trigger: %w", err)
+	}
 	return tx.Commit()
+}
+
+// applyCollectionLoginSharing applies the #1615 rule: a shared collection
+// is shown to every profile on the login, so it stays shared only when its
+// allow list already covers every profile (its creator implied). Shared with
+// some profiles, or with nobody but its creator, it becomes private. The allow-list table stays, no
+// longer read, because the bridge importer's source contract names it.
+func applyCollectionLoginSharing(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		UPDATE personal_collections
+		   SET is_shared = 0
+		 WHERE is_shared
+		   AND EXISTS (
+		         SELECT 1 FROM profiles p
+		          WHERE p.id <> personal_collections.creator_profile_id
+		            AND NOT EXISTS (
+		                  SELECT 1 FROM personal_collection_profiles v
+		                   WHERE v.collection_id = personal_collections.id
+		                     AND v.profile_id = p.id
+		                ))`)
+	return err
+}
+
+// retireProfileThemes deletes every stored ui.theme, ui.custom_theme_vars and
+// ui.custom_css value at every scope. The web client has one theme and applies
+// only the admin's overrides, so these choices are dead; the keys stay in the
+// manifest, deprecated, so a stale client's write still succeeds. The Postgres
+// store deletes the same rows in 20260926233851_retire_profile_themes.sql.
+func retireProfileThemes(tx *sql.Tx) error {
+	_, err := tx.Exec(`DELETE FROM user_setting_values WHERE key IN ('ui.theme', 'ui.custom_theme_vars', 'ui.custom_css')`)
+	if err != nil {
+		return fmt.Errorf("deleting retired profile theme settings: %w", err)
+	}
+	return nil
 }
 
 // migrateToV20 widens collection sort preferences to include the two personal
@@ -612,4 +756,12 @@ func migrateToV7(tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+func addHistoryRemovalCutoff(tx *sql.Tx) error {
+	if columnExists(tx, "hidden_history_items", "removed_before") {
+		return nil
+	}
+	_, err := tx.ExecContext(context.Background(), "ALTER TABLE hidden_history_items ADD COLUMN removed_before TEXT")
+	return err
 }

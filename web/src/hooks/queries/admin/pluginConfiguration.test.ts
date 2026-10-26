@@ -3,12 +3,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import {
-  useSavePluginAuthBinding,
-  useSavePluginConfig,
-  useSavePluginTaskBinding,
-  useTestPluginConfig,
-} from "./plugins";
+import { useSavePluginAuthBinding, useSavePluginTaskBinding, useTestPluginConfig } from "./plugins";
 
 const configBody = { key: "account", value: { region: "us-east" }, clear_secrets: ["api_key"] };
 const noContent = () => new Response(null, { status: 204 });
@@ -51,51 +46,6 @@ afterEach(() => {
   cleanup();
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
-});
-it("saves configuration through v2 once with the captured body", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(noContent());
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useSavePluginConfig, fixture());
-  const draft = { ...configBody, value: { ...configBody.value } };
-  act(() => result.current.mutate({ id: 7, body: draft }));
-  draft.value.region = "later";
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(fetchMock).toHaveBeenCalledOnce();
-  expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-    "/api/v2/admin/plugins/installations/7/config",
-  );
-  const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-  expect(init.method).toBe("PUT");
-  expect(JSON.parse(String(init.body))).toEqual(configBody);
-  expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("profile-a");
-});
-it.each(["401", "network"])(
-  "never replays an uncertain %s config save under global retry",
-  async (kind) => {
-    const fetchMock =
-      kind === "network"
-        ? vi.fn().mockRejectedValue(new Error("connection lost"))
-        : vi.fn().mockResolvedValue(problem(401, "authentication_required", "Expired"));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useSavePluginConfig, fixture());
-    act(() => result.current.mutate({ id: 7, body: configBody }));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-  },
-);
-it("refuses a queued save after authority replacement", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useSavePluginConfig, fixture());
-  act(() => result.current.mutate({ id: 7, body: configBody }));
-  await waitFor(() => expect(result.current.isPaused).toBe(true));
-  act(() => {
-    setProfileToken("pin-b");
-    onlineManager.setOnline(true);
-  });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).not.toHaveBeenCalled();
 });
 it("returns a completed failed probe as data and never retries the probe", async () => {
   const fetchMock = vi

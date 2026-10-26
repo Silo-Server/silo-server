@@ -82,6 +82,9 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 		return
 	}
 	selected.SetMarkers(file)
+	if h.MarkerImageURLs != nil {
+		selected.MarkerPreviews = catalog.BuildMarkerPreviews(ctx, file, h.MarkerImageURLs.ResolveURLs)
+	}
 	detail.Intro, detail.Credits, detail.Recap, detail.Preview = selected.Intro, selected.Credits, selected.Recap, selected.Preview
 	for i := range detail.PlaybackVariants {
 		for j := range detail.PlaybackVariants[i].Parts {
@@ -89,6 +92,7 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 				version := &detail.PlaybackVariants[i].Parts[j].Versions[k]
 				if version.FileID == selectedFileID {
 					version.SetMarkers(file)
+					version.MarkerPreviews = selected.MarkerPreviews
 				}
 			}
 		}
@@ -99,13 +103,24 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 // (played) or unwatched for the profile; a season or series expands to its
 // episodes and an ebook's read state lives in the reader-progress store. It
 // is the command behind v1 POST/DELETE /watched/{id} and the v2 operations.
-func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalog.AccessFilter) (WatchedStateView, error) {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, filter)
+// recordRewatch lets marking a watched movie or episode that has a resume
+// position record another play; it never applies to a season or series.
+func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalog.AccessFilter) (WatchedStateView, error) {
+	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+	}
+	if !played && h.watchState != nil && (targetType == watchstate.ParentSeries || targetType == watchstate.ParentSeason) {
+		ids, err := h.watchState.ParentUnwatchTargets(ctx, userID, profileID, h.episodeRepo, targetType, contentID)
+		if err != nil {
+			return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+		}
+		for _, id := range ids {
+			targets = append(targets, watchedLeafTarget{ContentID: id})
+		}
 	}
 
 	switch {
@@ -117,7 +132,8 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	case h.watchState == nil:
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	case played:
-		err = h.markLeafTargetsWatched(ctx, userID, profileID, targets)
+		err = h.markLeafTargetsWatched(ctx, userID, profileID, targets,
+			recordRewatch && (targetType == itemTypeMovie || targetType == itemTypeEpisode))
 	default:
 		err = h.markLeafTargetsUnwatched(ctx, userID, profileID, targets)
 	}
@@ -128,7 +144,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
 		Played: boolPtr(played),
 	})
@@ -141,16 +157,54 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	}, nil
 }
 
+// ClearResumePosition clears the profile's resume position on a movie or
+// episode and keeps its watched state and watch history; an item without a
+// resume position is a no-op. A season, series or ebook has no single resume
+// position (400 invalid_watch_target); an unknown or inaccessible item is 404,
+// as is a kind the watched-state resolver does not handle, such as an
+// audiobook.
+// It is the command behind the v2 operation; the frozen v1 API has none.
+func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalog.AccessFilter) error {
+	// Only the target's type is needed: a season or series is rejected
+	// without loading its episodes.
+	target, err := h.lookupWatchedTarget(ctx, contentID, filter)
+	if err != nil {
+		if isNotFound(err) {
+			return apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
+	}
+	if target.Type != itemTypeMovie && target.Type != itemTypeEpisode {
+		return apiError(http.StatusBadRequest, "invalid_watch_target", "Only a movie or an episode has a resume position")
+	}
+	if h.watchState == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	cleared, err := h.watchState.ClearResumePosition(ctx, userID, profileID, contentID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
+	}
+	if !cleared {
+		return nil
+	}
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "progress", userStateEventState{})
+	return nil
+}
+
 // markLeafTargetsWatched records a manual play for every leaf target the
 // profile has not already completed and queues one outbound provider event
 // for the plays it recorded. A target already completed is a no-op: no
-// history row, no event, so a retried mark never double-counts a play.
-func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
+// history row, no event, so a retried mark never double-counts a play. With
+// recordRewatch, a completed target that has a resume position records
+// another play instead.
+func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget, recordRewatch bool) error {
 	leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
 	for _, target := range targets {
 		leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
 			MediaItemID:     target.ContentID,
 			DurationSeconds: target.DurationSeconds,
+			RecordRewatch:   recordRewatch,
 		})
 	}
 	result, err := h.watchState.RecordManualMarkWatchedWithResult(ctx, userID, profileID, leafTargets, time.Now().UTC())
@@ -161,17 +215,12 @@ func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, p
 	return nil
 }
 
-// markLeafTargetsUnwatched hides the targets' history and clears their
-// progress, then queues the removal of the manual plays that were visible.
+// markLeafTargetsUnwatched clears the targets' watched state and progress.
+// Their plays stay in watch history, here and on watch providers.
 func (h *ItemsHandler) markLeafTargetsUnwatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
 	targetIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
 		targetIDs = append(targetIDs, target.ContentID)
 	}
-	result, err := h.watchState.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
-	if err != nil {
-		return err
-	}
-	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
-	return nil
+	return h.watchState.RecordManualMarkUnwatched(ctx, userID, profileID, targetIDs)
 }

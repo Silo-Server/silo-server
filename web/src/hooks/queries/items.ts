@@ -9,7 +9,7 @@ import type {
   ItemSplitRequest,
   WatchDetail,
 } from "@/api/types";
-import { v2, type V2Result } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -21,6 +21,7 @@ import {
 } from "@/pages/ItemDetail/watchedState";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   invalidateMediaSurfaceQueries,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
@@ -203,7 +204,26 @@ export function useRefreshItemMetadata() {
   });
 }
 
+/** The marker kinds an admin re-detection runs; a movie has credits only. */
+export type RedetectMarkersKind = "intro" | "credits" | "all";
+export type RedetectItemMarkersResponse =
+  V2Result<"POST /api/v2/admin/items/{id}/redetect-markers">;
+export async function redetectItemMarkers(
+  itemId: string,
+  kind: RedetectMarkersKind,
+): Promise<RedetectItemMarkersResponse> {
+  return v2("POST /api/v2/admin/items/{id}/redetect-markers", {
+    path: { id: itemId },
+    body: { kind },
+    retryAuthentication: false,
+  });
+}
+
 export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
+/**
+ * Re-detects an episode's intro through the older episode-only operation,
+ * for API nodes that do not advertise the redetect_markers capability.
+ */
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
@@ -213,20 +233,55 @@ export async function redetectEpisodeIntro(
   });
 }
 
+const redetectionToasts = {
+  onSuccess: (response: { status: string }) => {
+    toast.success(
+      response.status === "already_running"
+        ? "Re-detection already running"
+        : "Re-detection started",
+    );
+  },
+  onError: (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+  },
+};
+
+function isMissingOperation(error: unknown): boolean {
+  return (
+    (error instanceof V2ProblemError || error instanceof V2TransportError) && error.status === 404
+  );
+}
+
+/**
+ * Re-detects an item's markers. The capability read and this call can reach
+ * different API nodes during a rolling deploy or rollback, so a 404 drops the
+ * cached capability; with `introFallback` (episodes) an intro-only request
+ * retries once through the older episode-only operation. Other kinds surface
+ * the error, since that operation cannot re-detect credits.
+ */
+export function useRedetectItemMarkers({ introFallback = false } = {}) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) => {
+      try {
+        return await redetectItemMarkers(itemId, kind);
+      } catch (error) {
+        if (!isMissingOperation(error)) throw error;
+        void queryClient.invalidateQueries({ queryKey: adminKeys.markerCapabilities() });
+        if (!introFallback || kind !== "intro") throw error;
+        return redetectEpisodeIntro(itemId);
+      }
+    },
+    ...redetectionToasts,
+  });
+}
+
 export function useRedetectEpisodeIntro() {
   return useMutation({
     retry: false,
     mutationFn: redetectEpisodeIntro,
-    onSuccess: (response) => {
-      toast.success(
-        response.status === "already_running"
-          ? "Re-detection already running"
-          : "Re-detection started",
-      );
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
-    },
+    ...redetectionToasts,
   });
 }
 
@@ -249,7 +304,6 @@ export interface UpdateItemMetadataRequest {
   air_time?: string | null;
   air_timezone?: string | null;
   air_date?: string | null;
-  status?: string;
   rating_imdb?: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -305,25 +359,32 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
         ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
         : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
+      // Marking watched no longer always flips the flag (a rewatch stays
+      // watched), so remember what to restore.
+      const previousPlayed = item.user_data?.played ?? !nextPlayed;
       await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
         user_data: { ...detail.user_data, played: nextPlayed },
         user_state: {
+          ...detail.user_state,
           played: nextPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
+      return { previousPlayed };
     },
     // Revert only this mutation's own field. Restoring a whole snapshot would
     // discard a concurrent favorite/watchlist toggle's optimistic state.
-    onError: (err, nextPlayed) => {
+    onError: (err, nextPlayed, context) => {
+      const previousPlayed = context?.previousPlayed ?? !nextPlayed;
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
-        user_data: { ...detail.user_data, played: !nextPlayed },
+        user_data: { ...detail.user_data, played: previousPlayed },
         user_state: {
-          played: !nextPlayed,
+          ...detail.user_state,
+          played: previousPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
@@ -333,14 +394,20 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
     },
-    onSettled: () => {
+    onSettled: (_data, error) => {
       // The detail query has to be refreshed: marking watched also zeroes
       // `position_seconds` and moves season/series counts server-side, and the
-      // optimistic patch above only carries `played`.
+      // optimistic patch above only carries `played`. A mark that landed also
+      // clears the resume position, so a closed player must not start from
+      // its cached one while that refresh waits.
+      const knownRelatedIds = error
+        ? undefined
+        : dropInactiveWatchDetail(queryClient, item.content_id);
       scheduleMediaSurfaceInvalidation(queryClient, {
         itemId: item.content_id,
         watchedKeys: getCachedWatchedInvalidationKeys(queryClient, item),
         skipSimilarItems: true,
+        knownRelatedIds,
       });
     },
   });
@@ -380,17 +447,21 @@ type ApplyMatchItem = Pick<ItemDetail, "content_id" | "series_id" | "season_numb
   library_id?: number;
 };
 
+interface ApplyItemMatchVariables {
+  item: ApplyMatchItem;
+  providerIds: Record<string, string>;
+  /**
+   * Called with the item's new content ID when applying the match moved it,
+   * so a page showing the old ID can follow it.
+   */
+  onReplaced?: (contentID: string) => void | Promise<void>;
+}
+
 export function useApplyItemMatch() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      item,
-      providerIds,
-    }: {
-      item: ApplyMatchItem;
-      providerIds: Record<string, string>;
-    }) => {
+    mutationFn: async ({ item, providerIds }: ApplyItemMatchVariables) => {
       return v2("POST /api/v2/admin/items/{id}/match/apply", {
         path: { id: item.content_id },
         body: {
@@ -401,8 +472,39 @@ export function useApplyItemMatch() {
       });
     },
     retry: false,
-    onSuccess: async (_, { item }) => {
+    onSuccess: async (result, { item, onReplaced }) => {
       toast.success("Match applied successfully");
+      const adminLists = Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
+      ]);
+
+      if (result.content_id && result.content_id !== item.content_id) {
+        // The match moved the item to a new content ID, so the old one no
+        // longer resolves. Mark its queries stale without refetching them,
+        // move a page showing it to the new ID before anything else can
+        // refetch it, then refresh the lists and rows that still link to it.
+        await queryClient.invalidateQueries({
+          predicate: (query) => query.queryKey.includes(item.content_id),
+          refetchType: "none",
+        });
+        try {
+          await onReplaced?.(result.content_id);
+        } finally {
+          // The lists still link to the old ID even if following it failed.
+          // Home reads its rows through one-shot fetches, so it re-reads them
+          // only when the refresh signal changes.
+          void invalidateMediaSurfaceQueries(queryClient, {
+            itemId: item.content_id,
+            skipItemQueries: true,
+          }).then(
+            () => bumpHomeRefreshSignal(queryClient),
+            () => bumpHomeRefreshSignal(queryClient),
+          );
+        }
+        await adminLists;
+        return;
+      }
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
@@ -410,8 +512,7 @@ export function useApplyItemMatch() {
           queryKey: ["catalog", "items", item.content_id, "detail"],
         }),
         queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
+        adminLists,
       ]);
 
       if (item.type === "series") {

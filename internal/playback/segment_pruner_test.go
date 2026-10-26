@@ -333,29 +333,6 @@ func TestOpenSegmentDescriptorSurvivesUnlink(t *testing.T) {
 	path := filepath.Join(dir, "seg_00001.ts")
 	want := []byte("complete segment")
 	writePrunerTestFile(t, path, want, time.Now())
-	session := &TranscodeSession{outputDir: dir}
-
-	segment, err := session.OpenSegment("seg_00001.ts")
-	if err != nil {
-		t.Fatalf("OpenSegment: %v", err)
-	}
-	defer func() { _ = segment.Close() }()
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("remove opened segment: %v", err)
-	}
-	got, err := io.ReadAll(segment.File)
-	if err != nil {
-		t.Fatalf("read opened segment: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Fatalf("opened segment = %q, want %q", got, want)
-	}
-}
-
-func TestOpenSegmentLeaseCapturesGeneration(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "seg_00001.ts")
-	writePrunerTestFile(t, path, []byte("complete segment"), time.Now())
 	session := &TranscodeSession{outputDir: dir, segmentGeneration: 7}
 
 	segment, err := session.OpenSegment("seg_00001.ts")
@@ -365,6 +342,16 @@ func TestOpenSegmentLeaseCapturesGeneration(t *testing.T) {
 	defer func() { _ = segment.Close() }()
 	if segment.Generation != 7 {
 		t.Fatalf("segment generation = %d, want 7", segment.Generation)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove opened segment: %v", err)
+	}
+	got, err := io.ReadAll(segment.File)
+	if err != nil {
+		t.Fatalf("read opened segment: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("opened segment = %q, want %q", got, want)
 	}
 }
 

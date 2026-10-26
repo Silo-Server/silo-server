@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -27,15 +28,7 @@ func CreateCollection(db *sql.DB, input userstore.CreateCollectionInput) (*Colle
 	if input.SortConfig == "" {
 		input.SortConfig = "{}"
 	}
-	allowedProfiles := normalizeAllowedProfiles(input.CreatorProfileID, input.AllowedProfileIDs, input.IsShared)
-
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(
+	_, err := db.Exec(
 		`INSERT INTO personal_collections (
 			id, profile_id, creator_profile_id, name, collection_type, is_shared,
 			query_definition, sort_config, created_at, updated_at
@@ -46,30 +39,18 @@ func CreateCollection(db *sql.DB, input userstore.CreateCollectionInput) (*Colle
 	if err != nil {
 		return nil, err
 	}
-	for _, profileID := range allowedProfiles {
-		if _, err := tx.Exec(
-			`INSERT INTO personal_collection_profiles (collection_id, profile_id) VALUES (?, ?)`,
-			id, profileID,
-		); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 
 	return &Collection{
-		ID:                id,
-		ProfileID:         input.CreatorProfileID,
-		CreatorProfileID:  input.CreatorProfileID,
-		Name:              input.Name,
-		CollectionType:    input.CollectionType,
-		IsShared:          input.IsShared,
-		AllowedProfileIDs: allowedProfiles,
-		QueryDefinition:   input.QueryDefinition,
-		SortConfig:        input.SortConfig,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:               id,
+		ProfileID:        input.CreatorProfileID,
+		CreatorProfileID: input.CreatorProfileID,
+		Name:             input.Name,
+		CollectionType:   input.CollectionType,
+		IsShared:         input.IsShared,
+		QueryDefinition:  input.QueryDefinition,
+		SortConfig:       input.SortConfig,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}, nil
 }
 
@@ -82,26 +63,26 @@ func GetCollection(db *sql.DB, id string) (*Collection, error) {
 		 FROM personal_collections WHERE id = ?`,
 		id,
 	).Scan(&c.ID, &c.ProfileID, &c.CreatorProfileID, &c.Name, &c.CollectionType, &isShared, &c.QueryDefinition, &c.SortConfig, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("collection %s: %w", id, userstore.ErrCollectionNotFound)
+	}
 	if err != nil {
 		return nil, err
 	}
 	c.IsShared = isShared
-	c.AllowedProfileIDs, err = listCollectionProfiles(db, id)
-	if err != nil {
-		return nil, err
-	}
 	return &c, nil
 }
 
-// ListCollections returns all collections for a given profile, ordered by creation date.
+// ListCollections returns the collections profileID may see: its own, then
+// other profiles' shared collections grouped by creator, each by creation date.
 func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 	rows, err := db.Query(
-		`SELECT pc.id, pc.profile_id, pc.creator_profile_id, pc.name, pc.collection_type, pc.is_shared,
-		        pc.query_definition, pc.sort_config, pc.created_at, pc.updated_at
-		 FROM personal_collections pc
-		 JOIN personal_collection_profiles pcp ON pcp.collection_id = pc.id
-		 WHERE pcp.profile_id = ? ORDER BY pc.created_at ASC`,
-		profileID,
+		`SELECT id, profile_id, creator_profile_id, name, collection_type, is_shared,
+		        query_definition, sort_config, created_at, updated_at
+		 FROM personal_collections
+		 WHERE creator_profile_id = ? OR is_shared
+		 ORDER BY creator_profile_id = ? DESC, creator_profile_id ASC, created_at ASC, id ASC`,
+		profileID, profileID,
 	)
 	if err != nil {
 		return nil, err
@@ -116,51 +97,7 @@ func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 		}
 		collections = append(collections, c)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := attachCollectionProfiles(db, profileID, collections); err != nil {
-		return nil, err
-	}
-	return collections, nil
-}
-
-// attachCollectionProfiles fills AllowedProfileIDs for every collection with a
-// single batched query, avoiding the N+1 round trip a per-collection lookup
-// would create.
-func attachCollectionProfiles(db *sql.DB, profileID string, collections []Collection) error {
-	if len(collections) == 0 {
-		return nil
-	}
-	rows, err := db.Query(
-		`SELECT allowed.collection_id, allowed.profile_id
-		 FROM personal_collection_profiles AS visible
-		 JOIN personal_collection_profiles AS allowed
-		   ON allowed.collection_id = visible.collection_id
-		 WHERE visible.profile_id = ?
-		 ORDER BY allowed.profile_id ASC`,
-		profileID,
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	byCollection := make(map[string][]string, len(collections))
-	for rows.Next() {
-		var collectionID, profileID string
-		if err := rows.Scan(&collectionID, &profileID); err != nil {
-			return err
-		}
-		byCollection[collectionID] = append(byCollection[collectionID], profileID)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for i := range collections {
-		collections[i].AllowedProfileIDs = byCollection[collections[i].ID]
-	}
-	return nil
+	return collections, rows.Err()
 }
 
 // UpdateCollection renames a collection and updates its updated_at timestamp.
@@ -207,35 +144,6 @@ func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
 			return err
 		}
 	}
-	if input.AllowedProfileIDs != nil || input.IsShared != nil {
-		isShared := false
-		if input.IsShared != nil {
-			isShared = *input.IsShared
-		} else {
-			if err := tx.QueryRow(`SELECT is_shared FROM personal_collections WHERE id = ?`, input.ID).Scan(&isShared); err != nil {
-				return err
-			}
-		}
-		allowed := []string{}
-		if input.AllowedProfileIDs != nil {
-			allowed = *input.AllowedProfileIDs
-		} else {
-			allowed, err = listCollectionProfilesTx(tx, input.ID)
-			if err != nil {
-				return err
-			}
-		}
-		allowed = normalizeAllowedProfiles(creatorProfileID, allowed, isShared)
-		if _, err := tx.Exec(`DELETE FROM personal_collection_profiles WHERE collection_id = ?`, input.ID); err != nil {
-			return err
-		}
-		for _, profileID := range allowed {
-			if _, err := tx.Exec(`INSERT INTO personal_collection_profiles (collection_id, profile_id) VALUES (?, ?)`, input.ID, profileID); err != nil {
-				return err
-			}
-		}
-	}
-
 	return tx.Commit()
 }
 
@@ -306,59 +214,4 @@ func ListCollectionItems(db *sql.DB, collectionID string) ([]CollectionItem, err
 		items = append(items, ci)
 	}
 	return items, rows.Err()
-}
-
-func listCollectionProfiles(db *sql.DB, collectionID string) ([]string, error) {
-	rows, err := db.Query(
-		`SELECT profile_id FROM personal_collection_profiles WHERE collection_id = ? ORDER BY profile_id ASC`,
-		collectionID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanCollectionProfiles(rows)
-}
-
-func listCollectionProfilesTx(tx *sql.Tx, collectionID string) ([]string, error) {
-	rows, err := tx.Query(
-		`SELECT profile_id FROM personal_collection_profiles WHERE collection_id = ? ORDER BY profile_id ASC`,
-		collectionID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanCollectionProfiles(rows)
-}
-
-func scanCollectionProfiles(rows *sql.Rows) ([]string, error) {
-	var profiles []string
-	for rows.Next() {
-		var profileID string
-		if err := rows.Scan(&profileID); err != nil {
-			return nil, err
-		}
-		profiles = append(profiles, profileID)
-	}
-	return profiles, rows.Err()
-}
-
-func normalizeAllowedProfiles(creatorProfileID string, allowedProfiles []string, isShared bool) []string {
-	if !isShared {
-		return []string{creatorProfileID}
-	}
-	seen := map[string]struct{}{creatorProfileID: {}}
-	normalized := []string{creatorProfileID}
-	for _, profileID := range allowedProfiles {
-		if profileID == "" {
-			continue
-		}
-		if _, ok := seen[profileID]; ok {
-			continue
-		}
-		seen[profileID] = struct{}{}
-		normalized = append(normalized, profileID)
-	}
-	return normalized
 }

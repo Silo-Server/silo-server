@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -52,6 +53,10 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 		if ctx.Err() != nil {
 			return plexMetadataSweep{}, ctx.Err()
 		}
+		// Unlike other failures, a source over the size limits fails the run.
+		if errors.Is(err, ErrUpstreamResponseTooLarge) {
+			return plexMetadataSweep{}, err
+		}
 		noteErr(err, batch)
 		// Older PMS releases answered 404 for a whole batch when only one key was
 		// deleted. Retry that case per key, but do not multiply systematic failures
@@ -82,6 +87,9 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 			if err != nil {
 				if ctx.Err() != nil {
 					return plexMetadataSweep{}, ctx.Err()
+				}
+				if errors.Is(err, ErrUpstreamResponseTooLarge) {
+					return plexMetadataSweep{}, err
 				}
 				noteErr(err, []string{key})
 				continue

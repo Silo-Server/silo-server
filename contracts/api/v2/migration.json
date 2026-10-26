@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 779
+    "entries": 789
   },
   "entries": [
     {
@@ -311,6 +311,48 @@
       "listener": "root",
       "namespace": "legacy_unversioned",
       "method": "PUT",
+      "path": "/",
+      "registration_index": 0,
+      "handler": "server.FrontendHandler()",
+      "handler_kind": "expression",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "web"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "other",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Bundled web frontend catch-all on the root listener; an HTML/asset response, not a native API operation. No ratified document names this exclusion, so it is a judgment call for maintainer review.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Serves the bundled web frontend; the browser is the consumer. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
+      "method": "QUERY",
       "path": "/",
       "registration_index": 0,
       "handler": "server.FrontendHandler()",
@@ -703,6 +745,50 @@
       "listener": "root",
       "namespace": "legacy_unversioned",
       "method": "PUT",
+      "path": "/api/",
+      "registration_index": 0,
+      "handler": "listener:api",
+      "handler_kind": "delegation",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": "api",
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Root-mux delegation to the API listener; the operations behind it are the API listener rows.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "legacy_unversioned",
+      "method": "QUERY",
       "path": "/api/",
       "registration_index": 0,
       "handler": "listener:api",
@@ -1126,6 +1212,48 @@
     {
       "listener": "root",
       "namespace": "operational",
+      "method": "QUERY",
+      "path": "/metrics",
+      "registration_index": 0,
+      "handler": "http.NotFoundHandler()",
+      "handler_kind": "expression",
+      "source_file": "cmd/silo/root_handler.go",
+      "route_group": "/",
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "unused"
+      ],
+      "consumer_call_sites": [],
+      "section": "root-operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "operator_metrics",
+      "disposition_rationale": "Unauthenticated operator-facing /metrics stays outside the native client contract (api-contract.md, \"What Huma covers\"). The primary port answers 404 here; metrics are served only by the opt-in operational_metrics listener.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "root",
+      "namespace": "operational",
       "method": "TRACE",
       "path": "/metrics",
       "registration_index": 0,
@@ -1175,7 +1303,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1235,7 +1363,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1297,7 +1425,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1360,7 +1488,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1420,7 +1548,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1483,7 +1611,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1543,7 +1671,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1605,7 +1733,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1668,7 +1796,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1731,7 +1859,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1791,7 +1919,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1853,7 +1981,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1915,7 +2043,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -1977,7 +2105,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2039,7 +2167,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2108,7 +2236,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2168,7 +2296,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2237,7 +2365,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2297,7 +2425,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2359,7 +2487,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2419,7 +2547,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2481,7 +2609,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2543,7 +2671,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2605,7 +2733,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2665,7 +2793,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2727,7 +2855,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2789,7 +2917,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2851,7 +2979,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2911,7 +3039,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -2973,7 +3101,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3035,7 +3163,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3097,7 +3225,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3151,7 +3279,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3213,7 +3341,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3275,7 +3403,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3337,7 +3465,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3399,7 +3527,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3459,7 +3587,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/catalog",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3519,7 +3647,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3578,7 +3706,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3641,7 +3769,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3704,7 +3832,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3767,7 +3895,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3827,7 +3955,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3889,7 +4017,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -3951,7 +4079,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4013,7 +4141,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4051,19 +4179,17 @@
       "section": "admin-collections",
       "release_flow": "other_admin",
       "tier": 2,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/admin/collections/import/trakt",
-        "operation_id": "importAdminTrakt"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Administrator collection v2 operation uses shared services and typed string IDs. Bundled web consumes v2; legacy routes remain available. No existing Apple or Android administrator collection consumer was found. Jellyfin has no administrator editing surface.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity is provided. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section admin-collections. The v2 importAdminTrakt operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -4075,7 +4201,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4130,7 +4256,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4200,7 +4326,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4260,7 +4386,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4322,7 +4448,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4384,7 +4510,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4444,7 +4570,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4514,7 +4640,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4577,7 +4703,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4639,7 +4765,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4702,7 +4828,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4764,7 +4890,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4833,7 +4959,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/collections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4895,7 +5021,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -4946,7 +5072,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5014,7 +5140,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5082,7 +5208,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5153,7 +5279,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5212,7 +5338,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5271,7 +5397,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/handlers/admin_diagnostics.go",
       "route_group": "/api/v1/admin/diagnostics/reports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5331,7 +5457,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/handlers/admin_diagnostics.go",
       "route_group": "/api/v1/admin/diagnostics/reports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5392,7 +5518,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/handlers/admin_diagnostics.go",
       "route_group": "/api/v1/admin/diagnostics/reports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5452,7 +5578,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/handlers/admin_diagnostics.go",
       "route_group": "/api/v1/admin/diagnostics/reports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5504,7 +5630,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5558,7 +5684,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5612,7 +5738,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5664,7 +5790,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5730,7 +5856,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-import-sources",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5790,7 +5916,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-import-sources",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5852,7 +5978,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-import-sources",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5915,7 +6041,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-import-sources",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -5978,7 +6104,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6038,7 +6164,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6100,7 +6226,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6163,7 +6289,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6226,7 +6352,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6288,7 +6414,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6350,7 +6476,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6419,7 +6545,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6479,7 +6605,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6541,7 +6667,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6603,7 +6729,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6666,7 +6792,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6729,7 +6855,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/history-imports",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6789,7 +6915,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invitations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6849,7 +6975,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invitations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6911,7 +7037,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invitations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -6972,7 +7098,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invitations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7034,7 +7160,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invite-codes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7094,7 +7220,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invite-codes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7156,7 +7282,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invite-codes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7217,7 +7343,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invite-codes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7279,7 +7405,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/invite-codes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7341,7 +7467,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7401,7 +7527,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7461,7 +7587,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7521,7 +7647,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -7583,7 +7709,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7645,7 +7771,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7707,7 +7833,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7761,7 +7887,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7822,7 +7948,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7884,7 +8010,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7944,7 +8070,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -7998,7 +8124,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8022,17 +8148,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/hooks/queries/items.ts",
-          "line": 210,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "admin-catalog",
       "release_flow": "other_admin",
       "tier": 2,
@@ -8046,7 +8164,7 @@
         "path": "/api/v2/admin/items/{id}/redetect-intro",
         "operation_id": "redetectAdminEpisodeIntro"
       },
-      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Typed202 queued/already_running is not persisted job acceptance. Existing web re-detection adopted; no native administrator callers or Jellyfin equivalent found.",
+      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Episodes and intros only, as in v1. Typed202 queued/already_running is not persisted job acceptance. Web re-detection moved to the v2-only redetectAdminItemMarkers, which also offers credits and movies; no native administrator callers or Jellyfin equivalent found.",
       "retry_safety": "non_retryable",
       "retry_safety_note": "An in-process in-flight map coalesces active work only; no durable receipt, cluster-wide lease, or persisted job. Web disables mutation and authentication retries."
     },
@@ -8060,7 +8178,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8114,7 +8232,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -8175,7 +8293,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 8,
+      "middleware_chain": 9,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
@@ -8237,7 +8355,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8299,7 +8417,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8358,7 +8476,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8419,7 +8537,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8480,7 +8598,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8541,7 +8659,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/jobs",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8660,7 +8778,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/jobs",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8721,7 +8839,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/libraries/{libraryID}/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8781,7 +8899,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/libraries/{libraryID}/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8843,7 +8961,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/libraries/{libraryID}/collection-groups",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8906,7 +9024,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -8958,7 +9076,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9012,7 +9130,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9066,7 +9184,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9120,7 +9238,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9174,7 +9292,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9234,7 +9352,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9294,7 +9412,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9354,7 +9472,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9406,7 +9524,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9466,7 +9584,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9526,7 +9644,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9586,7 +9704,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9648,7 +9766,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9710,7 +9828,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9762,7 +9880,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9822,7 +9940,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9884,7 +10002,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -9938,7 +10056,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10001,7 +10119,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10063,7 +10181,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10125,7 +10243,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10179,7 +10297,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/nodes",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10241,7 +10359,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10303,7 +10421,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10358,7 +10476,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10413,7 +10531,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10476,7 +10594,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10539,7 +10657,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10599,7 +10717,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10661,7 +10779,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10722,7 +10840,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10784,7 +10902,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10846,7 +10964,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/notifications/server-channels",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10900,7 +11018,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -10962,7 +11080,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11024,7 +11142,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11083,7 +11201,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11134,7 +11252,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11194,7 +11312,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11254,7 +11372,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11317,7 +11435,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11377,7 +11495,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11439,7 +11557,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11501,7 +11619,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11563,7 +11681,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11625,7 +11743,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11687,7 +11805,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11749,7 +11867,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11811,7 +11929,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11873,7 +11991,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11933,7 +12051,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -11995,7 +12113,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12057,7 +12175,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12119,7 +12237,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12181,7 +12299,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12252,7 +12370,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12321,7 +12439,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12385,7 +12503,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/plugins",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12456,7 +12574,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12516,7 +12634,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12576,7 +12694,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12636,7 +12754,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12698,7 +12816,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12761,7 +12879,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12821,7 +12939,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12884,7 +13002,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -12944,7 +13062,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13006,7 +13124,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13066,7 +13184,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13129,7 +13247,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13191,7 +13309,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13253,7 +13371,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/policy",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13313,7 +13431,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/rate-limits",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13373,7 +13491,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/rate-limits",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13436,7 +13554,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/recommendations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13496,7 +13614,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/recommendations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13558,7 +13676,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/recommendations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13620,7 +13738,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/recommendations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13682,7 +13800,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/recommendations",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13744,7 +13862,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13804,7 +13922,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13866,7 +13984,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13929,7 +14047,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -13992,7 +14110,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14054,7 +14172,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14114,7 +14232,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14177,7 +14295,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14237,7 +14355,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14300,7 +14418,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14360,7 +14478,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14422,7 +14540,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14476,7 +14594,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14538,7 +14656,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14600,7 +14718,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14660,7 +14778,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14722,7 +14840,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14785,7 +14903,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14847,7 +14965,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14910,7 +15028,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -14973,7 +15091,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15036,7 +15154,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/sections",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15099,7 +15217,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15160,7 +15278,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15219,7 +15337,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15278,7 +15396,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15329,7 +15447,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15391,7 +15509,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15462,7 +15580,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15533,7 +15651,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15604,7 +15722,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15675,7 +15793,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15726,7 +15844,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15788,7 +15906,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15849,7 +15967,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15908,7 +16026,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15967,7 +16085,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -15996,18 +16114,18 @@
       "consumer_call_sites": [],
       "section": "admin-settings",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The `sections.allow_profile_custom_sections` admin setting routes\"); still registered on the bridge surface, retired by the tombstone. No successor: profiles may always add rule rows, so there is no setting.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/admin/settings/sections",
-        "operation_id": "getAdminSectionSettings"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Reuse existing profile-section flag foundation. Store read errors preserve disabled default; no recorded native/web consumer. Independent review pending."
+      "notes": "The v2 operations (getAdminSectionSettings, updateAdminSectionSettings) were removed before the v2 lock when the \"Let profiles add rule rows\" setting was retired: profiles may always add rule rows, and only an admin adds new Editor's picks rows. The frozen v1 route reads allow_profile_custom_sections as true; a stored sections.allow_profile_custom_sections row is ignored. getProfileSectionFlags keeps allow_profile_custom_sections, always true and deprecated. No native or Jellyfin consumer exists. Removal ratified 2026-10-05 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -16019,7 +16137,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16048,21 +16166,18 @@
       "consumer_call_sites": [],
       "section": "admin-settings",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The `sections.allow_profile_custom_sections` admin setting routes\"); still registered on the bridge surface, retired by the tombstone. No successor: profiles may always add rule rows, so there is no setting.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "PUT",
-        "path": "/api/v2/admin/settings/sections",
-        "operation_id": "updateAdminSectionSettings"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Guarded boolean replacement through existing settings UpdateAtomic. No-change no write; admin GET now supplies actor/profile-bound ETag and conditional reads. Existing profile read/default-on-error semantics and bridge writer unchanged. No recorded web/native/Jellyfin writer; no UI invented. Independent new-write/additive-admin-read review pending.",
-      "concurrency": "if_match",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Same desired boolean has no additional effect; canonical guard runs inside the settings transaction. Reusing a stale explicit validator fails rather than overwriting a changed flag."
+      "notes": "The v2 operations (getAdminSectionSettings, updateAdminSectionSettings) were removed before the v2 lock when the \"Let profiles add rule rows\" setting was retired: profiles may always add rule rows, and only an admin adds new Editor's picks rows. The frozen v1 route accepts a JSON body, changes nothing, and answers allow_profile_custom_sections true; a stored sections.allow_profile_custom_sections row is ignored. getProfileSectionFlags keeps allow_profile_custom_sections, always true and deprecated. No native or Jellyfin consumer exists. Removal ratified 2026-10-05 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -16074,7 +16189,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16133,7 +16248,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16192,7 +16307,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16254,7 +16369,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16313,7 +16428,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16372,7 +16487,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16431,7 +16546,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16490,7 +16605,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16549,7 +16664,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16600,7 +16715,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitle-providers",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16660,7 +16775,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitle-providers/{provider}",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16723,7 +16838,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitle-providers/{provider}",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16785,7 +16900,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitles",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16854,7 +16969,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitles/{id}",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16917,7 +17032,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitles/{id}",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -16980,7 +17095,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/subtitles/{id}",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17032,7 +17147,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/system",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17091,7 +17206,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/system",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17150,7 +17265,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/system",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17209,7 +17324,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17269,7 +17384,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17329,7 +17444,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17391,7 +17506,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17451,7 +17566,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17511,7 +17626,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17587,7 +17702,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin/tasks",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17650,7 +17765,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17701,7 +17816,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17760,7 +17875,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17821,7 +17936,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17883,7 +17998,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -17942,7 +18057,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18004,7 +18119,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18065,7 +18180,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18125,7 +18240,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18184,7 +18299,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18244,7 +18359,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18312,7 +18427,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18380,7 +18495,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/admin",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -18778,7 +18893,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 11,
+      "middleware_chain": 13,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -18834,7 +18949,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 12,
+      "middleware_chain": 14,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -18991,7 +19106,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 16,
+      "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19084,10 +19199,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 2,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "profile_required": false,
       "admin_required": false,
@@ -19175,10 +19291,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 14,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
+        "rate_limited",
         "viewer_access"
       ],
       "profile_required": false,
@@ -19290,10 +19407,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 2,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "profile_required": false,
       "admin_required": false,
@@ -19361,7 +19479,7 @@
       },
       "notes": "Authenticated. Same {status} answer and the same decision codes as approveDeviceLogin.",
       "retry_safety": "domain_identity",
-      "retry_safety_note": "Keyed by the request's user code; the denial is UPDATE ... WHERE status IN (pending, approved), a second deny is a no-op."
+      "retry_safety_note": "Keyed by the request's user code; the denial is UPDATE ... WHERE status is pending, or approved by the denying account, so a second deny is a no-op and a request another account approved stays approved (409)."
     },
     {
       "listener": "api",
@@ -19457,7 +19575,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 17,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19636,7 +19754,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 18,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19853,7 +19971,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 20,
+      "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20250,7 +20368,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 11,
+      "middleware_chain": 13,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -20636,7 +20754,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 21,
+      "middleware_chain": 23,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20810,7 +20928,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 22,
+      "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20923,7 +21041,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 15,
+      "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -21121,11 +21239,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21209,11 +21328,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21277,11 +21397,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21345,11 +21466,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21413,11 +21535,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21501,11 +21624,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21570,11 +21694,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21629,11 +21754,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21698,11 +21824,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21768,11 +21895,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21847,11 +21975,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -21906,11 +22035,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -22752,20 +22882,18 @@
       ],
       "section": "personal-collections",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/collections/import/trakt",
-        "operation_id": "importTraktCollection"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Personal collection v2 operation uses the shared profile-scoped service. Storage capabilities distinguish unsupported SQLite imports, groups, artwork and reorder. Native Apple and Android adoption remains follow-up; bundled web consumes v2.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity or mutation generation is implemented. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section personal-collections. The v2 importTraktCollection operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -23709,7 +23837,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 10,
+      "middleware_chain": 11,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -24348,11 +24476,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24405,11 +24534,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24454,11 +24584,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24503,11 +24634,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24552,11 +24684,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -24611,11 +24744,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25107,11 +25241,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25291,11 +25426,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25358,11 +25494,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25407,11 +25544,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -25456,11 +25594,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/downloads",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -26643,8 +26782,8 @@
         "operation_id": "deleteFavorite"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -26705,7 +26844,7 @@
         "path": "/api/v2/favorites/{item_id}",
         "operation_id": "getFavorite"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not a favorite and for one the viewer may not see alike. getFavoriteMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -26783,8 +26922,8 @@
         "operation_id": "addFavorite"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being a favorite. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -27651,7 +27790,7 @@
         "path": "/api/v2/home/layout",
         "operation_id": "getHomeLayout"
       },
-      "notes": "Section catalog-home (profile_scoped). Same body; the SectionLayout schema shared with getLibraryLayout."
+      "notes": "Section catalog-home (profile_scoped). Same sections as v1 in the HomeLayout schema (SectionLayoutEntry rows, as getLibraryLayout); v2 adds the opt-in include_items and image_size query parameters and the included_sections array, empty unless requested, that carries the first rows as getHomeSectionItems answers them."
     },
     {
       "listener": "api",
@@ -27951,7 +28090,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 19,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -28063,7 +28202,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 19,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -28171,11 +28310,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -28224,11 +28364,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -28305,7 +28446,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28364,7 +28505,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28425,7 +28566,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28484,7 +28625,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28543,7 +28684,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28603,7 +28744,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28662,7 +28803,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28723,7 +28864,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28784,7 +28925,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28843,7 +28984,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28902,7 +29043,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -28963,7 +29104,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29022,7 +29163,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29082,7 +29223,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29143,7 +29284,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29204,7 +29345,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29265,7 +29406,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29324,7 +29465,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29385,7 +29526,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29446,7 +29587,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29507,7 +29648,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29568,7 +29709,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29627,7 +29768,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29688,7 +29829,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/libraries",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -29934,11 +30075,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -30002,11 +30144,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -30267,11 +30410,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -30325,11 +30469,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/markers",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -30375,11 +30520,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/markers",
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -30428,11 +30574,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/markers",
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -30481,11 +30628,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/markers",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -30539,11 +30687,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/markers",
-      "middleware_chain": 7,
+      "middleware_chain": 8,
       "auth_class": "permission_gated",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "marker_edit",
         "rate_limited",
         "viewer_access"
@@ -31711,7 +31860,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 23,
+      "middleware_chain": 25,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
@@ -33057,11 +33206,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -33125,11 +33275,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -33212,11 +33363,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -34716,6 +34868,50 @@
     {
       "listener": "api",
       "namespace": "api_v1",
+      "method": "QUERY",
+      "path": "/api/v1/plugins/{installation_id}/*",
+      "registration_index": 0,
+      "handler": "literal:api:/api/v1/plugins/{installation_id}/*",
+      "handler_kind": "literal",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/v1",
+      "middleware_chain": 1,
+      "auth_class": "public",
+      "auth_traits": [],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.PluginHTTPProxy != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "dynamic_proxy",
+      "response_media_kind": "dynamic_proxy",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "unused"
+      ],
+      "consumer_call_sites": [],
+      "section": "plugin-proxy",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "dynamic_plugin_proxy",
+      "disposition_rationale": "Dynamic plugin HTTP proxy path; cannot have a finite static response schema (api-contract.md, \"What Huma covers\").",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Media kind deliberately overrides the inventory's heuristic value: a dynamic plugin proxy has no static request or response kind, so both are recorded as dynamic_proxy (the gate allows this override only under this rule). Conditionally registered: deps.PluginHTTPProxy != nil. v2 registers the operation unconditionally and reports capability state instead."
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v1",
       "method": "TRACE",
       "path": "/api/v1/plugins/{installation_id}/*",
       "registration_index": 0,
@@ -35155,7 +35351,7 @@
         "path": "/api/v2/profile/sections/settings",
         "operation_id": "getProfileSectionSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag. Adds default_title, the administrator's title for the row, which v1 does not return."
     },
     {
       "listener": "api",
@@ -35480,7 +35676,7 @@
       },
       "notes": "Pilot (profile_scoped, no profile header). PUT became PATCH: omitted=unchanged, null clears where allowed. Only max_playback_quality is a strict enum (no 4K/UHD aliases); quality_preference and subtitle_mode stay free-form (maxLength 32) until ratified (#135) because v1 never validated them and clients send 1080p/4k/2160p/720p and default/forced_only; every string member always emitted; read model does not constrain legacy stored enum values.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the row converges, but updateProfile bumps the account-wide access_policy_revision whenever pin, is_child, rating, library, or quality fields are present, so an identical retry invalidates tokens minted in between across sibling profiles. The v2 port must bump only on an effective change."
+      "retry_safety_note": "DEFECT: the row converges, but updateProfile bumps access_policy_revision when pin, is_child, rating, library or quality fields are present, and pin_revision when pin is, so a retry with a PIN invalidates that profile's tokens minted in between. The v2 port must bump only on an effective change."
     },
     {
       "listener": "api",
@@ -35658,9 +35854,9 @@
         "path": "/api/v2/profiles/{id}/verify-pin",
         "operation_id": "verifyProfilePIN"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same token semantics (X-Profile-Token bound to the login session and policy revision) and no-store. expires_at is a nullable instant, always present; a missing or empty pin is 422 (v1: 400).",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Writes no durable state on success; a duplicate re-verifies the PIN and mints another short-lived profile token."
+      "notes": "Conditionally registered: authMiddleware != nil; profileHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Same token semantics (X-Profile-Token bound to the login session and the profile's PIN revision) and no-store. expires_at is a nullable instant, always present; a missing or empty pin is 422 (v1: 400).",
+      "retry_safety": "non_retryable",
+      "retry_safety_note": "Each attempt affects the profile PIN lockout count; do not automatically replay a check after a timeout."
     },
     {
       "listener": "api",
@@ -36058,7 +36254,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here (docs/continuum-to-silo-docker-migration.md). Contract: docs/architecture/api-contract.md."
+      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here. Contract: docs/architecture/api-contract.md."
     },
     {
       "listener": "api",
@@ -38023,7 +38219,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -38084,7 +38280,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 9,
+      "middleware_chain": 10,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -38223,17 +38419,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/lib/recipes.ts",
-          "line": 79,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "catalog-home",
       "release_flow": "browse_search",
       "tier": 1,
@@ -40565,11 +40753,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -40626,11 +40815,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -40687,11 +40877,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -40950,11 +41141,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41092,11 +41284,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41281,11 +41474,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41351,11 +41545,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41411,11 +41606,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41464,11 +41660,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/subtitles",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -41649,18 +41846,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The admin theme overrides route\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client applies only the branding accent color, with no admin token, font or CSS overrides.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/admin-css",
-        "operation_id": "getThemeOverrides"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented public branding discovery/overrides and image GET/HEAD on reviewed raw foundation. Asset URLs target v2, exact content-version requests cache immutably, stale versions return404, unversioned reads revalidate. Security headers and conditional tags preserved. Bundled web uses v2 discovery/overrides. Capability GET /api/v2/theme/capabilities. Frozen v1 transport unchanged. Independently reviewed and accepted with coordinated Apple and Android public branding consumers; no native CSS caller."
+      "notes": "Section settings-branding. The v2 getThemeOverrides operation and the overrides_available capability field were removed before the v2 lock when the admin token and font overrides and custom CSS were removed from the web client; the accent color stays on getBranding and the web client applies it from there. The bundled web client no longer reads the overrides; no native or Jellyfin consumer exists. The frozen v1 route keeps reporting the stored ui.admin_theme_vars and ui.admin_custom_css values until the /api/v1 tombstone retires it. Removal ratified 2026-10-13 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41767,18 +41964,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/catalog",
-        "operation_id": "getThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41790,7 +41987,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 13,
+      "middleware_chain": 15,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -41823,20 +42020,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/theme/catalog/refresh",
-        "operation_id": "refreshThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Resets a cache timestamp; converges."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41880,18 +42075,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/download",
-        "operation_id": "downloadThemeFile"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -43437,11 +43632,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -43581,7 +43777,7 @@
       },
       "notes": "Section personal-progress (profile_scoped). Media kind confirmed from ItemsHandler.HandleMarkUnwatched: request has no body, v1 answers JSON {content_id, type, affected_count, played:false}; v2 answers 204 with no body. Same target resolution as markWatched (movie, ebook, episode, season, series; season/series expand to episodes), unknown or inaccessible target 404. Retry safety: natural_idempotent (clearing an unwatched item is a no-op). Conditionally registered in v1 (authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil); v2 registers unconditionally and answers 503 when the items handler is not wired.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "recordMarkUnwatched hides history through a fresh time.Now() cutoff and re-dispatches the provider event, so a retry after a lost response also hides a viewing recorded in between. The v2 port must carry the cutoff in the request so a retry targets the original set."
+      "retry_safety_note": "recordMarkUnwatched clears watched state through a fresh time.Now() cutoff, so a retry after a lost response also stops a viewing recorded in between from counting as watched (the viewing stays in history). The v2 port must carry the cutoff in the request so a retry targets the original set."
     },
     {
       "listener": "api",
@@ -43817,8 +44013,8 @@
         "operation_id": "deleteWatchlistEntry"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -43879,7 +44075,7 @@
         "path": "/api/v2/watchlist/{item_id}",
         "operation_id": "getWatchlistEntry"
       },
-      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
+      "notes": "Section personal-lists (profile_scoped). v1's bodiless 204/404 became a 200 {item_id, added_at} entry (added_at a UTC ms instant) or a 404 not_found problem, for an item that is not on the watchlist and for one the viewer may not see alike. getWatchlistMembership answers the same check as 200 {item_id, is_member} for a non-member, 404 only for an item the viewer may not see (issue #952). Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead."
     },
     {
       "listener": "api",
@@ -43957,8 +44153,8 @@
         "operation_id": "addToWatchlist"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being on the watchlist. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -44492,7 +44688,7 @@
         "path": "/api/v2/webhook-sync/webhooks/{secret}",
         "operation_id": "receiveExternalWebhook"
       },
-      "notes": "External provider receiver implemented through shared secret lookup, provider processing and delivery logging; independently reviewed and accepted. V2 bounds complete delivery to 10 MiB before provider side effects and cleans multipart resources. Public secret proof independent of ambient login/profile; rotation invalidates old URL. Bodyless204 acknowledgement and safe problem failures. Non-retryable synchronous processing retains existing event ordering/deduplication limitations; no exactly-once guarantee. V2 management emits v2 receiver URLs; frozen bridge URLs and behavior retained. Capability GET /api/v2/webhook-sync/capabilities.",
+      "notes": "External provider receiver implemented through shared secret lookup, provider processing and delivery logging; independently reviewed and accepted. Every receiver bounds the complete delivery to 10 MiB before provider side effects and cleans multipart resources: a critical bridge fix extended the v2 limit to the frozen bridge receivers, which previously buffered unbounded bodies, and oversize deliveries there now answer 413 payload_too_large. Public secret proof independent of ambient login/profile; rotation invalidates old URL. Bodyless204 acknowledgement and safe problem failures. Non-retryable synchronous processing retains existing event ordering/deduplication limitations; no exactly-once guarantee. V2 management emits v2 receiver URLs; bridge URLs retained. Capability GET /api/v2/webhook-sync/capabilities.",
       "retry_safety": "non_retryable",
       "retry_safety_note": "Delivery can update watch state, discovery and logs. No request replay identity or exactly-once guarantee; do not automatically replay an uncertain response."
     },
@@ -44506,11 +44702,12 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 7,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
         "demo_guarded",
+        "household_profile_gate",
         "rate_limited",
         "viewer_access"
       ],
@@ -45293,6 +45490,50 @@
     {
       "listener": "api",
       "namespace": "api_v2",
+      "method": "QUERY",
+      "path": "/api/v2/*",
+      "registration_index": 0,
+      "handler": "listener:api_v2",
+      "handler_kind": "delegation",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": "api_v2",
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "v2-delegation",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "API-listener delegation to the native v2 listener; the operations behind it are described by contracts/api/v2/openapi.json, not by legacy ledger rows.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "API-listener hand-off of the /api/v2/ subtree to the sealed apiv2 listener (internal/apiv2). The operations behind it are v2 operations, not legacy rows."
+    },
+    {
+      "listener": "api",
+      "namespace": "api_v2",
       "method": "TRACE",
       "path": "/api/v2/*",
       "registration_index": 0,
@@ -45344,7 +45585,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45404,7 +45645,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45457,7 +45698,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45510,7 +45751,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45569,7 +45810,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45622,7 +45863,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45675,7 +45916,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45750,7 +45991,7 @@
       "handler_kind": "expression",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 24,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45794,7 +46035,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45847,7 +46088,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45901,7 +46142,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45955,7 +46196,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46000,7 +46241,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46039,13 +46280,60 @@
       "listener": "proxy",
       "namespace": "legacy_unversioned",
       "method": "GET",
+      "path": "/stream/bandwidth-probe/{token}",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 27,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": true,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "web",
+        "apple",
+        "android"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-proxy",
+      "release_flow": "playback_lifecycle",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Media-path bandwidth probe served at a version-neutral proxy route and described in x-silo-worker-protocols; no native API alias.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with public outer middleware and a signed probe-purpose token. Described by x-silo-worker-protocols; no native alias. Discovery is advertised by connection_speed_v1 at GET /api/v2/playback/capabilities."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
       "path": "/stream/direct/{token}",
       "registration_index": 0,
       "handler": "(*internal/proxy.Server).handleDirectPlay",
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46106,7 +46394,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46167,7 +46455,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46228,7 +46516,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46289,7 +46577,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46350,7 +46638,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46411,7 +46699,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46456,7 +46744,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46501,7 +46789,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46554,7 +46842,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46607,7 +46895,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46668,7 +46956,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46729,7 +47017,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46789,7 +47077,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46842,7 +47130,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46895,7 +47183,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46948,7 +47236,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47001,7 +47289,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47061,7 +47349,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47120,7 +47408,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47172,7 +47460,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47281,7 +47569,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47326,6 +47614,58 @@
     {
       "listener": "transcode_node",
       "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/downloads/artifacts",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleListDownloadArtifacts",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/downloadprepare/transport.go",
+          "line": 493,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "downloads",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node GET /downloads/artifacts. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
       "method": "DELETE",
       "path": "/downloads/artifacts/{artifact_id}",
       "registration_index": 0,
@@ -47333,7 +47673,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47386,7 +47726,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47438,7 +47778,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47490,7 +47830,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47538,13 +47878,65 @@
       "listener": "transcode_node",
       "namespace": "legacy_unversioned",
       "method": "GET",
+      "path": "/downloads/prepare/{artifact_id}/progress",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleDownloadPrepareProgress",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/downloadprepare/transport.go",
+          "line": 432,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "downloads",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node GET /downloads/prepare/{artifact_id}/progress. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
       "path": "/hw-capabilities",
       "registration_index": 0,
       "handler": "(*internal/transcodenode.Server).handleHWCapabilities",
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47610,6 +48002,58 @@
     },
     {
       "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/media-samples/run",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleMediaSample",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/mediasample/remote.go",
+          "line": 85,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Node-listener route added with subtitle sync: transcode nodes run media sampling requests (speech levels for subtitle alignment) so large files are read next to the media instead of on the API server. The node listeners have no /api/v2 namespace; the route keeps its version-neutral path and is described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /media-samples/run. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
       "namespace": "operational",
       "method": "GET",
       "path": "/metrics",
@@ -47660,7 +48104,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47719,7 +48163,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47778,7 +48222,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47822,7 +48266,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47884,7 +48328,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47937,7 +48381,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48011,7 +48455,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48085,7 +48529,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48149,6 +48593,58 @@
       },
       "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /transcode/{session_id}/segment/{name}/downloaded. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR.",
       "retry_safety": "natural_idempotent"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/trickplay/extract",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/trickplay/remote.go",
+          "line": 145,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /trickplay/extract. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
     }
   ]
 }

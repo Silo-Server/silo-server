@@ -29,9 +29,12 @@ and ranges. Unsupported mount methods return 405 with Allow.
 The existing proxy's credential header filters, response header filters, request
 buffering, error behavior and HTTPRoutes RPC remain unchanged. Query forwarding
 retains only the first value of each repeated key, as in the bridge proxy. This is not a
-websocket tunnel or an arbitrary streaming transport. Bodies are still buffered;
-there is no new body limit, durable admission, idempotency promise or automatic
-retry policy. Plugin-defined side effects must not be automatically replayed.
+websocket tunnel or an arbitrary streaming transport. Bodies are buffered in
+full before the plugin RPC, under a host cap of 3.75 MiB (4 MiB gRPC receive
+limit less room for the request envelope) on both mounts and for every method,
+chunked bodies included. A larger body gets 413, any other body read failure
+gets 400, and neither reaches the plugin. There is no durable admission,
+idempotency promise or automatic retry policy. Plugin-defined side effects must not be automatically replayed.
 
 The web client prepares plugin navigation with
 `POST /api/v2/auth/plugin-launch`, then opens

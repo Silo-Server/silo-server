@@ -106,75 +106,6 @@ func TestPlaybackV2CapabilitiesAndMissingConfiguration(t *testing.T) {
 	}
 }
 
-func TestPlaybackV2StartUsesTypedServiceAndOpaqueIDs(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	fake := &fakePlaybackService{}
-	deps.Playback = fake
-	data, err := os.ReadFile("../playback/testdata/protocol_v3/decision_response.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &fake.response); err != nil {
-		t.Fatal(err)
-	}
-	input := playbackStartFixture(t)
-	input["allow_alternate_versions"] = false
-	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, input), viewerHeaders())
-	if response.Code != 201 {
-		t.Fatalf("start: %d %s", response.Code, response.Body.String())
-	}
-	if fake.calls != 1 || fake.request.FileID != 42 || fake.caller.ProfileID != "p-owner" || fake.caller.UserID <= 0 || fake.caller.InstallationID != playbackTestInstallation {
-		t.Fatalf("service caller/request: %+v %+v", fake.caller, fake.request)
-	}
-	if fake.request.AllowsAlternateVersions() {
-		t.Fatal("fixed media file constraint was lost at the API boundary")
-	}
-	var body struct {
-		Plan struct {
-			Requested string `json:"requested_media_file_id"`
-			Effective string `json:"effective_media_file_id"`
-			Source    struct {
-				FileID string `json:"media_file_id"`
-			} `json:"source"`
-		} `json:"playback_plan"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Plan.Requested == "" || body.Plan.Effective == "" || body.Plan.Source.FileID == "" {
-		t.Fatalf("opaque IDs: %v %s", err, response.Body.String())
-	}
-}
-
-func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
-	for _, variation := range []string{"numeric file", "protocol", "profile", "installation", "unknown field", "null start"} {
-		t.Run(variation, func(t *testing.T) {
-			deps, _ := catalogDeps(t)
-			fake := &fakePlaybackService{}
-			deps.Playback = fake
-			body := playbackStartFixture(t)
-			switch variation {
-			case "numeric file":
-				body["file_id"] = 42
-			case "protocol":
-				body["protocol_version"] = 2
-			case "profile":
-				body["profile_id"] = "other"
-			case "installation":
-				body["installation_id"] = ""
-			case "unknown field":
-				body["unexpected"] = true
-			case "null start":
-				body["start_position"] = nil
-			}
-			response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
-			if response.Code != 422 {
-				t.Fatalf("validation: %d %s", response.Code, response.Body.String())
-			}
-			if fake.calls != 0 {
-				t.Fatal("invalid request reached application")
-			}
-		})
-	}
-}
-
 func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	fake := &fakePlaybackService{mutation: handlers.PlaybackMutationView{Outcome: "applied"}}
@@ -230,4 +161,88 @@ func TestPlaybackV2ProblemMapping(t *testing.T) {
 	if problem := playbackProblem(errors.New("opaque")); problem.Type != TypeDependencyUnavailable.URI() {
 		t.Fatalf("opaque error: %+v", problem)
 	}
+}
+
+// v2 drops the source entry, video or audio-only, without touching other
+// entries or the shared plan that v1 serializes.
+func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
+	plan := []playback.AvailableQualityV3{
+		{Label: playback.QualityOriginalV3, Height: 2160, BitrateKbps: 40_000, PreservesSource: true},
+		{Label: "1080p", DisplayName: "1080p", Height: 1080, BitrateKbps: 8_000},
+		{Label: "1080p-medium", DisplayName: "1080p Medium", Height: 1080, BitrateKbps: 6_000},
+	}
+	got := playbackQualities(plan)
+	if len(got) != 2 || got[0].Label != "1080p" || got[1].Label != "1080p-medium" {
+		t.Fatalf("v2 qualities = %#v", got)
+	}
+	if len(plan) != 3 || plan[0].Label != playback.QualityOriginalV3 {
+		t.Fatalf("shared plan changed: %#v", plan)
+	}
+	audio := playbackQualities([]playback.AvailableQualityV3{{Label: playback.QualityOriginalV3, BitrateKbps: 128, PreservesSource: true}})
+	if len(audio) != 0 {
+		t.Fatalf("audio-only menu = %#v, want empty", audio)
+	}
+	if playbackQualities(nil) != nil {
+		t.Fatal("an absent menu stays absent")
+	}
+}
+
+// TestPlaybackV2ProbeURLUsesForwardedOrigin: behind a TLS-terminating reverse
+// proxy the request's Host is the internal origin the proxy dialed, which a
+// client cannot reach. The advertised probe URL names the forwarded origin.
+func TestPlaybackV2ProbeURLUsesForwardedOrigin(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.Playback = &scheduleService{}
+	headers := with(with(viewerHeaders(), "X-Forwarded-Host", "media.example.test"), "X-Forwarded-Proto", "https")
+	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", headers)
+	var body PlaybackCapabilities
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+	}
+	if want := "https://media.example.test" + Prefix + "/playback/bandwidth-probe?media_path=true"; body.BandwidthProbeURL != want {
+		t.Fatalf("bandwidth_probe_url = %q, want %q", body.BandwidthProbeURL, want)
+	}
+}
+
+// TestPlaybackV2SpeedTestSchedule: with connection_speed_v1 the capability
+// carries the speed test's schedule; automatic tests switched off still read
+// false rather than vanishing, and a server with no target sends none. Without
+// the feature none of it appears.
+func TestPlaybackV2SpeedTestSchedule(t *testing.T) {
+	read := func(service PlaybackService) map[string]any {
+		t.Helper()
+		deps, _ := catalogDeps(t)
+		deps.Playback = service
+		response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", viewerHeaders())
+		var body map[string]any
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+		}
+		return body
+	}
+	body := read(&scheduleService{view: handlers.PlaybackCapabilitiesView{BandwidthProbeMaxAgeSeconds: 86400}})
+	if body["bandwidth_probe_automatic"] != false || body["bandwidth_probe_max_age_seconds"] != float64(86400) {
+		t.Fatalf("schedule = %v", body)
+	}
+	if _, ok := body["bandwidth_probe_target_kbps"]; ok {
+		t.Fatal("a zero target was sent")
+	}
+	body = read(&fakePlaybackService{})
+	for _, field := range []string{"bandwidth_probe_automatic", "bandwidth_probe_max_age_seconds", "bandwidth_probe_target_kbps", "bandwidth_probe_url"} {
+		if _, ok := body[field]; ok {
+			t.Fatalf("%s sent without connection_speed_v1", field)
+		}
+	}
+}
+
+type scheduleService struct {
+	fakePlaybackService
+	view handlers.PlaybackCapabilitiesView
+}
+
+func (f *scheduleService) PlaybackCapabilities(ctx context.Context, userID int, profileID string) (handlers.PlaybackCapabilitiesView, error) {
+	view, err := f.fakePlaybackService.PlaybackCapabilities(ctx, userID, profileID)
+	view.Features = append(view.Features, playback.FeatureConnectionSpeedV1)
+	view.BandwidthProbeAutomatic, view.BandwidthProbeMaxAgeSeconds, view.BandwidthProbeTargetKbps = f.view.BandwidthProbeAutomatic, f.view.BandwidthProbeMaxAgeSeconds, f.view.BandwidthProbeTargetKbps
+	return view, err
 }

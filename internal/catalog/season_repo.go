@@ -346,7 +346,8 @@ func (r *SeasonRepository) DeleteBySeries(ctx context.Context, seriesID string) 
 }
 
 // UpdateMetadata builds a dynamic UPDATE query for the seasons table,
-// setting only the non-nil fields in upd. Always bumps updated_at.
+// setting only the non-nil fields in upd and NULLing the ones it clears.
+// Always bumps updated_at.
 // Returns ErrSeasonNotFound if no row matches contentID.
 func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
 	var setClauses []string
@@ -378,6 +379,7 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	}
 	addString("poster_source_path", upd.PosterSourcePath)
 	addString("poster_thumbhash", upd.PosterThumbhash)
+	setClauses = append(setClauses, upd.nullClauses(seasonClearableColumns...)...)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 

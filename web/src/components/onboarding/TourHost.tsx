@@ -105,8 +105,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
     if (!step) {
       finish({ skipped: false });
     }
-    // finish is stable enough for this one-shot; re-running on step change is the point.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- finish is stable enough for this one-shot; re-running on step change is the point
   }, [step]);
 
   if (saveFailed)

@@ -25,8 +25,8 @@ type ThemeCatalogResult struct {
 	CacheControl string
 }
 
-// DownloadThemeFile is shared by the frozen byte-preserving v1 transport and
-// the typed v2 transport. Initial and redirected requests use the same allowlist.
+// DownloadThemeFile backs the frozen byte-preserving v1 transport; /api/v2 has
+// no theme catalog. Initial and redirected requests use the same allowlist.
 func (h *ThemeHandler) DownloadThemeFile(ctx context.Context, rawURL string) ([]byte, error) {
 	if rawURL == "" {
 		return nil, apiError(http.StatusBadRequest, "bad_request", "Missing url parameter")

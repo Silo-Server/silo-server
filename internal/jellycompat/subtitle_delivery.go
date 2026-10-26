@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
@@ -16,9 +18,67 @@ const (
 	compatSubtitleEncode = "Encode"
 )
 
+// compatSubtitleSegmentPTSOffset90k is the 90 kHz PTS shift the source's HLS
+// segments add to the source clock, which a WebVTT X-TIMESTAMP-MAP must carry.
+// MPEG-TS segments are shifted by the muxer's fixed delay. fMP4 segments
+// (copied video without the MPEG-TS remux, and encoded HEVC) keep the source
+// clock in tfdt, so their map needs no shift. The container decision is the
+// one the transcode itself makes from the same recipe fields.
+//
+// Direct play and progressive remux have no HLS segments and keep the source
+// clock. Subtitle DeliveryUrls can be fetched before any route starts, so until
+// one has, a source that can be transcoded is assumed to play over HLS.
+func compatSubtitleSegmentPTSOffset90k(playMethod string, source PlaybackMediaSource, file *models.MediaFile) int64 {
+	switch playMethod {
+	case string(playback.PlayTranscode):
+	case "":
+		if !source.SupportsTranscoding {
+			return 0
+		}
+	default:
+		return 0
+	}
+	sourceVideoCodec, _, _ := playback.SourceVideoTranscodeFacts(file)
+	opts := playback.TranscodeOpts{
+		SourceVideoCodec: sourceVideoCodec,
+		TargetCodecVideo: compatSourceTargetVideoCodec(source),
+		CopyVideoMPEGTS:  source.HLSRemuxMPEGTS,
+	}
+	if playback.HLSOutputContainer(opts) == playback.OutputContainerMPEGTS {
+		return playback.HLSMPEGTSTimestampOffset90k
+	}
+	return 0
+}
+
+// deliverTextSubtitle answers from text subtitle bytes that already carry
+// their timing correction: ASS/SSA or SRT as they are when that format was
+// requested, anything else as WebVTT.
+func (h *PlaybackHandler) deliverTextSubtitle(w http.ResponseWriter, r *http.Request, format string, data []byte, requestedFormat string, segmentPTSOffset90k int64) {
+	if requestedFormat == compatSubtitleASS && playback.IsASS(format) {
+		h.deliverSubtitle(w, r, compatSubtitleASS, data, segmentPTSOffset90k)
+		return
+	}
+	if requestedFormat == compatSubtitleSRT && subtitleCanServeSRT(format) {
+		h.deliverSubtitle(w, r, compatSubtitleSRT, data, segmentPTSOffset90k)
+		return
+	}
+	if subtitles.SubtitleFormat(strings.ToLower(format)) == subtitles.FormatVTT {
+		h.deliverSubtitle(w, r, compatSubtitleVTT, data, segmentPTSOffset90k)
+		return
+	}
+	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, format, h.FFmpegPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+		return
+	}
+	h.deliverSubtitle(w, r, compatSubtitleVTT, vttData, segmentPTSOffset90k)
+}
+
 // deliverSubtitle preserves raw ASS styling when possible and applies the
 // Jellyfin text timing contract to VTT/SRT. Unsupported conversions are explicit.
-func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request, format string, data []byte) {
+// segmentPTSOffset90k is the source's HLS segment PTS shift for the VTT time
+// map (see compatSubtitleSegmentPTSOffset90k).
+func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request, format string, data []byte, segmentPTSOffset90k int64) {
 	requested := strings.ToLower(chiURLParam(r, "routeFormat"))
 	if requested == "" {
 		requested = compatSubtitleVTT
@@ -51,6 +111,11 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 		writeSubtitleResponse(w, requested, data)
 		return
 	}
+	// Text written for left-to-right players gets its right-to-left lines
+	// marked so the punctuation lands where the author put it.
+	if format == compatSubtitleVTT || format == compatSubtitleSRT {
+		data = subtitles.MarkLTRAuthoredLines(data)
+	}
 	if requested == format && start == 0 && end == 0 && !timeMap {
 		writeSubtitleResponse(w, requested, data)
 		return
@@ -61,12 +126,13 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 			writeError(w, 500, "ServerError", "Failed to convert subtitle")
 			return
 		}
+		data = subtitles.MarkLTRAuthoredLines(data)
 	}
 	windowFormat := requested
 	if requested == "js" {
 		windowFormat = compatSubtitleVTT
 	}
-	result, err := windowSubtitleVTT(data, windowFormat, start, end, copyTimestamps, timeMap)
+	result, err := windowSubtitleVTT(data, windowFormat, start, end, copyTimestamps, timeMap, segmentPTSOffset90k)
 	if err != nil {
 		writeError(w, 500, "ServerError", "Invalid subtitle timing")
 		return
@@ -115,15 +181,18 @@ func formatSubtitleTimestamp(ms int64, separator string) string {
 	return fmt.Sprintf("%02d:%02d:%02d%s%03d", ms/3600000, ms/60000%60, ms/1000%60, separator, ms%1000)
 }
 
-func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimestamps, timeMap bool) ([]byte, error) {
+func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimestamps, timeMap bool, segmentPTSOffset90k int64) ([]byte, error) {
 	var out strings.Builder
 	if format == compatSubtitleVTT {
 		out.WriteString("WEBVTT\n")
 		if timeMap {
-			// LOCAL is the emitted cue clock; MPEGTS remains the original media clock.
-			mediaTime := start * 90
-			if copyTimestamps {
-				mediaTime = 0
+			// LOCAL is the emitted cue clock. MPEGTS is the matching segment
+			// PTS: the source clock plus the segments' shift, 10 s for MPEG-TS
+			// and none for fMP4. Jellyfin writes the same MPEGTS:900000 for
+			// copied timestamps on MPEG-TS.
+			mediaTime := segmentPTSOffset90k
+			if !copyTimestamps {
+				mediaTime += start * 90
 			}
 			fmt.Fprintf(&out, "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:%d\n", mediaTime%(1<<33))
 		}
@@ -185,4 +254,12 @@ func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimesta
 		}
 	}
 	return []byte(out.String()), nil
+}
+
+// subtitlePlayed hands a subtitle a client is being served to PlaySync. A
+// HEAD request only asks about the subtitle and is not a play.
+func (h *PlaybackHandler) subtitlePlayed(r *http.Request, target subtitles.SyncTarget) {
+	if h.PlaySync != nil && r.Method != http.MethodHead {
+		h.PlaySync.SubtitlePlayed(r.Context(), target)
+	}
 }

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import {
   audioTitle,
   compactAudioMeta,
@@ -47,7 +47,7 @@ function describeTrack(track: PlayerAudioTrack, index: number): TrackDescriptor 
   return {
     title,
     meta: metaParts.join(" \u00B7 "),
-    codecLabel: track.codec ? mapAudioLabel(track.codec) : "",
+    codecLabel: audioTrackLabel(track),
     channelsLabel: formatChannels(track.channels),
     isDefault: Boolean(track.default),
   };
@@ -153,6 +153,7 @@ export function AudioTrackMenu({
 
       {open && (
         <PlayerMenuSurface
+          anchorRef={menuRef}
           className="absolute right-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}

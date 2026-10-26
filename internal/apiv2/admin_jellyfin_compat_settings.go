@@ -42,7 +42,7 @@ func registerAdminJellyfinCompatSettings(reg *Registry) {
 // AdminJellyfinCompatSettingsPatch is the native transport projection, independent of handler views.
 type AdminJellyfinCompatSettingsPatch struct {
 	Enabled               *bool   `json:"enabled,omitempty"`
-	PublicURL             *string `json:"public_url,omitempty"`
+	PublicURL             *string `json:"public_url,omitempty" format:"uri-reference"`
 	ServerName            *string `json:"server_name,omitempty"`
 	EmulatedServerVersion *string `json:"emulated_server_version,omitempty"`
 	WebEnabled            *bool   `json:"web_enabled,omitempty"`

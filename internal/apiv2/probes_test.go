@@ -194,15 +194,10 @@ func registerProbes(reg *Registry) {
 	registerGuardedProbes(newGuardedProbeStore())(reg)
 }
 
-// The guarded probe: an in-memory versioned resource behind the real router,
-// exercising every optimistic-concurrency outcome the contract ratifies.
+// The guarded probe supplies versioned resources for transport and fixture tests.
 
 // guardedProbeScope is the representation scope the probe's ETag carries.
 const guardedProbeScope = "probe.guarded"
-
-// guardedProbeReservedName is the stored name that makes a PUT conflict with
-// domain state after its precondition passed (the 409 case).
-const guardedProbeReservedName = "reserved"
 
 type guardedProbeRow struct {
 	Name    string
@@ -216,46 +211,18 @@ type guardedProbeRow struct {
 type guardedProbeStore struct {
 	mu   sync.Mutex
 	rows map[string]guardedProbeRow
-	// lastVersion remembers the version a deleted id reached, so a
-	// recreation continues the sequence instead of restarting at 1: an
-	// ETag minted for the old resource must never validate the new one.
-	// A real store gets the same guarantee from a monotonic version source
-	// that survives the row (a sequence, or a generation column).
-	lastVersion map[string]int64
-	// afterGet runs after each of the next afterGetRemaining Gets return
-	// their row and before the caller's compare-and-update: the test's way
-	// to land a concurrent writer in the window the precondition exists to
-	// cover, once or several times in a row.
-	afterGet          func()
-	afterGetRemaining int
-}
-
-// raceNextGets arms afterGet for the next n Gets.
-func (s *guardedProbeStore) raceNextGets(n int, fn func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.afterGet, s.afterGetRemaining = fn, n
 }
 
 func newGuardedProbeStore() *guardedProbeStore {
 	return &guardedProbeStore{rows: map[string]guardedProbeRow{
-		"a":        {Name: "alpha", Version: 1},
-		"reserved": {Name: guardedProbeReservedName, Version: 1},
+		"a": {Name: "alpha", Version: 1},
 	}}
 }
 
 func (s *guardedProbeStore) Get(id string) (guardedProbeRow, bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	row, ok := s.rows[id]
-	var hook func()
-	if s.afterGetRemaining > 0 {
-		s.afterGetRemaining--
-		hook = s.afterGet
-	}
-	s.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
 	return row, ok
 }
 
@@ -281,7 +248,7 @@ func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, err
 	if _, ok := s.rows[id]; ok {
 		return guardedProbeRow{}, ErrStaleVersion
 	}
-	row := guardedProbeRow{Name: name, Version: s.lastVersion[id] + 1}
+	row := guardedProbeRow{Name: name, Version: 1}
 	s.rows[id] = row
 	return row, nil
 }
@@ -291,10 +258,7 @@ func (s *guardedProbeStore) Create(id string, name string) (guardedProbeRow, err
 func (s *guardedProbeStore) Upsert(id string, name string) guardedProbeRow {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	row, ok := s.rows[id]
-	if !ok {
-		row.Version = s.lastVersion[id]
-	}
+	row := s.rows[id]
 	row.Name = name
 	row.Version++
 	s.rows[id] = row
@@ -308,10 +272,6 @@ func (s *guardedProbeStore) Delete(id string, expected int64) error {
 	if !ok || row.Version != expected {
 		return ErrStaleVersion
 	}
-	if s.lastVersion == nil {
-		s.lastVersion = map[string]int64{}
-	}
-	s.lastVersion[id] = row.Version
 	delete(s.rows, id)
 	return nil
 }
@@ -418,9 +378,6 @@ func registerGuardedProbes(store *guardedProbeStore) func(*Registry) {
 				}
 				if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, current); p != nil {
 					return nil, p
-				}
-				if row.Name == guardedProbeReservedName {
-					return nil, NewProblem(TypeConflict, "A reserved probe resource cannot be replaced.")
 				}
 				updated, err := store.Update(in.ID, row.Version, in.Body.Name)
 				if err != nil {

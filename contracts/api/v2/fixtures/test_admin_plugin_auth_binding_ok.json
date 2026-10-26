@@ -1,0 +1,18 @@
+{
+  "ok": false,
+  "steps": [
+    {
+      "id": "discovery",
+      "label": "Discovery document reachable",
+      "ok": true,
+      "message": "Loaded https://id.example.test/.well-known/openid-configuration"
+    },
+    {
+      "id": "issuer",
+      "label": "Issuer matches",
+      "ok": false,
+      "message": "The discovery document names a different issuer"
+    }
+  ],
+  "callback_url": "https://silo.example.test/api/v2/auth/oauth/3/callback"
+}

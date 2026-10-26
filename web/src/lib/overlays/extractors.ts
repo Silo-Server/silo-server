@@ -1,4 +1,6 @@
 import type { BrowseItem, EpisodeListItem, OverlaySummary, SectionItem } from "@/api/types";
+import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
+import type { WatchlistTitleStatus } from "@/lib/watchlistTitles";
 import type { OverlayData } from "./types";
 
 // BrowseItem and SectionItem share the fields the overlay system consumes;
@@ -12,6 +14,7 @@ interface OverlaySourceItem {
   rating_rt_critic?: number | null;
   rating_rt_audience?: number | null;
   content_rating?: string;
+  advisory_age?: number | null;
   year?: number | null;
   runtime?: number;
   original_language?: string;
@@ -48,6 +51,7 @@ function extract(item: OverlaySourceItem): OverlayData {
     rating_rt_critic: item.rating_rt_critic,
     rating_rt_audience: item.rating_rt_audience,
     content_rating: item.content_rating || undefined,
+    advisory_age: item.advisory_age ?? null,
     year: item.year || null,
     runtime: item.runtime ?? null,
     original_language: item.original_language,
@@ -71,4 +75,26 @@ export function overlayDataFromSectionItem(item: SectionItem): OverlayData {
 
 export function overlayDataFromEpisodeListItem(item: EpisodeListItem): OverlayData {
   return extract(item);
+}
+
+/**
+ * A watchlist title the library doesn't have. TMDB supplies the rating, age
+ * rating and year; file-based badges (resolution, HDR, audio) have no value
+ * and don't render. The request_status badge takes the status the card
+ * derived (watchlistTitleStatus), which keeps the request labels out of the
+ * overlay library.
+ */
+export function overlayDataFromWatchlistTitle(
+  title: Pick<WatchlistTitle, "vote_average" | "content_rating" | "year">,
+  status: Pick<WatchlistTitleStatus, "badge" | "badgeIcon" | "attention" | "downloadPercent">,
+): OverlayData {
+  return {
+    rating_tmdb: title.vote_average ?? null,
+    content_rating: title.content_rating || undefined,
+    year: title.year || null,
+    request_status: status.badge,
+    request_status_icon: status.badgeIcon,
+    request_status_attention: status.attention,
+    request_download_percent: status.downloadPercent ?? null,
+  };
 }

@@ -70,7 +70,7 @@ export function ProviderState({
     <span
       data-state={state}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap",
+        "inline-flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap",
         state === "error" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
         className,
       )}
@@ -82,10 +82,8 @@ export function ProviderState({
 }
 
 /**
- * Two-up grid for tiles; an expanded tile spans the full width inside it.
- * It stops at two columns on purpose: the settings content column is clamped
- * to `max-w-3xl`, so a third column leaves each tile too narrow for its header
- * (monogram, name, badge, state pill) and truncates provider names.
+ * The list providers sit in: one row each, divided by hairlines like every
+ * other settings row. An expanded row opens its panel in place.
  */
 export function ProviderTileGrid({
   className,
@@ -94,7 +92,7 @@ export function ProviderTileGrid({
   className?: string;
   children: ReactNode;
 }) {
-  return <div className={cn("grid gap-3 sm:grid-cols-2", className)}>{children}</div>;
+  return <div className={cn("provider-list flex min-w-0 flex-col", className)}>{children}</div>;
 }
 
 /** Result of the last Test on a tile, kept in memory for the tile itself. */
@@ -153,8 +151,8 @@ export function ProviderPanelActions({
           role="status"
           className={
             test.ok
-              ? "text-muted-foreground mr-auto text-[11.5px]"
-              : "mr-auto text-[11.5px] text-amber-600 dark:text-amber-400"
+              ? "text-muted-foreground mr-auto text-xs"
+              : "mr-auto text-xs text-amber-600 dark:text-amber-400"
           }
         >
           {test.ok ? testedLabel(test) : test.message}
@@ -166,9 +164,10 @@ export function ProviderPanelActions({
 }
 
 /**
- * One third-party provider: identity, connection state, and — once expanded —
- * its credential panel inline instead of in a dialog, so the admin never loses
- * sight of the list they are working through.
+ * One third-party provider as a settings row: identity, connection state and
+ * its button, and — once expanded — its credential panel inline instead of in
+ * a dialog, so the admin never loses sight of the list they are working
+ * through.
  */
 export function ProviderTile({
   name,
@@ -196,13 +195,9 @@ export function ProviderTile({
       aria-labelledby={headingId}
       data-state={state}
       data-expanded={expanded ? "true" : undefined}
-      className={cn(
-        "border-border/70 bg-foreground/[0.02] flex min-w-0 flex-col rounded-2xl border p-4",
-        expanded && "col-span-full shadow-lg",
-        className,
-      )}
+      className={cn("provider-row flex min-w-0 flex-col py-3.5", className)}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span
           aria-hidden="true"
           className={cn(
@@ -222,47 +217,35 @@ export function ProviderTile({
           {tagline ? (
             <p className="text-muted-foreground mt-0.5 text-xs leading-snug">{tagline}</p>
           ) : null}
+          {meta ? (
+            <p
+              className={cn(
+                "mt-1 text-xs",
+                state === "error" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+              )}
+            >
+              {meta}
+            </p>
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2.5">
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
           <ProviderState state={state} label={statePill} />
           {headerActions}
+          {!expanded && primaryAction ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={primaryAction.onClick}
+              disabled={primaryAction.disabled}
+            >
+              {primaryAction.label}
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* Grid rows stretch the tiles to equal height, but a taller tagline
-          would otherwise push these rows down in one tile and not its
-          neighbor. `mt-auto` on the first bottom-block element pins the
-          action and meta lines to the tile foot, so they sit on the same
-          baseline across every tile in the row. */}
-      {!expanded && primaryAction ? (
-        <div className="mt-auto flex justify-end pt-3.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={primaryAction.onClick}
-            disabled={primaryAction.disabled}
-          >
-            {primaryAction.label}
-          </Button>
-        </div>
-      ) : null}
-
-      {meta ? (
-        <p
-          className={cn(
-            "text-[11.5px]",
-            !expanded && primaryAction ? "mt-2.5" : "mt-auto pt-2.5",
-            state === "error" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
-          )}
-        >
-          {meta}
-        </p>
-      ) : null}
-
-      {expanded && children ? (
-        <div className="border-border/70 mt-3.5 border-t pt-3.5">{children}</div>
-      ) : null}
+      {expanded && children ? <div className="mt-3.5 pl-12">{children}</div> : null}
     </fieldset>
   );
 }

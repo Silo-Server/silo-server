@@ -5,10 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/policy"
 )
+
+// ViewerAccessRetryAfterSeconds is the Retry-After of a request refused
+// because the viewer's access policy ran out of time. Evaluations are short,
+// so the next one usually fits.
+const ViewerAccessRetryAfterSeconds = 1
 
 // ViewerResolver resolves the effective viewer access scope for a request.
 type ViewerResolver interface {
@@ -40,12 +47,13 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 			SessionID:    claims.SessionID,
 			ProfileID:    profileID,
 			ProfileToken: r.Header.Get("X-Profile-Token"),
-			// API keys have no PIN proof by design. A display token was
-			// issued to an already verified profile session and carries the
-			// profile in its claims; the profile still has to exist and be
-			// owned by the user, which Resolve checks.
+			// API keys have no PIN proof by design. A display token or a
+			// direct-download link was issued to an already verified profile
+			// and carries the profile in its claims; the profile still has
+			// to exist and be owned by the user, which Resolve checks.
 			SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey ||
-				claims.TokenType == auth.TokenTypeApplePushDisplay,
+				claims.TokenType == auth.TokenTypeApplePushDisplay ||
+				claims.TokenType == auth.TokenTypeDirectDownloadLink,
 		}
 
 		scope, err := m.resolver.Resolve(r.Context(), input)
@@ -65,6 +73,19 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 				_ = json.NewEncoder(w).Encode(errorResponse{
 					Error:   "not_found",
 					Message: "Profile not found",
+				})
+				return
+			case errors.Is(err, policy.ErrPolicyEvalTimeout):
+				// Still refused, but the policy never decided: answer like a
+				// credential that could not be checked, so the client retries
+				// instead of treating it as a server fault.
+				recordDenialReason(w, ReasonViewerAccessUnavailable)
+				w.Header().Set("Retry-After", strconv.Itoa(ViewerAccessRetryAfterSeconds))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(errorResponse{
+					Error:   CodeServiceUnavailable,
+					Message: "Viewer access could not be resolved right now; try again shortly",
 				})
 				return
 			default:

@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	PlayMethodBandwidthProbe = "bandwidth_probe_v1"
 	// PlayMethodDownload identifies a token minted only after the API has
 	// authorized a file download. Proxy download routes reject playback tokens.
 	PlayMethodDownload = "download"
@@ -65,6 +66,10 @@ type Claims struct {
 	AudioChannels          int     `json:"ach,omitempty"`
 	AudioTrackIndex        int     `json:"ati,omitempty"`
 	AudioOnly              bool    `json:"ao,omitempty"`
+	// CopyAudioCodec is the codec of the source audio track a remux copies.
+	// The remux adds aac_adtstoasc for a copied AAC track. Absent in older
+	// tokens, whose remux keeps the plain copy.
+	CopyAudioCodec string `json:"cac,omitempty"`
 	// DVProfile is the file's Dolby Vision profile (0 = none); remux nodes
 	// use it to strip dangling profile 7 RPUs. Absent in older tokens, which
 	// decodes as 0 (no strip — the pre-existing behavior).
@@ -72,6 +77,10 @@ type Claims struct {
 	// RemuxDVMode freezes whether a Profile 7 remux preserves or strips DV
 	// metadata. Empty is the legacy auto behavior for old tokens.
 	RemuxDVMode string `json:"dvm,omitempty"`
+	// RemuxResumeLeadingPictureDrop asks a seeked progressive remux to drop
+	// open-GOP leading pictures when the executing FFmpeg supports it. It is
+	// best effort, so a node that predates the claim serves the plain copy.
+	RemuxResumeLeadingPictureDrop bool `json:"rlpd,omitempty"`
 
 	// Ownership / authorization lookup keys (re-resolved at reconstruct).
 	// Not trust assertions.
@@ -123,7 +132,9 @@ type Claims struct {
 	ToneMapDVRPUPresent        bool    `json:"tmdr,omitempty"`
 	VideoBitstreamFilter       string  `json:"vbsf,omitempty"`
 	VideoSampleEntry           string  `json:"vse,omitempty"`
+	VideoRange                 string  `json:"vrg,omitempty"`
 	CopyVideoMPEGTS            bool    `json:"cvts,omitempty"`
+	KeyframePlaylist           bool    `json:"kfp,omitempty"`
 	OutputSubdir               string  `json:"osd,omitempty"`
 	SeekSeconds                float64 `json:"seek,omitempty"`
 	StreamOriginSeconds        float64 `json:"origin,omitempty"`
@@ -133,13 +144,21 @@ type Claims struct {
 	SubtitleTrackIndex         int     `json:"sti,omitempty"`
 	SubtitleBurnIn             bool    `json:"sbi,omitempty"`
 	SubtitleCodec              string  `json:"sbc,omitempty"`
-	TargetBitrateKbps          int     `json:"tbr,omitempty"`
-	TotalDuration              float64 `json:"dur,omitempty"`
-	FastStart                  bool    `json:"fs,omitempty"`
-	ThrottleSeconds            int     `json:"ths,omitempty"`
-	TargetCodecAudio           string  `json:"tca,omitempty"`
-	TargetAudioChannels        int     `json:"tac,omitempty"`
-	TargetAudioBitrateKbps     int     `json:"tabr,omitempty"`
+	// SubtitleRendition emits the selected text track as the HLS WebVTT
+	// subtitle rendition of the transcode's own playlist.
+	SubtitleRendition      bool    `json:"srn,omitempty"`
+	TargetBitrateKbps      int     `json:"tbr,omitempty"`
+	TotalDuration          float64 `json:"dur,omitempty"`
+	FastStart              bool    `json:"fs,omitempty"`
+	ThrottleSeconds        int     `json:"ths,omitempty"`
+	TargetCodecAudio       string  `json:"tca,omitempty"`
+	TargetAudioChannels    int     `json:"tac,omitempty"`
+	TargetAudioBitrateKbps int     `json:"tabr,omitempty"`
+
+	// HLSVariableSubstitution records the client's hls_variable_substitution_v1
+	// delivery feature, so the relay and a reconstruct keep the playlist form
+	// the client negotiated. Absent in older tokens: the literal form.
+	HLSVariableSubstitution bool `json:"hvs,omitempty"`
 
 	// Recipe staleness hint, bumped on each re-mint after a recipe mutation
 	// (audio/quality/seek switch). An optional client-side hint only.

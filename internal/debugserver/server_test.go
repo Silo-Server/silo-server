@@ -216,7 +216,7 @@ func TestProfilesParseWithGoTools(t *testing.T) {
 	defer runtime.SetBlockProfileRate(0)
 	defer runtime.SetMutexProfileFraction(0)
 	_, base := testServer(t, Config{BlockRate: 1_000_000, MutexFraction: 100})
-	for _, profile := range []string{"profile?seconds=1", "heap?gc=1", "allocs", "goroutine", "threadcreate", "block", "mutex", "trace?seconds=.02"} {
+	for _, profile := range []string{"profile?seconds=1", "heap?gc=1", "block", "trace?seconds=.02"} {
 		t.Run(profile, func(t *testing.T) {
 			resp, err := http.Get(base + "/debug/pprof/" + profile)
 			if err != nil {

@@ -9,13 +9,31 @@ import (
 )
 
 func (s *PostgresUserStore) ListHomeDismissals(ctx context.Context, profileID, surface string) ([]userstore.HomeItemDismissal, error) {
-	rows, err := s.pool.Query(ctx,
+	return s.queryHomeDismissals(ctx,
 		`SELECT profile_id, surface, media_item_id, series_id, progress_updated_at, dismissed_at
 		 FROM user_home_item_dismissals
 		 WHERE user_id = $1 AND profile_id = $2 AND surface = $3
 		 ORDER BY dismissed_at DESC`,
 		s.userID, profileID, surface,
 	)
+}
+
+// ListHomeDismissalsForItems implements userstore.HomeDismissalItemReader.
+func (s *PostgresUserStore) ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, mediaItemIDs []string) ([]userstore.HomeItemDismissal, error) {
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
+	}
+	return s.queryHomeDismissals(ctx,
+		`SELECT profile_id, surface, media_item_id, series_id, progress_updated_at, dismissed_at
+		 FROM user_home_item_dismissals
+		 WHERE user_id = $1 AND profile_id = $2 AND surface = $3 AND media_item_id = ANY($4)
+		 ORDER BY dismissed_at DESC`,
+		s.userID, profileID, surface, mediaItemIDs,
+	)
+}
+
+func (s *PostgresUserStore) queryHomeDismissals(ctx context.Context, query string, args ...any) ([]userstore.HomeItemDismissal, error) {
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing home dismissals: %w", err)
 	}

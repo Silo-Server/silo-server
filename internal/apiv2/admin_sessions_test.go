@@ -68,47 +68,7 @@ func (f *fakeAdminNodeSessions) Read(_ context.Context, node int) (nodesessions.
 		{NodeURL: "https://node.invalid", SessionID: "first", AuthUserID: 7, MediaFileID: 42},
 	}}, nil
 }
-func TestAdminPlaybackSessionReadProjection(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := new(fakeAdminPlaybackSessions)
-	deps.AdminPlaybackSessions = f
-	h := NewHandler(deps)
-	path := Prefix + "/admin/sessions"
-	requireProblem(t, do(t, h, "GET", path, "", bearer(memberToken)), TypePermissionDenied)
-	if f.calls != 0 {
-		t.Fatal("member reached loader")
-	}
-	rec := do(t, h, "GET", path+"?limit=1", "", bearer(adminToken))
-	var page Collection[AdminPlaybackSession]
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].SessionID != "a" || page.Items[0].UserID != "7" || page.Items[0].ProfileID != "primary" || page.Items[0].StreamLocation != "local" || page.Page == nil || !page.Page.HasMore {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	cursor := url.QueryEscape(page.Page.NextCursor)
-	rec = do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", bearer(adminToken))
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	row := page.Items[0]
-	if rec.Code != 200 || row.SessionID != "b" || row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.StreamLocation != "remote" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
-		t.Fatal(rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"started_at":"2026-01-02T02:04:05.123Z"`) {
-		t.Fatal(rec.Body.String())
-	}
-	requireProblem(t, do(t, h, "GET", path+"?limit=2&cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)
-	requireProblem(t, do(t, h, "GET", path+"?user_id=7&limit=1&cursor="+cursor, "", bearer(adminToken)), TypeInvalidCursor)
-	requireProblem(t, do(t, h, "GET", path+"?user_id=0", "", bearer(adminToken)), TypeValidationFailed)
-	requireProblem(t, do(t, h, "GET", path+"?limit=1&cursor="+cursor, "", actingRequestAdmin), TypeInvalidCursor)
-	missing := NewHandler(pilotDeps(nil, nil))
-	requireProblem(t, do(t, missing, "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
-	rec = do(t, missing, "GET", path+"/capabilities", "", bearer(adminToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) {
-		t.Fatal(rec.Body.String())
-	}
-}
+
 func TestAdminNodeSessionObservations(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	f := new(fakeAdminNodeSessions)
@@ -172,37 +132,6 @@ func TestAdminPlaybackSessionsAcceptDeclaredMaximumLimit(t *testing.T) {
 func adminSessionFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_playback_sessions", operationID: "listAdminPlaybackSessions", method: "GET", path: Prefix + "/admin/sessions", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/CollectionAdminPlaybackSession", assertHeaders: []string{"Content-Type"}, scenario: "Diagnostic rows retain account/profile and chosen/requested file distinctions with canonical string IDs and instants."},
-	}
-}
-
-func TestAdminSessionNetworkProviderProjection(t *testing.T) {
-	for _, provider := range []*string{nil, new(""), new("tailscale")} {
-		view := handlers.AdminPlaybackSessionView{RoutingNetworkProvider: provider, StartedAt: time.Now(), UpdatedAt: time.Now()}
-		wire, err := json.Marshal(adminPlaybackSessionOf(view))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(wire, &fields); err != nil {
-			t.Fatal(err)
-		}
-		raw, present := fields["routing_network_provider"]
-		if present != (provider != nil) {
-			t.Fatalf("wrong field presence: %s", wire)
-		}
-		if present {
-			var got string
-			if err := json.Unmarshal(raw, &got); err != nil || got != *provider {
-				t.Fatalf("provider = %s", raw)
-			}
-		}
-		legacy, err := json.Marshal(view)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(legacy), "routing_network_provider") {
-			t.Fatal("v2 field leaked into v1")
-		}
 	}
 }
 

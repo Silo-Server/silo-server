@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createEmptyQueryDefinition, type QueryDefinition } from "@/api/types";
 import type { GuidedFormState } from "@/components/collections/CollectionGuidedRulesEditor";
 import CollectionGuidedRulesEditor from "@/components/collections/CollectionGuidedRulesEditor";
+import { GUIDED_UNAVAILABLE_MESSAGE } from "@/components/collections/guidedRepresentable";
 import CollectionRulesEditor from "@/components/collections/CollectionRulesEditor";
 import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
@@ -63,6 +64,8 @@ interface CatalogFilterSheetProps {
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;
+  /** False when the rules use options Guided can't show; Guided is then off. */
+  guidedAvailable?: boolean;
   queryDefinition: QueryDefinition;
   onQueryDefinitionChange: (qd: QueryDefinition) => void;
   filters?: CatalogFiltersResponse;
@@ -85,6 +88,7 @@ export default function CatalogFilterSheet({
   sortRelevanceScope,
   editorMode,
   onEditorModeChange,
+  guidedAvailable = true,
   queryDefinition,
   onQueryDefinitionChange,
   filters,
@@ -122,6 +126,7 @@ export default function CatalogFilterSheet({
                   variant={editorMode === "guided" ? "default" : "outline"}
                   size="xs"
                   onClick={() => onEditorModeChange("guided")}
+                  disabled={!guidedAvailable}
                 >
                   Guided
                 </Button>
@@ -135,6 +140,9 @@ export default function CatalogFilterSheet({
                 </Button>
               </div>
             </div>
+            {guidedAvailable ? null : (
+              <p className="text-muted-foreground text-xs">{GUIDED_UNAVAILABLE_MESSAGE}</p>
+            )}
           </SheetHeader>
 
           <ScrollArea className="min-h-0 flex-1">

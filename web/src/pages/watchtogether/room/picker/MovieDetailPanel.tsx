@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Bookmark, X } from "lucide-react";
+import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import type { ItemMemberState, MemberWatchState } from "@/api/v2/watchTogetherMemberState";
@@ -125,10 +128,7 @@ export function MovieDetailPanel({
   if (item?.year ?? card.year) meta.push(String(item?.year ?? card.year));
   if (item?.runtime) meta.push(formatRuntimeMinutes(item.runtime));
   if (item?.content_rating) meta.push(item.content_rating);
-  const ratings: string[] = [];
-  if (item?.rating_imdb) ratings.push(`IMDb ${item.rating_imdb.toFixed(1)}`);
-  if (item?.rating_tmdb) ratings.push(`TMDB ${item.rating_tmdb.toFixed(1)}`);
-  if (item?.rating_rt_critic) ratings.push(`RT ${Math.round(item.rating_rt_critic)}%`);
+  const ratings = item?.ratings ?? [];
 
   return (
     <div className="surface-panel-subtle relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
@@ -196,18 +196,23 @@ export function MovieDetailPanel({
       <div className="overlay-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
         {ratings.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {ratings.map((r) => (
-              <span
-                key={r}
-                className="bg-surface-raised text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium"
-              >
-                {r}
-              </span>
+            {ratings.map((rating) => (
+              <RatingEntry
+                key={rating.source}
+                rating={rating}
+                size="sm"
+                className="bg-surface-raised text-muted-foreground rounded-full px-2 py-0.5"
+              />
             ))}
           </div>
         ) : null}
         {item?.tagline ? (
-          <p className="text-muted-foreground text-xs italic">{item.tagline}</p>
+          <p className="text-muted-foreground text-xs italic">
+            {item.tagline}
+            {hasMachineTranslation(item.machine_translated_fields, "tagline") && (
+              <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+            )}
+          </p>
         ) : null}
         {detail.isLoading ? (
           <div className="flex flex-col gap-1.5">
@@ -216,9 +221,14 @@ export function MovieDetailPanel({
             <Skeleton className="h-3 w-2/3 rounded" />
           </div>
         ) : item?.overview ? (
-          <p className="text-muted-foreground line-clamp-5 text-sm leading-relaxed">
-            {item.overview}
-          </p>
+          <div>
+            <p className="text-muted-foreground line-clamp-5 text-sm leading-relaxed">
+              {item.overview}
+            </p>
+            {hasMachineTranslation(item.machine_translated_fields) && (
+              <MachineTranslatedLabel className="mt-1" />
+            )}
+          </div>
         ) : null}
         <MemberWatchList members={members} state={memberState} loading={memberStateLoading} />
       </div>

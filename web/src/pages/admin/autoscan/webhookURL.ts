@@ -11,3 +11,8 @@ export function autoscanWebhookURL(value: string, origin: string): string {
   );
   return url.toString();
 }
+
+/** Resolve a possibly relative webhook_url against the admin UI's own origin. */
+export function absoluteWebhookURL(url: string): string {
+  return autoscanWebhookURL(url, window.location.origin);
+}

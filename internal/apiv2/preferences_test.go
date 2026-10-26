@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 	"testing"
 
+	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -239,88 +243,6 @@ func preferenceDeps(audio *fakeAudioPreferences, library *fakeLibraryPlaybackPre
 	return deps
 }
 
-func TestGetAudioPreference(t *testing.T) {
-	h := newTestHandler(t, preferenceDeps(nil, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner)
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	want := `{"profile_id":"p-owner","series_id":"series-8f2c1a","audio_track_index":1,"audio_language":"eng","track_signature":{"language":"eng","title":"English 5.1","codec":"eac3","layout":"5.1","channels":6,"default":true},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	// A series with no preference is 404, as in v1.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-none", "", owner), TypeNotFound)
-	// Another profile's preference is not this profile's.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", with(bearer(adminToken), "X-Profile-Id", "p-primary")), TypeNotFound)
-}
-
-func TestUpdateAudioPreference(t *testing.T) {
-	audio := &fakeAudioPreferences{}
-	h := newTestHandler(t, preferenceDeps(audio, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodPut, "/api/v2/audio-prefs/series-8f2c1a", `{"audio_track_index":2,"audio_language":"jpn","track_signature":{"language":"jpn","codec":"aac","channels":2}}`, owner)
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	got := audio.last
-	if got == nil || got.ProfileID != "p-owner" || got.SeriesID != "series-8f2c1a" || got.AudioTrackIndex != 2 || got.AudioLanguage != "jpn" {
-		t.Fatalf("stored = %+v", got)
-	}
-	// The signature crosses the seam member for member; an absent default is false.
-	if s := got.TrackSignature; s == nil || s.Language != "jpn" || s.Codec != "aac" || s.Channels != 2 || s.Default || s.Title != "" {
-		t.Fatalf("signature = %+v", got.TrackSignature)
-	}
-	// The read-back is what was stored.
-	rec = do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner)
-	want := `{"profile_id":"p-owner","series_id":"series-8f2c1a","audio_track_index":2,"audio_language":"jpn","track_signature":{"language":"jpn","codec":"aac","channels":2,"default":false},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Only the index is required; an omitted signature stores none.
-	rec = do(t, h, http.MethodPut, "/api/v2/audio-prefs/series-8f2c1a", `{"audio_track_index":0}`, owner)
-	if rec.Code != 204 || audio.last.TrackSignature != nil || audio.last.AudioLanguage != "" {
-		t.Fatalf("%d %+v", rec.Code, audio.last)
-	}
-}
-
-func TestUpdateAudioPreferenceValidation(t *testing.T) {
-	audio := &fakeAudioPreferences{}
-	h := newTestHandler(t, preferenceDeps(audio, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	for _, tc := range []struct{ body, location, code string }{
-		{`{"audio_language":"eng"}`, "body.audio_track_index", codeRequired},
-		{`{"audio_track_index":-2}`, "body.audio_track_index", codeOutOfRange},
-		{`{"audio_track_index":"1"}`, "body.audio_track_index", codeInvalidType},
-		{`{"audio_track_index":1,"track_signature":{"bitrate":1}}`, "body.track_signature.bitrate", codeUnknownField},
-		{`{"audio_track_index":1,"track_signature":{"channels":"6"}}`, "body.track_signature.channels", codeInvalidType},
-		{`{"audio_track_index":1,"series_id":"x"}`, "body.series_id", codeUnknownField},
-	} {
-		rec := do(t, h, http.MethodPut, "/api/v2/audio-prefs/series-8f2c1a", tc.body, owner)
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: status = %d, body %s", tc.body, rec.Code, rec.Body.String())
-			continue
-		}
-		doc := requireProblem(t, rec, TypeValidationFailed)
-		if len(doc.Errors) != 1 || doc.Errors[0].Location != tc.location || doc.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.body, doc.Errors)
-		}
-	}
-	if audio.last != nil {
-		t.Fatalf("a rejected body reached the seam: %+v", audio.last)
-	}
-	// A language the canonical settings contract refuses is the seam's
-	// 400 naming the member, rendered as a 422 at body.audio_language.
-	audio.err = &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "playback.audio_language: too long", Field: "audio_language"}
-	doc := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/audio-prefs/series-8f2c1a", `{"audio_track_index":1,"audio_language":"not-a-language"}`, owner), TypeValidationFailed)
-	if len(doc.Errors) != 1 || doc.Errors[0].Location != "body.audio_language" || doc.Errors[0].Code != codeInvalid {
-		t.Fatalf("errors = %+v", doc.Errors)
-	}
-}
-
 func TestDeleteAudioPreference(t *testing.T) {
 	h := newTestHandler(t, preferenceDeps(nil, nil))
 	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -336,95 +258,6 @@ func TestDeleteAudioPreference(t *testing.T) {
 	}
 }
 
-func TestAudioPreferenceDenied(t *testing.T) {
-	h := newTestHandler(t, preferenceDeps(nil, nil))
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		body := ""
-		if method == http.MethodPut {
-			body = `{"audio_track_index":1}`
-		}
-		requireProblem(t, do(t, h, method, "/api/v2/audio-prefs/series-8f2c1a", body, nil), TypeAuthenticationRequired)
-		// Profile scoped: the header is required, and a locked profile needs its token.
-		requireProblem(t, do(t, h, method, "/api/v2/audio-prefs/series-8f2c1a", body, bearer(memberToken)), TypeValidationFailed)
-		requireProblem(t, do(t, h, method, "/api/v2/audio-prefs/series-8f2c1a", body, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	}
-	// Demo mode refuses the mutations to a non-admin and leaves the read alone.
-	demo := preferenceDeps(nil, nil)
-	demo.DemoSettings = fakeSettings{demo: true}
-	dh := newTestHandler(t, demo)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	requireProblem(t, do(t, dh, http.MethodPut, "/api/v2/audio-prefs/series-8f2c1a", `{"audio_track_index":1}`, owner), TypePermissionDenied)
-	requireProblem(t, do(t, dh, http.MethodDelete, "/api/v2/audio-prefs/series-8f2c1a", "", owner), TypePermissionDenied)
-	if rec := do(t, dh, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner); rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Without the seam the operations fail closed.
-	bare := preferenceDeps(nil, nil)
-	bare.AudioPreferences = nil
-	requireProblem(t, do(t, newTestHandler(t, bare), http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner), TypeDependencyUnavailable)
-}
-
-func TestListLibraryPlaybackPreferences(t *testing.T) {
-	h := newTestHandler(t, preferenceDeps(nil, nil))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/library-playback-prefs", "", owner)
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	// Only the acting profile's rows; an override the profile has not set is
-	// absent, not null; no page member on the bounded collection.
-	want := `{"items":[{"profile_id":"p-owner","library_id":"1","audio_language":"en","subtitle_mode":"always","updated_at":"2026-01-02T03:04:05.000Z"},{"profile_id":"p-owner","library_id":"3","show_forced_subtitles":true,"updated_at":"2026-01-01T00:00:00.000Z"}]}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	// A profile with none gets an empty array, never null.
-	rec = do(t, h, http.MethodGet, "/api/v2/library-playback-prefs", "", with(bearer(adminToken), "X-Profile-Id", "p-primary"))
-	if rec.Code != 200 || rec.Body.String() != `{"items":[]}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// The v1 offset/limit parameters are not part of an unpaginated collection.
-	doc := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library-playback-prefs?limit=10", "", owner), TypeValidationFailed)
-	if len(doc.Errors) != 1 || doc.Errors[0].Code != codeUnknownParameter {
-		t.Fatalf("errors = %+v", doc.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library-playback-prefs", "", bearer(memberToken)), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/library-playback-prefs", "", nil), TypeAuthenticationRequired)
-}
-
-func TestDeleteLibraryPlaybackPreference(t *testing.T) {
-	library := &fakeLibraryPlaybackPreferences{known: map[int]bool{1: true, 2: true, 3: true}, prefs: fixtureLibraryPlaybackPreferences()}
-	h := newTestHandler(t, preferenceDeps(nil, library))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/1", "", owner)
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// The other profile's row for the same library is untouched.
-	if len(library.prefs) != 2 || library.prefs[1].ProfileID != "p-other" {
-		t.Fatalf("prefs = %+v", library.prefs)
-	}
-	// A library with no override is still a 204; an unknown library is 404.
-	if rec := do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/2", "", owner); rec.Code != 204 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/9", "", owner), TypeNotFound)
-	// An identifier no library can carry fails validation at the path.
-	for _, id := range []string{"abc", "0", "-1"} {
-		doc := requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/"+id, "", owner), TypeValidationFailed)
-		if len(doc.Errors) != 1 || doc.Errors[0].Location != locationPathLibraryID {
-			t.Fatalf("%s: errors = %+v", id, doc.Errors)
-		}
-	}
-	// Class denials and demo mode.
-	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/1", "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/library-playback-prefs/1", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	demo := preferenceDeps(nil, nil)
-	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/library-playback-prefs/1", "", owner), TypePermissionDenied)
-}
-
 func TestGetSubtitlePreference(t *testing.T) {
 	h := newTestHandler(t, preferenceDeps(nil, nil))
 	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -438,163 +271,6 @@ func TestGetSubtitlePreference(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-none", "", owner), TypeNotFound)
 	// Another profile on the same account does not see the owner's preference.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", with(bearer(memberToken), "X-Profile-Id", "p-kid")), TypeNotFound)
-}
-
-// TestGetPreferencesRenderClearedCanonicalMembers pins the wire shape the
-// canonical seams produce after /settings/values cleared the members playback
-// resolves: the track identity stays, the language and mode are empty
-// strings, and show_forced_subtitles is absent rather than null.
-func TestGetPreferencesRenderClearedCanonicalMembers(t *testing.T) {
-	subs := &fakeSubtitlePreferences{prefs: map[string]userstore.SubtitlePreference{"p-owner/series-8f2c1a": {
-		ProfileID: "p-owner", SeriesID: "series-8f2c1a", SubtitleTrackIndex: 2,
-		TrackSignature: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "eng"},
-		UpdatedAt:      "2026-01-02T03:04:05Z",
-	}}}
-	audio := &fakeAudioPreferences{prefs: map[string]userstore.AudioPreference{"p-owner/series-8f2c1a": {
-		ProfileID: "p-owner", SeriesID: "series-8f2c1a", AudioTrackIndex: 1,
-		TrackSignature: &userstore.AudioTrackSignature{Language: "eng", Codec: "eac3"},
-		UpdatedAt:      "2026-01-02T03:04:05Z",
-	}}}
-	deps := preferenceDeps(audio, nil)
-	deps.SubtitlePreferences = subs
-	h := newTestHandler(t, deps)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner)
-	want := `{"profile_id":"p-owner","series_id":"series-8f2c1a","subtitle_language":"","subtitle_track_index":2,"subtitle_mode":"","track_signature":{"source":"embedded","language":"eng","forced":false,"hearing_impaired":false},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/audio-prefs/series-8f2c1a", "", owner)
-	want = `{"profile_id":"p-owner","series_id":"series-8f2c1a","audio_track_index":1,"audio_language":"","track_signature":{"language":"eng","codec":"eac3","default":false},"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestUpdateSubtitlePreference(t *testing.T) {
-	subs := &fakeSubtitlePreferences{}
-	deps := preferenceDeps(nil, nil)
-	deps.SubtitlePreferences = subs
-	h := newTestHandler(t, deps)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", `{"subtitle_track_index":2,"subtitle_language":"jpn","subtitle_mode":"always","external_subtitle_path":"ep.jpn.srt","track_signature":{"source":"external","language":"jpn","forced":true},"show_forced_subtitles":false}`, owner)
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	got := subs.last
-	if got == nil || got.ProfileID != "p-owner" || got.SeriesID != "series-8f2c1a" || got.SubtitleTrackIndex != 2 || got.SubtitleLanguage != "jpn" || got.SubtitleMode != "always" || got.ExternalSubtitlePath != "ep.jpn.srt" {
-		t.Fatalf("stored = %+v", got)
-	}
-	// The signature crosses the seam member for member; an absent flag is false.
-	if s := got.TrackSignature; s == nil || s.Source != "external" || s.Language != "jpn" || !s.Forced || s.HearingImpaired || s.Codec != "" {
-		t.Fatalf("signature = %+v", got.TrackSignature)
-	}
-	// An explicit false forced override is an override, not an omission.
-	if !got.HasShowForcedSubtitles || got.ShowForcedSubtitles {
-		t.Fatalf("forced = %+v", got)
-	}
-	// The read-back is what was stored.
-	rec = do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner)
-	want := `{"profile_id":"p-owner","series_id":"series-8f2c1a","subtitle_language":"jpn","subtitle_track_index":2,"external_subtitle_path":"ep.jpn.srt","subtitle_mode":"always","track_signature":{"source":"external","language":"jpn","forced":true,"hearing_impaired":false},"show_forced_subtitles":false,"updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Only the index is required; an omitted forced flag crosses the seam as
-	// "no override" so the seam can keep the stored one, everything else is none.
-	rec = do(t, h, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", `{"subtitle_track_index":0}`, owner)
-	if rec.Code != 204 || subs.last.TrackSignature != nil || subs.last.SubtitleLanguage != "" || subs.last.SubtitleMode != "" {
-		t.Fatalf("%d %+v", rec.Code, subs.last)
-	}
-	if !subs.last.HasShowForcedSubtitles || subs.last.ShowForcedSubtitles {
-		t.Fatalf("forced override not kept: %+v", subs.last)
-	}
-	// -1 is the "subtitles off" sentinel every v1 client stores; it reaches
-	// the seam unchanged.
-	rec = do(t, h, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", `{"subtitle_track_index":-1,"subtitle_mode":"off"}`, owner)
-	if rec.Code != 204 || subs.last.SubtitleTrackIndex != -1 || subs.last.SubtitleMode != "off" {
-		t.Fatalf("%d %+v", rec.Code, subs.last)
-	}
-}
-
-func TestUpdateSubtitlePreferenceValidation(t *testing.T) {
-	subs := &fakeSubtitlePreferences{}
-	deps := preferenceDeps(nil, nil)
-	deps.SubtitlePreferences = subs
-	h := newTestHandler(t, deps)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	for _, tc := range []struct{ body, location, code string }{
-		{`{"subtitle_language":"eng"}`, "body.subtitle_track_index", codeRequired},
-		{`{"subtitle_track_index":-2}`, "body.subtitle_track_index", codeOutOfRange},
-		{`{"subtitle_track_index":"1"}`, "body.subtitle_track_index", codeInvalidType},
-		{`{"subtitle_track_index":1,"track_signature":{"title":"x"}}`, "body.track_signature.title", codeUnknownField},
-		{`{"subtitle_track_index":1,"track_signature":{"forced":"yes"}}`, "body.track_signature.forced", codeInvalidType},
-		{`{"subtitle_track_index":1,"series_id":"x"}`, "body.series_id", codeUnknownField},
-	} {
-		rec := do(t, h, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", tc.body, owner)
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: status = %d, body %s", tc.body, rec.Code, rec.Body.String())
-			continue
-		}
-		doc := requireProblem(t, rec, TypeValidationFailed)
-		if len(doc.Errors) != 1 || doc.Errors[0].Location != tc.location || doc.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.body, doc.Errors)
-		}
-	}
-	if subs.last != nil {
-		t.Fatalf("a rejected body reached the seam: %+v", subs.last)
-	}
-	// A value the canonical settings contract refuses is the seam's 400,
-	// which carries no member and renders as malformed_request, as v1's does.
-	subs.err = &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "playback.subtitle_mode: unsupported"}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", `{"subtitle_track_index":1,"subtitle_mode":"sometimes"}`, owner), TypeMalformedRequest)
-}
-
-func TestDeleteSubtitlePreference(t *testing.T) {
-	subs := &fakeSubtitlePreferences{prefs: map[string]userstore.SubtitlePreference{"p-owner/series-8f2c1a": fixtureSubtitlePreference()}}
-	deps := preferenceDeps(nil, nil)
-	deps.SubtitlePreferences = subs
-	h := newTestHandler(t, deps)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-
-	rec := do(t, h, http.MethodDelete, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner)
-	if rec.Code != 204 || rec.Body.Len() != 0 || len(subs.prefs) != 0 {
-		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), subs.prefs)
-	}
-	// Deleting a preference that does not exist still succeeds, as in v1.
-	if rec := do(t, h, http.MethodDelete, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner); rec.Code != 204 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner), TypeNotFound)
-}
-
-func TestSubtitlePreferenceDenied(t *testing.T) {
-	h := newTestHandler(t, preferenceDeps(nil, nil))
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		body := ""
-		if method == http.MethodPut {
-			body = `{"subtitle_track_index":1}`
-		}
-		requireProblem(t, do(t, h, method, "/api/v2/subtitle-prefs/series-8f2c1a", body, nil), TypeAuthenticationRequired)
-		// Profile scoped: the header is required, and a locked profile needs its token.
-		requireProblem(t, do(t, h, method, "/api/v2/subtitle-prefs/series-8f2c1a", body, bearer(memberToken)), TypeValidationFailed)
-		requireProblem(t, do(t, h, method, "/api/v2/subtitle-prefs/series-8f2c1a", body, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	}
-	// Demo mode refuses the mutations to a non-admin and leaves the read alone.
-	demo := preferenceDeps(nil, nil)
-	demo.DemoSettings = fakeSettings{demo: true}
-	dh := newTestHandler(t, demo)
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	requireProblem(t, do(t, dh, http.MethodPut, "/api/v2/subtitle-prefs/series-8f2c1a", `{"subtitle_track_index":1}`, owner), TypePermissionDenied)
-	requireProblem(t, do(t, dh, http.MethodDelete, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner), TypePermissionDenied)
-	if rec := do(t, dh, http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner); rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Without the seam the operations fail closed.
-	bare := preferenceDeps(nil, nil)
-	bare.SubtitlePreferences = nil
-	requireProblem(t, do(t, newTestHandler(t, bare), http.MethodGet, "/api/v2/subtitle-prefs/series-8f2c1a", "", owner), TypeDependencyUnavailable)
 }
 
 func TestUpdateLibraryPlaybackPreference(t *testing.T) {
@@ -673,44 +349,6 @@ func TestUpdateLibraryPlaybackPreference(t *testing.T) {
 	}
 }
 
-func TestUpdateLibraryPlaybackPreferenceValidation(t *testing.T) {
-	library := &fakeLibraryPlaybackPreferences{known: map[int]bool{1: true}}
-	h := newTestHandler(t, preferenceDeps(nil, library))
-	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	for _, tc := range []struct{ body, location, code string }{
-		{`{"show_forced_subtitles":"yes"}`, "body.show_forced_subtitles", codeInvalidType},
-		{`{"audio_language":1}`, "body.audio_language", codeInvalidType},
-		{`{"library_id":"1"}`, "body.library_id", codeUnknownField},
-	} {
-		rec := do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", tc.body, owner)
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: status = %d, body %s", tc.body, rec.Code, rec.Body.String())
-			continue
-		}
-		doc := requireProblem(t, rec, TypeValidationFailed)
-		if len(doc.Errors) != 1 || doc.Errors[0].Location != tc.location || doc.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.body, doc.Errors)
-		}
-	}
-	if library.last != nil {
-		t.Fatalf("a rejected body reached the seam: %+v", library.last)
-	}
-	// A member the seam refuses (a subtitle_mode outside auto/always/off, or a
-	// value the canonical contract rejects) is its 400 naming the member,
-	// rendered as a 422 at body.<member>.
-	library.err = &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Invalid subtitle_mode", Field: "subtitle_mode"}
-	doc := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{"subtitle_mode":"sometimes"}`, owner), TypeValidationFailed)
-	if len(doc.Errors) != 1 || doc.Errors[0].Location != "body.subtitle_mode" || doc.Errors[0].Code != codeInvalid {
-		t.Fatalf("errors = %+v", doc.Errors)
-	}
-	// Class denials and demo mode.
-	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{}`, nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/library-playback-prefs/1", `{}`, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	demo := preferenceDeps(nil, nil)
-	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPatch, "/api/v2/library-playback-prefs/1", `{}`, owner), TypePermissionDenied)
-}
-
 func TestGetPreferencesAcceptsMissingLegacyTimestamp(t *testing.T) {
 	for _, timestamp := range []string{"", "not-a-timestamp"} {
 		t.Run(timestamp, func(t *testing.T) {
@@ -739,5 +377,70 @@ func TestGetPreferencesAcceptsMissingLegacyTimestamp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The language tag patterns are hand-copied into many struct tags; they must
+// agree with lang.CanonicalTag, which the handlers use. A request pattern
+// admits every value the handler accepts, and a response pattern admits what
+// the handler stores.
+func TestLanguagePatternsAgreeWithCanonicalTag(t *testing.T) {
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Pattern string `json:"pattern"`
+					Items   *struct {
+						Pattern string `json:"pattern"`
+					} `json:"items"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// Every language or country pattern is one of these, so a copy that drifts
+	// fails here rather than refusing a value the handler accepts.
+	known := map[string]bool{
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$`:                                                true,
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$`:                                               true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\s\v\x85\p{Z}]*$`:  true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\s\v\x85\p{Z}]*$`: true,
+		`^(?:[a-z]{2})?$`: true, `^[a-z]{2,3}$`: true, `^[A-Z]{2}$`: true,
+	}
+	for name, schema := range doc.Components.Schemas {
+		for member, property := range schema.Properties {
+			p := property.Pattern
+			if property.Items != nil {
+				p = property.Items.Pattern
+			}
+			if p != "" && (strings.Contains(member, "language") || strings.Contains(member, "countr")) && !known[p] {
+				t.Errorf("%s.%s: unknown language pattern %q", name, member, p)
+			}
+		}
+	}
+	pattern := func(schema, member string) *regexp.Regexp {
+		p := doc.Components.Schemas[schema].Properties[member].Pattern
+		if p == "" {
+			t.Fatalf("%s.%s declares no pattern", schema, member)
+		}
+		return regexp.MustCompile(p)
+	}
+	request, response := pattern("ProfileUpdate", "language"), pattern("Profile", "language")
+	for _, value := range []string{"en", "eng", "EN", " en ", "pt-BR", "pt_br", "zh-Hant-TW", "es-419", "fil", "und",
+		"x-silo-original", "i-klingon", "sgn-BE-FR", "ar-EG-u-nu-latn", "", "English", "original", "00", "x",
+		// strings.TrimSpace trims Unicode spaces, not only ASCII ones.
+		"\u00a0en\u00a0", "\ven", "\u2003en\u3000", "\u0085", "\u00a0"} {
+		canonical := lang.CanonicalTag(value)
+		if strings.TrimSpace(value) != "" && canonical == "" {
+			continue // the handler refuses it; the pattern may too
+		}
+		if !request.MatchString(value) {
+			t.Errorf("request pattern refuses %q, which the handler accepts", value)
+		}
+		if !response.MatchString(canonical) {
+			t.Errorf("response pattern refuses %q, the canonical form of %q", canonical, value)
+		}
 	}
 }

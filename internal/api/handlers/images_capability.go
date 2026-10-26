@@ -76,11 +76,7 @@ func GetImagesCapability(backend ...string) ImagesCapabilityResponse {
 	}
 	widths := make(map[string]ImageSizeWidths, len(imageTypesWithWidths))
 	for _, imageType := range imageTypesWithWidths {
-		widths[imageType] = ImageSizeWidths{
-			Small:  variantWidthPx(imageType, imagesize.Small),
-			Medium: variantWidthPx(imageType, imagesize.Medium),
-			Large:  variantWidthPx(imageType, imagesize.Large),
-		}
+		widths[imageType] = ImageWidthsFor(imageType)
 	}
 
 	return ImagesCapabilityResponse{
@@ -92,6 +88,16 @@ func GetImagesCapability(backend ...string) ImagesCapabilityResponse {
 		OriginalMaxWidthPx:     imageutil.MaxCachedOriginalDimension,
 		StorageBackend:         storageBackend,
 		Delivery:               delivery,
+	}
+}
+
+// ImageWidthsFor reports the pixel width behind each named size for one image
+// type, as the widths map does for the types it lists.
+func ImageWidthsFor(imageType string) ImageSizeWidths {
+	return ImageSizeWidths{
+		Small:  variantWidthPx(imageType, imagesize.Small),
+		Medium: variantWidthPx(imageType, imagesize.Medium),
+		Large:  variantWidthPx(imageType, imagesize.Large),
 	}
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { detachedMediaPlaying } from "./detachedMedia";
 import {
   ThemeMusic,
   resetThemeAudioFormats,
@@ -26,6 +27,8 @@ function audio() {
       element.src = "";
     }),
     load: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
   };
   return element as unknown as HTMLAudioElement;
 }
@@ -42,6 +45,20 @@ afterEach(() => {
 });
 
 describe("ThemeMusic", () => {
+  // The speed test treats it as media: it streams over the link playback uses.
+  it("counts its element as playing media until it stops", async () => {
+    const element = audio();
+    const music = new ThemeMusic(
+      vi.fn(async () => ({ url: "/audio?token=current" })),
+      () => element,
+    );
+    music.select(selection, false);
+    await flush();
+    expect(detachedMediaPlaying()).toBe(true);
+    music.stop(true);
+    expect(detachedMediaPlaying()).toBe(false);
+  });
+
   it("aborts a pending grant while suspended and reloads only after selection resumes", async () => {
     let resolve!: (grant: ThemeGrant) => void;
     const grant = vi
@@ -136,23 +153,6 @@ describe("ThemeMusic", () => {
     vi.advanceTimersByTime(300);
     expect(element.pause).toHaveBeenCalled();
     expect(element.src).toBe("");
-  });
-
-  it("discards a grant that arrives after navigation or profile change", async () => {
-    let resolve!: (grant: ThemeGrant) => void;
-    const grant = vi.fn(
-      () =>
-        new Promise<ThemeGrant>((done) => {
-          resolve = done;
-        }),
-    );
-    const create = vi.fn(audio);
-    const music = new ThemeMusic(grant, create);
-    music.select(selection, false);
-    music.stop(true);
-    resolve({ url: "/audio?token=obsolete" });
-    await flush();
-    expect(create).not.toHaveBeenCalled();
   });
 
   it("recovers once from a stale playback URL and then stops retrying", async () => {

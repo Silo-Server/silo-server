@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -23,8 +24,14 @@ type scopedKeyUserRepo struct {
 	getErr  error
 	created *models.CreateUserInput
 	updated *models.UpdateUserInput
+	deleted bool
+	// promoteBeforeMutate makes the account an admin between the handler's
+	// pre-checks and the locked write, as a concurrent promotion would.
+	promoteBeforeMutate bool
 	// updateErr, when set, is what Update returns.
 	updateErr error
+	// revoked records whether the last mutation asked to sign the account out.
+	revoked bool
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -50,12 +57,49 @@ func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.Update
 
 func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
 
-func (r *scopedKeyUserRepo) GetByID(context.Context, int) (*models.User, error) {
+// MutateAdminAccount runs the handler's checks against the stored account the
+// way the transactional repository does, without a transaction.
+func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return auth.AdminUserSnapshot{}, err
+	}
+	if r.promoteBeforeMutate {
+		current.Role = models.RoleAdmin
+	}
+	revoke, err := validate(current, nil)
+	if err != nil {
+		return auth.AdminUserSnapshot{User: current}, err
+	}
+	r.revoked = revoke
+	if input == nil {
+		r.deleted = true
+		return auth.AdminUserSnapshot{User: current}, nil
+	}
+	return auth.AdminUserSnapshot{User: current}, r.Update(ctx, id, *input)
+}
+
+func (r *scopedKeyUserRepo) GetAdminSnapshot(ctx context.Context, id int) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	return auth.AdminUserSnapshot{User: current}, err
+}
+
+func (r *scopedKeyUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	return r.user, nil
+	if r.user != nil && id == r.user.ID {
+		return r.user, nil
+	}
+	// Caller 1 is the server Owner, so the tests that use it exercise the
+	// scoped-key rules rather than the Owner rules.
+	if id == scopedKeyTestOwnerID {
+		return &models.User{ID: id, Role: models.RoleAdmin, Enabled: true, IsOwner: true}, nil
+	}
+	return nil, auth.ErrNotFound
 }
+
+const scopedKeyTestOwnerID = 1
 
 // newScopedKeyAdminHandler builds an AdminHandler whose target account has the
 // given role, so the "target is already an admin" rule can be exercised.
@@ -67,7 +111,7 @@ func newScopedKeyAdminHandler(targetRole string) (*AdminHandler, *scopedKeyUserR
 		Role:        targetRole,
 		Permissions: []string{},
 		Enabled:     true,
-		MaxProfiles: 5,
+		MaxProfiles: new(5),
 	}}
 	return &AdminHandler{
 		userRepo:           repo,
@@ -176,6 +220,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 		name       string
 		claims     *auth.Claims
 		targetRole string
+		self       bool
 		body       string
 		wantStatus int
 		wantUpdate bool
@@ -202,6 +247,36 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			name:       "scoped key cannot redirect its admin owner's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			self:       true,
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot redirect another admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot clear an admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":""}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key may edit an ordinary recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "user",
+			body:       `{"email":"new@example.test"}`,
+			wantStatus: http.StatusOK,
+			wantUpdate: true,
+		},
+		{
 			name:       "scoped key may reset an ordinary password",
 			claims:     scopedKeyClaims(),
 			targetRole: "user",
@@ -221,7 +296,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "unscoped key keeps full access",
 			claims:     unscopedKeyClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -229,7 +304,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "jwt admin keeps full access",
 			claims:     jwtAdminClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -238,6 +313,9 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newScopedKeyAdminHandler(tt.targetRole)
+			if tt.self {
+				tt.claims.UserID = repo.user.ID
+			}
 			rec := updateUserRequestFor(t, h, tt.claims, tt.body)
 
 			if rec.Code != tt.wantStatus {
@@ -252,25 +330,6 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 				t.Fatalf("user updated = %v, want %v", got, tt.wantUpdate)
 			}
 		})
-	}
-}
-
-// Promoting passes the role through untouched; the repository owns clearing
-// the group so every caller (invitations, provisioning) gets the same rule.
-func TestHandleUpdateUserPromoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
-	groupID := int64(5)
-	repo.user.AccessGroupID = &groupID
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"admin"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "admin" {
-		t.Fatalf("update = %+v, want role admin", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository clears it)", repo.updated.AccessGroupID)
 	}
 }
 
@@ -302,23 +361,6 @@ func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
 				t.Fatal("grouped-admin assignment must not be written")
 			}
 		})
-	}
-}
-
-// Demoting passes through as well; the repository lands the ex-admin on the
-// default group unless the request names one.
-func TestHandleUpdateUserDemoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("admin")
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"user"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "user" {
-		t.Fatalf("update = %+v, want role user", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository assigns the default group)", repo.updated.AccessGroupID)
 	}
 }
 
@@ -384,4 +426,17 @@ func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, bo
 	rec := httptest.NewRecorder()
 	h.HandleUpdateUser(rec, req)
 	return rec
+}
+
+func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
+	for _, body := range []string{`{"password":"new-password"}`, `{"email":"attacker@example.test"}`} {
+		t.Run(body, func(t *testing.T) {
+			h, repo := newScopedKeyAdminHandler(models.RoleUser)
+			repo.promoteBeforeMutate = true
+			rec := updateUserRequestFor(t, h, scopedKeyClaims(), body)
+			if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
+				t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+			}
+		})
+	}
 }

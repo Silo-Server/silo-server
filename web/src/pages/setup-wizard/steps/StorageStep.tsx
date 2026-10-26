@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
 import {
   SettingField,
   SettingFieldRow,
@@ -18,7 +19,7 @@ import {
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
 
-const REDIS_KEYS = ["redis.url"];
+const REDIS_KEYS = ["redis.url", "redis.db"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
@@ -108,7 +109,7 @@ function Backend({
   status,
   open,
   onToggle,
-  editable = true,
+  readOnly = false,
   children,
 }: {
   title: string;
@@ -118,8 +119,8 @@ function Backend({
   status?: ReactNode;
   open: boolean;
   onToggle: () => void;
-  /** False when the value is owned by the environment and cannot be edited here. */
-  editable?: boolean;
+  /** Show the environment-owned values for inspection without offering edits. */
+  readOnly?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -136,19 +137,11 @@ function Backend({
           ))
         }
       >
-        {editable ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onToggle}
-            aria-expanded={open}
-          >
-            {open ? "Hide" : configured ? "Edit" : "Set up"}
-          </Button>
-        ) : null}
+        <Button type="button" variant="secondary" size="sm" onClick={onToggle} aria-expanded={open}>
+          {open ? "Hide" : readOnly ? "View" : configured ? "Edit" : "Set up"}
+        </Button>
       </SettingFieldRow>
-      {open && editable ? <div className="setup-backend-fields">{children}</div> : null}
+      {open ? <div className="setup-backend-fields">{children}</div> : null}
     </>
   );
 }
@@ -348,7 +341,7 @@ export function StorageStep() {
       busy={busy}
       disabled={holdSubmit}
       onSkip={skip}
-      footnote="Storage, Redis, and database settings are in Admin › Settings › Storage & Database."
+      footnote="Storage settings are in Admin › Server › Storage; Redis and database settings are in Admin › Server › General."
     >
       {locationStatusUnavailable ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
@@ -376,7 +369,7 @@ export function StorageStep() {
             locationStatusUnavailable
               ? "Storage lock status is unavailable. Reload before changing the backend."
               : artworkLocked
-                ? "Locked: files have already been stored on this backend. Change it from Admin › Settings › Storage & Database, which moves them."
+                ? "Locked: files have already been stored on this backend. Change it from Admin › Server › Storage, which moves them."
                 : "Where Silo keeps artwork, subtitles, and other library assets."
           }
           onChange={(value) => {
@@ -398,7 +391,7 @@ export function StorageStep() {
         />
         <SettingFieldRow
           label="Keep provider artwork"
-          description="Copies posters and backdrops into your artwork storage."
+          description="Copies posters and backdrops into your artwork storage, including artwork stored next to your media. When off, clients load artwork straight from the providers."
         >
           <Switch
             checked={form.getValue("metadata.cache_images") !== "false"}
@@ -421,15 +414,28 @@ export function StorageStep() {
           }
           open={open.redis}
           onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
-          editable={!redisManaged}
+          readOnly={redisManaged}
         >
           <SettingField
             label="Connection URL"
             type="password"
             hint="redis://localhost:6379"
             value={form.getValue("redis.url")}
-            onChange={(v) => form.setValue("redis.url", v)}
+            onChange={(v) => stageRedisUrl(form, v)}
             sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
+            disabled={redisManaged}
+          />
+          <SettingField
+            label="Database number"
+            type="number"
+            description={
+              redisManaged
+                ? "Set by REDIS_URL"
+                : "Replaces the number in the URL. Installs sharing one Redis each need their own."
+            }
+            value={form.getValue("redis.db")}
+            onChange={(v) => form.setValue("redis.db", v)}
+            disabled={redisManaged}
           />
           <ConnectionCheckAction
             onClick={redisCheck.run}
@@ -457,8 +463,8 @@ export function StorageStep() {
             locationStatusUnavailable={locationStatusUnavailable}
             lockedDescription={
               usesS3
-                ? "Locked: files are stored here. Change it from Admin › Settings › Storage & Database, which moves them."
-                : "Locked: files are stored on local disk, and adding a public bucket would switch Automatic storage to S3. Change it from Admin › Settings › Storage & Database, which moves them."
+                ? "Locked: files are stored here. Change it from Admin › Server › Storage, which moves them."
+                : "Locked: files are stored on local disk, and adding a public bucket would switch Automatic storage to S3. Change it from Admin › Server › Storage, which moves them."
             }
           />
         </Backend>
@@ -476,7 +482,7 @@ export function StorageStep() {
             disabled={busy}
             locationLocked={locationStatusUnavailable || privateLocked}
             locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription="Locked: Silo records a configured private bucket at startup, even when empty. Stored library assets also lock this location. Change it from Admin › Settings › Storage & Database."
+            lockedDescription="Locked: Silo records a configured private bucket at startup, even when empty. Stored library assets also lock this location. Change it from Admin › Server › Storage."
           />
         </Backend>
       </StepSection>

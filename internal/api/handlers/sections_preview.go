@@ -23,6 +23,8 @@ type previewRequest struct {
 	ItemLimit   int             `json:"item_limit"`
 	LibraryID   *int            `json:"library_id,omitempty"`
 	LibraryIDs  []int           `json:"library_ids,omitempty"`
+	// V1Rules: see createSectionRequest.
+	V1Rules bool `json:"-"`
 }
 
 // previewResponse is the response body for POST /api/admin/sections/preview.
@@ -38,6 +40,7 @@ func (h *SectionHandler) HandlePreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_json", err.Error())
 		return
 	}
+	req.V1Rules = true
 
 	resp, err := h.previewAdminSection(r.Context(), req, requestAccessFilter(r))
 	if err != nil {

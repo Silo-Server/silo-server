@@ -180,19 +180,7 @@ export function useSetPolicyDocumentEnabled() {
     onSuccess: (_data, variables) => invalidatePolicyDocuments(client, variables.documentId),
   });
 }
-export function useDeletePolicyDocument() {
-  const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: ({ documentId, etag }: { documentId: string; etag: string }) =>
-      v2("DELETE /api/v2/admin/policy/documents/{id}", {
-        path: { id: documentId },
-        headers: { "If-Match": etag },
-        retryAuthentication: false,
-      }),
-    onSuccess: () => invalidatePolicyDocuments(client),
-  });
-}
+
 export function useValidatePolicy() {
   return useMutation({
     retry: false,

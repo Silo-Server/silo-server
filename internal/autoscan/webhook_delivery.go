@@ -40,6 +40,12 @@ func scanWebhookDelivery(row interface{ Scan(...any) error }) (WebhookDelivery, 
 // CreateWebhookDelivery durably accepts a delivery and leases it to the caller
 // for an immediate ingest attempt. If the caller exits before finalizing it, a
 // retry worker can reclaim it after webhookDeliveryLease.
+//
+// The same statement stamps the endpoint's last_received_at, so the admin
+// "Last delivery" time commits with acceptance: a delivery that fails to
+// insert is not stamped, one that is inserted cannot lose its stamp, and the
+// stamp uses the database clock before inline processing starts, so an error
+// recorded while processing is always newer.
 func (r *Repository) CreateWebhookDelivery(ctx context.Context, in ChangeIngest) (WebhookDelivery, error) {
 	changes, err := json.Marshal(in.Changes)
 	if err != nil {
@@ -51,13 +57,22 @@ func (r *Repository) CreateWebhookDelivery(ctx context.Context, in ChangeIngest)
 	}
 	lockedBy := uuid.NewString()
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO autoscan_webhook_deliveries (
-			source_id, provider_event_type, changes, received_at,
-			attempt_count, next_attempt_at, locked_at, locked_by
+		WITH delivery AS (
+			INSERT INTO autoscan_webhook_deliveries (
+				source_id, provider_event_type, changes, received_at,
+				attempt_count, next_attempt_at, locked_at, locked_by
+			)
+			VALUES ($1, $2, $3, $4, 1, now(), now(), $5)
+			RETURNING id, source_id, provider_event_type, changes, received_at,
+				attempt_count, locked_by
+		), stamp AS (
+			UPDATE autoscan_webhook_endpoints
+			SET last_received_at = now()
+			WHERE source_id = $1
 		)
-		VALUES ($1, $2, $3, $4, 1, now(), now(), $5)
-		RETURNING id, source_id, provider_event_type, changes, received_at,
-			attempt_count, locked_by`,
+		SELECT id, source_id, provider_event_type, changes, received_at,
+			attempt_count, locked_by
+		FROM delivery`,
 		in.SourceID, in.ProviderEventType, changes, receivedAt, lockedBy)
 	delivery, err := scanWebhookDelivery(row)
 	if err != nil {

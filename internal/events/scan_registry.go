@@ -22,7 +22,7 @@ type ScanRunResult struct {
 	MatchedFiles            int    `json:"matched_files"`
 	RetriedItems            int    `json:"retried_items"`
 	StillUnmatchedWarnings  int    `json:"still_unmatched_warnings"`
-	Skipped                 int    `json:"skipped"`
+	Skipped                 int    `json:"skipped"` // kept for payload compatibility; overlapping scans now wait, so always 0
 	Errors                  int    `json:"errors"`
 	Phase                   string `json:"phase,omitempty"`
 	Message                 string `json:"message,omitempty"`

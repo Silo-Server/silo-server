@@ -174,7 +174,7 @@
       "expected": {
         "outcome": "playable",
         "delivery": "server_transcode_hls",
-        "decision_reason": "quality_original",
+        "decision_reason": "quality_auto_source",
         "plan_id": "plan:176744988a004fd5f2230c221961c41a",
         "plan_attempt_key": "v3:d1ecc0d9511b83b8",
         "selected_tracks": {
@@ -271,6 +271,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -529,6 +543,20 @@
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
+            "preserves_source": false
           }
         ]
       }
@@ -766,6 +794,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -1220,6 +1262,20 @@
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
+            "preserves_source": false
           }
         ]
       }
@@ -1460,6 +1516,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -1702,6 +1772,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -1958,6 +2042,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -2707,6 +2805,20 @@
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
+            "preserves_source": false
           }
         ]
       }
@@ -3372,8 +3484,8 @@
         "outcome": "playable",
         "delivery": "server_remux_progressive",
         "decision_reason": "container_normalization",
-        "plan_id": "plan:e88fbdcf1a40478d50f19e6a1c9d2e41",
-        "plan_attempt_key": "v3:e3784d73c47008f0",
+        "plan_id": "plan:b0fabdf793bdfddfe228437da393616f",
+        "plan_attempt_key": "v3:11afdf62d282fb34",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3407,7 +3519,7 @@
           {
             "name": "server_dv7_to_hdr10",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "2",
             "validated_claims": [
               "dolby_vision_metadata_removed",
               "hdr10_base_layer_preserved",
@@ -3736,6 +3848,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]
@@ -5018,6 +5144,20 @@
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
+            "preserves_source": false
           }
         ]
       }
@@ -5255,6 +5395,20 @@
             "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p-low",
+            "display_name": "480p Low",
+            "height": 480,
+            "bitrate_kbps": 800,
+            "preserves_source": false
+          },
+          {
+            "label": "360p",
+            "display_name": "360p",
+            "height": 360,
+            "bitrate_kbps": 300,
             "preserves_source": false
           }
         ]

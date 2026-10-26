@@ -15,7 +15,7 @@
       "max_local_stream_bitrate_kbps": null,
       "transcode_allowed": null,
       "audio_transcode_allowed": null,
-      "max_profiles": 5,
+      "max_profiles": null,
       "download_allowed": true,
       "download_transcode_allowed": null,
       "requests_allowed": null,
@@ -23,6 +23,7 @@
       "password_login": false,
       "password_change_required": false,
       "is_owner": false,
+      "break_glass": false,
       "effective_policy": {
         "library_ids": [
           "3"
@@ -32,6 +33,7 @@
         "max_transcodes": 0,
         "max_remote_stream_bitrate_kbps": 0,
         "max_local_stream_bitrate_kbps": 0,
+        "max_profiles": 5,
         "transcode_allowed": true,
         "audio_transcode_allowed": false,
         "download_allowed": false,

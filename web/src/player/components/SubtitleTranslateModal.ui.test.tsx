@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
 
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -67,9 +68,62 @@ it("reports the validated accepted job to the player before closing", async () =
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Translate" }));
   });
-  expect(onSubtitleJobAccepted).toHaveBeenCalledExactlyOnceWith("11");
+  expect(onSubtitleJobAccepted).toHaveBeenCalledExactlyOnceWith("11", undefined);
   expect(onClose).toHaveBeenCalledOnce();
   expect(onSubtitleJobAccepted.mock.invocationCallOrder[0]).toBeLessThan(
     onClose.mock.invocationCallOrder[0]!,
   );
+});
+
+it("offers only the spoken language for audio when translation is off", async () => {
+  playerV2Mock.mockResolvedValue({
+    job: { id: "13", media_file_id: "7", kind: "transcribe", source_index: 0, status: "pending" },
+    live_delivery_attached: true,
+  });
+  render(
+    <SubtitleTranslateModal
+      {...props}
+      translateEnabled={false}
+      transcribeEnabled
+      audioTracks={[{ language: "de" }]}
+    />,
+  );
+  expect(screen.queryByRole("combobox", { name: "Subtitle language" })).toBeNull();
+  expect(screen.getByText(/Subtitles are written in the spoken language/)).toBeInTheDocument();
+  expect(screen.queryByText(/translated if the language differs/)).toBeNull();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+  });
+  expect(playerV2Mock).toHaveBeenCalledWith(
+    expect.anything(),
+    "POST /api/v2/subtitles/ai/translate",
+    expect.objectContaining({
+      body: expect.objectContaining({ kind: "transcribe", target_language: "" }),
+    }),
+  );
+});
+
+it("says when the server returns subtitles it already created", async () => {
+  playerV2Mock.mockResolvedValue({
+    job: {
+      id: "12",
+      media_file_id: "7",
+      kind: "translate",
+      source_index: 0,
+      status: "completed",
+      result_subtitle_id: "31",
+    },
+    live_delivery_attached: false,
+  });
+  const info = vi.spyOn(toast, "info").mockImplementation(() => "toast");
+  const onSubtitleJobAccepted = vi.fn();
+  render(<SubtitleTranslateModal {...props} onSubtitleJobAccepted={onSubtitleJobAccepted} />);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Translate" }));
+  });
+  expect(info).toHaveBeenCalledExactlyOnceWith(
+    "These subtitles were already created, so the saved track is selected.",
+  );
+  expect(onSubtitleJobAccepted).toHaveBeenCalledExactlyOnceWith("12", "31");
+  info.mockRestore();
 });

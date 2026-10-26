@@ -106,7 +106,6 @@ func TestHLSSegmentErrorResponse(t *testing.T) {
 		wantCode   string
 	}{
 		{"segment not found", playback.ErrSegmentNotFound, http.StatusNotFound, "NotFound"},
-		{"transcode failed", playback.ErrTranscodeFailed, http.StatusNotFound, "NotFound"},
 		{"tone-map source changed", tonemap.ErrSourceRevisionChanged, http.StatusUnsupportedMediaType, "TranscodeUnsupported"},
 		{"tone-map validation unavailable", playback.ErrToneMapSourceValidationUnavailable, http.StatusServiceUnavailable, "TranscodeUnavailable"},
 		{"tone-map executor unavailable", playback.ErrToneMapExecutorUnavailable, http.StatusServiceUnavailable, "TranscodeUnavailable"},

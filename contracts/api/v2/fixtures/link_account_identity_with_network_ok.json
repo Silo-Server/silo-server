@@ -1,0 +1,12 @@
+{
+  "id": "8",
+  "installation_id": "5",
+  "provider_id": "plugin:5:tailscale",
+  "provider_name": "Tailscale",
+  "username": "alice@example.test",
+  "email": "alice@example.test",
+  "display_name": "Alice Example",
+  "linked_at": "2026-01-02T03:04:05.000Z",
+  "last_sign_in_at": null,
+  "last_checked_at": "2026-01-03T16:07:08.000Z"
+}

@@ -7,6 +7,7 @@
 package arrwebhook
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -67,7 +68,36 @@ type payload struct {
 	// Download/import payloads include the files replaced by an upgrade. They
 	// must be reconciled as vanished paths even when a separate "file delete for
 	// upgrade" notification is not enabled in arr.
-	DeletedFiles []fileRef `json:"deletedFiles"`
+	DeletedFiles    []fileRef       `json:"-"`
+	DeletedFilesRaw json.RawMessage `json:"deletedFiles"`
+}
+
+// folderDeleteEventTypes send deletedFiles as a bool (whether arr deleted the
+// folder) rather than as files.
+var folderDeleteEventTypes = map[string]bool{
+	"SeriesDelete": true,
+	"MovieDelete":  true,
+}
+
+// decodeDeletedFiles reads deletedFiles once the event type is known: the bool
+// folder-delete events send names no files, and anything else that is not a
+// list of files is malformed.
+func decodeDeletedFiles(eventType string, raw json.RawMessage) ([]fileRef, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	if folderDeleteEventTypes[eventType] {
+		switch string(trimmed) {
+		case "true", "false":
+			return nil, nil
+		}
+	}
+	var files []fileRef
+	if err := json.Unmarshal(trimmed, &files); err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // importEventTypes are the events that carry newly imported files.
@@ -97,6 +127,11 @@ func Parse(provider string, body []byte) (ParsedWebhook, error) {
 	if eventType == "" {
 		return ParsedWebhook{}, ErrMalformedPayload
 	}
+	deletedFiles, err := decodeDeletedFiles(eventType, p.DeletedFilesRaw)
+	if err != nil {
+		return ParsedWebhook{}, ErrMalformedPayload
+	}
+	p.DeletedFiles = deletedFiles
 
 	out := ParsedWebhook{EventType: eventType, Provider: resolveProvider(provider, p)}
 	if strings.EqualFold(eventType, "Test") {

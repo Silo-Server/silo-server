@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminPlaybackHistory, useAdminUserProfiles } from "@/hooks/queries/admin/history";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import type { AdminPlaybackHistoryItem } from "@/api/types";
 
+import { episodeCode } from "./admin-users/detail/format";
 import { formatDecisionLabel } from "./adminActivityPresentation";
 
 const ALL_USERS = "all";
@@ -119,96 +122,96 @@ export default function AdminPlaybackHistory() {
   const allRows = history.data ?? [];
   const total = allRows.length;
   const paginatedRows = allRows.slice(page * pageSize, (page + 1) * pageSize);
-  const activeMediaItemLabel = allRows[0]?.media_title || selectedMediaItemId;
+  const activeMediaItemLabel = allRows[0] ? historyRowLabel(allRows[0]) : selectedMediaItemId;
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Playback History</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Finalized playback attempts across all users and profiles.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {selectedMediaItemId && (
-            <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-              <span className="text-muted-foreground font-medium">Item filter active</span>
-              <Link
-                to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
-                className="hover:text-primary font-semibold transition-colors hover:underline"
-              >
-                {activeMediaItemLabel}
-              </Link>
-            </div>
-          )}
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Playback History"
+        subtitle="Finalized playback attempts across all users and profiles."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedMediaItemId && (
+              <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+                <span className="text-muted-foreground font-medium">Item filter active</span>
+                <Link
+                  to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
+                  className="hover:text-primary font-semibold transition-colors hover:underline"
+                >
+                  {activeMediaItemLabel}
+                </Link>
+              </div>
+            )}
 
-          <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="All users" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS}>All users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.id} value={String(user.id)}>
-                  {user.username}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_USERS}>All users</SelectItem>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={String(user.id)}>
+                    {user.username}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <Select
-            value={selectedProfile}
-            onValueChange={(value) => updateFilter("profile_id", value)}
-            disabled={selectedUser === ALL_USERS}
-          >
-            <SelectTrigger className="w-[220px]">
-              <SelectValue
-                placeholder={selectedUser === ALL_USERS ? "Choose a user first" : "All profiles"}
+            <Select
+              value={selectedProfile}
+              onValueChange={(value) => updateFilter("profile_id", value)}
+              disabled={selectedUser === ALL_USERS}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue
+                  placeholder={selectedUser === ALL_USERS ? "Choose a user first" : "All profiles"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
+                {(profiles.data ?? []).map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={selectedCompleted}
+              onValueChange={(value) => updateFilter("completed", value)}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All attempts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COMPLETION}>All attempts</SelectItem>
+                <SelectItem value="true">Completed</SelectItem>
+                <SelectItem value="false">Partial</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button variant="outline" size="sm" onClick={resetFilters}>
+              Reset
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => {
+                void refreshHistory();
+              }}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
               />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
-              {(profiles.data ?? []).map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {profile.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={selectedCompleted}
-            onValueChange={(value) => updateFilter("completed", value)}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="All attempts" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_COMPLETION}>All attempts</SelectItem>
-              <SelectItem value="true">Completed</SelectItem>
-              <SelectItem value="false">Partial</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" size="sm" onClick={resetFilters}>
-            Reset
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-w-[8.25rem] justify-center"
-            onClick={() => {
-              void refreshHistory();
-            }}
-            disabled={isManualRefreshPending}
-            aria-busy={isManualRefreshPending}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </Button>
-        </div>
-      </div>
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <InfoCard label="Visible Rows" value={String(allRows.length)} />
@@ -266,22 +269,30 @@ export default function AdminPlaybackHistory() {
                   </TableHeader>
                   <TableBody>
                     {paginatedRows.map((row) => {
-                      const title =
-                        row.media_title || row.media_item_id || `File #${row.media_file_id}`;
+                      const watch = watchTime(row);
+                      const { title, detail } = historyRowTitle(row);
+                      const titleBlock = (
+                        <>
+                          {title}
+                          {detail ? (
+                            <div className="text-muted-foreground font-normal">{detail}</div>
+                          ) : null}
+                        </>
+                      );
                       const profileLabel = row.profile_name || row.profile_id;
                       return (
                         <TableRow key={row.session_id}>
                           <TableCell>
-                            <div className="space-y-1">
+                            <div className="max-w-[18rem] min-w-[12rem] space-y-1 break-words whitespace-normal">
                               {row.media_item_id ? (
                                 <Link
                                   to={`/item/${encodeURIComponent(row.media_item_id)}`}
                                   className="hover:text-primary block font-medium transition-colors hover:underline"
                                 >
-                                  {title}
+                                  {titleBlock}
                                 </Link>
                               ) : (
-                                <div className="font-medium">{title}</div>
+                                <div className="font-medium">{titleBlock}</div>
                               )}
                               <div className="text-muted-foreground text-xs">
                                 {row.media_type || "unknown"} · session {row.session_id.slice(0, 8)}
@@ -314,7 +325,16 @@ export default function AdminPlaybackHistory() {
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
-                              <div>{formatDuration(row.watched_seconds)}</div>
+                              <div
+                                title={
+                                  watch.estimated
+                                    ? "Estimated: recorded before watch time was measured"
+                                    : undefined
+                                }
+                              >
+                                {watch.estimated ? "≈ " : ""}
+                                {formatDuration(watch.seconds)}
+                              </div>
                               <div className="text-muted-foreground text-xs">
                                 of {formatDuration(row.duration_seconds)}
                               </div>
@@ -409,6 +429,30 @@ export default function AdminPlaybackHistory() {
   );
 }
 
+/**
+ * An episode leads with its series title, with "S02E04 · Episode title" as the
+ * detail line. A row without a series title keeps its own title.
+ */
+function historyRowTitle(row: AdminPlaybackHistoryItem): { title: string; detail: string } {
+  if (row.series_title) {
+    // A pilot named after its show would otherwise repeat the series title.
+    const episodeTitle = row.media_title === row.series_title ? "" : row.media_title;
+    const detail = [episodeCode(row.season_number, row.episode_number), episodeTitle]
+      .filter(Boolean)
+      .join(" · ");
+    return { title: row.series_title, detail };
+  }
+  return {
+    title: row.media_title || row.media_item_id || `File #${row.media_file_id}`,
+    detail: "",
+  };
+}
+
+function historyRowLabel(row: AdminPlaybackHistoryItem): string {
+  const { title, detail } = historyRowTitle(row);
+  return detail ? `${title} · ${detail}` : title;
+}
+
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface-panel rounded-2xl border-0 p-4">
@@ -416,6 +460,17 @@ function InfoCard({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
     </div>
   );
+}
+
+// Measured watch time, or for a play recorded before it was measured the
+// server's estimate: the end position capped at the session's length.
+function watchTime(row: AdminPlaybackHistoryItem) {
+  if (row.played_seconds !== null) return { seconds: row.played_seconds, estimated: false };
+  const elapsed = (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000;
+  const capped = Number.isFinite(elapsed)
+    ? Math.min(row.watched_seconds, Math.max(elapsed, 0))
+    : row.watched_seconds;
+  return { seconds: Math.max(capped, 0), estimated: true };
 }
 
 function formatDuration(seconds: number | null) {

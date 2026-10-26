@@ -14,7 +14,9 @@ type ThemeSettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-// ThemeHandler serves theme-related public endpoints.
+// ThemeHandler serves the frozen /api/v1 theme routes. The web client has one
+// look and reads none of them; they stay on the bridge surface, reporting
+// whatever is stored, until v1 retires.
 type ThemeHandler struct {
 	settings ThemeSettingsReader
 
@@ -45,19 +47,13 @@ type AdminCSSView struct {
 	RawCSS string `json:"raw_css"`
 }
 
-// HandleAdminCSS returns the server-wide admin theme overrides.
-// Public endpoint — no authentication required. This allows admin
-// branding to apply before login (white-label).
+// HandleAdminCSS returns the retired server-wide theme overrides. Public
+// endpoint — no authentication required, as it was read before login.
 func (h *ThemeHandler) HandleAdminCSS(w http.ResponseWriter, r *http.Request) {
+	vars, _ := h.settings.Get(r.Context(), "ui.admin_theme_vars")
+	rawCSS, _ := h.settings.Get(r.Context(), "ui.admin_custom_css")
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, h.AdminCSS(r.Context()))
-}
-
-// AdminCSS reads the shared server overrides used before login.
-func (h *ThemeHandler) AdminCSS(ctx context.Context) AdminCSSView {
-	vars, _ := h.settings.Get(ctx, "ui.admin_theme_vars")
-	rawCSS, _ := h.settings.Get(ctx, "ui.admin_custom_css")
-	return AdminCSSView{Vars: vars, RawCSS: rawCSS}
+	writeJSON(w, http.StatusOK, AdminCSSView{Vars: vars, RawCSS: rawCSS})
 }
 
 // HandleDownload retains the frozen portable JSON response.

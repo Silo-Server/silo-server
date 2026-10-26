@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
 
 // Batch insert tuning. Variables so tests can shorten them.
@@ -147,7 +149,7 @@ func (d Drain[T]) persist(live, ctx context.Context, batch []T, stopping bool) {
 func (d Drain[T]) attempt(ctx context.Context, batch []T) error {
 	ctx, cancel := context.WithTimeout(ctx, insertTimeout)
 	defer cancel()
-	return d.Insert(ctx, batch)
+	return d.Insert(queryattr.Quiet(ctx), batch)
 }
 
 func (d Drain[T]) report(ctx context.Context, failure InsertFailure) {

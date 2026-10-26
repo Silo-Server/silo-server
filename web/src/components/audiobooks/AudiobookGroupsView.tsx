@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AudiobookGroup } from "@/api/types";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
+import PageUnavailable from "@/components/PageUnavailable";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -129,18 +131,26 @@ export default function AudiobookGroupsView({
   const [sort, setSort] = useState<AudiobookGroupSort>(groupBy === "series" ? "name" : "count");
   const [filter, setFilter] = useState("");
   const debouncedFilter = useDebounce(filter.trim(), 250);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useAudiobookGroups(
-    libraryId,
-    groupBy,
-    sort,
-    debouncedFilter,
-  );
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isError,
+    isFetching,
+    isFetchingNextPage,
+    isLoading,
+    refetch,
+  } = useAudiobookGroups(libraryId, groupBy, sort, debouncedFilter);
 
   const groups = useMemo(() => data?.pages.flatMap((page) => page.groups) ?? [], [data?.pages]);
   const firstPage = data?.pages[0];
   const total = firstPage?.total ?? 0;
   const totalExact = firstPage?.total_exact ?? false;
   const isInitialLoading = isLoading && groups.length === 0;
+  // A failed read with nothing loaded is not an empty library. Groups that
+  // did load stay on screen when a later refetch fails.
+  const failedWithNothingLoaded = isError && groups.length === 0;
   const loadNextPage = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
       void fetchNextPage();
@@ -202,6 +212,13 @@ export default function AudiobookGroupsView({
             ))}
           </div>
         )
+      ) : failedWithNothingLoaded ? (
+        <PageUnavailable
+          title={`Couldn't load these ${noun}`}
+          description={loadErrorDescription(error)}
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
       ) : groups.length === 0 ? (
         <p className="text-muted-foreground py-10 text-center text-sm">
           {filter ? `No ${noun} match “${filter}”.` : `No ${noun} found in this library.`}

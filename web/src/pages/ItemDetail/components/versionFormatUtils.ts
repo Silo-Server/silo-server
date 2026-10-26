@@ -1,6 +1,29 @@
-import type { VersionAudioTrack, VersionSubtitleTrack, VersionVideoTrack } from "@/api/types";
+import type {
+  FileVersion,
+  VersionAudioTrack,
+  VersionSubtitleTrack,
+  VersionVideoTrack,
+} from "@/api/types";
 import { englishLanguageName, getLanguageName } from "@/lib/languageNames";
-import { formatBitrate, formatChannels, formatSampleRate } from "@/lib/mediaFormat";
+import {
+  audioTrackAtmosEvidence,
+  formatBitrate,
+  formatChannels,
+  formatSampleRate,
+} from "@/lib/mediaFormat";
+
+/**
+ * Atmos evidence for the audio stream a version's codec_audio describes. The
+ * scanner takes codec_audio from the first audio stream, so the first track's
+ * profile and titles apply when its codec agrees.
+ */
+export function versionAudioAtmosEvidence(version: FileVersion): string | undefined {
+  const first = version.audio_tracks?.[0];
+  if (!first?.codec || !version.codec_audio) return undefined;
+  return first.codec.toLowerCase() === version.codec_audio.toLowerCase()
+    ? audioTrackAtmosEvidence(first)
+    : undefined;
+}
 
 export function formatPageCount(pages?: number): string {
   if (!pages || pages <= 0) return "";

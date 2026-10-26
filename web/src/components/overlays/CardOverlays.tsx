@@ -52,12 +52,16 @@ function overlayLength(pixels: number, mode: ScalingMode, legacyVariable: string
   return `${Number(((pixels / POSTER_REFERENCE_WIDTH) * 100).toFixed(6))}cqi`;
 }
 
+// Every poster card asks on every render, so the answer is cached. It is keyed
+// to the `CSS` object so a replaced global (as in tests) is asked again.
+let containerQueryUnitsSupport: { css: typeof CSS; supported: boolean } | null = null;
+
 function supportsContainerQueryUnits(): boolean {
-  return (
-    typeof CSS !== "undefined" &&
-    typeof CSS.supports === "function" &&
-    CSS.supports("width", "1cqi")
-  );
+  if (typeof CSS === "undefined" || typeof CSS.supports !== "function") return false;
+  if (containerQueryUnitsSupport?.css !== CSS) {
+    containerQueryUnitsSupport = { css: CSS, supported: CSS.supports("width", "1cqi") };
+  }
+  return containerQueryUnitsSupport.supported;
 }
 
 function setLegacyLength(element: HTMLElement, variable: string, pixels: number, scale: number) {
@@ -154,7 +158,9 @@ function resolveBadge(
   return {
     def,
     label,
-    accentColor: itemAccent ?? def.defaultAccent,
+    // The viewer's own accent wins; a data-driven accent (amber for a title
+    // that needs attention) comes before the badge's default.
+    accentColor: itemAccent ?? def.getAccent?.(data) ?? def.defaultAccent,
     iconId: showIcon ? candidateIcon : null,
   };
 }
@@ -192,7 +198,9 @@ function BadgeStack({
           columnGap: length(preset.iconGap, POSTER_VARS.iconGap),
           paddingInline: length(preset.paddingInline, POSTER_VARS.paddingInline),
           paddingBlock: length(preset.paddingBlock, POSTER_VARS.paddingBlock),
-          fontSize: length(preset.fontSize, POSTER_VARS.fontSize),
+          // The inline size beats the preset's rem class, so it carries the
+          // text size itself: browser default and in-app scale (#1796).
+          fontSize: `calc(${length(preset.fontSize, POSTER_VARS.fontSize)} * var(--ui-root-text-ratio, 1))`,
           borderRadius:
             preset.borderRadius === "full"
               ? "9999px"

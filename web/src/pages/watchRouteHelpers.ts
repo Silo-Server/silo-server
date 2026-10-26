@@ -11,7 +11,7 @@ import type {
   WatchPageProps,
 } from "@/player";
 import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLanguage";
-import { isBitmapCodec } from "@/player/utils/subtitleCodecs";
+import { subtitleNeedsBurnIn } from "@/player/utils/subtitleCodecs";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 
 export interface WatchRouteRequest {
@@ -20,10 +20,14 @@ export interface WatchRouteRequest {
   libraryId?: number;
   roomId?: string;
   roomToken?: string;
+  /** The shuffle this playback belongs to; the post-roll plays its next pick. */
+  shuffleId?: string;
   restart: boolean;
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  /** The viewer chose fileId, so Auto must not swap in another version. */
+  versionPicked?: boolean;
   returnHref?: string;
   requestKey: string;
 }
@@ -34,10 +38,12 @@ export interface WatchPlaybackStartInput {
   libraryId?: number;
   roomId?: string;
   roomToken?: string;
+  shuffleId?: string;
   restart?: boolean;
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  versionPicked?: boolean;
   returnHref?: string;
 }
 
@@ -54,10 +60,12 @@ function buildWatchRouteRequestKey(
   libraryId: number | undefined,
   roomId: string | undefined,
   roomToken: string | undefined,
+  shuffleId: string | undefined,
   restart: boolean,
   audioTrackIndex: number | undefined,
   prePlaySubtitleMode: "auto" | "off" | "explicit" | undefined,
   prePlaySubtitleSelection: PrePlaySubtitleSelection | null | undefined,
+  versionPicked: boolean,
 ): string {
   return JSON.stringify([
     contentId,
@@ -65,10 +73,12 @@ function buildWatchRouteRequestKey(
     libraryId ?? null,
     roomId ?? null,
     roomToken ?? null,
+    shuffleId ?? null,
     restart,
     audioTrackIndex ?? null,
     prePlaySubtitleMode ?? null,
     prePlaySubtitleSelection ?? null,
+    versionPicked,
   ]);
 }
 
@@ -78,10 +88,12 @@ export function createWatchRouteRequest({
   libraryId,
   roomId,
   roomToken,
+  shuffleId,
   restart = false,
   audioTrackIndex,
   prePlaySubtitleMode,
   prePlaySubtitleSelection,
+  versionPicked = false,
   returnHref,
 }: WatchPlaybackStartInput): WatchRouteRequest {
   return {
@@ -90,10 +102,12 @@ export function createWatchRouteRequest({
     libraryId,
     roomId,
     roomToken,
+    shuffleId,
     restart,
     audioTrackIndex,
     prePlaySubtitleMode,
     prePlaySubtitleSelection,
+    versionPicked,
     returnHref,
     requestKey: buildWatchRouteRequestKey(
       contentId,
@@ -101,10 +115,12 @@ export function createWatchRouteRequest({
       libraryId,
       roomId,
       roomToken,
+      shuffleId,
       restart,
       audioTrackIndex,
       prePlaySubtitleMode,
       prePlaySubtitleSelection,
+      versionPicked,
     ),
   };
 }
@@ -119,6 +135,7 @@ export function buildWatchRouteRequest(
     libraryId: parseOptionalInt(searchParams.get("libraryId")),
     roomId: searchParams.get("room_id") ?? undefined,
     roomToken: searchParams.get("room_token") ?? undefined,
+    shuffleId: searchParams.get("shuffle") ?? undefined,
     restart: searchParams.get("restart") === "1",
   });
 }
@@ -133,6 +150,7 @@ export function buildWatchHref(request: WatchRouteRequest): string {
   if (request.libraryId != null) searchParams.set("libraryId", String(request.libraryId));
   if (request.roomId) searchParams.set("room_id", request.roomId);
   if (request.roomToken) searchParams.set("room_token", request.roomToken);
+  if (request.shuffleId) searchParams.set("shuffle", request.shuffleId);
   if (request.restart) searchParams.set("restart", "1");
   const query = searchParams.toString();
 
@@ -181,7 +199,6 @@ function buildInitialSubtitleTrackIndexes({
   subtitleMode,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
-  profileLanguage,
   showForcedSubtitles,
 }: {
   item: WatchDetail;
@@ -189,7 +206,6 @@ function buildInitialSubtitleTrackIndexes({
   subtitleMode: SubtitleMode;
   preferredSubtitleLanguage: string | null;
   preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null;
-  profileLanguage: string | null;
   showForcedSubtitles: boolean;
 }): {
   start: Record<number, number>;
@@ -235,7 +251,6 @@ function buildInitialSubtitleTrackIndexes({
       preferredLanguage: preferredSubtitleLanguage,
       preferredTrackSignature: preferredSubtitleTrackSignature,
       audioLanguage: resolveVersionAudioLanguage(version, selectedAudioTrackIndex),
-      profileLanguage,
       showForcedSubtitles,
     });
     if (selectedSubtitleTrackIndex === null) {
@@ -243,11 +258,12 @@ function buildInitialSubtitleTrackIndexes({
     }
     const selectedTrack = tracks.find((track) => track.index === selectedSubtitleTrackIndex);
     start[version.file_id] = selectedSubtitleTrackIndex;
-    // Bitmap tracks (PGS/DVD/DVB) have to be burned in on the web player. Keep
-    // their ordinals separately so a refused start can be retried without the
-    // subtitle. Successful starts stay a single request, and the server owns
-    // remapping the selection when it adapts to another file version.
-    if (selectedTrack && isBitmapCodec(selectedTrack.codec)) {
+    // Tracks the server must burn in (DVD/DVB bitmaps, external bitmap
+    // files) can be why a start is refused. Keep their ordinals separately so
+    // a refused start can be retried without the subtitle. Successful starts
+    // stay a single request, and the server owns remapping the selection when
+    // it adapts to another file version.
+    if (selectedTrack && subtitleNeedsBurnIn(selectedTrack)) {
       bitmap[version.file_id] = selectedSubtitleTrackIndex;
     }
   }
@@ -283,7 +299,6 @@ export function buildWatchPageProps({
     "auto") as SubtitleMode;
   const showForcedSubtitles =
     item.effective_show_forced_subtitles ?? currentProfile?.show_forced_subtitles ?? true;
-  const profileLanguage = currentProfile?.language || null;
 
   const subtitles: PlayerSubtitleInfo[] = item.subtitles.map((subtitle, index) => ({
     index,
@@ -345,7 +360,6 @@ export function buildWatchPageProps({
     subtitleMode,
     preferredSubtitleLanguage,
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
-    profileLanguage,
     showForcedSubtitles,
   });
 
@@ -393,6 +407,7 @@ export function buildWatchPageProps({
     title: item.title,
     year: item.year,
     fileId: request.fileId,
+    versionPicked: request.versionPicked,
     libraryId: request.libraryId,
     versions: item.versions,
     playbackVariants: item.playback_variants ?? [],
@@ -407,7 +422,6 @@ export function buildWatchPageProps({
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
     subtitleMode,
     showForcedSubtitles,
-    profileLanguage,
     intro,
     introSkipMode,
     credits,

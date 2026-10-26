@@ -2,17 +2,23 @@ package watchstate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/clientclock"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type LeafWatchTarget struct {
 	MediaItemID     string
 	DurationSeconds float64
+	// RecordRewatch lets a completed target with a resume position (a rewatch
+	// in progress) record another play and clear the position. Without it that
+	// target is a no-op like any completed one.
+	RecordRewatch bool
 }
 
 type Service struct {
@@ -37,6 +43,9 @@ type PlaybackStopResult struct {
 	Completed             bool
 	SkippedBelowMinResume bool
 	HistoryID             string
+	// AlreadyRecorded reports a RecordPlaybackStopOnce call whose play was
+	// already in watch history, so it wrote nothing.
+	AlreadyRecorded bool
 }
 
 type ManualMarkResult struct {
@@ -79,13 +88,24 @@ func (s *Service) RecordManualMarkWatchedWithResult(ctx context.Context, userID 
 	return s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourceManual)
 }
 
+// RecordManualMarkUnwatched clears the targets' watched state and resume
+// position and keeps their plays in watch history. Nothing goes to watch
+// providers, so their history keeps the plays too.
 func (s *Service) RecordManualMarkUnwatched(ctx context.Context, userID int, profileID string, targetIDs []string) error {
-	_, err := s.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
-	return err
+	return s.recordMarkUnwatched(ctx, userID, profileID, targetIDs)
 }
 
-func (s *Service) RecordManualMarkUnwatchedWithResult(ctx context.Context, userID int, profileID string, targetIDs []string) (ManualMarkResult, error) {
-	return s.recordMarkUnwatched(ctx, userID, profileID, targetIDs)
+// ClearResumePosition sets the profile's visible resume position on a leaf
+// item to zero and reports whether there was one. Unlike mark unwatched it
+// keeps the watched latch and the known duration. Like it, it keeps watch
+// history and sends nothing to watch providers. The write is stamped now, so delta sync carries
+// it to other devices and an older provider resume point cannot restore it.
+func (s *Service) ClearResumePosition(ctx context.Context, userID int, profileID, mediaItemID string) (bool, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return store.ClearResumePosition(ctx, profileID, mediaItemID, time.Now().UTC())
 }
 
 func (s *Service) RecordPlaybackStop(
@@ -141,6 +161,75 @@ func (s *Service) RecordPlaybackStop(
 	result.HistoryID = historyID
 	if entry.Completed {
 		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
+	return result, nil
+}
+
+// RecordPlaybackStopOnce records a play that more than one stop may report,
+// such as copies of one session on several replicas, in watch history once.
+// historyID names the play's row: the first stop that can record the play
+// writes it, and a later stop changes nothing (AlreadyRecorded) unless it
+// completes a row stored incomplete. A stop below the minimum resume
+// threshold, or one whose write fails, leaves the row to the next stop.
+//
+// It writes no resume progress. The caller's client reports progress as the
+// play goes, and a stale copy's stop would only move that point back. The
+// version hints are written only by the stop that records the play, after the
+// row, so a stale copy cannot replace a newer play's hints; a failed hints
+// write is returned but does not undo the record.
+func (s *Service) RecordPlaybackStopOnce(
+	ctx context.Context,
+	userID int,
+	profileID, targetID string,
+	duration, position float64,
+	watchedAt time.Time,
+	hints userstore.VersionHints,
+	thresholds userstore.ProgressThresholds,
+	historyID string,
+) (PlaybackStopResult, error) {
+	result := PlaybackStopResult{
+		MediaItemID:          targetID,
+		DurationSeconds:      duration,
+		FinalPositionSeconds: position,
+	}
+	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+		result.SkippedBelowMinResume = true
+		return result, nil
+	}
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return result, err
+	}
+	if watchedAt.IsZero() {
+		watchedAt = time.Now().UTC()
+	}
+	entry := userstore.WatchHistoryEntry{
+		ID:              historyID,
+		ProfileID:       profileID,
+		MediaItemID:     targetID,
+		WatchedAt:       formatWatchedAt(watchedAt),
+		DurationSeconds: duration,
+		Completed:       duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct),
+		Source:          userstore.WatchHistorySourcePlayback,
+	}
+	s.applyStableIdentity(ctx, &entry)
+	entry, err = userstore.AddVisibleHistory(ctx, store, entry)
+	if errors.Is(err, userstore.ErrHistoryEntryExists) {
+		result.AlreadyRecorded = true
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Completed = entry.Completed
+	result.HistoryID = historyID
+	if entry.Completed {
+		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
+	if hints.FileID > 0 {
+		if err := store.UpdateProgressHints(ctx, profileID, targetID, hints); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
@@ -237,7 +326,18 @@ func (s *Service) RecordImportedMarkUnplayed(
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	return store.RemoveHistoryItems(ctx, profileID, []string{targetID}, updatedAt)
+	return store.ClearWatchedState(ctx, profileID, []string{targetID}, updatedAt)
+}
+
+// Progress returns the profile's watch progress for targetID, or nil when it
+// has none, read from the same user store watch-state writes go to. User
+// stores report UpdatedAt as RFC 3339 in UTC, whole seconds.
+func (s *Service) Progress(ctx context.Context, userID int, profileID, targetID string) (*userstore.WatchProgress, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return store.GetProgress(ctx, profileID, targetID)
 }
 
 func (s *Service) SetFavorite(
@@ -251,9 +351,11 @@ func (s *Service) SetFavorite(
 		return err
 	}
 	if favorite {
-		return store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+		return err
 	}
-	return store.RemoveFavorite(ctx, profileID, targetID)
+	_, err = store.RemoveFavorite(ctx, profileID, targetID)
+	return err
 }
 
 func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, targetID string) (bool, error) {
@@ -267,19 +369,21 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 	}
 	next := !current
 	if next {
-		return next, store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+	} else {
+		_, err = store.RemoveFavorite(ctx, profileID, targetID)
 	}
-	return next, store.RemoveFavorite(ctx, profileID, targetID)
+	return next, err
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {
+	watchedAt = clientclock.Clamp(watchedAt, time.Now().UTC())
 	_, err := s.recordMarkWatched(ctx, userID, profileID, []LeafWatchTarget{{MediaItemID: targetID}}, watchedAt, userstore.WatchHistorySourceJellycompat)
 	return err
 }
 
 func (s *Service) RecordJellycompatMarkUnplayed(ctx context.Context, userID int, profileID, targetID string) error {
-	_, err := s.recordMarkUnwatched(ctx, userID, profileID, []string{targetID})
-	return err
+	return s.recordMarkUnwatched(ctx, userID, profileID, []string{targetID})
 }
 
 // RecordJellycompatMarkPlayedBatch marks all the given media items as played in
@@ -287,13 +391,14 @@ func (s *Service) RecordJellycompatMarkUnplayed(ctx context.Context, userID int,
 // jellycompat's series-mark-played path to collapse a per-episode loop into
 // one progress upsert plus per-episode history inserts (audit 2026-05-01 §2.7).
 func (s *Service) RecordJellycompatMarkPlayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string, watchedAt time.Time) error {
+	watchedAt = clientclock.Clamp(watchedAt, time.Now().UTC())
 	return s.recordMarkWatchedBatch(ctx, userID, profileID, targetIDs, watchedAt, userstore.WatchHistorySourceJellycompat)
 }
 
-// RecordJellycompatMarkUnplayedBatch hides prior visible history and clears
-// progress for all targets in a single store operation.
+// RecordJellycompatMarkUnplayedBatch clears the watched state and progress of
+// all targets in a single store operation, keeping their history.
 func (s *Service) RecordJellycompatMarkUnplayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string) error {
-	return s.recordMarkUnwatchedBatch(ctx, userID, profileID, targetIDs)
+	return s.recordMarkUnwatched(ctx, userID, profileID, targetIDs)
 }
 
 func (s *Service) storeForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
@@ -330,8 +435,10 @@ func (s *Service) recordMarkWatched(
 	// A mark is idempotent per leaf: a target the profile has already
 	// completed gets no new history row and no new outbound play, so a
 	// retried request (or a series mark over partly watched episodes)
-	// records each play once. An unmark clears the completed state, so the
-	// next mark records again.
+	// records each play once. The exception is a RecordRewatch target with a
+	// resume position: it records another play and clears the position, so a
+	// repeat records again only if playback set a new position in between.
+	// An unmark clears the completed state, so the next mark records again.
 	targets, err = s.dropCompletedTargets(ctx, store, profileID, targets)
 	if err != nil {
 		return ManualMarkResult{}, err
@@ -353,6 +460,7 @@ func (s *Service) recordMarkWatched(
 		batchTargets = append(batchTargets, userstore.MarkWatchedTarget{
 			MediaItemID:     target.MediaItemID,
 			DurationSeconds: target.DurationSeconds,
+			RecordRewatch:   target.RecordRewatch,
 		})
 		entries = append(entries, userstore.WatchHistoryEntry{
 			ID:              uuid.NewString(),
@@ -382,8 +490,9 @@ func (s *Service) recordMarkWatched(
 }
 
 // dropCompletedTargets returns the targets the profile has not yet completed,
-// in their original order. The progress lookup honors the hidden-history
-// watermark, so an unmarked item counts as not completed.
+// and the RecordRewatch targets it is rewatching (completed with a resume
+// position), in their original order. The progress lookup honors the
+// watched-state cutoff, so an unmarked item counts as not completed.
 func (s *Service) dropCompletedTargets(ctx context.Context, store userstore.UserStore, profileID string, targets []LeafWatchTarget) ([]LeafWatchTarget, error) {
 	if len(targets) == 0 {
 		return targets, nil
@@ -398,7 +507,7 @@ func (s *Service) dropCompletedTargets(ctx context.Context, store userstore.User
 	}
 	remaining := make([]LeafWatchTarget, 0, len(targets))
 	for _, target := range targets {
-		if current, ok := progress[target.MediaItemID]; ok && current.Completed {
+		if current, ok := progress[target.MediaItemID]; ok && current.Completed && !(target.RecordRewatch && current.PositionSeconds > 0) {
 			continue
 		}
 		remaining = append(remaining, target)
@@ -411,72 +520,15 @@ func (s *Service) recordMarkUnwatched(
 	userID int,
 	profileID string,
 	targetIDs []string,
-) (ManualMarkResult, error) {
-	store, err := s.storeForUser(ctx, userID)
-	if err != nil {
-		return ManualMarkResult{}, err
-	}
-	result, err := s.completedHistoryForTargets(ctx, store, profileID, targetIDs, []userstore.WatchHistorySource{userstore.WatchHistorySourceManual})
-	if err != nil {
-		return ManualMarkResult{}, err
-	}
-	return result, store.RemoveHistoryItems(ctx, profileID, targetIDs, time.Now().UTC())
-}
-
-func (s *Service) completedHistoryForTargets(
-	ctx context.Context,
-	store userstore.UserStore,
-	profileID string,
-	targetIDs []string,
-	includeSources []userstore.WatchHistorySource,
-) (ManualMarkResult, error) {
+) error {
 	if len(targetIDs) == 0 {
-		return ManualMarkResult{}, nil
-	}
-	const pageSize = 500
-	var entries []userstore.WatchHistoryEntry
-	for offset := 0; ; offset += pageSize {
-		page, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID:      profileID,
-			MediaItemIDs:   targetIDs,
-			IncludeSources: includeSources,
-			Limit:          pageSize,
-			Offset:         offset,
-		})
-		if err != nil {
-			return ManualMarkResult{}, err
-		}
-		entries = append(entries, page...)
-		if len(page) < pageSize {
-			break
-		}
-	}
-	return ManualMarkResult{Entries: representativeHistoryEntries(targetIDs, entries)}, nil
-}
-
-func representativeHistoryEntries(targetIDs []string, entries []userstore.WatchHistoryEntry) []userstore.WatchHistoryEntry {
-	if len(targetIDs) == 0 || len(entries) == 0 {
 		return nil
 	}
-	latestByTarget := make(map[string]userstore.WatchHistoryEntry, len(targetIDs))
-	for _, entry := range entries {
-		current, ok := latestByTarget[entry.MediaItemID]
-		if !ok || entry.WatchedAt > current.WatchedAt || (entry.WatchedAt == current.WatchedAt && entry.ID > current.ID) {
-			latestByTarget[entry.MediaItemID] = entry
-		}
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return err
 	}
-	result := make([]userstore.WatchHistoryEntry, 0, len(latestByTarget))
-	seen := make(map[string]struct{}, len(targetIDs))
-	for _, targetID := range targetIDs {
-		if _, ok := seen[targetID]; ok {
-			continue
-		}
-		seen[targetID] = struct{}{}
-		if entry, ok := latestByTarget[targetID]; ok {
-			result = append(result, entry)
-		}
-	}
-	return result
+	return store.ClearWatchedState(ctx, profileID, targetIDs, time.Now().UTC())
 }
 
 func (s *Service) recordMarkWatchedBatch(
@@ -511,39 +563,6 @@ func (s *Service) recordMarkWatchedBatch(
 	return nil
 }
 
-func (s *Service) recordMarkUnwatchedBatch(
-	ctx context.Context,
-	userID int,
-	profileID string,
-	targetIDs []string,
-) error {
-	if len(targetIDs) == 0 {
-		return nil
-	}
-	store, err := s.storeForUser(ctx, userID)
-	if err != nil {
-		return err
-	}
-	return store.RemoveHistoryItems(ctx, profileID, targetIDs, time.Now().UTC())
-}
-
-// buildMarkPlayedBatchSQL returns the upsert that marks every media_item_id in
-// the unnest($3) array as completed for a given (user, profile). Extracted into
-// a helper so a SQL-shape unit test can pin the structure without standing up
-// Postgres.
-func buildMarkPlayedBatchSQL() (string, []any) {
-	return `
-        INSERT INTO user_watch_progress
-            (user_id, profile_id, media_item_id, completed, position_seconds, duration_seconds, updated_at)
-        SELECT $1, $2, mid, TRUE, 0, 0, $4
-        FROM unnest($3::text[]) AS mid
-        ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
-        SET completed = TRUE,
-            updated_at = EXCLUDED.updated_at
-        WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
-           OR user_watch_progress.updated_at < EXCLUDED.updated_at`, nil
-}
-
 func (s *Service) addImportedHistoryIfMissing(
 	ctx context.Context,
 	store userstore.UserStore,
@@ -567,10 +586,12 @@ func (s *Service) addImportedHistoryIfMissingWithSource(
 	if watchedAt == nil || watchedAt.IsZero() {
 		return false, nil
 	}
+	// The full time lets the store order the import against a history removal
+	// in the same second; the store decides the precision it keeps.
 	entry := userstore.WatchHistoryEntry{
 		ProfileID:       profileID,
 		MediaItemID:     targetID,
-		WatchedAt:       watchedAt.UTC().Format(time.RFC3339),
+		WatchedAt:       watchedAt.UTC().Format(time.RFC3339Nano),
 		DurationSeconds: duration,
 		Completed:       completed,
 		Source:          source,
@@ -603,11 +624,11 @@ func formatWatchedAt(watchedAt time.Time) string {
 }
 
 // RecordJellycompatProgress commits the leaf's explicit state and its optional
-// played/unplayed history mutation before notifying watch providers.
+// played/unplayed history mutation before notifying watch providers. Like the
+// mark-played path, a played mark adds history only when the leaf is not
+// already completed.
 func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, profileID string, edit userstore.JellycompatProgressEdit, played *bool) error {
-	if edit.EventAt.IsZero() {
-		edit.EventAt = time.Now().UTC()
-	}
+	edit.EventAt = clientclock.Clamp(edit.EventAt, time.Now().UTC())
 	store, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return err
@@ -617,7 +638,7 @@ func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, pro
 		return fmt.Errorf("atomic user progress updates unavailable")
 	}
 	if played != nil {
-		edit.ClearHistory = !*played
+		edit.ClearWatched = !*played
 		if *played {
 			entry := userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: edit.MediaItemID, WatchedAt: formatWatchedAt(edit.EventAt), Completed: true, Source: userstore.WatchHistorySourceJellycompat}
 			s.applyStableIdentity(ctx, &entry)

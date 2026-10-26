@@ -37,6 +37,7 @@ import {
 } from "@/components/realtimeEventsContext";
 import {
   createCatalogInvalidationScheduler,
+  invalidateAccessDependentState,
   invalidateCatalogState,
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
@@ -44,12 +45,27 @@ import {
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import {
+  adminDownloadPreparationsKey,
+  applyDownloadPreparationProgress,
+  isDownloadPreparationProgressEvent,
+  type AdminDownloadPreparationList,
+} from "@/api/v2/adminDownloadPreparations";
+import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorageCache";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
-import { adminKeys, historyImportKeys, libraryKeys, sectionKeys } from "@/hooks/queries/keys";
 import {
+  adminKeys,
+  historyImportKeys,
+  libraryKeys,
+  notInterestedKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
+import {
+  dropInactiveWatchDetail,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
@@ -67,10 +83,18 @@ interface UserStatePayload {
   profile_id: string;
   content_id?: string;
   series_id?: string;
-  change: "progress" | "favorite" | "watchlist" | "history" | "watched" | "home_dismissal";
+  change:
+    | "progress"
+    | "favorite"
+    | "watchlist"
+    | "history"
+    | "watched"
+    | "home_dismissal"
+    | "not_interested";
   played?: boolean;
   is_favorite?: boolean;
   in_watchlist?: boolean;
+  not_interested?: boolean;
 }
 
 const CATALOG_ITEM_CHANGED_EVENTS = new Set([
@@ -78,6 +102,36 @@ const CATALOG_ITEM_CHANGED_EVENTS = new Set([
   "library.item_added",
   "metadata.updated",
 ]);
+
+// Everything that shows a title's request state: the request list, title
+// pages, Discover, and request search results. The feature status and brand
+// lists don't depend on it.
+const REQUEST_STATE_QUERIES: QueryFilters[] = [
+  { queryKey: requestKeys.mineAll() },
+  { queryKey: requestKeys.detailAll() },
+  { queryKey: requestKeys.discovery() },
+  { queryKey: requestKeys.discoverBrowseAll() },
+  { queryKey: requestKeys.searchAll() },
+];
+
+function isRequestNotification(notification: Pick<AppNotification, "type">) {
+  return notification.type?.startsWith("request.") ?? false;
+}
+
+/**
+ * Close code the server ends the events socket with after an access_changed
+ * frame. The client refetches access-dependent data and reconnects at once.
+ */
+export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
+
+/**
+ * How long the events socket stays open after the page is hidden. Its frames
+ * keep the cache current meanwhile, so a quick tab switch costs no requests. A
+ * longer absence closes the socket, and the return refetches active queries
+ * once to cover the frames it missed.
+ */
+export const HIDDEN_EVENTS_SOCKET_GRACE_MS = 60_000;
+
 function buildEventsUrl(location: Pick<Location, "protocol" | "host">) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${location.host}/api/v2/events/ws`;
@@ -347,11 +401,13 @@ function handleUserStateEvent(
         payload.played ?? detail.user_state?.played ?? detail.user_data?.played ?? false;
       const isFavorite = payload.is_favorite ?? detail.user_state?.is_favorite ?? false;
       const inWatchlist = payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false;
+      const notInterested = payload.not_interested ?? detail.user_state?.not_interested ?? false;
       if (
         played === (detail.user_data?.played ?? false) &&
         played === (detail.user_state?.played ?? false) &&
         isFavorite === (detail.user_state?.is_favorite ?? false) &&
-        inWatchlist === (detail.user_state?.in_watchlist ?? false)
+        inWatchlist === (detail.user_state?.in_watchlist ?? false) &&
+        notInterested === (detail.user_state?.not_interested ?? false)
       ) {
         return detail;
       }
@@ -361,24 +417,45 @@ function handleUserStateEvent(
           payload.played == null
             ? detail.user_data
             : { ...detail.user_data, played: payload.played },
-        user_state: { played, is_favorite: isFavorite, in_watchlist: inWatchlist },
+        user_state: {
+          played,
+          is_favorite: isFavorite,
+          in_watchlist: inWatchlist,
+          not_interested: notInterested,
+        },
       };
     });
   }
 
-  // The patch above only carries played/favourite/watchlist, which is the whole
-  // of what a favorite or watchlist event changes. Every other change — progress
+  // The patch above only carries played/favourite/watchlist/not-interested,
+  // which is the whole of what a favorite, watchlist or not-interested event
+  // changes. Every other change — progress
   // above all, which arrives with no state at all — also moves fields the patch
   // cannot reconstruct (position_seconds, is_in_progress, season counts), so the
   // detail query still has to be refreshed for those.
-  const detailFullyPatched = payload.change === "favorite" || payload.change === "watchlist";
+  const detailFullyPatched =
+    payload.change === "favorite" ||
+    payload.change === "watchlist" ||
+    payload.change === "not_interested";
+  if (payload.change === "not_interested") {
+    void queryClient.invalidateQueries({ queryKey: notInterestedKeys.all });
+  }
+  // A closed player would start from its cached watch detail's resume
+  // position, so drop it now rather than after the coalesced refresh; the
+  // refresh still reaches the series it led to.
+  const knownRelatedIds =
+    payload.content_id && (payload.change === "progress" || payload.change === "watched")
+      ? dropInactiveWatchDetail(queryClient, payload.content_id)
+      : undefined;
   scheduleMediaSurfaceInvalidation(
     queryClient,
     payload.content_id
       ? {
           itemId: payload.content_id,
           skipItemDetail: detailFullyPatched,
-          skipSimilarItems: true,
+          // A mark changes which titles More like this lists.
+          skipSimilarItems: payload.change !== "not_interested",
+          knownRelatedIds,
         }
       : { skipSimilarItems: true },
   );
@@ -402,7 +479,7 @@ function handleUserStateEvent(
 
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { user, profile } = useAuth();
+  const { user, profile, refreshAccount } = useAuth();
   const actingAdmin = useIsActingAdmin();
   const pageActivity = usePageActivity();
   const location = useLocation();
@@ -427,12 +504,22 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const nextHandlerIDRef = useRef(1);
   const waitersRef = useRef(new Map<string, JobWaiter>());
   const activeProfileIDRef = useRef<string | null | undefined>(profile?.id);
-  const canApplyRealtimeUpdatesRef = useRef(pageActivity.canApplyRealtimeUpdates);
   const allowDashboardRealtimeUpdatesRef = useRef(allowDashboardRealtimeUpdates);
-  const shouldCatchUpOnFocusRef = useRef(!pageActivity.canApplyRealtimeUpdates);
+  const shouldCatchUpOnFocusRef = useRef(false);
+  const hiddenAtRef = useRef<number | null>(null);
+  const hideCountRef = useRef(0);
+  // An unexpected drop on a visible page is not caught up at once, but the
+  // next return from a hide catches up the frames it lost.
+  const droppedSinceCatchUpRef = useRef(false);
+  const [hiddenGraceExpired, setHiddenGraceExpired] = useState(false);
+  // Bumping these replaces the socket, or runs a catch-up while the page is visible.
+  const [socketGeneration, setSocketGeneration] = useState(0);
+  const [catchUpSignal, setCatchUpSignal] = useState(0);
+  // A frozen page runs no timers or socket handlers, so it gets no grace.
+  const keepSocketOpen =
+    pageActivity.canApplyRealtimeUpdates || (!pageActivity.isFrozen && !hiddenGraceExpired);
 
   activeProfileIDRef.current = profile?.id;
-  canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
   allowDashboardRealtimeUpdatesRef.current = allowDashboardRealtimeUpdates;
 
   useEffect(() => () => catalogInvalidation.cancel(), [catalogInvalidation]);
@@ -532,12 +619,34 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /** Patches a progress reading into the cached list; false when a re-read is needed. */
+  function applyDownloadPreparationProgressToCache(
+    authority: ProfileRequestContextSnapshot | null,
+    event: Parameters<typeof applyDownloadPreparationProgress>[1],
+  ) {
+    const key = adminDownloadPreparationsKey(authority);
+    const cached = queryClient.getQueryData<AdminDownloadPreparationList>(key);
+    if (!cached) return true; // nothing is showing the list; nothing to refresh
+    const next = applyDownloadPreparationProgress(cached, event);
+    if (!next) return false;
+    queryClient.setQueryData(key, next);
+    return true;
+  }
+
   function handleSnapshot(
     message: EventsSnapshotMessage,
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
+    refreshDownloadPreparations: () => void,
+    refreshDownloadStorage: () => void,
   ) {
     switch (message.channel) {
+      case "download_preparations":
+        // The channel sends no snapshot body; a (re)subscription means events
+        // may have been missed, so re-read the list and the storage views.
+        refreshDownloadPreparations();
+        refreshDownloadStorage();
+        break;
       case "jobs":
         if (Array.isArray(message.data)) {
           hydrateAdminJobSnapshot(queryClient, message.data as AdminJob[]);
@@ -562,7 +671,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         break;
       case "notifications":
         if (Array.isArray(message.data)) {
-          applyNotificationsSnapshot(queryClient, message.data as AppNotification[]);
+          const rows = message.data as AppNotification[];
+          applyNotificationsSnapshot(queryClient, rows);
+          // A reconnect sends request changes made while the socket was down
+          // as unread rows here, not as notification.created events.
+          if (rows.some(isRequestNotification)) {
+            refreshQueries(...REQUEST_STATE_QUERIES);
+          }
         }
         break;
       default:
@@ -571,9 +686,17 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     dispatchChannelMessage(message.channel, "snapshot", message);
   }
 
-  function handleNotificationEvent(message: EventsEventMessage) {
+  function handleNotificationEvent(
+    message: EventsEventMessage,
+    refreshQueries: (...filters: QueryFilters[]) => void,
+  ) {
     if (message.event === "notification.created") {
       const notification = message.data as AppNotification;
+      // A request changed state (approved, declined, arrived). The scheduler
+      // batches a burst (a scan fulfilling many requests) into one refetch.
+      if (isRequestNotification(notification)) {
+        refreshQueries(...REQUEST_STATE_QUERIES);
+      }
       if (
         notification.profile_id &&
         activeProfileIDRef.current &&
@@ -588,11 +711,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           description: [episodeCode, notification.episode_title].filter(Boolean).join(" — "),
         });
       } else if (notification.type === "request.fulfilled") {
+        const follower = notification.reason_flags?.follower === true;
         toast(
           notification.series_title
             ? `${notification.series_title} is now available`
-            : "Your request is now available",
-          { description: "Your media request has arrived in the library." },
+            : follower
+              ? "A title you followed is now available"
+              : "Your request is now available",
+          {
+            description: follower
+              ? "A title you asked to hear about has arrived in the library."
+              : "Your media request has arrived in the library.",
+          },
         );
       } else if (
         notification.type === "request.approved" ||
@@ -619,8 +749,25 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     realtimeAuthority: ProfileRequestContextSnapshot | null,
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
+    refreshDownloadPreparations: () => void,
+    refreshDownloadStorage: () => void,
   ) {
     switch (message.channel) {
+      case "download_preparations":
+        if (message.event === "download_storage.changed") {
+          // Clean-up or a revoke changed what the storage views show.
+          refreshDownloadStorage();
+          break;
+        }
+        if (
+          message.event === "download_preparation.progress" &&
+          isDownloadPreparationProgressEvent(message.data) &&
+          applyDownloadPreparationProgressToCache(realtimeAuthority, message.data)
+        ) {
+          break;
+        }
+        refreshDownloadPreparations();
+        break;
       case "catalog":
         {
           const isItemChange = CATALOG_ITEM_CHANGED_EVENTS.has(message.event);
@@ -692,7 +839,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         );
         break;
       case "notifications":
-        handleNotificationEvent(message);
+        handleNotificationEvent(message, refreshQueries);
         break;
       default:
         break;
@@ -701,12 +848,42 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (!authenticatedUserID) {
+    if (pageActivity.canApplyRealtimeUpdates) {
+      setHiddenGraceExpired(false);
       return;
     }
+    const timer = window.setTimeout(
+      () => setHiddenGraceExpired(true),
+      HIDDEN_EVENTS_SOCKET_GRACE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pageActivity.canApplyRealtimeUpdates]);
+
+  useEffect(() => {
     if (!pageActivity.canApplyRealtimeUpdates) {
-      shouldCatchUpOnFocusRef.current = true;
+      if (hiddenAtRef.current === null) {
+        hiddenAtRef.current = Date.now();
+        hideCountRef.current += 1;
+      }
       return;
+    }
+    const hiddenAt = hiddenAtRef.current;
+    hiddenAtRef.current = null;
+    if (!authenticatedUserID) {
+      shouldCatchUpOnFocusRef.current = false;
+      return;
+    }
+    // A suspended page (a phone browser in the background) runs no timers, so
+    // the grace timer may not have closed the socket. Frames were probably
+    // missed, and the socket may have died without a close event: replace it.
+    if (hiddenAt !== null && Date.now() - hiddenAt >= HIDDEN_EVENTS_SOCKET_GRACE_MS) {
+      shouldCatchUpOnFocusRef.current = true;
+      if (socketRef.current) {
+        setSocketGeneration((generation) => generation + 1);
+      }
+    }
+    if (hiddenAt !== null && droppedSinceCatchUpRef.current) {
+      shouldCatchUpOnFocusRef.current = true;
     }
     if (!shouldCatchUpOnFocusRef.current) {
       return;
@@ -722,19 +899,32 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
 
     shouldCatchUpOnFocusRef.current = false;
+    droppedSinceCatchUpRef.current = false;
     void queryClient.refetchQueries({
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
     });
+    // The account record is not a query. An access change made while the
+    // socket was down never sends access_changed: the reconnect's ticket
+    // already carries the new access.
+    void refreshAccount().catch(() => {});
   }, [
     authenticatedUserID,
+    catchUpSignal,
     isForegroundPlaybackRoute,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
+    refreshAccount,
   ]);
 
   useEffect(() => {
-    if (!authenticatedUserID || !pageActivity.canApplyRealtimeUpdates) {
+    if (!authenticatedUserID) {
+      setConnectionState("disconnected");
+      return;
+    }
+    if (!keepSocketOpen) {
+      // Frames sent from now on are missed; catch up when the page returns.
+      shouldCatchUpOnFocusRef.current = true;
       setConnectionState("disconnected");
       return;
     }
@@ -756,6 +946,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         { queryKey: adminSessionsKey(authority), exact: true },
         { queryKey: adminStatsKey(authority), exact: true },
       );
+    };
+    const refreshDownloadPreparations = () => {
+      if (!authority.profileId) return;
+      adminRefresh.schedule({ queryKey: adminDownloadPreparationsKey(authority), exact: true });
+    };
+    const refreshDownloadStorage = () => {
+      if (!authority.profileId) return;
+      adminRefresh.schedule({ queryKey: adminDownloadStorageRootKey(authority) });
     };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
@@ -819,6 +1017,20 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       activeSocket = socket;
       socketRef.current = socket;
+      const hideCountAtOpen = hideCountRef.current;
+      // The server sends access_changed and then closes with
+      // EVENTS_ACCESS_CHANGED_CLOSE_CODE; whichever arrives first refreshes.
+      let accessChangeHandled = false;
+      const handleAccessChanged = () => {
+        if (accessChangeHandled) return;
+        accessChangeHandled = true;
+        invalidateAccessDependentState(queryClient, {
+          allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+        });
+        void refreshAccount().catch(() => {});
+        // The new access applies to the next ticket, so reconnect at once.
+        nextReconnectDelayRef.current = 0;
+      };
 
       socket.onopen = () => {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
@@ -829,9 +1041,6 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       socket.onmessage = (event) => {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
-          return;
-        }
-        if (!canApplyRealtimeUpdatesRef.current) {
           return;
         }
         const message = parseEventsMessage(event.data);
@@ -870,10 +1079,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             return;
           }
           case "snapshot":
-            handleSnapshot(message, refreshSessions, adminRefresh.schedule);
+            handleSnapshot(
+              message,
+              refreshSessions,
+              adminRefresh.schedule,
+              refreshDownloadPreparations,
+              refreshDownloadStorage,
+            );
             return;
           case "event":
-            handleEvent(message, authority, refreshSessions, adminRefresh.schedule);
+            handleEvent(
+              message,
+              authority,
+              refreshSessions,
+              adminRefresh.schedule,
+              refreshDownloadPreparations,
+              refreshDownloadStorage,
+            );
+            return;
+          case "access_changed":
+            handleAccessChanged();
             return;
           case "error":
             return;
@@ -887,9 +1112,30 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         setConnectionState("disconnected");
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event: CloseEvent) => {
         if (socketRef.current !== socket) {
           return;
+        }
+        if (
+          event.code === EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
+          !closedByEffect &&
+          authorityActive()
+        ) {
+          handleAccessChanged();
+        } else if (!closedByEffect) {
+          droppedSinceCatchUpRef.current = true;
+        }
+        if (
+          event.code !== EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
+          !closedByEffect &&
+          (hiddenAtRef.current !== null || hideCountRef.current !== hideCountAtOpen)
+        ) {
+          // The socket was up while the page was hidden, and a phone browser
+          // may have been suspended then, so frames could have been lost
+          // without notice. Catalog and user-state channels send no snapshot
+          // on reconnect: catch up now, or when the page returns.
+          shouldCatchUpOnFocusRef.current = true;
+          setCatchUpSignal((signal) => signal + 1);
         }
         socketRef.current = null;
         activeSocket = null;
@@ -933,8 +1179,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     renderedAuthority?.serverOrigin,
     renderedAuthority?.profileId,
     renderedAuthority?.profileToken,
-    pageActivity.canApplyRealtimeUpdates,
+    keepSocketOpen,
+    socketGeneration,
     queryClient,
+    refreshAccount,
     sendSubscribe,
   ]);
 

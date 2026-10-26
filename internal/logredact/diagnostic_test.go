@@ -135,3 +135,58 @@ func TestSanitizeJSONRedactsURLFormsWithSpaces(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactSecretAssignments(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"desc = api_key=s3cret rejected", "desc = api_key=[REDACTED] rejected"},
+		{"desc=api_key=s3cret", "desc=api_key=[REDACTED]"},
+		{`Get "https://h.example/x?Limit=5&access_token=s3cret": EOF`, `Get "https://h.example/x?Limit=5&access_token=[REDACTED]": EOF`},
+		{`password="two words" and X-Emby-Token='s3cret'`, `password="[REDACTED]" and X-Emby-Token='[REDACTED]'`},
+		{"Pw=s3cret;status=401", "Pw=[REDACTED];status=401"},
+		{"status=401 attempts=3", "status=401 attempts=3"},
+		{"api_key= empty", "api_key= empty"},
+	} {
+		if got := RedactSecretAssignments(tc.in); got != tc.want {
+			t.Errorf("RedactSecretAssignments(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSanitizeTextMasksCredentials(t *testing.T) {
+	for _, text := range []string{
+		"desc = api_key=SECRET",
+		"node https://node.example/prepare?token=SECRET&x=1: 502",
+		`upstream said {"access_token": "SECRET"}`,
+		"Authorization: Bearer SECRET",
+		"open rtsp://user:SECRET@camera/stream failed",
+		"X-Emby-Token=SECRET, password: SECRET",
+	} {
+		got := SanitizeText(text)
+		if strings.Contains(got, "SECRET") || !strings.Contains(got, Placeholder) {
+			t.Fatalf("SanitizeText(%q) = %q", text, got)
+		}
+	}
+}
+
+func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
+	const text = "ffmpeg: No space left on device (/media/Movies/A: B (2020).mkv)"
+	if got := SanitizeText(text); got != text {
+		t.Fatalf("SanitizeText changed ordinary text: %q", got)
+	}
+}
+
+// TestSanitizeTextMasksURLUserinfo checks that a password holding unescaped
+// @, ? or # is masked in full, and that an @ in the path is not userinfo.
+func TestSanitizeTextMasksURLUserinfo(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"fetch ftp://user:pa@ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch ftp://user:pa#ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch redis://default:pa?ss@cache:6379 failed", "fetch redis://" + Placeholder + "@cache:6379 failed"},
+		{"fetch ftp://user:pw@host/a@example.test failed", "fetch ftp://" + Placeholder + "@host/a@example.test failed"},
+		{"fetch ftp://host/a@example.test failed", "fetch ftp://host/a@example.test failed"},
+	} {
+		if got := SanitizeText(tc.in); got != tc.want {
+			t.Errorf("SanitizeText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

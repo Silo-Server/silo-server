@@ -121,11 +121,11 @@ landed after the running scan walked the directory is still picked up.
 
 `mode` is `library`, `subtree`, or `file`.
 
-`202` means the request was validated and dispatched to the durable queue, or to the
-process-local ingester when no queue is configured. It is not a completion, a durable command
-identity, or a replay receipt, and it does not promise that process-local execution survives a
-restart. A conflicting scan that is already running for the same library is deduplicated (see
-[Deduplication](#deduplication)) and still answers `202`.
+`202` means the request was validated and dispatched to the durable queue (or, in a server built
+without a database, such as some tests, to the process-local ingester). It is not a completion, a
+durable command identity, or a replay receipt, and it does not promise that process-local
+execution survives a restart. A request that overlaps a scan already running for the same library
+still answers `202`; it is coalesced or waits its turn (see [Deduplication](#deduplication)).
 
 This operation is **non-retryable**. Do not replay it automatically after an uncertain response;
 observe the library's scan state and make a new explicit decision.
@@ -137,7 +137,7 @@ Errors are RFC 9457 problem documents. The trailing segment of `type` is the sta
 | Status | Problem code             | Cause |
 | ------ | ------------------------ | ----- |
 | 400    | `malformed_request`      | Malformed JSON body, or a target the resolver rejects: neither `library_id` nor `path` supplied, a path outside the library's roots, a missing or uninspectable path, a path that is neither file nor directory, a permission-denied path, an ambiguous path matching several libraries, or an unsupported media extension. |
-| 401    | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401    | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403    | `permission_denied`      | The caller is not an acting administrator. The demo-mode guard also answers here; it exempts acting administrators. |
 | 403    | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`. |
 | 404    | `not_found`              | The library ID does not exist. |
@@ -389,15 +389,22 @@ scanned path as missing. That makes them safe and efficient for targeted updates
 
 ### Deduplication
 
-Scans are deduplicated per library. If a conflicting scan is already running, the new request is
-dropped rather than queued, and the operation still answers `202`. The conflict rules:
+A queued request for the same scope as an accepted or running queued scan is coalesced into it, as
+described under [Scan mode resolution](#scan-mode-resolution). Scans of different scopes are never
+dropped. Within one server process, two scans that overlap do not run at the same time: the later
+one stays `running` while it waits for the earlier one to finish, then scans its own scope.
+Overlapping scans that are waiting start in the order they arrived. A waiting queued scan reports
+the progress message "Waiting for an overlapping scan to finish"; a waiting admin item or library
+refresh shows no message. Canceling the library's scans cancels a waiting scan too. The overlap
+rules:
 
-- Two full library scans on the same library conflict with each other.
-- Two subtree/file scans conflict only if their paths overlap.
-- A subtree or file scan does **not** conflict with a full library scan.
+- Two full library scans on the same library overlap.
+- Two subtree/file scans overlap only if one path contains the other (or they are equal).
+- A subtree or file scan does **not** overlap a full library scan, so they run side by side.
 
-So if a full library scan is running and Sonarr fires a subtree scan, the subtree scan still
-runs. If two full library scans are triggered back to back, the second is dropped.
+So if Sonarr fires a season scan while the show folder is still being scanned, the season scan
+runs right after the show scan finishes and picks up files that landed after the show scan walked
+that folder. Scans running on different servers in a cluster are not serialized.
 
 ## Tips
 

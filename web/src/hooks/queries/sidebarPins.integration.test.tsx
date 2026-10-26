@@ -220,32 +220,6 @@ describe("serialized sidebar pin writes", () => {
     await waitFor(() => expect(result.current.pins.pins["42"]).toHaveLength(1));
   });
 
-  it("serializes rapid toggles as stable desired-state operations", async () => {
-    mocks.mutateAsync.mockResolvedValue({});
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    const { result } = renderHook(() => useToggleSidebarPin(), {
-      wrapper: wrapper(queryClient),
-    });
-    const pin = { type: "collection" as const, id: "a", label: "A" };
-
-    act(() => {
-      result.current.togglePin(42, pin);
-      result.current.togglePin(42, pin);
-    });
-
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(2));
-    expect(mocks.mutateAsync.mock.calls[0]![0]).toMatchObject({
-      item: { type: "collection", library_id: 42, collection_id: "a", label: "A" },
-      present: true,
-    });
-    expect(mocks.mutateAsync.mock.calls[1]![0]).toMatchObject({
-      item: { type: "collection", library_id: 42, collection_id: "a", label: "A" },
-      present: false,
-    });
-  });
-
   it("orders the same target across separate hook instances", async () => {
     const writes = [deferred(), deferred()];
     mocks.mutateAsync.mockImplementation(
@@ -263,11 +237,17 @@ describe("serialized sidebar pin writes", () => {
       second.result.current.togglePin(42, pin);
     });
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
-    expect(mocks.mutateAsync.mock.calls[0]![0]).toMatchObject({ present: true });
+    expect(mocks.mutateAsync.mock.calls[0]![0]).toMatchObject({
+      item: { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
+      present: true,
+    });
 
     writes[0]!.resolve({});
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(2));
-    expect(mocks.mutateAsync.mock.calls[1]![0]).toMatchObject({ present: false });
+    expect(mocks.mutateAsync.mock.calls[1]![0]).toMatchObject({
+      item: { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
+      present: false,
+    });
     writes[1]!.resolve({});
   });
 

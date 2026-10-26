@@ -153,6 +153,22 @@ export function SearchStatusPanel() {
   );
 }
 
+/**
+ * One line of the index status for the Search engine row, so an admin sees
+ * whether Meilisearch is keeping up without opening Advanced. Shares the
+ * status query with the full panel.
+ */
+export function SearchStatusSummary() {
+  const { data: status } = useCatalogSearchStatus();
+  if (!status) return null;
+  const lastSync = formatStatusDate(status.index.last_sync_at) || "never";
+  return (
+    <SettingFieldStatus tone="muted">
+      {`Last sync ${lastSync} · ${status.index.document_count.toLocaleString()} items indexed`}
+    </SettingFieldStatus>
+  );
+}
+
 /** The two index maintenance tasks. Shown whether or not the status resolved. */
 function SearchTaskLinks() {
   return (

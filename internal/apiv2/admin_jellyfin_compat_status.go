@@ -27,14 +27,14 @@ type AdminJellyfinCompatStatus struct {
 	Enabled           bool                                   `json:"enabled"`
 	APIState          string                                 `json:"api_state" enum:"disabled,enabled,error"`
 	Listen            string                                 `json:"listen"`
-	PublicURL         string                                 `json:"public_url"`
+	PublicURL         string                                 `json:"public_url" doc:"Public URL Jellyfin clients are told to use, as configured; not validated as a URI"`
 	EmulatedVersion   string                                 `json:"emulated_server_version"`
 	ServerName        string                                 `json:"server_name"`
 	WebEnabled        bool                                   `json:"web_enabled"`
 	WebState          string                                 `json:"web_state" enum:"missing,installing,removing,installed,failed,update_available"`
 	PinnedVersion     string                                 `json:"pinned_version"`
 	InstalledVersion  string                                 `json:"installed_version,omitempty"`
-	SourceURL         string                                 `json:"source_url"`
+	SourceURL         string                                 `json:"source_url" format:"uri"`
 	Tag               string                                 `json:"tag,omitempty"`
 	CommitSHA         string                                 `json:"commit_sha,omitempty"`
 	Checksum          string                                 `json:"checksum,omitempty"`

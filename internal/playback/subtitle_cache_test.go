@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -66,48 +67,119 @@ func TestServeExtractTextWindowDoesNotPoisonFullTrack(t *testing.T) {
 	}
 }
 
-func TestServeExtractTextConcurrentViewerDoesNotWaitForFill(t *testing.T) {
-	c, source := newTestCache(t)
-	opts := StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}
-	started, release := make(chan struct{}), make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, func(ctx context.Context, opts StreamExtractOpts) error {
-			close(started)
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
+func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
+	for _, tc := range []struct {
+		codec, format string
+		failTemp      bool
+	}{
+		{codec: "subrip", format: "vtt"},
+		{codec: "hdmv_pgs_subtitle", format: "sup"},
+		// The temp file fails after the second viewer has the first cues: it
+		// extracts the rest itself without repeating them.
+		{codec: "subrip", format: "vtt", failTemp: true},
+	} {
+		t.Run(fmt.Sprintf("%s/failTemp=%v", tc.codec, tc.failTemp), func(t *testing.T) {
+			c, source := newTestCache(t)
+			opts := StreamExtractOpts{InputPath: source, SourceCodec: tc.codec}
+			const track = "first cues, rest of the track"
+			started, secondGotCues := make(chan struct{}), make(chan struct{})
+			var calls atomic.Int32
+			extract := func(ctx context.Context, opts StreamExtractOpts) error {
+				if calls.Add(1) > 1 {
+					_, err := io.WriteString(opts.Writer, track)
+					return err
+				}
+				fill := inflightFill(c)
+				close(started)
+				if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
+					return err
+				}
+				select {
+				case <-secondGotCues:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if tc.failTemp {
+					fill.mu.Lock()
+					_ = fill.tmp.Close()
+					fill.mu.Unlock()
+				}
+				_, err := io.WriteString(opts.Writer, "rest of the track")
+				return err
 			}
-			_, err := io.WriteString(opts.Writer, "complete owner track")
-			return err
+			// The first viewer's client stops reading.
+			stalled := &stalledResponse{ResponseRecorder: httptest.NewRecorder(), release: make(chan struct{})}
+			firstCtx, leave := context.WithCancel(t.Context())
+			firstDone := make(chan error, 1)
+			go func() {
+				firstDone <- c.ServeExtract(stalled, httptest.NewRequestWithContext(firstCtx, http.MethodGet, "/subtitle", nil), opts, extract)
+			}()
+			defer func() {
+				leave()
+				close(stalled.release)
+				<-firstDone
+			}()
+			<-started
+
+			second := &signalingResponse{ResponseRecorder: httptest.NewRecorder(), wrote: secondGotCues}
+			if err := c.ServeExtract(second, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, extract); err != nil {
+				t.Fatal(err)
+			}
+			if got := second.Body.String(); got != track {
+				t.Fatalf("second viewer body = %q, want %q", got, track)
+			}
+			wantCalls := int32(1)
+			if tc.failTemp {
+				wantCalls = 2
+			}
+			if got := calls.Load(); got != wantCalls {
+				t.Fatalf("extract ran %d times, want %d", got, wantCalls)
+			}
+			f, _, ok := c.lookup(source, 0, tc.format)
+			if ok == tc.failTemp {
+				t.Fatalf("cached=%v with failed temp file=%v", ok, tc.failTemp)
+			}
+			if ok {
+				if got := readAllAndClose(t, f); got != track {
+					t.Fatalf("cached track = %q", got)
+				}
+			}
 		})
-	}()
-	<-started
-	defer func() {
-		close(release)
-		if err := <-firstDone; err != nil {
-			t.Error(err)
-		}
-	}()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	rec := httptest.NewRecorder()
-	err := c.ServeExtract(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil), opts, func(_ context.Context, opts StreamExtractOpts) error {
-		_, err := io.WriteString(opts.Writer, "independent viewer track")
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	if rec.Body.String() != "independent viewer track" {
-		t.Fatalf("body = %q", rec.Body.String())
+}
+
+// inflightFill returns the one fill in flight.
+func inflightFill(c *SubtitleCache) *SubtitleCacheFill {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, fill := range c.inflight {
+		return fill
 	}
-	// The second viewer must not publish or discard the first viewer's fill.
-	if f, _, ok := c.lookup(source, 0, "vtt"); ok {
-		_ = f.Close()
-		t.Fatal("concurrent viewer published another viewer's fill")
-	}
+	return nil
+}
+
+// stalledResponse blocks every write until release is closed, then fails it.
+type stalledResponse struct {
+	*httptest.ResponseRecorder
+	release chan struct{}
+}
+
+func (s *stalledResponse) Write([]byte) (int, error) {
+	<-s.release
+	return 0, errors.New("client stopped reading")
+}
+
+// signalingResponse closes wrote after its first write.
+type signalingResponse struct {
+	*httptest.ResponseRecorder
+	wrote chan struct{}
+	once  sync.Once
+}
+
+func (s *signalingResponse) Write(p []byte) (int, error) {
+	n, err := s.ResponseRecorder.Write(p)
+	s.once.Do(func() { close(s.wrote) })
+	return n, err
 }
 
 func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
@@ -137,6 +209,62 @@ func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
 		t.Fatal("canceled viewer discarded the active fill")
 	}
 	_ = f.Close()
+}
+
+func TestServeExtractFillOutlivesViewerWhenWarmSlotFree(t *testing.T) {
+	for _, slotsBusy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("slotsBusy=%v", slotsBusy), func(t *testing.T) {
+			c, source := newTestCache(t)
+			if slotsBusy {
+				for range cap(c.warmSem) {
+					c.warmSem <- struct{}{}
+				}
+			}
+			ctx, leave := context.WithCancel(t.Context())
+			var fill *SubtitleCacheFill
+			err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil),
+				StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(ctx context.Context, opts StreamExtractOpts) error {
+					fill = inflightFill(c)
+					if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
+						return err
+					}
+					leave()
+					if slotsBusy {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(5 * time.Second):
+							t.Error("extract kept running without a warm slot")
+						}
+					}
+					for len(c.warmSem) == 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(time.Millisecond):
+						}
+					}
+					_, err := io.WriteString(opts.Writer, "rest of the track")
+					return err
+				})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want the viewer's cancellation", err)
+			}
+			<-fill.done
+			f, _, ok := c.lookup(source, 0, "vtt")
+			if ok == slotsBusy {
+				t.Fatalf("cached=%v with slots busy=%v", ok, slotsBusy)
+			}
+			if ok {
+				if got := readAllAndClose(t, f); got != "first cues, rest of the track" {
+					t.Fatalf("cached track = %q", got)
+				}
+			}
+			if !slotsBusy && len(c.warmSem) != 0 {
+				t.Fatalf("fill kept %d warm slots after finishing", len(c.warmSem))
+			}
+		})
+	}
 }
 
 func TestServeExtractOutlivesServerWriteTimeout(t *testing.T) {
@@ -280,36 +408,6 @@ func readAllAndClose(t *testing.T, f *os.File) string {
 	return string(data)
 }
 
-func TestSubtitleCacheMissThenHit(t *testing.T) {
-	c, source := newTestCache(t)
-
-	if _, _, ok := c.Lookup(source, 0); ok {
-		t.Fatal("expected miss on empty cache")
-	}
-
-	fillEntry(t, c, source, 0, "PGS DATA TRACK 0")
-
-	f, modTime, ok := c.Lookup(source, 0)
-	if !ok {
-		t.Fatal("expected hit after commit")
-	}
-	if got := readAllAndClose(t, f); got != "PGS DATA TRACK 0" {
-		t.Fatalf("cached content = %q", got)
-	}
-	src, err := os.Stat(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !modTime.Equal(src.ModTime()) {
-		t.Fatalf("hit modTime = %v, want source mtime %v", modTime, src.ModTime())
-	}
-
-	// A different track ordinal is a distinct entry.
-	if _, _, ok := c.Lookup(source, 1); ok {
-		t.Fatal("expected miss for uncached track ordinal")
-	}
-}
-
 func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
 	c, source := newTestCache(t)
 	if _, ok := c.LookupText(source, 0, "srt"); ok {
@@ -326,30 +424,6 @@ func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
 	}
 	if _, ok := c.LookupText(source, 1, "srt"); ok {
 		t.Fatal("text cache entry must not satisfy another track")
-	}
-}
-
-func TestSubtitleCacheTextInvalidatedBySourceChange(t *testing.T) {
-	c, source := newTestCache(t)
-	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("old extract"), nil }); err != nil {
-		t.Fatal(err)
-	}
-
-	newTime := time.Now().Add(2 * time.Hour)
-	if err := os.Chtimes(source, newTime, newTime); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := c.LookupText(source, 0, "srt"); ok {
-		t.Fatal("expected text miss after source mtime changed")
-	}
-	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("new extract"), nil }); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "new extract" {
-		t.Fatalf("refilled SRT lookup = %q, %t", got, ok)
-	}
-	if n := countMatching(t, c, func(name string) bool { return strings.HasSuffix(name, ".srt") }); n != 1 {
-		t.Fatalf("stale text sibling not removed: %d entries", n)
 	}
 }
 
@@ -397,25 +471,6 @@ func TestSubtitleCacheInvalidatedBySourceSize(t *testing.T) {
 	}
 	if _, _, ok := c.Lookup(source, 0); ok {
 		t.Fatal("expected miss after source size changed")
-	}
-}
-
-func TestSubtitleCacheDiscardLeavesNothing(t *testing.T) {
-	c, source := newTestCache(t)
-	fill := c.BeginFill(source, 0)
-	if fill == nil {
-		t.Fatal("BeginFill returned nil")
-	}
-	if _, err := fill.Tee(io.Discard).Write([]byte("partial byt")); err != nil {
-		t.Fatal(err)
-	}
-	fill.Discard()
-
-	if _, _, ok := c.Lookup(source, 0); ok {
-		t.Fatal("discarded fill must not be served")
-	}
-	if n := countCacheFiles(t, c); n != 0 {
-		t.Fatalf("discard left %d files (temp not removed?)", n)
 	}
 }
 

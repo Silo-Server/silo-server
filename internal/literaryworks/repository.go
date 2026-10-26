@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 var ErrWorkNotFound = errors.New("literary work not found")
@@ -175,25 +176,17 @@ func (r *Repository) GetFirstWorkIDForContentIDs(ctx context.Context, contentIDs
 }
 
 func (r *Repository) GetMatchItem(ctx context.Context, contentID string) (MatchItemWithWork, error) {
-	rows, err := r.queryMatchItems(ctx, `
+	items, err := r.listMatchItems(ctx, `
 		WHERE mi.content_id = $1
 		  AND mi.type IN ('ebook', 'audiobook')
 	`, contentID)
 	if err != nil {
 		return MatchItemWithWork{}, err
 	}
-	defer rows.Close()
-	if rows.Next() {
-		item, err := scanMatchItem(rows)
-		if err != nil {
-			return MatchItemWithWork{}, err
-		}
-		return item, rows.Err()
+	if len(items) == 0 {
+		return MatchItemWithWork{}, ErrWorkNotFound
 	}
-	if err := rows.Err(); err != nil {
-		return MatchItemWithWork{}, err
-	}
-	return MatchItemWithWork{}, ErrWorkNotFound
+	return items[0], nil
 }
 
 func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, limit int) ([]MatchItemWithWork, error) {
@@ -212,7 +205,7 @@ func (r *Repository) listMatchCandidatesPage(ctx context.Context, source MatchIt
 	}
 	// Two phases: pick candidate IDs with indexable base-table predicates, then
 	// hydrate only those rows. This keeps the per-row lateral aggregates in
-	// queryMatchItems off every opposite-format book and on the LIMIT rows we keep.
+	// listMatchItems off every opposite-format book and on the LIMIT rows we keep.
 	contentIDs, next, err := r.listMatchCandidateIDs(ctx, source, limit, after, autoWorkID)
 	if err != nil {
 		return nil, nil, err
@@ -220,23 +213,14 @@ func (r *Repository) listMatchCandidatesPage(ctx context.Context, source MatchIt
 	if len(contentIDs) == 0 {
 		return nil, nil, nil
 	}
-	rows, err := r.queryMatchItems(ctx, `
+	items, err := r.listMatchItems(ctx, `
 		WHERE mi.content_id = ANY($1)
 		ORDER BY mi.title ASC, mi.content_id ASC
 	`, contentIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-	var items []MatchItemWithWork
-	for rows.Next() {
-		item, err := scanMatchItem(rows)
-		if err != nil {
-			return nil, nil, err
-		}
-		items = append(items, item)
-	}
-	return items, next, rows.Err()
+	return items, next, nil
 }
 
 // listMatchCandidateIDs selects opposite-format candidate content IDs using only
@@ -384,11 +368,13 @@ func buildMatchCandidateQuery(source MatchItem, limit int, after *matchCandidate
 	return query, args
 }
 
-func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {
+// listMatchItems returns the match projection of the media items selected by
+// suffix, a WHERE clause with optional ORDER BY bound to args.
+func (r *Repository) listMatchItems(ctx context.Context, suffix string, args ...any) ([]MatchItemWithWork, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
-	return r.pool.Query(ctx, `
+	rows, err := r.pool.Query(ctx, `
 		SELECT mi.content_id,
 		       mi.type,
 		       mi.title,
@@ -426,6 +412,19 @@ func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ..
 			WHERE mip.content_id = mi.content_id
 		) provider_ids ON TRUE
 		`+suffix, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MatchItemWithWork
+	for rows.Next() {
+		item, err := scanMatchItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *Repository) GetWorkWithItems(ctx context.Context, workID string, filter catalog.AccessFilter) (*Work, []WorkItemDetail, error) {

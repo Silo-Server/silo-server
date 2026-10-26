@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 func TestWorkerStartActualMedia(t *testing.T) {
@@ -31,7 +33,7 @@ func TestWorkerStartActualMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, req, testSecret)
 	response, err := handler.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)

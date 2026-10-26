@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { DiagnosticReport, DiagnosticReportState, DiagnosticReportSummary } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DateTimePicker } from "@/components/DateTimePicker";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,35 +170,36 @@ export default function AdminDiagnostics() {
 
   return (
     <div className="space-y-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Client Diagnostics</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Review client crash reports, device context, and correlated playback sessions.
-          </p>
-        </div>
-        <div className="flex items-center gap-5 sm:gap-6">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="diagnostics-uploads-enabled" className="text-muted-foreground text-sm">
-              Client uploads
-            </Label>
-            <Switch
-              id="diagnostics-uploads-enabled"
-              checked={uploadsEnabled}
-              onCheckedChange={(enabled) => updateUploadsEnabled.mutate(enabled)}
-              disabled={!status.data || status.isError || updateUploadsEnabled.isPending}
-            />
-          </div>
-          <div className="text-right">
-            <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
-              Retention
+      <PageHeader
+        title="Client Diagnostics"
+        subtitle="Review client crash reports, device context, and correlated playback sessions."
+        actions={
+          <div className="flex items-center gap-5 sm:gap-6">
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor="diagnostics-uploads-enabled"
+                className="text-muted-foreground text-sm"
+              >
+                Client uploads
+              </Label>
+              <Switch
+                id="diagnostics-uploads-enabled"
+                checked={uploadsEnabled}
+                onCheckedChange={(enabled) => updateUploadsEnabled.mutate(enabled)}
+                disabled={!status.data || status.isError || updateUploadsEnabled.isPending}
+              />
             </div>
-            <div className="text-sm">
-              {status.data ? `${status.data.retention_days} days` : "Loading..."}
+            <div className="text-right">
+              <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
+                Retention
+              </div>
+              <div className="text-sm">
+                {status.data ? `${status.data.retention_days} days` : "Loading..."}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {status.data?.status !== undefined && status.data.status !== "available" && (
         <FeatureStatusBanner status={status.data.status} />

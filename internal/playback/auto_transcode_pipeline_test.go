@@ -3,7 +3,6 @@ package playback
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,18 +52,6 @@ func TestAutoTranscodePipelineWalksFallbacksInOrder(t *testing.T) {
 	}
 	if pipeline.AdvanceAfterFailure("") {
 		t.Fatal("software path must be the final fallback")
-	}
-}
-
-func TestAutoTranscodePipelineFullHardwareStageKeepsExplicitNVENCRule(t *testing.T) {
-	pipeline := newResolvedAutoTranscodePipeline(resolvedAutoOpts(), newAutoTranscodePipelineCache())
-	full := pipeline.Current()
-	if full.nvencSoftwareDecode {
-		t.Fatal("full-hardware stage must not carry the mixed-stage permission")
-	}
-	joined := strings.Join(buildFFmpegArgs(full), " ")
-	if !strings.Contains(joined, "-hwaccel cuda") || !strings.Contains(joined, "-c:v h264_nvenc") {
-		t.Fatalf("full-hardware stage args = %s, want CUDA decode and NVENC encode", joined)
 	}
 }
 

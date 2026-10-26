@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"io"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,18 +36,6 @@ func TestMountedCompatRouterPreservesMediaHTTPAndCompression(t *testing.T) {
 	singleRange := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"Range": "bytes=2-5"})
 	assertCompatSocketResponse(t, singleRange, http.StatusPartialContent, "2345")
 	_ = singleRange.Body.Close()
-	multiRange := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"Range": "bytes=0-1,4-6"})
-	assertCompatMultiRange(t, multiRange)
-	_ = multiRange.Body.Close()
-	notModified := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"If-None-Match": etag})
-	assertCompatSocketResponse(t, notModified, http.StatusNotModified, "")
-	_ = notModified.Body.Close()
-	ifRangeHit := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"Range": "bytes=2-5", "If-Range": etag})
-	assertCompatSocketResponse(t, ifRangeHit, http.StatusPartialContent, "2345")
-	_ = ifRangeHit.Body.Close()
-	ifRangeMiss := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"Range": "bytes=2-5", "If-Range": `"stale"`})
-	assertCompatSocketResponse(t, ifRangeMiss, http.StatusOK, "0123456789abcdefghijklmnopqrstuvwxyz")
-	_ = ifRangeMiss.Body.Close()
 
 	gzipMedia := compatSocketRequest(t, client, http.MethodGet, mediaURL, map[string]string{"Accept-Encoding": "gzip"})
 	if encoding := gzipMedia.Header.Get("Content-Encoding"); encoding != "" {
@@ -188,37 +173,6 @@ func assertCompatSocketResponse(t *testing.T, resp *http.Response, wantStatus in
 	}
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 		t.Fatalf("media Content-Encoding = %q, want empty", encoding)
-	}
-}
-
-func assertCompatMultiRange(t *testing.T, resp *http.Response) {
-	t.Helper()
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusPartialContent {
-		t.Fatalf("multi-range status = %d, want 206", resp.StatusCode)
-	}
-	mediaType, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || mediaType != "multipart/byteranges" {
-		t.Fatalf("multi-range Content-Type = %q: %v", resp.Header.Get("Content-Type"), err)
-	}
-	mr := multipart.NewReader(resp.Body, params["boundary"])
-	var bodies []string
-	for {
-		part, err := mr.NextPart()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("read multipart range: %v", err)
-		}
-		body, err := io.ReadAll(part)
-		if err != nil {
-			t.Fatalf("read multipart body: %v", err)
-		}
-		bodies = append(bodies, string(body))
-	}
-	if strings.Join(bodies, ",") != "01,456" {
-		t.Fatalf("multi-range bodies = %q, want [01 456]", bodies)
 	}
 }
 

@@ -16,6 +16,15 @@ const (
 	wsPingInterval = 20 * time.Second
 	wsPongTimeout  = 10 * time.Second
 	wsWriteTimeout = 5 * time.Second
+
+	// wsMaxClientMessageBytes bounds one inbound message on every socket that
+	// configureWebSocket sets up. Clients send only small JSON control frames
+	// (playback hello/ack/result, watch-together reports, events subscribe),
+	// each a few hundred bytes; the limit stops a client from making the
+	// server buffer an arbitrarily large message before it is parsed. Gorilla
+	// counts every fragment of a message, and an oversize message fails the
+	// read and closes the connection with 1009 (message too big).
+	wsMaxClientMessageBytes = 64 * 1024
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -71,6 +80,7 @@ func configureWebSocket(conn *websocket.Conn) {
 		return
 	}
 
+	conn.SetReadLimit(wsMaxClientMessageBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))

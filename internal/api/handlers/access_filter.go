@@ -42,3 +42,17 @@ func accessFilterFromScope(scope access.Scope, userID int, profileID, deviceID s
 		DeviceID:           deviceID,
 	}
 }
+
+// withProfileMetadataLanguage fills the profile's metadata language
+// preferences into a filter built without them (accessFilterFromScope leaves
+// them out), so localization resolves the viewer's language.
+func withProfileMetadataLanguage(ctx context.Context, filter catalog.AccessFilter) catalog.AccessFilter {
+	if filter.ProfilePreferredLanguage != "" || len(filter.MetadataLanguageOverrides) > 0 {
+		return filter
+	}
+	if scope, ok := access.GetScope(ctx); ok {
+		filter.ProfilePreferredLanguage = scope.PreferredMetadataLanguage
+		filter.MetadataLanguageOverrides = scope.MetadataLanguageOverrides
+	}
+	return filter
+}

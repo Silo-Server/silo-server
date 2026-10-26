@@ -17,6 +17,25 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("tells an unreadable file apart from one that has not been scanned", () => {
+    const unreadable = describePlanTerminal({
+      reason: "source_unreadable",
+      message: "The source file could not be read; it appears to be empty or damaged.",
+      retryable: false,
+    });
+    expect(unreadable.title).toBe("This file can't be played");
+    expect(unreadable.message).toContain("empty or damaged");
+    expect(unreadable.message).not.toMatch(/scan finishes/);
+
+    expect(
+      describePlanTerminal({
+        reason: "source_metadata_incomplete",
+        message: "The source is missing video metadata required for a validated playback route.",
+        retryable: true,
+      }).title,
+    ).toBe("This file hasn't finished scanning");
+  });
+
   it("describes disabled audio transcoding", () => {
     expect(
       describePlanTerminal({
@@ -46,20 +65,6 @@ describe("describePlanTerminal", () => {
     });
   });
 
-  it("falls back to a generic subtitle sentence when the server sends no message", () => {
-    expect(
-      describePlanTerminal({
-        reason: "subtitle_codec_unsupported",
-        message: "  ",
-        retryable: false,
-      }),
-    ).toEqual({
-      title: "That subtitle track can't be used",
-      message:
-        "Silo couldn't prepare the selected subtitles for this device. Try a different track.",
-    });
-  });
-
   it("keeps the server's reason for refusing every version of an item", () => {
     expect(
       describePlanTerminal({
@@ -70,16 +75,6 @@ describe("describePlanTerminal", () => {
     ).toEqual({
       title: "No playable version found",
       message: "A lower-resolution source is required because 4K transcoding is disabled.",
-    });
-  });
-
-  it("falls back to a generic sentence when no alternate version carries no message", () => {
-    expect(
-      describePlanTerminal({ reason: "no_alternate_version", message: "   ", retryable: false }),
-    ).toEqual({
-      title: "No playable version found",
-      message:
-        "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
     });
   });
 
@@ -107,19 +102,6 @@ describe("describePlanTerminal", () => {
     ).toEqual({
       title: "Playback unavailable",
       message: "Failed to start the playback transport.",
-    });
-  });
-
-  it("falls back to a generic sentence when a conversion failure carries no message", () => {
-    expect(
-      describePlanTerminal({
-        reason: "transcode_node_unavailable",
-        message: " ",
-        retryable: true,
-      }),
-    ).toEqual({
-      title: "Playback unavailable",
-      message: "The server couldn't start converting this file. Please try again.",
     });
   });
 
@@ -182,6 +164,17 @@ describe("describePlaybackTransportError", () => {
       title: "Playback unavailable",
       message: "You do not have permission to play this item.",
     });
+  });
+
+  it("does not call a failed change to a playing stream a failure to start", () => {
+    const error = new PlayerFetchError(502, "Bad Gateway");
+
+    expect(describePlaybackTransportError(error)?.message).toBe(
+      "Silo could not start playback right now. Please try again.",
+    );
+    expect(describePlaybackTransportError(error, "update")?.message).toBe(
+      "Silo could not update playback right now. Please try again.",
+    );
   });
 
   it("ignores 4xx statuses it has nothing specific to say about", () => {

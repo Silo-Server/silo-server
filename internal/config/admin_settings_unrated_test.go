@@ -80,7 +80,7 @@ func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
 	reader := &countingSettingReader{value: "allow"}
 	policy := NewUnratedContentPolicy(reader)
 	now := time.Unix(1000, 0)
-	policy.now = func() time.Time { return now }
+	policy.setting.now = func() time.Time { return now }
 
 	for range 2 {
 		if !policy.AllowUnratedContent(ctx) {
@@ -92,13 +92,13 @@ func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
 	}
 
 	reader.value = "hide"
-	now = now.Add(unratedContentCacheTTL)
+	now = now.Add(UnratedContentCacheTTL)
 	if policy.AllowUnratedContent(ctx) {
 		t.Fatal("want hide once the TTL has passed")
 	}
 
 	reader.err = errors.New("boom")
-	now = now.Add(unratedContentCacheTTL)
+	now = now.Add(UnratedContentCacheTTL)
 	if policy.AllowUnratedContent(ctx) {
 		t.Fatal("a failed read must keep the last value read successfully, which was hide")
 	}
@@ -120,21 +120,21 @@ func TestUnratedContentPolicyKeepsLastValueOnReadFailure(t *testing.T) {
 	reader := &countingSettingReader{value: "allow"}
 	policy := NewUnratedContentPolicy(reader)
 	now := time.Unix(1000, 0)
-	policy.now = func() time.Time { return now }
+	policy.setting.now = func() time.Time { return now }
 
 	if !policy.AllowUnratedContent(ctx) {
 		t.Fatal("want allow from the first read")
 	}
 
 	reader.err = errors.New("boom")
-	now = now.Add(unratedContentCacheTTL)
+	now = now.Add(UnratedContentCacheTTL)
 	if !policy.AllowUnratedContent(ctx) {
 		t.Fatal("a failed read must keep the last value read successfully")
 	}
 
 	reader.err = nil
 	reader.value = "hide"
-	now = now.Add(unratedContentCacheTTL)
+	now = now.Add(UnratedContentCacheTTL)
 	if policy.AllowUnratedContent(ctx) {
 		t.Fatal("want hide once a read succeeds again")
 	}

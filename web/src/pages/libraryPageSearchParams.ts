@@ -121,6 +121,21 @@ export function isMangaLibraryType(libraryType: string): boolean {
   return libraryType === "manga";
 }
 
+const SHUFFLE_LIBRARY_TYPES = new Set([
+  "movie",
+  "movies",
+  "series",
+  "tv",
+  "show",
+  "tvshows",
+  "mixed",
+]);
+
+/** Whether a library holds movies or episodes, the media a shuffle plays. */
+export function isShuffleLibraryType(libraryType: string): boolean {
+  return SHUFFLE_LIBRARY_TYPES.has(libraryType.trim().toLowerCase());
+}
+
 function readString(value: string | null): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;

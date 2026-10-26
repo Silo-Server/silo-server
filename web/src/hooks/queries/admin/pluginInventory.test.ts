@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import { fetchPluginCatalog, useAdminPluginInstallations, useAdminPlugins } from "./plugins";
+import { fetchPluginCatalog, useAdminPluginInstallations } from "./plugins";
 
 function fixture() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -164,37 +164,4 @@ it("reads the catalog through v2 and rejects an unknown source kind", async () =
   bad.items[0]!.source_kind = "mystery";
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(bad)));
   await expect(fetchPluginCatalog()).rejects.toThrow("Unrecognized plugin source kind.");
-});
-it("composes the plugins page reads without a legacy call", async () => {
-  const fetchMock = vi.fn((input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("/admin/plugins/catalog-settings"))
-      return Promise.resolve(
-        new Response(JSON.stringify({ include_approved_community_plugins: true }), {
-          headers: { "Content-Type": "application/json", ETag: '"1"' },
-        }),
-      );
-    if (url.includes("/admin/plugins/catalog-status"))
-      return Promise.resolve(
-        response({
-          approved_community_plugin_count: 0,
-          installed_community_plugin_count: 0,
-          migrated_plugin_count: 0,
-          community_updates_paused: false,
-        }),
-      );
-    if (url.includes("/admin/plugins/catalog"))
-      return Promise.resolve(response(catalogEntry("org.example.a")));
-    if (url.includes("/admin/plugins/installations"))
-      return Promise.resolve(response(installation("3")));
-    if (url.includes("/admin/plugins/repositories"))
-      return Promise.resolve(response({ items: [], page: { has_more: false } }));
-    return Promise.reject(new Error(`unexpected ${url}`));
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useAdminPlugins, fixture());
-  await waitFor(() => expect(result.current.isLoading).toBe(false));
-  expect(result.current.catalog.map((c) => c.plugin_id)).toEqual(["org.example.a"]);
-  expect(result.current.installations.map((i) => i.id)).toEqual([3]);
-  expect(fetchMock.mock.calls.every((c) => String(c[0]).includes("/api/v2/"))).toBe(true);
 });

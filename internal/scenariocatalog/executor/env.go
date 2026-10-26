@@ -42,11 +42,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	apiv2 "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -57,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -385,6 +388,12 @@ func (e *Env) Reseed() {
 	}
 	e.mustSetting("branding.server_name", serverName)
 	e.mustSetting("signup.enabled", "true")
+	// A deployment mints its server identity on first use and keeps it. Seed
+	// it here so the first v2 read that reports server_id (device lookup,
+	// system info) is not observed as a server_settings write.
+	if _, err := serveridentity.Ensure(ctx, catalog.NewServerSettingsRepo(e.pool)); err != nil {
+		e.t.Fatalf("scenario executor: seed server identity: %v", err)
+	}
 	// Media requests on, so the onboarding flow's requests step is present
 	// for non-child profiles and the child filter has something to remove.
 	e.mustExec(`INSERT INTO request_settings (id, requests_enabled) VALUES (true, true)
@@ -432,24 +441,22 @@ func (e *Env) Reseed() {
 	// account; admin_secondary stays PIN-free because scenarios declare it
 	// as the acting profile and would otherwise stop at profile_unverified.
 	e.mustProfile(admin.ID, userstore.Profile{ID: profileAdminLocked, Name: "Fixture Admin Locked"})
-	adminPIN := adminLockedPIN
 	adminStore, err := e.stores.ForUser(ctx, admin.ID)
 	if err != nil {
 		e.t.Fatalf("scenario executor: admin store: %v", err)
 	}
-	if err := adminStore.UpdateProfile(ctx, profileAdminLocked, userstore.UpdateProfileInput{PIN: &adminPIN}); err != nil {
+	if err := adminStore.UpdateProfile(ctx, profileAdminLocked, userstore.UpdateProfileInput{PINHash: e.pinHash(ctx, adminLockedPIN)}); err != nil {
 		e.t.Fatalf("scenario executor: lock admin profile: %v", err)
 	}
 	e.mustProfile(member.ID, userstore.Profile{ID: profilePrimary, Name: "Fixture Parent"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileSecondary, Name: "Fixture Teen"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileChild, Name: "Fixture Kid", IsChild: true, MaxContentRating: "PG"})
 	e.mustProfile(member.ID, userstore.Profile{ID: profileLocked, Name: "Fixture Locked"})
-	pin := lockedPIN
 	store, err := e.stores.ForUser(ctx, member.ID)
 	if err != nil {
 		e.t.Fatalf("scenario executor: member store: %v", err)
 	}
-	if err := store.UpdateProfile(ctx, profileLocked, userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	if err := store.UpdateProfile(ctx, profileLocked, userstore.UpdateProfileInput{PINHash: e.pinHash(ctx, lockedPIN)}); err != nil {
 		e.t.Fatalf("scenario executor: lock profile: %v", err)
 	}
 	e.mustProfile(grouped.ID, userstore.Profile{ID: profileGroupedPrimary, Name: "Fixture Grouped"})
@@ -668,9 +675,21 @@ func (e *Env) mustProfile(userID int, p userstore.Profile) {
 	}
 }
 
+// pinHash hashes a fixture PIN the way the profile handlers do before they
+// store it.
+func (e *Env) pinHash(ctx context.Context, pin string) *string {
+	hash, err := passwordhash.Generate(ctx, []byte(pin), bcrypt.MinCost)
+	if err != nil {
+		e.t.Fatalf("scenario executor: hashing PIN: %v", err)
+	}
+	stored := string(hash)
+	return &stored
+}
+
 func (e *Env) mintProfileToken(u *models.User, profileID string) string {
 	token, _, err := e.profileTok.Mint(access.ProfileTokenClaims{
-		UserID: u.ID, SessionID: e.sessions[userName(u)], ProfileID: profileID, PolicyRevision: e.currentRevision(u.ID),
+		UserID: u.ID, SessionID: e.sessions[userName(u)], ProfileID: profileID,
+		PINRevision: e.currentPINRevision(u.ID, profileID), PolicyRevision: e.currentRevision(u.ID),
 	})
 	if err != nil {
 		e.t.Fatalf("scenario executor: profile token: %v", err)
@@ -682,6 +701,14 @@ func (e *Env) currentRevision(userID int) int64 {
 	var rev int64
 	if err := e.pool.QueryRow(e.ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, userID).Scan(&rev); err != nil {
 		e.t.Fatalf("scenario executor: policy revision: %v", err)
+	}
+	return rev
+}
+
+func (e *Env) currentPINRevision(userID int, profileID string) int64 {
+	var rev int64
+	if err := e.pool.QueryRow(e.ctx, `SELECT pin_revision FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, profileID).Scan(&rev); err != nil {
+		e.t.Fatalf("scenario executor: profile pin revision: %v", err)
 	}
 	return rev
 }

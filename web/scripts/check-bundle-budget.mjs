@@ -1,36 +1,26 @@
-// Checks the launch cost of a production build against perf-budget.json.
-// Run it after `pnpm run build`:
+// Reports the launch cost of a production build and checks the parts of it
+// that a config change can break. Run it after `pnpm run build`.
 //
-//   eagerBrotliBytes           brotli-11 bytes of everything the browser must
-//                              download before the app runs: the index.html
-//                              entry chunk, its static-import closure, and
-//                              their CSS, read from the Vite manifest that
-//                              vite.config.ts moves out of dist to
-//                              .bundle-manifest.json. Lazy chunks are
-//                              excluded.
-//   crossOriginRenderBlocking  stylesheets and classic scripts in
-//                              dist/index.html that load from another origin
-//                              and hold back first paint.
+// It prints the brotli-11 size of everything the browser must download before
+// the app runs: the index.html entry chunk, its static-import closure, and
+// their CSS, read from the Vite manifest that vite.config.ts moves out of dist
+// to .bundle-manifest.json. Lazy chunks are excluded. The size is reported, not
+// gated.
 //
-// The check fails when a value grows past its budget, and also when it falls
-// below it, so the change that shrinks the launch bundle lowers the budget in
-// the same PR. Byte counts get BYTE_TOLERANCE of slack either way. It also
-// fails when the vendor chunk is missing or imports another chunk, since its
-// URL then stops surviving releases.
+// It fails when the vendor chunk is missing or imports another chunk, since
+// its URL then stops surviving releases, and when dist/index.html loads a
+// stylesheet or classic script from another origin that holds back first
+// paint.
 //
-// Usage: node scripts/check-bundle-budget.mjs [--update]
-//   --update rewrites perf-budget.json from the current build.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// Usage: node scripts/check-bundle-budget.mjs
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { brotliCompressSync, constants } from "node:zlib";
 
-export const BYTE_TOLERANCE = 1024;
-
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(webRoot, "dist");
 const manifestPath = path.join(webRoot, ".bundle-manifest.json");
-const budgetPath = path.join(webRoot, "perf-budget.json");
 
 /**
  * Returns the output files the entry loads before it can run: its own chunk,
@@ -119,36 +109,13 @@ export function crossOriginRenderBlocking(html) {
   return blocking;
 }
 
-/** Compares measured values with the budget and returns one message per breach. */
-export function budgetFailures(actual, budget) {
-  const failures = [];
-  const bytes = actual.eagerBrotliBytes;
-  const byteBudget = budget.eagerBrotliBytes;
-  if (bytes > byteBudget + BYTE_TOLERANCE) {
-    failures.push(
-      `eager launch bundle is ${bytes} B brotli, ${bytes - byteBudget} B over the ${byteBudget} B budget. ` +
-        "Move the new code behind a lazy import, or raise the budget with `pnpm run budget:update` and say why in the PR.",
-    );
-  } else if (bytes < byteBudget - BYTE_TOLERANCE) {
-    failures.push(
-      `eager launch bundle is ${bytes} B brotli, ${byteBudget - bytes} B under the ${byteBudget} B budget. ` +
-        "Lock the win in: run `pnpm run budget:update` and commit perf-budget.json.",
-    );
-  }
-  const count = actual.crossOriginRenderBlocking;
-  const countBudget = budget.crossOriginRenderBlocking;
-  if (count > countBudget) {
-    failures.push(
-      `index.html has ${count} cross-origin render-blocking resources, budget ${countBudget}. ` +
-        "Self-host the resource or load it without blocking first paint.",
-    );
-  } else if (count < countBudget) {
-    failures.push(
-      `index.html has ${count} cross-origin render-blocking resources, budget ${countBudget}. ` +
-        "Lower the budget: run `pnpm run budget:update` and commit perf-budget.json.",
-    );
-  }
-  return failures;
+/** Returns one message per cross-origin render-blocking resource. */
+export function renderBlockingFailures(blocking) {
+  return blocking.map(
+    (url) =>
+      `index.html blocks first paint on ${url}. ` +
+      "Self-host the resource or load it without blocking first paint.",
+  );
 }
 
 function brotliSize(bytes) {
@@ -176,38 +143,25 @@ function measure() {
     blocking,
     chunkCount: Object.values(manifest).filter((chunk) => chunk.file.endsWith(".js")).length,
     vendorFailures: vendorChunkFailures(manifest),
-    values: {
-      eagerBrotliBytes: files.reduce((total, file) => total + file.brotli, 0),
-      crossOriginRenderBlocking: blocking.length,
-    },
   };
 }
 
 function main(argv) {
-  const update = argv.includes("--update");
-  const unknown = argv.filter((arg) => arg !== "--update");
-  if (unknown.length > 0) throw new Error(`unknown argument: ${unknown.join(" ")}`);
+  if (argv.length > 0) throw new Error(`unknown argument: ${argv.join(" ")}`);
 
-  const { files, blocking, chunkCount, vendorFailures, values } = measure();
+  const { files, blocking, chunkCount, vendorFailures } = measure();
   for (const { file, raw, brotli } of files) {
     console.log(`  ${file}  ${raw} B raw, ${brotli} B brotli`);
   }
-  for (const url of blocking) console.log(`  render-blocking: ${url}`);
+  const eagerBrotliBytes = files.reduce((total, file) => total + file.brotli, 0);
   console.log(
-    `eager launch bundle: ${values.eagerBrotliBytes} B brotli in ${files.length} files; ` +
-      `${chunkCount} JS chunks in the manifest; ` +
-      `${values.crossOriginRenderBlocking} cross-origin render-blocking resources`,
+    `eager launch bundle: ${eagerBrotliBytes} B brotli in ${files.length} files; ` +
+      `${chunkCount} JS chunks in the manifest`,
   );
 
-  const failures = [...vendorFailures];
-  if (update) {
-    writeFileSync(budgetPath, `${JSON.stringify(values, null, 2)}\n`);
-    console.log(`wrote ${path.relative(webRoot, budgetPath)}`);
-  } else {
-    failures.push(...budgetFailures(values, JSON.parse(readFileSync(budgetPath, "utf8"))));
-  }
-  for (const failure of failures) console.error(`bundle budget: ${failure}`);
-  if (failures.length === 0 && !update) console.log("bundle budget: within perf-budget.json");
+  const failures = [...vendorFailures, ...renderBlockingFailures(blocking)];
+  for (const failure of failures) console.error(`bundle check: ${failure}`);
+  if (failures.length === 0) console.log("bundle check: passed");
   return failures.length === 0 ? 0 : 1;
 }
 

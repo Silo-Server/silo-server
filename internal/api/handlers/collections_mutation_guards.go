@@ -16,12 +16,9 @@ type collectionMutationItemReader interface {
 // the selected viewer's library or rating scope. Both native transports use
 // the scope populated by their authentication/profile middleware.
 func (h *CollectionHandler) requireVisibleCollectionItem(ctx context.Context, itemID string) error {
-	reader := h.ItemReader
-	if reader == nil && h.Executor != nil && h.Executor.Pool != nil {
-		reader = catalog.NewItemRepository(h.Executor.Pool)
-	}
-	if reader == nil {
-		return apiError(http.StatusServiceUnavailable, "unavailable", "Catalog access is unavailable")
+	reader, err := h.itemReader()
+	if err != nil {
+		return err
 	}
 	items, err := reader.GetByIDsWithAccess(ctx, []string{itemID}, AccessFilterFromContext(ctx, ""))
 	if err != nil {
@@ -33,4 +30,16 @@ func (h *CollectionHandler) requireVisibleCollectionItem(ctx context.Context, it
 		}
 	}
 	return apiError(http.StatusNotFound, "not_found", "Item not found")
+}
+
+// itemReader reads catalog items under an access filter: the injected reader,
+// else the catalog behind the executor.
+func (h *CollectionHandler) itemReader() (collectionMutationItemReader, error) {
+	if h.ItemReader != nil {
+		return h.ItemReader, nil
+	}
+	if h.Executor != nil && h.Executor.Pool != nil {
+		return catalog.NewItemRepository(h.Executor.Pool), nil
+	}
+	return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog access is unavailable")
 }

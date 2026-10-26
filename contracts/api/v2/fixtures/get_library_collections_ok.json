@@ -30,7 +30,8 @@
       "last_sync_message": "",
       "item_count": 12,
       "created_at": "2026-01-02T03:04:05.000Z",
-      "updated_at": "2026-01-02T03:04:05.000Z"
+      "updated_at": "2026-01-02T03:04:05.000Z",
+      "poster_is_collage": false
     }
   ],
   "groups": [
@@ -46,7 +47,8 @@
           "title": "Rainy days",
           "poster_url": "",
           "item_count": 4,
-          "creator_profile_id": "p-owner"
+          "creator_profile_id": "p-owner",
+          "poster_is_collage": false
         }
       ]
     }
@@ -59,7 +61,8 @@
         "title": "Oscar Winners",
         "poster_url": "",
         "item_count": 12,
-        "featured": true
+        "featured": true,
+        "poster_is_collage": false
       }
     ]
   }

@@ -1,0 +1,22 @@
+{
+  "files": [
+    {
+      "file_id": "42",
+      "state": "ready",
+      "servable": true,
+      "failures": 0,
+      "generated_at": "2026-01-02T03:04:05.000Z",
+      "thumbnail_count": 720,
+      "thumbnail_width": 300,
+      "interval_ms": 10000,
+      "sheet_bytes": 2100000
+    },
+    {
+      "file_id": "43",
+      "state": "unusable",
+      "servable": false,
+      "failures": 1,
+      "last_error": "ffmpeg sampling failed (invalid_data)"
+    }
+  ]
+}

@@ -8,8 +8,8 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
-  detectMeteredV3,
 } from "@/player/client-context-v3";
+import { mediaElementReleased } from "@/player/bandwidth-probe";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { replanV2 } from "@/player/lifecycle-v2";
 import { sendSessionProgress, stopSequencedSession } from "@/player/session-mutations";
@@ -87,7 +87,7 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-export function audiobookAbsoluteTime(
+function audiobookAbsoluteTime(
   partStartSeconds: number,
   timelineOffsetSeconds: number,
   playerSeconds: number,
@@ -420,8 +420,7 @@ export function useAudiobookPlayback({
             qualityPreference: QUALITY_ORIGINAL_V3,
             attemptedPlanKeys,
             attemptCount,
-            metered: detectMeteredV3(),
-            bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+            // Replans never send the speed-test reading; only a start does.
             clientCapabilities,
             clientPlaybackContext,
           }),
@@ -595,6 +594,7 @@ export function useAudiobookPlayback({
         if (canceled) return;
       }
 
+      const estimate = detectBandwidthEstimateKbpsV3();
       const decision = await startPlaybackV2(
         config,
         buildStartRequestV3({
@@ -610,8 +610,9 @@ export function useAudiobookPlayback({
           // "resume wherever the server last saw us".
           forceStartPosition: true,
           progressPersistence: "client",
-          metered: detectMeteredV3(),
-          bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
+          // The speed-test reading, labelled as one, as a video start sends it.
+          bandwidthEstimateKbps: estimate ?? null,
+          bandwidthEstimateSource: estimate === undefined ? undefined : "probe",
           clientCapabilities,
           clientPlaybackContext,
         }),
@@ -718,6 +719,9 @@ export function useAudiobookPlayback({
       if (shouldPlay) {
         audio.play().catch((err) => {
           console.warn("audiobook autoplay blocked", err);
+          // A remote resume across a part boundary was already reported as
+          // completed; tell the server the player stayed paused.
+          reportSessionRef.current(absoluteFromAudio(), true);
         });
       }
     };
@@ -837,6 +841,8 @@ export function useAudiobookPlayback({
         audio.pause();
         reportRef.current(currentTimeRef.current);
       }
+      // A removed element's media events never reach the document.
+      if (audio) mediaElementReleased(audio);
     };
   }, []);
 
@@ -871,15 +877,20 @@ export function useAudiobookPlayback({
     [activeFileIndex, duration, parts, playing],
   );
 
-  const resumePlayback = useCallback(() => {
+  // Resolves once the element plays, or once a source switch that will play
+  // is queued; rejects when the element refuses to play, so a remote resume
+  // is reported as rejected instead of completed. A queued switch does not
+  // wait for its source to load, which can outlast the command deadline;
+  // if that later play is refused, the player reports itself paused.
+  const resumePlayback = useCallback((): Promise<void> => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio) return Promise.resolve();
     if (endedRef.current) {
       // The finished book's session is stopped and its stream revoked. Play
       // starts a new attempt from the beginning, as the element itself would.
       seekTo(0);
       playAfterSourceSwitchRef.current = true;
-      return;
+      return Promise.resolve();
     }
     const pausedAtMs = pausedAtRef.current;
     pausedAtRef.current = null;
@@ -893,18 +904,18 @@ export function useAudiobookPlayback({
           // The rewind crossed a file boundary; playback resumes once the new
           // source is ready instead of racing the source switch.
           playAfterSourceSwitchRef.current = true;
-          return;
+          return Promise.resolve();
         }
       }
     }
-    audio.play().catch((err) => console.error("audiobook play failed", err));
+    return audio.play();
   }, [activeFileIndex, duration, parts, seekTo, smartRewindEnabled]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
-      resumePlayback();
+      resumePlayback().catch((err) => console.error("audiobook play failed", err));
     } else {
       audio.pause();
     }
@@ -954,12 +965,12 @@ export function useAudiobookPlayback({
           return;
         case "unpause":
           if (!audio) return;
-          resumePlayback();
+          await resumePlayback();
           return;
         case "play_pause":
           if (!audio) return;
           if (audio.paused) {
-            resumePlayback();
+            await resumePlayback();
           } else {
             audio.pause();
           }

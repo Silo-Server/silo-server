@@ -149,6 +149,9 @@ func TestStreamDenyWritesMarkerWithTokenLifetime(t *testing.T) {
 	if !deny.Denied(t.Context(), "sid-1") {
 		t.Fatal("denied session reported as allowed")
 	}
+	if gets, sets := client.counts(); gets != 0 || sets != 1 {
+		t.Fatalf("gets = %d, sets = %d; want the deny to prime the cache with no lookup", gets, sets)
+	}
 	if deny.Denied(t.Context(), "sid-2") {
 		t.Fatal("unrelated session reported as denied")
 	}
@@ -186,17 +189,6 @@ func TestStreamDenyCachesLookupsPerSession(t *testing.T) {
 	}
 	if gets, _ := client.counts(); gets != 3 {
 		t.Fatalf("gets = %d, want a lookup for the second session", gets)
-	}
-}
-
-func TestStreamDenyLocalDenyIsVisibleWithoutLookup(t *testing.T) {
-	deny, client, _, _ := newTestStreamDeny(t)
-	deny.Deny(t.Context(), "sid-1")
-	if !deny.Denied(t.Context(), "sid-1") {
-		t.Fatal("local deny not visible")
-	}
-	if gets, sets := client.counts(); gets != 0 || sets != 1 {
-		t.Fatalf("gets = %d, sets = %d; want the deny to prime the cache with no lookup", gets, sets)
 	}
 }
 
@@ -256,5 +248,36 @@ func TestStreamDenySweepsExpiredCacheEntries(t *testing.T) {
 	deny.mu.Unlock()
 	if size != 1 {
 		t.Fatalf("cache size = %d, want expired entries swept on insert", size)
+	}
+}
+
+// TestStreamDenyLookupSkipsTheCache pins that a writer acting for another
+// replica's stop reads Redis itself: a "not denied" answer cached a moment
+// before the stop must not hide it, and a failed read is reported.
+func TestStreamDenyLookupSkipsTheCache(t *testing.T) {
+	deny, client, _, _ := newTestStreamDeny(t)
+	if deny.Denied(t.Context(), "session") {
+		t.Fatal("unmarked session reported denied")
+	}
+	// Another replica stops the session.
+	client.mu.Lock()
+	client.keys[StreamDenyKey("session")] = fakeStreamDenyKey{value: streamDenyValue}
+	client.mu.Unlock()
+	if deny.Denied(t.Context(), "session") {
+		t.Fatal("cached answer expected before the cache window ends")
+	}
+	if denied, err := deny.Lookup(t.Context(), "session"); err != nil || !denied {
+		t.Fatalf("Lookup = %v, %v; want the marker another replica wrote", denied, err)
+	}
+	if denied, err := deny.Lookup(t.Context(), "other"); err != nil || denied {
+		t.Fatalf("Lookup of an unmarked session = %v, %v", denied, err)
+	}
+	client.setErr(errors.New("redis down"))
+	if _, err := deny.Lookup(t.Context(), "other"); err == nil {
+		t.Fatal("a failed read was not reported")
+	}
+	var none *StreamDeny
+	if denied, err := none.Lookup(t.Context(), "session"); err != nil || denied {
+		t.Fatalf("nil store Lookup = %v, %v", denied, err)
 	}
 }

@@ -59,6 +59,7 @@ type SettingsContractCapabilities struct {
 	SupportsBatchedEffective bool     `json:"supports_batched_effective" doc:"Whether the effective resolver accepts a batch of keys" example:"true"`
 	SupportsIdempotentWrites bool     `json:"supports_idempotent_writes" doc:"Whether repeating a value write converges on the same state" example:"true"`
 	SupportsAtomicShortcuts  bool     `json:"supports_atomic_shortcuts" doc:"Whether navigation shortcut list mutations are atomic" example:"true"`
+	SupportsDeviceRename     bool     `json:"supports_device_rename" doc:"Whether updateDevice can give a device a custom name, which listDevices returns as custom_name" example:"true"`
 }
 
 // SettingsContractCapabilitiesOutput is the getSettingsContractCapabilities
@@ -434,6 +435,7 @@ func (reg *Registry) getSettingsContractCapabilities(ctx context.Context, _ *Cap
 		SupportsBatchedEffective: view.SupportsBatchedEffective,
 		SupportsIdempotentWrites: view.SupportsIdempotentWrites,
 		SupportsAtomicShortcuts:  view.SupportsAtomicShortcuts,
+		SupportsDeviceRename:     reg.deps.DeviceSettings != nil,
 	}}, nil
 }
 

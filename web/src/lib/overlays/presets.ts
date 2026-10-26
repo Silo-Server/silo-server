@@ -12,7 +12,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Minimal",
     description: "Near-invisible. Tiny text, no background.",
     badgeClass:
-      "rounded-sm px-1 py-0 text-[9px] font-semibold tracking-widest uppercase leading-none",
+      "rounded-sm px-1 py-0 text-[0.5625rem] font-semibold tracking-widest uppercase leading-none",
     badgeStyle: (accent) => ({
       background: "transparent",
       color: accent ?? "rgba(255,255,255,0.85)",
@@ -36,7 +36,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Classic",
     description: "Semi-transparent dark pill with a white border. The default.",
     badgeClass:
-      "rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase leading-none",
+      "rounded-full border border-white/15 px-2 py-0.5 text-[0.625rem] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
       background: accent ? `color-mix(in srgb, ${accent} 28%, rgba(0,0,0,0.6))` : "rgba(0,0,0,0.6)",
       color: "white",
@@ -58,7 +58,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Vibrant",
     description: "Opaque, accent-colored badges. High contrast.",
     badgeClass:
-      "rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase leading-none shadow-sm",
+      "rounded-md px-2 py-0.5 text-[0.625rem] font-bold tracking-wide uppercase leading-none shadow-sm",
     badgeStyle: (accent) => ({
       background: accent ?? "rgba(220,220,220,0.95)",
       color: accent ? "white" : "black",
@@ -81,7 +81,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Pill",
     description: "Larger pill with more padding. Works well with icons.",
     badgeClass:
-      "rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase leading-none",
+      "rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
       background: accent
         ? `color-mix(in srgb, ${accent} 20%, rgba(20,20,30,0.7))`
@@ -105,7 +105,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Square",
     description: "Blocky, high-density. Plex-inspired.",
     badgeClass:
-      "rounded-sm px-1.5 py-0.5 text-[9px] font-bold tracking-widest uppercase leading-none",
+      "rounded-sm px-1.5 py-0.5 text-[0.5625rem] font-bold tracking-widest uppercase leading-none",
     badgeStyle: (accent) => ({
       background: "rgba(0,0,0,0.8)",
       color: accent ?? "white",

@@ -133,7 +133,7 @@ func (s *Service) resolveSnapshot(ctx context.Context, tx pgx.Tx, input access.R
 			return access.Scope{}, err
 		}
 	}
-	preferences, err := access.ResolveViewerPreferencesStrict(ctx, pgstore.NewViewerSnapshotReader(tx, input.UserID), input.ProfileID)
+	preferences, err := s.resolver.ViewerPreferencesStrict(ctx, pgstore.NewViewerSnapshotReader(tx, input.UserID), input.ProfileID)
 	if err != nil {
 		return access.Scope{}, err
 	}

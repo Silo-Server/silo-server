@@ -1,0 +1,10 @@
+{
+  "total": 17,
+  "completed": 12,
+  "in_progress": 4,
+  "failed": 1,
+  "revoked": 2,
+  "total_bytes": 42000000000,
+  "devices": 2,
+  "monitored_series": 3
+}

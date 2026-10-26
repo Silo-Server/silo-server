@@ -49,6 +49,8 @@ export function formatActiveScanTrigger(trigger: string) {
     case "task:scan_libraries":
     case "task_scan_libraries":
       return "Scheduled";
+    case "realtime_monitor":
+      return "File change";
     default:
       return trigger.replace(/_/g, " ");
   }

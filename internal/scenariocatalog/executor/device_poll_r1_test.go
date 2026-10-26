@@ -591,6 +591,13 @@ func assertDevicePollCollection(t *testing.T, e *Env, id, transport string, resp
 		t.Error("profile token identity differs from the collected account/session/profile/policy")
 	}
 	profile := find(rows(before["user_profiles"]), string(encode(profilePrimary)))
+	var pinRevision int64
+	if err := json.Unmarshal(profile["pin_revision"], &pinRevision); err != nil {
+		t.Fatal(err)
+	}
+	if profileClaims.PINRevision != pinRevision {
+		t.Error("profile token is not bound to the collected profile's PIN revision")
+	}
 	var owner int
 	if err := json.Unmarshal(profile["user_id"], &owner); err != nil || owner != memberID {
 		t.Error("approved profile is not owned by the approving member")
@@ -613,13 +620,24 @@ func assertDevicePollCollection(t *testing.T, e *Env, id, transport string, resp
 }
 
 func TestDevicePollR1Selection(t *testing.T) {
+	catalogs, err := scenariocatalog.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(catalogs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	load := func() []*scenariocatalog.Catalog {
 		t.Helper()
-		c, err := scenariocatalog.Load()
-		if err != nil {
+		var cloned []*scenariocatalog.Catalog
+		if err := json.Unmarshal(data, &cloned); err != nil {
 			t.Fatal(err)
 		}
-		return c
+		for i, c := range cloned {
+			c.File = catalogs[i].File
+		}
+		return cloned
 	}
 	if _, err := selectDevicePollR1(load()); err != nil {
 		t.Fatal(err)

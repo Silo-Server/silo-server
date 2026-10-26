@@ -2,7 +2,9 @@ package contractspec
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
@@ -14,13 +16,80 @@ func TestCommittedArtifactPassesLint(t *testing.T) {
 	if findings := Lint(contracts.OpenAPI); len(findings) != 0 {
 		t.Fatalf("committed openapi.json fails lint:\n  %s", strings.Join(findings, "\n  "))
 	}
+	if findings := Lint(seedDocument(t)); len(findings) != 0 {
+		t.Fatalf("seed document fails lint: %v", findings)
+	}
+	// A shapePending entry must name a member, so it can't outlive a rename.
+	var doc document
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for where := range shapePending {
+		name, member, _ := strings.Cut(strings.TrimPrefix(where, "components.schemas."), ".")
+		if s := doc.Components.Schemas[name]; s == nil || s.Properties[member] == nil {
+			t.Errorf("%s: shapePending entry names no member", where)
+		}
+	}
 }
 
-// mutate decodes the committed artifact, applies fn, and re-encodes it.
+// Seeded rule tests need only the operations they mutate. The committed artifact
+// gates above and in diff_test.go still validate the complete document.
+var seededDocument = sync.OnceValues(func() ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		return nil, err
+	}
+	paths := doc["paths"].(map[string]any)
+	keptPaths := map[string]any{}
+	for _, path := range []string{"/api/v2/system/info", "/api/v2/openapi.json", "/api/v2/profiles/{id}", "/api/v2/progress", "/api/v2/system/setup"} {
+		operation, ok := paths[path]
+		if !ok {
+			return nil, fmt.Errorf("seed operation missing: %s", path)
+		}
+		keptPaths[path] = operation
+	}
+	allSchemas := schemas(doc)
+	keptSchemas := map[string]any{}
+	var retainReferences func(any)
+	retainReferences = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			if ref, ok := v["$ref"].(string); ok && strings.HasPrefix(ref, "#/components/schemas/") {
+				name := strings.TrimPrefix(ref, "#/components/schemas/")
+				if _, seen := keptSchemas[name]; !seen {
+					keptSchemas[name] = allSchemas[name]
+					retainReferences(allSchemas[name])
+				}
+			}
+			for _, child := range v {
+				retainReferences(child)
+			}
+		case []any:
+			for _, child := range v {
+				retainReferences(child)
+			}
+		}
+	}
+	retainReferences(keptPaths)
+	doc["paths"] = keptPaths
+	doc["components"].(map[string]any)["schemas"] = keptSchemas
+	return json.Marshal(doc)
+})
+
+func seedDocument(t *testing.T) []byte {
+	t.Helper()
+	data, err := seededDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// mutate decodes a fresh seeded document, applies fn, and re-encodes it.
 func mutate(t *testing.T, fn func(doc map[string]any)) []byte {
 	t.Helper()
 	var doc map[string]any
-	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+	if err := json.Unmarshal(seedDocument(t), &doc); err != nil {
 		t.Fatal(err)
 	}
 	fn(doc)
@@ -168,6 +237,33 @@ func TestLintSeededFailures(t *testing.T) {
 				props["extra"] = map[string]any{"type": "object"}
 			},
 			want: "components.schemas.SystemInfo.extra: object without properties or additionalProperties:false is free-form",
+		},
+		"date member without a date shape": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["air_date"] = map[string]any{"type": []any{"string", "null"}, "description": "YYYY-MM-DD"}
+			},
+			want: "components.schemas.SystemInfo.air_date: date member declares neither format date nor a YYYY-MM-DD pattern",
+		},
+		"URL items without a URI format": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["backdrop_url"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+			},
+			want: "components.schemas.SystemInfo.backdrop_url: URL member declares neither format uri nor uri-reference, nor says it is not validated as a URI",
+		},
+		"language parameter without its standard": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["parameters"] = []any{map[string]any{"name": "language", "in": "query", "description": "Language code", "schema": map[string]any{"type": "string"}}}
+			},
+			want: "GET /api/v2/system/info parameter language: language or country member does not name its standard",
+		},
+		"pending member that declares its shape": {
+			seed: func(doc map[string]any) {
+				schemas(doc)["AdminItemMetadataUpdate"] = map[string]any{"type": "object", "additionalProperties": false,
+					"properties": map[string]any{"release_date": map[string]any{"type": "string", "format": "date"}}}
+			},
+			want: "components.schemas.AdminItemMetadataUpdate.release_date: declares its shape; delete its shapePending entry",
 		},
 		"missing security scheme": {
 			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },

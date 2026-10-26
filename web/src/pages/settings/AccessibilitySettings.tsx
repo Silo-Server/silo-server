@@ -1,7 +1,24 @@
 import { useId } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
+import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
 import { useTheme } from "@/hooks/useTheme";
+import { formatDate, formatTime } from "@/lib/datetime";
+import type { DateFormatPreference, TimeFormatPreference } from "@/lib/datetime";
+
+const DATE_FORMAT_CHOICES: ReadonlyArray<{ value: DateFormatPreference; label: string }> = [
+  { value: "auto", label: "Auto (browser)" },
+  { value: "DD/MM/YYYY", label: "DD/MM/YYYY" },
+  { value: "MM/DD/YYYY", label: "MM/DD/YYYY" },
+  { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
+];
+
+const TIME_FORMAT_CHOICES: ReadonlyArray<{ value: TimeFormatPreference; label: string }> = [
+  { value: "auto", label: "Auto (browser)" },
+  { value: "12h", label: "12-hour" },
+  { value: "24h", label: "24-hour" },
+];
 
 export default function AccessibilitySettings() {
   const { textScale, setTextScale, textWeight, setTextWeight, highContrast, setHighContrast } =
@@ -10,10 +27,18 @@ export default function AccessibilitySettings() {
   const textSizeLabelId = useId();
   const textWeightLabelId = useId();
   const contrastLabelId = useId();
+  const { dateFormat, timeFormat, setDateFormat, setTimeFormat } = useDateTimeFormatSettings();
+  useDateTimeFormat();
+  const dateFormatLabelId = useId();
+  const timeFormatLabelId = useId();
+  const previewDate = new Date();
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Accessibility</h2>
+      <PageHeader
+        title="Accessibility"
+        subtitle="Text size, weight, contrast, and date and time formats."
+      />
 
       <SettingsGroup
         title="Readability"
@@ -117,8 +142,68 @@ export default function AccessibilitySettings() {
             This sample paragraph reflects your current text size, weight, and contrast preferences.
             Adjustments take effect across the entire interface.
           </p>
-          <p className="text-muted-foreground/70 text-xs">
+          <p className="text-muted-foreground text-xs">
             Secondary text &middot; Metadata &middot; Captions
+          </p>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Date & time"
+        description="Choose how dates and clock times are displayed across the app. Saved for the active profile."
+      >
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p id={dateFormatLabelId} className="text-sm font-medium">
+              Date format
+            </p>
+            <div
+              role="radiogroup"
+              aria-labelledby={dateFormatLabelId}
+              className="flex flex-wrap gap-2"
+            >
+              {DATE_FORMAT_CHOICES.map((option) => (
+                <Button
+                  key={option.value}
+                  role="radio"
+                  aria-checked={dateFormat === option.value}
+                  variant={dateFormat === option.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setDateFormat(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p id={timeFormatLabelId} className="text-sm font-medium">
+              Time format
+            </p>
+            <div
+              role="radiogroup"
+              aria-labelledby={timeFormatLabelId}
+              className="flex flex-wrap gap-2"
+            >
+              {TIME_FORMAT_CHOICES.map((option) => (
+                <Button
+                  key={option.value}
+                  role="radio"
+                  aria-checked={timeFormat === option.value}
+                  variant={timeFormat === option.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setTimeFormat(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-muted-foreground text-[13px]">
+            Preview: {formatDate(previewDate)} · {formatDate(previewDate, "medium")} ·{" "}
+            {formatTime(previewDate)}
           </p>
         </div>
       </SettingsGroup>

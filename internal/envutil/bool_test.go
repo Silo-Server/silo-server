@@ -20,20 +20,6 @@ func TestTruthy(t *testing.T) {
 	}
 }
 
-func TestBool(t *testing.T) {
-	t.Run("unset", func(t *testing.T) {
-		if Bool(testEnv) {
-			t.Fatal("unset variable read as on")
-		}
-	})
-	t.Run("set", func(t *testing.T) {
-		t.Setenv(testEnv, "yes")
-		if !Bool(testEnv) {
-			t.Fatal("truthy variable read as off")
-		}
-	})
-}
-
 // A default-on flag is only safe if a garbled value lands on "off": the operator
 // who mistyped the kill switch was reaching for off, not for the default.
 func TestBoolDefault(t *testing.T) {

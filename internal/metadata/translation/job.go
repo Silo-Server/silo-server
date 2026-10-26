@@ -13,6 +13,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -35,10 +37,36 @@ type TargetKind string
 const (
 	// TargetItem covers a movie or series; for series, IncludeChildren expands
 	// the job to every season and episode overview.
-	TargetItem    TargetKind = "item"
+	TargetItem TargetKind = "item"
+	// TargetSeason covers one season; IncludeChildren adds the overviews of
+	// that season's episodes.
 	TargetSeason  TargetKind = "season"
 	TargetEpisode TargetKind = "episode"
+	// TargetLibrary prewarms every item of a library (with its seasons and
+	// episodes) that misses a localization; ContentID is LibraryContentID.
+	TargetLibrary TargetKind = "library"
 )
+
+const libraryContentIDPrefix = "library:"
+
+// LibraryContentID is the content_id a library prewarm job is stored under.
+// The prefix keeps it apart from catalog content IDs.
+func LibraryContentID(libraryID int) string {
+	return libraryContentIDPrefix + strconv.Itoa(libraryID)
+}
+
+// ParseLibraryContentID returns the library ID of a LibraryContentID.
+func ParseLibraryContentID(contentID string) (int, bool) {
+	raw, ok := strings.CutPrefix(contentID, libraryContentIDPrefix)
+	if !ok {
+		return 0, false
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
 
 // JobStatus is the lifecycle state of a job, shared with the other AI job
 // services via jobrunner.
@@ -75,8 +103,8 @@ type JobRequest struct {
 	ContentID       string
 	TargetLanguage  string
 	IncludeChildren bool
-	// Force re-translates fields that already have a provider or AI value.
-	// Manual values are never overwritten regardless.
+	// Force re-translates fields an earlier AI translation filled. Provider
+	// and manual values are never overwritten regardless.
 	Force       bool
 	RequestedBy *int
 }
@@ -114,6 +142,9 @@ type ChildText struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	Overview      string
+	// DefaultLanguage is the language Overview is written in; a child already
+	// in the target language is never sent for translation.
+	DefaultLanguage string
 }
 
 // ContentReader loads the base-row text a job translates. Implementations
@@ -122,6 +153,8 @@ type ContentReader interface {
 	ItemText(ctx context.Context, contentID string) (*ItemText, error)
 	SeasonTexts(ctx context.Context, seriesID string) ([]ChildText, error)
 	EpisodeTexts(ctx context.Context, seriesID string) ([]ChildText, error)
+	// SeasonEpisodeTexts loads one season's episodes.
+	SeasonEpisodeTexts(ctx context.Context, seasonContentID string) ([]ChildText, error)
 	// SeasonByID / EpisodeByID also return the parent series content ID.
 	SeasonByID(ctx context.Context, contentID string) (*ChildText, string, error)
 	EpisodeByID(ctx context.Context, contentID string) (*ChildText, string, error)
@@ -129,11 +162,45 @@ type ContentReader interface {
 	// episode overviews) that have source text but no localized value for the
 	// language — the auto-translate trigger condition.
 	CountMissingFields(ctx context.Context, itemContentID, language string) (int, error)
+	// LibraryItemsMissing lists, in title order, the library's items whose
+	// own or children's descriptions have source text in another language and
+	// no localized value for language.
+	LibraryItemsMissing(ctx context.Context, libraryID int, language string) ([]string, error)
 }
 
 // idempotencyKey derives the dedup key for a job. Two requests for the same
-// target, language, and model collapse to one in-flight job.
-func idempotencyKey(kind TargetKind, contentID, targetLang, model string) string {
+// target, language, model, scope, and force flag collapse to one in-flight job.
+func idempotencyKey(kind TargetKind, contentID, targetLang, model string, includeChildren, force bool) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%s|%s|%t|%t", kind, contentID, targetLang, model, includeChildren, force))
+	return hex.EncodeToString(sum[:])
+}
+
+// legacyIdempotencyKey is the key format before scope and force were part of
+// it. Active jobs a previous release created still carry it until they finish.
+func legacyIdempotencyKey(kind TargetKind, contentID, targetLang, model string) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%s|%s", kind, contentID, targetLang, model))
 	return hex.EncodeToString(sum[:])
+}
+
+// covers reports whether an active job does at least the work req asks for.
+func (j *Job) covers(req JobRequest) bool {
+	return (j.IncludeChildren || !req.IncludeChildren) && (j.Force || !req.Force)
+}
+
+// coveringKeys lists the keys of every job that would do at least the work of
+// a request: the same target with the same or wider scope, forced or not when
+// the request is not forced. A forced request is only covered by a forced job,
+// because a plain job skips fields that already have a value.
+func coveringKeys(kind TargetKind, contentID, targetLang, model string, includeChildren, force bool) []string {
+	keys := []string{idempotencyKey(kind, contentID, targetLang, model, includeChildren, force)}
+	if !includeChildren {
+		keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, true, force))
+	}
+	if !force {
+		keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, includeChildren, true))
+		if !includeChildren {
+			keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, true, true))
+		}
+	}
+	return keys
 }

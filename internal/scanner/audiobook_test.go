@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -154,37 +153,6 @@ func TestApplyAudiobookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
 	}
 }
 
-func TestAudiobookDuplicateCandidateSQLFiltersTitleBeforeLimit(t *testing.T) {
-	titlePredicate := strings.Index(audiobookDuplicateCandidateSQL, "normalized_title = $6")
-	limit := strings.Index(audiobookDuplicateCandidateSQL, "LIMIT")
-	if titlePredicate == -1 {
-		t.Fatalf("expected SQL to filter on normalized_title, got:\n%s", audiobookDuplicateCandidateSQL)
-	}
-	if limit == -1 {
-		t.Fatalf("expected SQL to keep a bounded candidate query, got:\n%s", audiobookDuplicateCandidateSQL)
-	}
-	if titlePredicate > limit {
-		t.Fatalf("title predicate appears after LIMIT, got:\n%s", audiobookDuplicateCandidateSQL)
-	}
-}
-
-func TestPopulateFromTags_SeriesDoesNotFallBackToAlbum(t *testing.T) {
-	// In audiobook tagging the `album` tag holds the book title, not the
-	// series name. populateFromTags must NOT use it as a series fallback,
-	// otherwise every book without an explicit series tag ends up with
-	// series_name = its own title (each becomes a singleton "series",
-	// polluting the Series filter dropdown — see migration 145 history).
-	b := &parsedAudiobook{}
-	b.populateFromTags(map[string]string{
-		"title":  "Project Hail Mary",
-		"album":  "Project Hail Mary",
-		"artist": "Andy Weir",
-	})
-	if b.Series != "" {
-		t.Fatalf("expected Series to stay empty when only `album` is set; got %q", b.Series)
-	}
-}
-
 func TestPopulateFromTags_SeriesPrefersExplicitTag(t *testing.T) {
 	b := &parsedAudiobook{}
 	b.populateFromTags(map[string]string{
@@ -242,7 +210,10 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 		t.Fatalf("got %d files, want 1", len(got.Files))
 	}
 	if len(got.Files[0].Chapters) != 2 {
-		t.Errorf("file 0 chapters = %d, want 2", len(got.Files[0].Chapters))
+		t.Fatalf("file 0 chapters = %d, want 2", len(got.Files[0].Chapters))
+	}
+	if got.Files[0].Chapters[0].Title != "Intro" || got.Files[0].Chapters[1].Title != "Outro" {
+		t.Fatalf("chapter titles = %q / %q, want Intro / Outro", got.Files[0].Chapters[0].Title, got.Files[0].Chapters[1].Title)
 	}
 }
 
@@ -321,15 +292,6 @@ func TestParseAudiobookFolderMultiFile(t *testing.T) {
 		if f.Chapters[0].StartSeconds != 0 || f.Chapters[0].EndSeconds <= f.Chapters[0].StartSeconds {
 			t.Errorf("file %d: synthesized chapter range = %.3f..%.3f, want positive probed duration", i, f.Chapters[0].StartSeconds, f.Chapters[0].EndSeconds)
 		}
-	}
-}
-
-func TestAudiobookPartPathsUseNaturalOrdering(t *testing.T) {
-	paths := []string{"/book/part10.m4b", "/book/part2.m4b", "/book/part1.m4b", "/book/Part3.m4b"}
-	sort.SliceStable(paths, func(i, j int) bool { return naturalPathLess(paths[i], paths[j]) })
-	want := []string{"/book/part1.m4b", "/book/part2.m4b", "/book/Part3.m4b", "/book/part10.m4b"}
-	if !reflect.DeepEqual(paths, want) {
-		t.Fatalf("natural audiobook part order = %v, want %v", paths, want)
 	}
 }
 
@@ -614,27 +576,6 @@ func TestResolveAudiobookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	}
 }
 
-func TestResolveAudiobookMediaItemPropagatesRootLookupError(t *testing.T) {
-	wantErr := errors.New("root lookup failed")
-	finder := &fakeRootContentFinder{err: wantErr}
-	writer := &fakeFilesystemItemWriter{}
-
-	_, err := resolveAudiobookMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		7,
-		"/library/Author/Book",
-		&parsedAudiobook{Title: "Book"},
-	)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want %v", err, wantErr)
-	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("upserts = %d, want 0", len(writer.upserts))
-	}
-}
-
 func TestStripNarratorSuffix(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -701,86 +642,42 @@ func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	}
 }
 
-func TestAudiobookFolderUnchangedAllMatch(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
-	}
-	if !audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=true when sizes+mtimes match")
-	}
-}
-
-func TestAudiobookFolderUnchangedRepairsLegacyCoverArtRows(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{{
-		FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now,
-		BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
-		VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
-	}}
-	onDisk := []audiobookDiskFile{{Path: files[0].FilePath, Size: files[0].FileSize, ModTime: now}}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("legacy cover-art rows must bypass the unchanged fast path")
-	}
-}
-
-func TestAudiobookFolderUnchangedSizeDiffers(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 101, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when size differs")
-	}
-}
-
-func TestAudiobookFolderUnchangedNewFileAppeared(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when a new file appeared")
-	}
-}
-
-func TestAudiobookFolderUnchangedFileDisappeared(t *testing.T) {
-	now := time.Now().UTC()
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
-		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when a file disappeared")
-	}
-}
-
-func TestAudiobookFolderUnchangedMtimeDiffers(t *testing.T) {
+func TestAudiobookFolderUnchanged(t *testing.T) {
 	now := time.Now().UTC()
 	earlier := now.Add(-time.Hour)
-	files := []*models.MediaFile{
-		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &earlier},
-	}
-	onDisk := []audiobookDiskFile{
-		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
-	}
-	if audiobookFolderUnchanged(files, onDisk) {
-		t.Fatal("expected unchanged=false when mtime differs")
+	const a, b = "/lib/Author/Book/a.m4b", "/lib/Author/Book/b.m4b"
+	for _, tc := range []struct {
+		name   string
+		files  []*models.MediaFile
+		onDisk []audiobookDiskFile
+		want   bool
+	}{
+		{name: "sizes and mtimes match",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}, {FilePath: b, FileSize: 200, FileModifiedAt: &now}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}},
+			want:   true},
+		{name: "legacy cover-art rows bypass the fast path",
+			files: []*models.MediaFile{{
+				FilePath: a, FileSize: 100, FileModifiedAt: &now,
+				BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
+				VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
+			}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
+		{name: "size differs",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 101, ModTime: now}}},
+		{name: "new file appeared",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}}},
+		{name: "mtime differs",
+			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &earlier}},
+			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := audiobookFolderUnchanged(tc.files, tc.onDisk); got != tc.want {
+				t.Fatalf("audiobookFolderUnchanged = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -838,30 +735,6 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := audiobookPeopleCreditsEqual(tt.existing, tt.desired); got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFloatPtrEqual(t *testing.T) {
-	a := 1.5
-	b := 1.5
-	c := 2.0
-	cases := []struct {
-		name string
-		x, y *float64
-		want bool
-	}{
-		{"both nil", nil, nil, true},
-		{"left nil", nil, &a, false},
-		{"right nil", &a, nil, false},
-		{"equal", &a, &b, true},
-		{"unequal", &a, &c, false},
-	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := floatPtrEqual(tt.x, tt.y); got != tt.want {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})

@@ -115,7 +115,7 @@ func registerAdminPluginUploads(reg *Registry) {
 		if err != nil {
 			return nil, adminPluginUploadProblem(err)
 		}
-		out, err := adminPluginInstallationOf(view)
+		out, err := reg.adminPluginInstallationOf(view)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -173,7 +173,7 @@ func registerAdminPluginUploads(reg *Registry) {
 		if err != nil {
 			return nil, adminPluginUploadProblem(err)
 		}
-		out, err := adminPluginInstallationOf(view)
+		out, err := reg.adminPluginInstallationOf(view)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

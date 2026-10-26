@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -33,5 +35,7 @@ describe("languageNames", () => {
   it("distinguishes an unassigned tag from a translated language name", () => {
     expect(englishLanguageName("xx")).toBeNull();
     expect(getLanguageName("xx")).toBe("Unknown language (xx)");
+    expect(getLanguageName("")).toBe("Unknown");
+    expect(getLanguageName("ENG")).toBe("English");
   });
 });

@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -44,14 +45,16 @@ func TestEpisodeParentPrimaryImagePrefersSeasonPoster(t *testing.T) {
 	}
 }
 
-func TestOriginalLanguageMapsFromListAndDetail(t *testing.T) {
+// Rows written before country codes were deduped on save can hold
+// ["US", "US"]; ProductionLocations must list each country once.
+func TestProductionLocationsDropRepeatedCountries(t *testing.T) {
 	m := newMapper(NewResourceIDCodec(), &config.Config{})
-	list := m.itemFromList(upstreamListItem{ContentID: "m-1", Type: "movie", Title: "Ran", OriginalLanguage: "ja"}, false, nil, nil)
-	if list.OriginalLanguage != "ja" {
-		t.Fatalf("list OriginalLanguage = %q", list.OriginalLanguage)
+	list := m.itemFromList(upstreamListItem{ContentID: "s-1", Type: "series", Title: "Breaking Bad", Countries: []string{"US", "US"}}, false, nil, map[string]bool{"productionlocations": true})
+	if want := []string{"US"}; !slices.Equal(list.ProductionLocations, want) {
+		t.Fatalf("list ProductionLocations = %v, want %v", list.ProductionLocations, want)
 	}
-	detail := m.itemFromDetailWithFields(upstreamItemDetail{ContentID: "s-1", Type: "series", Title: "Dark", OriginalLanguage: "de"}, false, nil, nil)
-	if detail.OriginalLanguage != "de" {
-		t.Fatalf("detail OriginalLanguage = %q", detail.OriginalLanguage)
+	detail := m.itemFromDetailWithFields(upstreamItemDetail{ContentID: "s-1", Type: "series", Title: "Breaking Bad", Countries: []string{"US", "US"}}, false, nil, nil)
+	if want := []string{"US"}; !slices.Equal(detail.ProductionLocations, want) {
+		t.Fatalf("detail ProductionLocations = %v, want %v", detail.ProductionLocations, want)
 	}
 }

@@ -5,8 +5,35 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
+
+// discordManagementDescription states the household-manager rule on every
+// operation that changes the account-wide Discord destination or mode.
+const discordManagementDescription = "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied."
+
+type NotificationDiscordManagementService interface {
+	MayManageDiscordNotifications(context.Context, int, string, func(string) error) (bool, error)
+}
+
+func (reg *Registry) requireDiscordNotificationManagement(ctx context.Context) *Problem {
+	svc := reg.deps.NotificationDiscordManagement
+	if svc == nil {
+		return unavailable("Discord notification management")
+	}
+	allowed, err := svc.MayManageDiscordNotifications(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+	if errors.Is(err, access.ErrProfileUnverified) {
+		return NewProblem(TypeProfileVerificationRequired, "Discord notification changes require verifying the primary profile PIN.")
+	}
+	if err != nil {
+		return serviceProblem(err)
+	}
+	if !allowed {
+		return NewProblem(TypePermissionDenied, "Discord notification changes require the account's primary profile.")
+	}
+	return nil
+}
 
 type NotificationChannelService interface {
 	ClearEmailAddress(context.Context, int, string) error
@@ -85,7 +112,11 @@ func registerNotificationChannels(reg *Registry) {
 	unlink.DefaultStatus = http.StatusNoContent
 	unlink.RetrySafety = RetrySafetyNonRetryable
 	unlink.Summary = "Unlink the account's current Discord identity and turn delivery off. Send once; replay can unlink a later connection."
+	unlink.Description = discordManagementDescription
 	Register(reg, unlink, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.NotificationChannels
 		if svc == nil {
 			return nil, unavailable("notification channels")
@@ -124,7 +155,11 @@ func registerNotificationChannels(reg *Registry) {
 	discordWrite.ProfileOptional = true
 	discordWrite.RetrySafety = RetrySafetyNonRetryable
 	discordWrite.Summary = "Set the login account's Discord delivery mode."
+	discordWrite.Description = discordManagementDescription
 	Register(reg, discordWrite, func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationDiscordPreferencesOutput, error) {
+		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.NotificationChannels
 		if svc == nil {
 			return nil, unavailable("notification channels")

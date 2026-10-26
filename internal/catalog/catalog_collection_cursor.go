@@ -91,17 +91,15 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 		return nil, ErrCatalogSourceNotFound
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindLibrary, collection.ID, collection.SortConfig, func(effective CatalogRequest) (*CatalogResult, error) {
-		if IsLiveQueryType(collection.CollectionType) || catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
-			def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
-			if err != nil {
-				return nil, err
-			}
-			if len(collection.LibraryIDs) > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
-			} else if collection.LibraryID > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
-			}
-			return r.resolveSmartCollectionCursor(ctx, effective, access, def)
+		membership, err := catalogLibraryCollectionMembership(collection, access)
+		if err != nil {
+			return nil, err
+		}
+		if membership.OutOfScope {
+			return &CatalogResult{Items: []*models.MediaItem{}, TotalExact: true}, nil
+		}
+		if membership.Live {
+			return r.resolveSmartCollectionCursor(ctx, effective, access, membership.Query)
 		}
 		return r.resolveLibraryMembershipQueryCursor(ctx, effective, access)
 	})
@@ -124,6 +122,10 @@ func (r *CatalogResolver) resolveUserCollectionCursor(ctx context.Context, req C
 	collection, err := store.GetCollection(ctx, req.CollectionID)
 	if err != nil || !ProfileCanAccessCollection(collection, access.ProfileID) {
 		return nil, ErrCatalogSourceNotFound
+	}
+	access, err = r.userCollectionAccess(ctx, access, collection)
+	if err != nil {
+		return nil, err
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindUser, collection.ID, []byte(collection.SortConfig), func(effective CatalogRequest) (*CatalogResult, error) {
 		sqlState := userstore.HasCatalogSQLState(store)
@@ -316,13 +318,11 @@ func (r *CatalogResolver) resolveLibraryMembershipQueryCursor(ctx context.Contex
 		return nil, err
 	}
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
 	executor.SourceArgs = []any{req.CollectionID}
 	if req.Query.Sort.Field == "" {
-		executor.SourceOrder = []queryCursorTerm{
-			{expression: "COALESCE((SELECT position FROM library_collection_items cursor_position WHERE cursor_position.collection_id=$1 AND cursor_position.media_item_id=mi.content_id),0)", kind: cursorKindNumber, nullsLast: true},
-			{expression: cursorContentIDExpression, kind: cursorKindText, nullsLast: true},
-		}
+		applyCollectionPositionOrder(executor, libraryMembershipOrderJoin)
+	} else {
+		executor.SourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
 	}
 	return resolveCollectionExecutorCursor(ctx, executor, req, req.Query, access)
 }
@@ -429,16 +429,43 @@ func (r *CatalogResolver) applyCollectionDisplayPredicate(ctx context.Context, e
 
 func (r *CatalogResolver) resolvePersonalMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter, display string) (*CatalogResult, error) {
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = "EXISTS (SELECT 1 FROM user_personal_collection_items cursor_membership WHERE cursor_membership.user_id=$1 AND cursor_membership.collection_id=$2 AND cursor_membership.sub_item_id='' AND cursor_membership.media_item_id=mi.content_id)"
 	executor.SourceArgs = []any{access.UserID, req.CollectionID}
 	if req.Query.Sort.Field == "" {
-		executor.SourceOrder = []queryCursorTerm{
-			{expression: "COALESCE((SELECT position FROM user_personal_collection_items cursor_position WHERE cursor_position.user_id=$1 AND cursor_position.collection_id=$2 AND cursor_position.sub_item_id='' AND cursor_position.media_item_id=mi.content_id),0)", kind: cursorKindNumber, nullsLast: true},
-			{expression: cursorContentIDExpression, kind: cursorKindText, nullsLast: true},
-		}
+		applyCollectionPositionOrder(executor, personalMembershipOrderJoin)
+	} else {
+		executor.SourceWhere = personalMembershipSourceWhere
 	}
 	if err := r.applyCollectionDisplayPredicate(ctx, executor, display, access); err != nil {
 		return nil, err
 	}
 	return resolveCollectionExecutorCursor(ctx, executor, req, req.Query, access)
+}
+
+// The membership joins for curated order. Their SourceArgs are those of the
+// matching membership EXISTS: the collection ID for a library collection, and
+// the account ID and collection ID for a personal one.
+const (
+	libraryMembershipOrderJoin  = "JOIN library_collection_items cursor_membership ON cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id"
+	personalMembershipOrderJoin = "JOIN user_personal_collection_items cursor_membership ON cursor_membership.user_id=$1 AND cursor_membership.collection_id=$2 AND cursor_membership.sub_item_id='' AND cursor_membership.media_item_id=mi.content_id"
+)
+
+// applyCollectionPositionOrder pages a membership source in curated order. It
+// joins each member's row, one per member by the table's primary key, instead
+// of testing membership with EXISTS, and orders by that row's
+// (COALESCE(position,0), media_item_id). That matches the table's continuation
+// index, so PostgreSQL reads a page in index order and stops, and a
+// continuation starts its index range at the cursor, which is why the position
+// binds as integer. Ordering by a correlated
+// position subquery evaluated and sorted every member for each page. The tie
+// breaker equals mi.content_id through the join, so the order and the cursor
+// keys are unchanged.
+func applyCollectionPositionOrder(executor *QueryExecutor, membershipJoin string) {
+	// TRUE keeps the display filter and collection search able to AND onto the
+	// source predicate.
+	executor.SourceWhere = cursorTruePredicate
+	executor.SourceJoin = membershipJoin
+	executor.SourceOrder = []queryCursorTerm{
+		{expression: "COALESCE(cursor_membership.position,0)", kind: cursorKindNumber, nullsLast: true, notNull: true, sqlType: "integer"},
+		{expression: "cursor_membership.media_item_id", kind: cursorKindText, nullsLast: true, notNull: true},
+	}
 }

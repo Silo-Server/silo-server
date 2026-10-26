@@ -1,5 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { adminKeys, libraryKeys, sectionKeys } from "@/hooks/queries/keys";
+import {
+  adminKeys,
+  calendarKeys,
+  collectionKeys,
+  downloadKeys,
+  episodeKeys,
+  libraryKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -24,9 +33,11 @@ export function invalidateCatalogState(
   if (libraryId !== undefined) {
     void queryClient.invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" });
   }
-  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId }).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
+  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId, itemMayBeNew: true }).then(
+    () => {
+      bumpHomeRefreshSignal(queryClient);
+    },
+  );
   if (includeLibraryLists) {
     void queryClient.invalidateQueries({
       queryKey: adminKeys.libraries(),
@@ -42,6 +53,32 @@ export function invalidateCatalogState(
 }
 
 /**
+ * Refetches everything the viewer's access decides: which libraries and titles
+ * they see (home, browse, search, details, people, collections, calendar) and
+ * what they may do with them (requests, downloads). Runs when the events
+ * socket reports that the account's access group, permissions, playback
+ * quality or role changed.
+ */
+export function invalidateAccessDependentState(
+  queryClient: QueryClient,
+  options: Pick<CatalogInvalidationOptions, "allowDashboardRefetch">,
+) {
+  invalidateCatalogState(queryClient, {
+    allowDashboardRefetch: options.allowDashboardRefetch,
+    includeLibraryLists: true,
+  });
+  for (const queryKey of [
+    collectionKeys.all,
+    episodeKeys.all,
+    calendarKeys.all,
+    requestKeys.all,
+    downloadKeys.all,
+  ]) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
+/**
  * A scan emits one catalog event per file it touches. Running the full
  * invalidation sweep for each of them refetches every open surface hundreds of
  * times a minute for data that is still changing, so events are coalesced into
@@ -53,6 +90,7 @@ interface PendingCatalogInvalidation {
   itemIds: Set<string>;
   libraryIds: Set<number>;
   hasUnscopedEvent: boolean;
+  hasItemUnscopedEvent: boolean;
   allowDashboardRefetch: boolean;
   includeLibraryLists: boolean;
 }
@@ -116,11 +154,13 @@ function mergeCatalogInvalidation(
     itemIds: new Set(),
     libraryIds: new Set(),
     hasUnscopedEvent: false,
+    hasItemUnscopedEvent: false,
     allowDashboardRefetch: false,
     includeLibraryLists: false,
   };
 
   if (options.itemId) next.itemIds.add(options.itemId);
+  else next.hasItemUnscopedEvent = true;
   if (options.libraryId === undefined) {
     next.hasUnscopedEvent = true;
   } else {
@@ -136,7 +176,7 @@ function resolveBatch(batch: PendingCatalogInvalidation): CatalogInvalidationOpt
   const [onlyItemId] = batch.itemIds;
   const [onlyLibraryId] = batch.libraryIds;
   return {
-    itemId: batch.itemIds.size === 1 ? onlyItemId : undefined,
+    itemId: !batch.hasItemUnscopedEvent && batch.itemIds.size === 1 ? onlyItemId : undefined,
     libraryId: !batch.hasUnscopedEvent && batch.libraryIds.size === 1 ? onlyLibraryId : undefined,
     allowDashboardRefetch: batch.allowDashboardRefetch,
     includeLibraryLists: batch.includeLibraryLists,

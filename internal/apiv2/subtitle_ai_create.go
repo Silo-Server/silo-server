@@ -16,8 +16,8 @@ type SubtitleAICreateBody struct {
 	MediaFileID    ID      `json:"media_file_id"`
 	Kind           string  `json:"kind" enum:"translate,transcribe,transcribe_translate"`
 	SourceIndex    int     `json:"source_index" minimum:"-1"`
-	SourceLanguage string  `json:"source_language" maxLength:"64"`
-	TargetLanguage string  `json:"target_language" maxLength:"64"`
+	SourceLanguage string  `json:"source_language" maxLength:"64" doc:"BCP 47 tag of the source language; empty or unrecognized means detect"`
+	TargetLanguage string  `json:"target_language" maxLength:"64" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe"`
 	SessionID      string  `json:"session_id,omitempty" maxLength:"128"`
 	StartPosition  float64 `json:"start_position" minimum:"0"`
 }
@@ -30,7 +30,7 @@ type SubtitleAICreateOutput struct {
 }
 
 func registerSubtitleAICreate(reg *Registry) {
-	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/ai/translate", "createSubtitleAIJob", "subtitles", "Start subtitle translation or transcription for an accessible file."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/ai/translate", "createSubtitleAIJob", "subtitles", "Start subtitle translation or transcription for an accessible file."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.DefaultStatus = http.StatusAccepted
 	op.Description = "Send once. Active-job deduplication does not provide durable request replay or worker recovery. Optional live delivery requires the caller's local playback session and exact file; it is best effort and is not attached to an existing deduplicated job. Poll the returned job for persisted outcome."
 	Register(reg, op, func(ctx context.Context, in *SubtitleAICreateInput) (*SubtitleAICreateOutput, error) {

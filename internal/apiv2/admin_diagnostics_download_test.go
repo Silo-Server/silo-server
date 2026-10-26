@@ -54,16 +54,18 @@ func TestAdminDiagnosticDownload(t *testing.T) {
 	}
 }
 func TestAdminDiagnosticDownloadProblems(t *testing.T) {
+	s := new(diagnosticDownloadStub)
+	deps := requestDeps(fixtureRequests())
+	deps.AdminDiagnosticDownloads = s
+	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name   string
 		err    error
 		status int
 	}{{"missing", diagnostics.ErrNotFound, 404}, {"pending", diagnostics.ErrReportNotReady, 409}, {"store", diagnostics.ErrReportStoreUnavailable, 503}, {"storage", diagnostics.ErrStorageUnavailable, 503}, {"internal", errors.New("private storage credential"), 500}} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &diagnosticDownloadStub{err: tc.err}
-			deps := requestDeps(fixtureRequests())
-			deps.AdminDiagnosticDownloads = s
-			r := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/diagnostics/reports/report-1/download", "", actingRequestAdmin)
+			*s = diagnosticDownloadStub{err: tc.err}
+			r := do(t, h, http.MethodGet, Prefix+"/admin/diagnostics/reports/report-1/download", "", actingRequestAdmin)
 			if r.Code != tc.status || !strings.Contains(r.Header().Get("Content-Type"), "application/problem+json") || strings.Contains(r.Body.String(), "credential") {
 				t.Fatal(r.Code, r.Body.String())
 			}

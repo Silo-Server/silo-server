@@ -30,7 +30,7 @@ type requestedLink struct {
 	minAge    time.Duration
 }
 
-func (f *fakeRepo) Issue(_ context.Context, _ int, tokenHash string, _ *int, _ time.Time) error {
+func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ *int, _ time.Time) error {
 	f.issued = append(f.issued, tokenHash)
 	return nil
 }
@@ -40,7 +40,7 @@ func (f *fakeRepo) Withdraw(_ context.Context, _ int, tokenHash string) error {
 	return nil
 }
 
-func (f *fakeRepo) IssueUnlessRecent(_ context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
+func (f *fakeRepo) IssueUnlessRecent(_ context.Context, userID int, _, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
 	f.requested = append(f.requested, requestedLink{userID, tokenHash, expiresAt, minAge})
 	return !f.recent, nil
 }
@@ -169,6 +169,9 @@ func TestRequestEmailsTheMatchingAccount(t *testing.T) {
 		if !ok || msg.To[0] != "alice@example.test" || auth.HashLinkToken(token) != got.tokenHash {
 			t.Fatalf("%q: email to %v does not carry the stored link", login, msg.To)
 		}
+		if len(msg.Inline) != 1 || !strings.Contains(msg.HTMLBody, "cid:"+msg.Inline[0].ContentID) {
+			t.Fatalf("%q: email does not carry the header logo it references", login)
+		}
 		// The account holder asked; the email must not credit an admin.
 		if !strings.Contains(msg.TextBody, "Someone asked to reset the password") || strings.Contains(msg.TextBody, "An admin") {
 			t.Fatalf("%q: wording %q", login, msg.TextBody)
@@ -263,6 +266,9 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	}
 	if !strings.Contains(sender.sent[0].TextBody, "/reset-password/") {
 		t.Fatal("email carries no link")
+	}
+	if inline := sender.sent[0].Inline; len(inline) != 1 || !strings.Contains(sender.sent[0].HTMLBody, "cid:"+inline[0].ContentID) {
+		t.Fatal("email does not carry the header logo it references")
 	}
 
 	sender.err = errors.New("smtp timeout")

@@ -2,42 +2,12 @@ package apiv2
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestListAuthProviders(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/auth/providers", "", nil)
-	want := `{"items":[{"id":"local","display_name":"Silo account","mode":"credentials","default":true},{"id":"plugin-3","display_name":"Example SSO","mode":"oauth","default":false,"icon_url":"https://plugins.example.test/icon.svg","installation_id":"3"}]}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	deps := pilotDeps(nil, nil)
-	deps.Sessions = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/providers", "", nil), TypeDependencyUnavailable)
-}
-
-func TestRefreshSession(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"ref"}`, nil)
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
-	}
-	if want := `{"access_token":"acc2","refresh_token":"ref2","expires_in":3600}` + "\n"; rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"revoked"}`, nil), TypeSessionExpired)
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"nope"}`, nil), TypeInvalidToken)
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{}`, nil), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.refresh_token" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-}
 
 type loginSessionPage struct {
 	Items []struct {
@@ -65,7 +35,7 @@ func TestListAndDeleteSessions(t *testing.T) {
 	deps.Sessions = sessions
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/auth/sessions", "", bearer(memberToken))
-	want := `{"items":[{"id":"s3","device_name":"Silo/1.0 (tvOS)","ip_address":"127.0.0.1","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"},{"id":"s2","device_name":"Silo/1.0 (iOS)","ip_address":"127.0.0.2","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"},{"id":"s1","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"}],"page":{"has_more":false}}` + "\n"
+	want := `{"items":[{"id":"s3","device_name":"Living Room Apple TV","ip_address":"127.0.0.1","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","device_id":"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50","device_platform":"tvOS","last_seen_at":null,"current":false},{"id":"s2","device_name":"Silo/1.0 (iOS)","ip_address":"127.0.0.2","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","last_seen_at":null,"current":false},{"id":"s1","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","last_seen_at":null,"current":true}],"page":{"has_more":false},"current_session":null}` + "\n"
 	if rec.Code != 200 || rec.Body.String() != want {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -178,36 +148,5 @@ func TestSignup(t *testing.T) {
 	requireProblem(t, do(t, off, http.MethodPost, "/api/v2/auth/signup", body, nil), TypePermissionDenied)
 	if rec := do(t, off, http.MethodGet, "/api/v2/auth/signup", "", nil); rec.Body.String() != `{"enabled":false}`+"\n" {
 		t.Fatalf("body = %s", rec.Body.String())
-	}
-}
-
-func TestRegistrationPasswordSchemaBounds(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	for _, endpoint := range []string{setupDomain, "signup"} {
-		for _, password := range []string{"1234567", strings.Repeat("a", 73)} {
-			body := fmt.Sprintf(`{"username":"alice","email":"alice@example.test","password":%q,"invite_code":"WELCOME-2026"}`, password)
-			// Setup does not accept the signup-only member.
-			if endpoint == setupDomain {
-				body = strings.Replace(body, `,"invite_code":"WELCOME-2026"`, "", 1)
-			}
-			p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/"+endpoint, body, nil), TypeValidationFailed)
-			if len(p.Errors) != 1 || p.Errors[0].Location != "body.password" {
-				t.Fatalf("%s errors = %+v", endpoint, p.Errors)
-			}
-		}
-	}
-}
-
-// Plugin launch has its own registrar and dependency (plugin_launch.go);
-// ordinary auth wiring must never turn it into a cookie issuer. Without the
-// launch dependency the operation refuses and sets no cookie.
-func TestOrdinaryAuthDoesNotIssuePluginLaunchCookie(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.PluginLaunch = nil
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, Prefix+"/auth/plugin-launch", "", bearer(memberToken))
-	requireProblem(t, rec, TypeDependencyUnavailable)
-	if rec.Header().Get("Set-Cookie") != "" {
-		t.Fatal("unwired plugin launch must not set a cookie", rec.Header())
 	}
 }

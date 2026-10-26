@@ -16,12 +16,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/animeids"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/apiv2"
@@ -50,7 +53,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
@@ -61,11 +63,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/progresssync"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -75,6 +79,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/shuffle"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -86,13 +91,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
-	watchtrakt "github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
+
+// The media request service answers the administrator request-usage read.
+var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
 
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
@@ -107,9 +116,17 @@ type ArtworkDelivery struct {
 
 type Dependencies struct {
 	Config *config.Config
+	// SubtitlePlaySync receives subtitles a player is served, so one never
+	// synced is aligned the first time it is played. The routes here connect
+	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
+	SubtitlePlaySync *subtitles.PlaySyncHook
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
+	// ShuttingDown reports whether this process has begun shutting down.
+	// /api/v1/ready fails once it does, while the server still answers
+	// requests. May be nil.
+	ShuttingDown func() bool
 	// OnConfigChange registers a callback fired after a live config reload
 	// actually changes the config. May be nil when hot reload is not wired.
 	OnConfigChange               func(fn func(old, updated *config.Config))
@@ -135,6 +152,7 @@ type Dependencies struct {
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
 	Scanner           *scanner.Scanner              // scanner instance (may be nil)
@@ -175,7 +193,19 @@ type Dependencies struct {
 	PersonRefreshQueue    handlers.PersonRefreshQueue
 	PersonRefresher       handlers.PersonRefresher
 	RateLimitMW           *ratelimit.Middleware
-	ClientIPResolver      *clientip.Resolver
+	// ProfilePINAttempts bounds wrong profile PIN guesses per profile,
+	// shared with the Jellyfin login so both count against one budget.
+	// Nil gets a process-local limiter.
+	ProfilePINAttempts *ratelimit.AttemptLimiter
+	// QuickConnectCodeAttempts bounds the six-digit Jellyfin Quick Connect
+	// codes each account tries, shared with the Jellyfin-compatible API's
+	// Authorize route. Nil gets a process-local limiter.
+	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
+	// SignInAttempts bounds password sign-ins per sign-in name, shared with
+	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
+	// one budget. Nil gets a process-local limiter.
+	SignInAttempts   *ratelimit.AttemptLimiter
+	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -189,6 +219,11 @@ type Dependencies struct {
 	EventsHub                 *evt.Hub
 	ScanRegistry              *evt.ScanRegistry
 	LibraryScanQueue          *scanqueue.Service
+	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
+	Trickplay                 interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
+	TrickplayReader           *trickplay.Reader              // published seek previews for players (nil when not configured)
+	TrickplayAdmin            *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
+	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
 	OpsLogRepo                *opslog.Repo
@@ -216,6 +251,14 @@ type Dependencies struct {
 	PluginHTTPProxy         *plugins.HTTPProxy
 	PluginUserConfig        *plugins.UserConfigStore
 	AuthProviders           []auth.RegisteredProvider
+	// AuthProviderSource supplies the auth-plugin sign-in providers, rebuilt
+	// without a restart; OnAuthProvidersChanged rebuilds them on every node
+	// after an auth binding write.
+	AuthProviderSource     auth.PluginProviderSource
+	OnAuthProvidersChanged func(context.Context)
+	// AuthProviderRecheck re-checks sessions opened through an external
+	// sign-in provider at refresh (nil skips it).
+	AuthProviderRecheck *auth.ProviderRecheck
 	// PublicURL is the externally-reachable origin (scheme + host) for this
 	// silo instance. Used to build redirect_uri values handed to OAuth
 	// IdPs. Empty disables the /oauth/{install_id}/{init,callback} routes.
@@ -227,6 +270,10 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// OnDownloadService receives the configured download service when the
+	// router builds one, so the Jellyfin-compatible listener serves its
+	// downloads under the same policy and bandwidth limiters. Optional.
+	OnDownloadService func(*downloads.Service)
 	// v2Wiring observes the sealed v2 dependency set right before
 	// apiv2.NewHandler consumes it; tests only. It is the one way to assert
 	// that a v1 handler reached the v2 listener, since NewRouter returns a
@@ -234,19 +281,35 @@ type Dependencies struct {
 	v2Wiring               func(apiv2.Dependencies)
 	v2RouteSnapshot        func([]streamtelemetry.WalkedRoute)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
-	RequestServerRestart   func(ctx context.Context) error
-	StorageTransition      *storagetransition.Service
-	ServerRestartStatus    *handlers.ServerRestartStatusTracker
+	// BeforeServerSettingCommit runs inside an admin settings save's
+	// transaction for each changed setting; an error rolls the save back.
+	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
+	// AdminDefaults is the node's shared snapshot of the administrator's
+	// setting defaults. Without it the router builds one from its settings
+	// repo, which then refreshes only on its own admin writes and its TTL.
+	AdminDefaults        *config.AdminDefaults
+	RequestServerRestart func(ctx context.Context) error
+	StorageTransition    *storagetransition.Service
+	ServerRestartStatus  *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
-	// Trakt / MDBList) — the user-facing analogue of CollectionService.
+	// MDBList) — the user-facing counterpart of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
+	// PersonalCollectionCollages serves and builds personal collection
+	// collages. main.go builds it beside UserCollectionSync, before scheduled
+	// syncs start, and hands it to both; the router gives it its generator
+	// once the poster signer exists. Nil builds one here when artwork
+	// storage is configured.
+	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
-	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
-	// router.go once the Trakt adapter exists (mirrors UserCollectionSync).
+	// Built in main.go with TMDB wired.
 	TrendingRefresher *sections.TrendingRefresher
+
+	// SeasonalListRefresher downloads the MDBList lists seasonal rows show.
+	// Built in main.go alongside the trending refresher.
+	SeasonalListRefresher *sections.SeasonalListRefresher
 
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
@@ -265,6 +328,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// LocalTLSPin is the pin of the key the API listener presents over TLS on
+	// its own port (internal/lantls), published in the connections document.
+	// Empty when the listener does not answer TLS (tests).
+	LocalTLSPin string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -302,6 +370,18 @@ func (deps Dependencies) themeRouter(playbackHandler *handlers.PlaybackHandler) 
 		router.Planner = deps.NodePlanner
 	}
 	return router
+}
+
+// recommendationReader builds a cache-backed recommendations reader. Its
+// reads queue profile refreshes only while recommendations are enabled.
+func (deps Dependencies) recommendationReader(repo *recommendations.Repo, ratingsRepo *catalog.RatingsRepo) *recommendations.Reader {
+	var refresh recommendations.ReadRefreshRequester
+	if deps.RecWorker != nil {
+		refresh = deps.RecWorker
+	}
+	return recommendations.NewReader(repo, ratingsRepo, refresh, deps.UserStoreProvider).
+		WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite").
+		WithPersonalRows(deps.Config == nil || deps.Config.Recommendations.Enabled)
 }
 
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
@@ -380,12 +460,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Blobs.Assets)
+	readyHandler.SetShuttingDown(deps.ShuttingDown)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
 	// acting-admin profile policy, degrading admin routes to the plain
 	// role check.
 	var checkPrimaryProfile apimw.PrimaryProfileChecker
+	// Reports whether a household has a PIN-protected or access-limited
+	// profile, which withholds admin powers from a profile-less admin
+	// request. Wired with checkPrimaryProfile; nil disables that check.
+	var householdRequiresProfile apimw.HouseholdProfileRequirement
 	// lookupProfile resolves a profile for the given user, returning nil when it
 	// does not exist. Shared by the acting-admin primary check and the
 	// diagnostics profile-attribution validator so both read profile state
@@ -410,6 +495,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			return profile.IsPrimary, true, nil
 		}
+		householdRequiresProfile = func(ctx context.Context, userID int) (bool, error) {
+			store, err := userStores.ForUser(ctx, userID)
+			if err != nil {
+				return false, err
+			}
+			profiles, err := store.ListProfiles(ctx)
+			if err != nil {
+				return false, err
+			}
+			return access.HouseholdRequiresProfile(profiles), nil
+		}
 	}
 
 	var permissionPDP apimw.PermissionDecider
@@ -419,13 +515,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Admin authorization for routes: admin role, exercised through the
 	// account's primary household profile.
-	var requireActingAdmin func(http.Handler) http.Handler
+	var actingAdmin apimw.ActingAdminDecider
 	if deps.PolicySystem != nil {
-		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile)
+		actingAdmin = apimw.NewPolicyActingAdminDecider(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
 	} else {
 		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile)
+		actingAdmin = apimw.NewActingAdminDecider(checkPrimaryProfile, householdRequiresProfile)
 	}
+	requireActingAdmin := apimw.RequireActingAdminWith(actingAdmin)
+	// Routes outside the admin groups that widen what an admin sees or may do
+	// ask apimw.ActingAdmin, which answers with this same decision.
+	r.Use(apimw.ProvideActingAdmin(actingAdmin))
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
@@ -446,6 +546,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	// One reader for access.unrated_content shared by every resolver built here.
 	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
+	adminDefaults := deps.AdminDefaults
+	if adminDefaults == nil {
+		// Embeddings without cmd/silo's shared instance (tests, tools) get
+		// their own, refreshed by this router's admin writes and its TTL.
+		var reader config.ManySettingReader
+		if many, ok := settingsRepo.(config.ManySettingReader); ok {
+			reader = many
+		}
+		adminDefaults = config.NewAdminDefaults(reader)
+	}
 	var accessGroupStore *access.GroupStore
 	if deps.DB != nil {
 		accessGroupStore = access.NewGroupStore(deps.DB)
@@ -501,6 +611,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataCurationAccess func(http.Handler) http.Handler
 	var markerEditAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
+	var collectionOwners catalog.PersonalCollectionAccess
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
 	var sessionRepo *auth.SessionRepository
@@ -534,6 +645,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
 		}
+		if deps.AuthProviderSource != nil {
+			authService.SetPluginProviderSource(deps.AuthProviderSource)
+		}
+		if deps.AuthProviderRecheck != nil {
+			authService.SetProviderRecheck(deps.AuthProviderRecheck)
+		}
+		signInAttempts := deps.SignInAttempts
+		if signInAttempts == nil {
+			signInAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.SignInNamePolicy)
+		}
+		authService.SetSignInAttempts(signInAttempts)
 		if settingsRepo != nil {
 			invitationService = invitations.NewService(
 				invitations.NewRepository(deps.DB),
@@ -542,6 +664,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				authService,
 				mail.NewSMTPSender(settingsRepo),
 				settingsRepo,
+				deps.EmailBrand,
 				"",
 			)
 			passwordResetService = passwordreset.NewService(
@@ -550,6 +673,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				authService,
 				mail.NewSMTPSender(settingsRepo),
 				settingsRepo,
+				deps.EmailBrand,
 				"",
 			)
 			passwordResetService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
@@ -563,6 +687,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.UserStoreProvider,
 			profileTokenService,
 		)
+		if deviceLoginService != nil {
+			quickConnectAttempts := deps.QuickConnectCodeAttempts
+			if quickConnectAttempts == nil {
+				quickConnectAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.QuickConnectCodePolicy)
+			}
+			deviceLoginService.WithQuickConnectAttempts(quickConnectAttempts)
+		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		if accessGroupStore != nil {
@@ -571,12 +702,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
+			// Shared personal collections are limited to their owner's
+			// access, resolved by the same resolver the request gates use.
+			collectionOwners = usercollections.NewOwnerAccess(viewerResolver)
 		}
 		if deps.DB != nil {
 			metadataLibraries := apimw.NewPGMetadataTargetLibraryResolver(deps.DB)
@@ -585,6 +719,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					userRepo,
 					metadataLibraries,
 					checkPrimaryProfile,
+					householdRequiresProfile,
 					permissionPDP,
 					accessGroupStore,
 				).RequireMetadataCurationForItem
@@ -594,6 +729,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					userRepo,
 					metadataLibraries,
 					checkPrimaryProfile,
+					householdRequiresProfile,
 					accessGroupStore,
 				).RequireMetadataCurationForItem
 			}
@@ -603,6 +739,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				userRepo,
 				nil, // marker gate does not resolve target libraries
 				checkPrimaryProfile,
+				householdRequiresProfile,
 				permissionPDP,
 				accessGroupStore,
 			).RequireMarkerEdit
@@ -612,6 +749,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				userRepo,
 				nil,
 				checkPrimaryProfile,
+				householdRequiresProfile,
 			).RequireMarkerEdit
 		}
 	}
@@ -654,6 +792,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryHandler.EventsHub = deps.EventsHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
+		libraryHandler.RealtimeMonitor = deps.LibraryMonitor
+		libraryHandler.Trickplay = deps.Trickplay
 		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
 		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
 		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
@@ -704,6 +844,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
+	var catalogResolver *catalog.CatalogResolver
+	var shuffleService *shuffle.Service
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
 	var itemRepo *catalog.ItemRepository
@@ -717,6 +859,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	// watchlistTitles is the one watchlist.Titles every surface shares: the
+	// v2 title operations, promotion on library watchlist reads, the title
+	// detail's repair observer and the profile purge.
+	var watchlistTitles *watchlist.Titles
 	var onboardingHandler *handlers.OnboardingHandler
 	// Declared here (assigned in the playback block below) so the onboarding
 	// gates closure can reference it before that block runs.
@@ -726,6 +872,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
+	var watchlistRequestWithdrawer *mediarequests.Service
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
@@ -795,6 +942,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		detailSvc.SetLiteraryWorkLinker(literaryService)
 		detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 		detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
+		if deps.TrickplayReader != nil {
+			detailSvc.SetTrickplayAvailability(deps.TrickplayReader)
+		}
 		if deps.ImageResolver != nil {
 			detailSvc.SetImageResolver(deps.ImageResolver)
 		}
@@ -813,10 +963,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
+		itemsHandler.SetPersonalCollectionAccess(collectionOwners)
 		if deps.MarkerPopulation != nil {
 			itemsHandler.MarkerPopulation = deps.MarkerPopulation
 		}
 		itemsHandler.MarkerFileResolver = deps.FileRepo
+		itemsHandler.MarkerImageURLs = deps.ArtworkResolver
 		itemsHandler.EventsHub = deps.EventsHub
 		itemsHandler.UserRepo = userRepo
 		if accessGroupStore != nil {
@@ -854,32 +1006,47 @@ func newChiRouter(deps Dependencies) chi.Router {
 				ebookReaderHandler.Conversion = conv
 			}
 		}
-		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
-		catalogHandler = handlers.NewCatalogHandler(
-			catalog.NewCatalogResolver(browseRepo, itemRepo).
-				WithEpisodeRepository(episodeRepo).
-				WithUserStoreProvider(deps.UserStoreProvider).
-				WithSearchProvider(catalogSearchService.Provider()),
-			itemsHandler,
-		)
-		catalogHandler.SetWorkSummaryProvider(literaryRepo)
-
 		tmdbAPIKey := ""
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
+		requestsTMDB := tmdb.NewClient(tmdbAPIKey, 40)
+		// deps.UserStoreProvider is the notification-wrapped provider, so a
+		// promoted series queues an interest recompute. The promotion effects
+		// are the personal data handler, wired once it exists.
+		watchlistTitles = watchlist.NewTitles(deps.DB, itemRepo, deps.UserStoreProvider, requestsTMDB, nil)
+
+		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
+		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
+		catalogResolver = catalog.NewCatalogResolver(browseRepo, itemRepo).
+			WithEpisodeRepository(episodeRepo).
+			WithUserStoreProvider(deps.UserStoreProvider).
+			WithSearchProvider(catalogSearchService.Provider()).
+			WithWatchlistPromoter(watchlistTitles).
+			WithPersonalCollectionAccess(collectionOwners)
+		catalogHandler = handlers.NewCatalogHandler(catalogResolver, itemsHandler)
+		shuffleService = shuffle.NewService(deps.DB, catalogResolver)
+		catalogHandler.SetWorkSummaryProvider(literaryRepo)
+
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
-			tmdb.NewClient(tmdbAPIKey, 40),
+			requestsTMDB,
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
+		requestSvc.SetTitleObserver(watchlistTitles)
+		watchlistRequestWithdrawer = requestSvc
+		requestSvc.SetWatchlistPreference(mediarequests.StoreWatchlistPreference{Stores: deps.UserStoreProvider})
 		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetAnimeIndex(animeids.NewStore(deps.DB))
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userRepo != nil {
 			requestSvc.SetUserRepository(userRepo)
 		}
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
+			requestSvc.SetTVDBIDResolver(tvdbResolver)
+		}
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}
@@ -974,6 +1141,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userImportHandler *handlers.UserCollectionImportHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	// One device-sightings recorder for every surface that registers the
+	// request's device (legacy and canonical settings, playback start), so
+	// they share one throttle window per (profile, device).
+	deviceSightings := handlers.NewDeviceSightings()
 	// userPluginSettingsHandler is the plugin handler the user-scoped
 	// /settings/plugins routes are registered on; v2 shares it.
 	var userPluginSettingsHandler *handlers.PluginHandler
@@ -984,6 +1155,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var libraryPlaybackPrefHandler *handlers.LibraryPlaybackPrefHandler
 	var watchProviderHandler *handlers.WatchProviderHandler
 	var playbackSessionsLoader *handlers.PlaybackSessionsLoader
+	// Personal collections without an uploaded or imported poster show a
+	// collage of their titles; it needs artwork storage and poster signing.
+	var personalCollages *catalog.PersonalCollectionCollages
+	if deps.DB != nil && detailSvc != nil {
+		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
+			personalCollages = deps.PersonalCollectionCollages
+			if personalCollages == nil {
+				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			}
+			personalCollages.SetCollageGenerator(gen)
+		}
+	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
 	}
@@ -991,8 +1174,32 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.UserStoreProvider != nil {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
+		if accessGroupStore != nil {
+			profileHandler.AccessGroups = accessGroupStore
+		}
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.RecWorker != nil {
+			profileHandler.RecWorker = deps.RecWorker
+		}
+		if deps.DB != nil {
+			// Drops live in Postgres whichever store holds the profile.
+			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+			profileHandler.WatchlistTitlesPurger = watchlistTitles
+			// So do ratings and recommendation state; the Postgres store
+			// already deleted them with the profile.
+			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
+			// Ebook reading data lives there too.
+			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
+			profileHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+		}
+		if watchlistRequestWithdrawer != nil {
+			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
+		}
 		profileHandler.ProfileTokens = profileTokenService
+		profileHandler.PINAttempts = deps.ProfilePINAttempts
+		if profileHandler.PINAttempts == nil {
+			profileHandler.PINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
 		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs)
@@ -1007,6 +1214,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
+		if watchlistTitles != nil {
+			personalDataHandler.SetWatchlistTitles(watchlistTitles)
+			watchlistTitles.SetEffects(personalDataHandler)
+		}
 		personalDataHandler.EventsHub = deps.EventsHub
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalListEventDispatcher); ok {
 			personalDataHandler.SetLocalListEventDispatcher(dispatcher)
@@ -1025,6 +1236,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.ArtworkStore = deps.Blobs.Assets
 		collectionHandler.ArtworkResolver = deps.ArtworkResolver
+		if detailSvc != nil {
+			collectionHandler.ItemPosters = detailSvc
+		}
+		collectionHandler.CollectionOwners = collectionOwners
+		collectionHandler.Collages = personalCollages
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -1041,7 +1257,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			userImportHandler.ArtworkResolver = deps.ArtworkResolver
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
+		settingsHandler.DeviceSightings = deviceSightings
 		settingsHandler.EventsHub = deps.EventsHub
+		// A profile's hidden libraries are part of the scope its
+		// recommendations are built under.
+		if deps.RecWorker != nil {
+			settingsHandler.RecWorker = deps.RecWorker
+		}
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
@@ -1051,14 +1273,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// which degrades to "no typed settings routes" instead of no server.
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
+			settingValuesHandler.DeviceSightings = deviceSightings
 			settingValuesHandler.EventsHub = deps.EventsHub
-			// Household management: a primary profile acting for another
-			// profile on its own account. Without both of these the widening
-			// is unavailable rather than unguarded.
-			if userRepo != nil {
-				settingValuesHandler.UserRepo = userRepo
+			if deps.RecWorker != nil {
+				settingValuesHandler.RecWorker = deps.RecWorker
 			}
+			// Household management: a primary profile acting for another
+			// profile on its own account. Without the token service a
+			// PIN-locked primary cannot widen rather than widening unguarded.
 			settingValuesHandler.ProfileTokens = profileTokenService
+			settingValuesHandler.SetAdminDefaults(adminDefaults)
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
 			} else if deps.DB != nil {
@@ -1070,12 +1294,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
-		if userRepo != nil {
-			deviceHandler.UserRepo = userRepo
-		}
 		deviceHandler.ProfileTokens = profileTokenService
+		if deps.DB != nil {
+			deviceHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			homeDismissalHandler.SetSeriesDrops(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications), itemRepo)
+		}
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
+			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
+		}
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
@@ -1094,28 +1324,26 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Build ratings handler if both repo and itemRepo are available.
 	var ratingsHandler *handlers.RatingsHandler
-	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalRatingEventDispatcher); ok {
 			ratingsHandler.SetLocalRatingEventDispatcher(dispatcher)
 		}
-		if deps.DB != nil {
-			recsRepoForStale = recommendations.NewRepo(deps.DB)
-			ratingsHandler.SetProfileStaler(recsRepoForStale)
-			ratingsHandler.SetProfileRefreshRequester(deps.RecWorker)
-			if personalDataHandler != nil {
-				personalDataHandler.SetProfileStaler(recsRepoForStale)
-				personalDataHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
-			if progressHandler != nil {
-				progressHandler.SetProfileStaler(recsRepoForStale)
-				progressHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
-			if itemsHandler != nil {
-				itemsHandler.SetProfileStaler(recsRepoForStale)
-				itemsHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
+	}
+	// Ratings, favorites, watchlist, progress and watched-state writes rebuild
+	// the profile's recommendations when they are enabled.
+	if deps.RecWorker != nil {
+		if ratingsHandler != nil {
+			ratingsHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if personalDataHandler != nil {
+			personalDataHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if progressHandler != nil {
+			progressHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if itemsHandler != nil {
+			itemsHandler.SetSignalsChangedNotifier(deps.RecWorker)
 		}
 	}
 
@@ -1149,6 +1377,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
+			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+			playbackHandler.SourceBitrates = &catalog.SourceBitrates{Pool: deps.DB}
 			// The v2 playback contract binds every mutation to this server's
 			// installation identity; a client that read capabilities from a
 			// different installation is refused. Nothing else depends on it, so a
@@ -1174,6 +1404,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
+			playbackHandler.DeviceSightings = deviceSightings
 		}
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		playbackHandler.CompletionObserver = deps.WatchCompletionObserver
@@ -1222,6 +1453,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// transcodes from after a restart. Same nil-safety: without Redis such a
 		// session replans instead of recovering, as it did before.
 		playbackHandler.NodeRecipeStore = noderecipe.NewStore(deps.RedisClient, 0)
+		// Keep the recipe of a header-authenticated session server-side, the only
+		// place it exists, so a restarted or different API process can rebuild the
+		// playback session. Same nil-safety: without Redis such a session answers
+		// 404 after a restart and the client starts a new attempt.
+		playbackHandler.SessionRecipeStore = noderecipe.NewSessionRecipeStore(deps.RedisClient, 0)
+		if streamHandler != nil {
+			streamHandler.SessionRecipeStore = playbackHandler.SessionRecipeStore
+		}
 		if deps.Config != nil {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
 				return deps.CurrentConfig().Playback
@@ -1249,9 +1488,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
 		}
-		if recsRepoForStale != nil {
-			playbackHandler.SetProfileStaler(recsRepoForStale)
-			playbackHandler.SetProfileRefreshRequester(deps.RecWorker)
+		if deps.RecWorker != nil {
+			playbackHandler.SetSignalsChangedNotifier(deps.RecWorker)
 		}
 		playbackHandler.StartCapabilityWarmupV3(deps.AppContext)
 		// The health sweep sees a node's capability hash change long before this
@@ -1336,6 +1574,27 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub, subtitleInventoryResolver)
+		if subtitleAINotifier != nil && deps.EventBus != nil {
+			// The bus carries each message under the realtime event it becomes.
+			publish := func(ctx context.Context, event playback.RealtimeEventName, payload string) error {
+				return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: string(event), Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(playback.RealtimeEventName, string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
+					switch event.Type {
+					case cache.EventSubtitleTimingChanged, cache.EventSubtitleSyncUpdated:
+						handler(playback.RealtimeEventName(event.Type), event.Payload)
+					}
+				})
+			}
+			busCtx := deps.AppContext
+			if busCtx == nil {
+				busCtx = context.Background()
+			}
+			if err := subtitleAINotifier.UseEventBus(busCtx, publish, subscribe); err != nil {
+				slog.Warn("subscribe subtitle timing changes and sync updates failed", "component", "api", "error", err)
+			}
+		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
@@ -1375,6 +1634,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if streamHandler != nil && subtitleRepo != nil && subtitleBlobs != nil {
 		streamHandler.SubtitleRepo = subtitleRepo
 		streamHandler.SubtitleBlobs = subtitleBlobs
+	}
+	if streamHandler != nil && subtitleRepo != nil {
+		streamHandler.ExternalTimings = subtitleRepo
+	}
+	if streamHandler != nil && deps.SubtitlePlaySync != nil {
+		streamHandler.PlaySync = deps.SubtitlePlaySync
 	}
 	if streamHandler != nil && deps.Config != nil {
 		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
@@ -1418,6 +1683,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.RestartStatus = restartStatus
 		adminHandler.CatalogSearchStatus = catalogSearchService
 		adminHandler.DiagnosticsStore = diagnosticsStore
+		if watchlistTitles != nil && deps.DB != nil {
+			adminHandler.WatchlistTitlesSweeper = watchlistTitles
+		}
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
@@ -1426,12 +1694,24 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 		}
-		if deps.OnServerSettingUpdated != nil {
-			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
+		// Refresh the administrator defaults before the handler tells clients
+		// to re-read, so their next request already sees the new default.
+		adminHandler.OnServerSettingUpdated = func(ctx context.Context, key, value string) {
+			adminDefaults.Changed(ctx, key)
+			if deps.OnServerSettingUpdated != nil {
+				deps.OnServerSettingUpdated(ctx, key, value)
+			}
+		}
+		adminHandler.BeforeServerSettingCommit = deps.BeforeServerSettingCommit
+		if deps.RecWorker != nil {
+			adminHandler.RecWorker = deps.RecWorker
 		}
 	}
 	if accessGroupStore != nil {
 		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
+		if deps.RecWorker != nil {
+			accessGroupHandler.RecWorker = deps.RecWorker
+		}
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
@@ -1443,7 +1723,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
 			privateStore = api
 		}
-		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
+		catalogSeedService := catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB))
+		if deps.Config != nil {
+			catalogSeedService.WithEmbeddingModel(deps.Config.Recommendations.EmbeddingModel)
+		}
+		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogSeedService, jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
 		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
@@ -1486,6 +1770,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.Scanner,
 			deps.FolderRepo,
 		)
+		if deps.RecWorker != nil {
+			adminSplitHandler.SetRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
 	}
 
 	// Build admin image handler for poster/backdrop/logo selection.
@@ -1538,7 +1825,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		markersHandler = handlers.NewMarkersHandler(
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
-		markersHandler.BaseContext = deps.AppContext
+		markersHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
+		if deps.DB != nil {
+			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+		}
+		markersHandler.MarkerImageURLs = deps.ArtworkResolver
+		markersHandler.ThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if deps.MarkerPopulation != nil {
 			markersHandler.MarkerPopulation = deps.MarkerPopulation
 		}
@@ -1603,6 +1895,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+		if deps.FileRepo != nil && settingsRepo != nil {
+			syncService := newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier)
+			subtitleSearchHandler.SetSyncService(syncService, subtitleRepo)
+			if deps.SubtitlePlaySync != nil {
+				deps.SubtitlePlaySync.Set(syncService)
+			}
+		}
 	}
 
 	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
@@ -1618,14 +1917,36 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// OnConfigChange; only the semaphore size (ai.max_concurrent_jobs) is
 	// fixed at construction.
 	var aiClient *llm.Client
+	var chatGPT *chatgpt.Service
+	if store, ok := settingsRepo.(chatgpt.Store); ok && deps.SecretCipher != nil {
+		chatGPT = chatgpt.NewService(store)
+		chatGPT.OnSettingUpdated = func(ctx context.Context, key, value string) {
+			if deps.OnServerSettingUpdated != nil {
+				deps.OnServerSettingUpdated(ctx, key, value)
+			}
+			if deps.EventBus != nil {
+				_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+		}
+	}
+	aiConfig := func(cfg *config.Config) llm.Config {
+		c := llmConfigFromServer(cfg)
+		if chatGPT != nil {
+			c.ChatGPTTokenSource = chatGPT.TokenSource
+			c.ChatGPTTokenRejected = chatGPT.RejectToken
+			c.ChatGPTPlanRejected = chatGPT.RejectPlanToken
+			c.TextConfigSource = chatGPT.TextConfig
+		}
+		return c
+	}
 	var aiSem chan struct{}
 	if deps.Config != nil {
-		aiClient = llm.NewClient(llmConfigFromServer(deps.Config))
+		aiClient = llm.NewClient(aiConfig(deps.Config))
 		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		if deps.OnConfigChange != nil {
 			clientForReload := aiClient
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				clientForReload.UpdateConfig(llmConfigFromServer(updated))
+				clientForReload.UpdateConfig(aiConfig(updated))
 			})
 		}
 	}
@@ -1633,6 +1954,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiCfg := effectiveSubtitleAIConfig(deps.Config)
+		aiCfg.TextConfigSource = aiClient.TextConfig
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -1653,10 +1975,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 			slog.Default(),
 			aiSem,
 		)
+		aiService.SetExternalTimings(subtitleRepo)
+		if streamHandler != nil && streamHandler.SubtitleCache != nil {
+			aiService.SetSubtitleCache(streamHandler.SubtitleCache)
+		}
 		aiService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
 				newCfg := effectiveSubtitleAIConfig(updated)
+				newCfg.TextConfigSource = aiClient.TextConfig
 				aiService.UpdateConfig(newCfg)
 				aiTranslator.SetBatching(updated.SubtitleAI.BatchSize, updated.SubtitleAI.ContextNeighbors)
 				aiTranscriber.SetExtraction(updated.Playback.FFmpegPath, updated.SubtitleAI.ASRChunkSeconds)
@@ -1671,9 +1998,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataAIHandler *handlers.MetadataAIHandler
 	if deps.DB != nil && deps.Config != nil && aiClient != nil {
 		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
+		mtConfig := func(cfg *config.Config) metadatatranslation.Config {
+			c := metadataAIConfigFromServer(cfg)
+			c.TextConfigSource = aiClient.TextConfig
+			return c
+		}
 		mtService := metadatatranslation.NewService(
 			deps.AppContext,
-			metadataAIConfigFromServer(deps.Config),
+			mtConfig(deps.Config),
 			mtRepo,
 			mtRepo,
 			&metadatatranslation.CatalogLocalizationStore{
@@ -1688,7 +2020,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mtService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				mtService.UpdateConfig(metadataAIConfigFromServer(updated))
+				mtService.UpdateConfig(mtConfig(updated))
 			})
 		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
@@ -1713,19 +2045,28 @@ func newChiRouter(deps Dependencies) chi.Router {
 		sectionBulkHandler = &handlers.SectionBulkHandler{Repo: sectionRepo}
 		sectionFetcher := sections.NewFetcher(deps.DB)
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
+		sectionFetcher.AdminDefaults = adminDefaults
+		sectionFetcher.CollectionOwners = collectionOwners
+		if watchlistTitles != nil {
+			sectionFetcher.WatchlistPromoter = watchlistTitles
+		}
 		sectionFetcher.CollectionRepo = catalog.NewLibraryCollectionRepository(deps.DB)
 		sectionFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 		sectionFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 		if deps.DB != nil {
 			sectionFetcher.RecommendationRepo = recommendations.NewRepo(deps.DB)
 			if ratingsRepo != nil {
-				sectionFetcher.RecommendationReader = recommendations.NewReader(sectionFetcher.RecommendationRepo, ratingsRepo, deps.RecWorker, deps.UserStoreProvider)
+				sectionFetcher.RecommendationReader = deps.recommendationReader(sectionFetcher.RecommendationRepo, ratingsRepo)
 			}
 		}
 		sections.InstallRecipeDelegate(sectionFetcher)
 		sectionHandler = handlers.NewSectionHandler(sectionRepo, sectionFetcher)
+		catalogResolver.WithSectionResolver(sectionHandler)
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
+		}
+		if deps.SeasonalListRefresher != nil {
+			sectionHandler.SeasonalLists = deps.SeasonalListRefresher
 		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo
@@ -1744,8 +2085,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			sectionHandler.AccessGroups = accessGroupStore
 		}
 		if settingsRepo != nil {
-			sectionHandler.Settings = settingsRepo
-			sectionSettingsHandler = &handlers.SectionSettingsHandler{Settings: settingsRepo}
+			sectionSettingsHandler = &handlers.SectionSettingsHandler{}
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
@@ -1792,42 +2132,25 @@ func newChiRouter(deps Dependencies) chi.Router {
 				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
-		if libraryCollectionService.TraktCollections == nil {
-			// The client ID is resolved per call rather than captured here, so
-			// saving new Trakt credentials applies without a server restart.
-			libraryCollectionService.TraktCollections = &traktCollectionAdapter{
-				client:   metatrakt.NewClient("", 5),
-				settings: settingsRepo,
+		if libraryCollectionService.TMDBLists == nil {
+			apiKey := ""
+			if deps.Config != nil {
+				apiKey = deps.Config.TMDBAPIKey
+			}
+			libraryCollectionService.TMDBLists = &tmdbListAdapter{
+				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
-		if libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil && settingsRepo != nil {
-			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
-				pool:     deps.DB,
-				settings: settingsRepo,
-				cipher:   deps.SecretCipher,
-				provider: watchtrakt.NewProvider(nil, ""),
-			}
-		}
-
-		// Propagate the now-wired Trakt + TMDB fetchers to the user-side sync
-		// service (constructed earlier in main.go before settingsRepo and the
-		// Trakt adapters existed, so its fetcher fields started nil).
+		// Propagate the now-wired TMDB fetchers to the user-side sync service
+		// (constructed earlier in main.go before settingsRepo existed, so its
+		// fetcher fields started nil).
 		if deps.UserCollectionSync != nil {
-			if deps.UserCollectionSync.TraktCollections == nil {
-				deps.UserCollectionSync.TraktCollections = libraryCollectionService.TraktCollections
-			}
-			if deps.UserCollectionSync.TraktTokenResolver == nil {
-				deps.UserCollectionSync.TraktTokenResolver = libraryCollectionService.TraktTokenResolver
-			}
 			if deps.UserCollectionSync.TMDBCollections == nil {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
 			}
-		}
-
-		// Propagate the now-wired Trakt fetcher to the trending refresher (built
-		// in main.go with TMDB only, before the Trakt adapter existed).
-		if deps.TrendingRefresher != nil && deps.TrendingRefresher.TraktTrending == nil {
-			deps.TrendingRefresher.TraktTrending = libraryCollectionService.TraktCollections
+			if deps.UserCollectionSync.TMDBLists == nil {
+				deps.UserCollectionSync.TMDBLists = libraryCollectionService.TMDBLists
+			}
 		}
 
 		// Wire the trending snapshot reader into the section fetcher. The
@@ -1835,6 +2158,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// snapshot table; the upstream fetch happens out-of-band in the refresh
 		// task, so the read path never calls the provider.
 		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
+		sectionFetcher.SeasonalLists = sections.NewSeasonalListRepository(deps.DB)
+		if sectionFetcher.RecommendationRepo != nil {
+			sectionFetcher.SeasonalNeighbors = sectionFetcher.RecommendationRepo
+		}
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,
@@ -1844,10 +2171,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		)
 		libraryCollectionHandler.ArtworkStore = deps.Blobs.Assets
 		libraryCollectionHandler.ArtworkResolver = deps.ArtworkResolver
+		libraryCollectionHandler.ArtworkSigner = deps.ArtworkSigner
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
 		libraryCollectionHandler.UserCollectionPool = deps.DB
+		libraryCollectionHandler.CollectionOwners = collectionOwners
+		libraryCollectionHandler.PersonalCollages = personalCollages
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
@@ -1908,12 +2238,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 		var recsReader *recommendations.Reader
 		if deps.DB != nil {
 			recsRepo = recommendations.NewRepo(deps.DB)
-			recsReader = recommendations.NewReader(recsRepo, ratingsRepo, deps.RecWorker, deps.UserStoreProvider)
+			recsReader = deps.recommendationReader(recsRepo, ratingsRepo)
 		}
-		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil)
+		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil).
+			WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite")
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
+			recsFetcher.AdminDefaults = adminDefaults
+			recsFetcher.CollectionOwners = collectionOwners
+			if watchlistTitles != nil {
+				recsFetcher.WatchlistPromoter = watchlistTitles
+			}
 			recsFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 			recsFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 			recsHandler.Fetcher = recsFetcher
@@ -1975,6 +2311,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+			if subtitleRepo != nil {
+				downloadSvc.SetExternalTimings(subtitleRepo)
+			}
+			if deps.Blobs.Assets != nil {
+				downloadSvc.SetArtworkStore(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair)
+			}
+		}
+		if streamHandler != nil {
+			downloadSvc.SetSubtitleCache(streamHandler.SubtitleCache)
 		}
 		if deps.MarkerPopulation != nil {
 			downloadSvc.SetMarkerPopulation(deps.MarkerPopulation)
@@ -1991,7 +2336,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// delete_watched monitors skip episodes the profile has finished.
 			downloadSvc.SetProgressStores(deps.UserStoreProvider)
 		}
+		if deps.OnDownloadService != nil {
+			deps.OnDownloadService(downloadSvc)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if jwtService != nil {
+			downloadHandler.SetDirectDownloadLinks(jwtService)
+		}
 		if deps.NodePlanner != nil {
 			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
 				cfg := deps.CurrentConfig()
@@ -2034,8 +2385,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		historyImportSvc.SetLocalNetworkAccess(localNetworkAccess)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
+		// Shows hidden from the source's Continue Watching are dropped through
+		// the same tracker as Home dismissals, so interest recomputes.
+		historyImportSvc.SetContinueWatchingStores(
+			notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications),
+			catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider),
+		)
 		if deps.EventsHub != nil {
 			historyImportSvc.AddObserver(evt.NewHistoryImportObserver(deps.EventsHub))
+		}
+		if deps.RecWorker != nil {
+			historyImportSvc.SetSignalsChangedNotifier(deps.RecWorker)
 		}
 		historyImportSvc.StartBackgroundWork()
 		historyImportHandler = handlers.NewHistoryImportHandler(historyImportSvc)
@@ -2043,6 +2403,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			webhookSyncSvc := webhooksync.NewService(webhooksync.NewRepository(deps.DB, deps.SecretCipher), historyRepo, deps.UserStoreProvider)
 			webhookSyncSvc.SetLocalNetworkAccess(localNetworkAccess)
 			webhookSyncSvc.SetStableIdentityResolver(historyIdentity)
+			if deps.RecWorker != nil {
+				webhookSyncSvc.SetSignalsChangedNotifier(deps.RecWorker)
+			}
 			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
 		}
 	}
@@ -2076,10 +2439,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			restartStatus,
 		)
 	}
-	// The OAuth handler is optional: it only stands up when PublicURL is
-	// configured (a stable redirect_uri origin for IdPs) and the DB is
-	// available (oauth_sessions storage). It is built before the v2 listener
-	// so completeOAuthLogin shares it with the v1 routes.
+	// The OAuth handler is built whenever the database (oauth_sessions
+	// storage), the auth service and the JWT service are available. Until
+	// server.public_url is set (the stable redirect_uri origin for IdPs), a
+	// v2 start sends the browser or app back with provider_unavailable and
+	// the frozen v1 init answers 409; SetHostBaseURL follows config changes. It is built before the v2 listener so
+	// completeOAuthLogin shares it with the v1 routes.
 	var oauthHandler *auth.OAuthHandler
 	if authHandler != nil {
 		if deps.DB != nil && authService != nil && jwtService != nil {
@@ -2088,7 +2453,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
 				pp := authService.FindOAuthInstallation(installationID)
 				if pp == nil {
-					return nil, "", errors.New("plugin not found")
+					return nil, "", auth.ErrUnknownAuthInstallation
 				}
 				c, err := pp.OAuthClient(ctx)
 				if err != nil {
@@ -2096,14 +2461,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 				return c, pp.CapabilityID(), nil
 			}
+			identity := serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 			oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
 				Store:           oauthStore,
 				CompletionStore: oauthStore,
+				LinkTickets:     oauthStore,
 				StateSecret:     stateSecret,
 				ResolveClient:   resolveClient,
 				LoginCompleter:  authService,
 				HostBaseURL:     deps.PublicURL,
 				StateTTL:        10 * time.Minute,
+				ServerID:        identity.ServerID,
+				RevokeSession:   authService.Logout,
+				Users:           userRepo,
+				ProviderLogout:  authService.ProviderLogoutURL,
+				KnownOrigins:    deps.overlayOrigins(),
 			})
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) {
@@ -2116,7 +2488,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// userRepo is a concrete pointer, so it has to stay out of the
 	// interface parameter when unset — a typed nil would satisfy the
 	// handler's nil check and panic on first use.
-	var compatUsers handlers.UserRepository
+	var compatUsers handlers.CompatConnectUsers
 	if userRepo != nil {
 		compatUsers = userRepo
 	}
@@ -2125,19 +2497,28 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsRepo,
 		compatUsers,
 	)
-	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
+	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, actingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
 	// Server identity is public discovery data, so it reads through the raw
 	// settings repo: a SECRET_KEY rotation must not change who the server is.
 	if deps.DB != nil {
 		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 	}
-	v2deps.ServerConnections = apiv2.ServerConnections{PublicURL: func() string {
-		if cfg := deps.CurrentConfig(); cfg != nil {
-			return cfg.Server.PublicURL
-		}
-		return ""
-	}}
+	v2deps.ServerConnections = apiv2.ServerConnections{
+		PublicURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.PublicURL
+			}
+			return ""
+		},
+		LocalURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.LocalURL
+			}
+			return ""
+		},
+		LocalTLSPin: deps.LocalTLSPin,
+	}
 	if deps.NetworkAccess != nil {
 		v2deps.ServerConnections.Providers = deps.NetworkAccess.Status
 	}
@@ -2151,7 +2532,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ScanControls = libraryHandler
 	}
 	if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil && deps.LogStreamHub != nil && sessionRepo != nil && userRepo != nil {
-		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 		v2deps.AdminLogsSocket = socket
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2187,6 +2568,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DownloadSubscriptionMutations = downloadSvc
 		v2deps.DownloadSubscriptionSync = downloadSvc
 		v2deps.DownloadCreation = downloadSvc
+		v2deps.AdminAccountDownloads = downloadSvc
+		v2deps.AdminDownloadDevices = downloadSvc
+		v2deps.DownloadPrepareAgain = downloadSvc
 	}
 	if ebookReaderHandler != nil {
 		v2deps.EbookProgress = ebookReaderHandler
@@ -2223,12 +2607,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
 		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
 	}
+	v2deps.ObserveDownloadDelivery = func(method, pattern string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, pattern, handler.ServeHTTP)
+	}
+	v2deps.ObserveBandwidthProbe = func(handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/bandwidth-probe", handler.ServeHTTP)
+	}
 
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
-		v2deps.ThemeOverrides = themeHandler
-		v2deps.ThemeCatalog = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
@@ -2244,7 +2632,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = handlers.NewAPIKeyHandler(apiKeyRepo)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -2278,7 +2666,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if playbackHandler != nil {
 		v2deps.Playback = playbackHandler
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.PlaybackControlSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2290,8 +2678,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Raw v2 delivery shares the byte-protocol handlers; fonts use the typed
 		// service. Both retain token-carried reconstruction and deny markers.
 		v2deps.PlaybackMedia = &apiv2.PlaybackMediaHandlers{
-			Manifest: observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest),
-			Segment:  observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment),
+			Manifest: observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", handlers.RefuseRelayRedirects(playbackHandler.HandleGetTranscodeManifest)),
+			Segment:  observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", handlers.RefuseRelayRedirects(playbackHandler.HandleGetTranscodeSegment)),
 		}
 		if streamHandler != nil {
 			v2deps.PlaybackMedia.Original = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2320,6 +2708,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if itemsHandler != nil {
 		v2deps.Watch = itemsHandler
+		if deps.TrickplayReader != nil {
+			v2deps.Trickplay = deps.TrickplayReader
+		}
+	}
+	if deps.TrickplayAdmin != nil {
+		v2deps.AdminTrickplay = deps.TrickplayAdmin
 	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
@@ -2333,8 +2727,20 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminUsers = adminHandler
 		v2deps.AdminPlaybackHistory = adminHandler
 		v2deps.AdminAccounts = adminHandler
+		v2deps.AdminLoginSessions = adminHandler
 		v2deps.AdminDevices = adminHandler
+		if adminHandler.AdminDevicesAvailable() {
+			v2deps.AdminAccountDevices = adminHandler
+		}
+		if deps.DB != nil {
+			v2deps.AdminWatchSummary = adminHandler
+		}
 		v2deps.AdminPlaybackSessions = adminHandler
+		if deps.DB != nil && deps.ArtifactManager != nil {
+			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
+			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
+			v2deps.AdminDownloadStorage = deps.ArtifactManager
+		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
 			v2deps.AdminPlaybackTerminate = adminPlaybackControlHandler
@@ -2350,6 +2756,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
+		adminHandler.ChatGPT = chatGPT
+	}
+	if chatGPT != nil {
+		v2deps.ChatGPT = chatGPT
 	}
 	if watchTogetherHandler != nil {
 		v2deps.WatchTogetherSuggestions = watchTogetherHandler
@@ -2375,7 +2785,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.WatchTogetherCapability = watchTogetherHandler
 		v2deps.WatchTogetherCreate = watchTogetherHandler
 		if deps.RedisClient != nil && sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.WatchTogetherSocket = socket
 			playbackHandler.WatchTogetherAvailable = true
 			if deps.OnConfigChange != nil {
@@ -2391,7 +2801,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.EventsSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2409,10 +2819,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.NotificationDestinationTests = inbox
 		v2deps.NotificationDestinationCreate = inbox
 		v2deps.OrderedAndroidPush = inbox
-		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile)
+		v2deps.AndroidPushRetirement = deps.Notifications.PushDevices
+		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, actingAdmin)
+		v2deps.ApplePushRetirement = deps.Notifications.PushDevices
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
+		v2deps.NotificationDiscordManagement = newDiscordNotificationsHandler(deps, profileTokenService)
 		v2deps.NotificationEmailVerification = deps.Notifications.EmailVerification
 		v2deps.NotificationEmailLinks = handlers.NewEmailLinkHandler(deps.Notifications)
 		linkHandler := handlers.NewDiscordLinkHandler(deps.Notifications, deps.Notifications.Settings, deps.PublicURL)
@@ -2449,6 +2862,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if subtitlePrefHandler != nil {
 		v2deps.SubtitlePreferences = subtitlePrefHandler
 	}
+	v2deps.LibraryMonitoring = deps.LibraryMonitoring
 	if libraryHandler != nil {
 		v2deps.LibraryAdmin = libraryHandler
 		v2deps.UserLibraries = libraryHandler
@@ -2503,6 +2917,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
+		v2deps.AdminNodeDrain = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
 		// Network access admin operations fan out to every enabled proxy node
 		// over its bearer routes, the same way force-reload does.
@@ -2522,7 +2937,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	var emailHandler *handlers.EmailHandler
 	if settingsRepo != nil {
-		emailHandler = handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
+		emailHandler = handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo), deps.EmailBrand)
 		v2deps.AdminEmailTests = emailHandler
 	}
 	v2deps.AdminResourceSampler = deps.ResourceSampler
@@ -2556,6 +2971,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPluginRepositoryUpdates = plugins.NewRepositoryStore(deps.DB)
 		v2deps.AdminPluginRepositoryDeletes = plugins.NewRepositoryStore(deps.DB)
 	}
+	var externalSignInPlugins *handlers.PluginHandler
 	if deps.DB != nil && deps.PluginService != nil && deps.PluginUserConfig != nil {
 		v2PluginHandler := handlers.NewPluginHandler(
 			plugins.NewRepositoryStore(deps.DB),
@@ -2568,10 +2984,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.PluginImageResolver,
 			restartStatus,
 		)
+		v2PluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
 		v2deps.AdminPluginInventory = v2PluginHandler
 		v2deps.AdminPluginConfiguration = v2PluginHandler
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
+		externalSignInPlugins = v2PluginHandler
+	}
+	if deps.DB != nil && authService != nil && userRepo != nil {
+		v2deps.ExternalSignIn = handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)
 	}
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService
@@ -2605,6 +3026,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if catalogResourceHandler != nil {
 		v2deps.CatalogItems = catalogResourceHandler
 	}
+	if shuffleService != nil {
+		v2deps.Shuffles = shuffleService
+	}
 	if itemsHandler != nil {
 		v2deps.CatalogTrailers = itemsHandler
 	}
@@ -2635,6 +3059,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.Recipes = &handlers.RecipeHandler{}
 	if personalDataHandler != nil && itemsHandler != nil {
 		v2deps.PersonalLists = personalDataHandler
+		v2deps.NotInterested = personalDataHandler
 	}
 	if ratingsHandler != nil {
 		v2deps.Ratings = ratingsHandler
@@ -2644,10 +3069,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
-	}
-	if sectionSettingsHandler != nil {
-		v2deps.SectionFlags = sectionSettingsHandler
-		v2deps.AdminSectionSettingsWrite = sectionSettingsHandler
+		v2deps.AdminProfileSections = sectionHandler
 	}
 	if webhookSyncHandler != nil {
 		v2deps.WebhookSync = webhookSyncHandler
@@ -2665,6 +3087,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.Requests = requestHandler.Service()
 		v2deps.RequestLifecycle = requestHandler.Service()
 		v2deps.AdminRequests = requestHandler.Service()
+		if watchlistRequests, ok := requestHandler.Service().(apiv2.WatchlistRequestService); ok && personalDataHandler != nil && watchlistTitles != nil {
+			v2deps.WatchlistTitles = personalDataHandler
+			v2deps.WatchlistRequests = watchlistRequests
+		}
+		// *requests.Service implements the usage read (pinned at the top of
+		// this file), so the assertion only fails for a test double.
+		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
+			v2deps.AdminRequestUsage = usage
+		}
 	}
 	if collectionHandler != nil {
 		v2deps.PersonalCollections = collectionHandler
@@ -2682,6 +3113,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Original: direct("/api/v2/direct-download", downloadHandler.HandleDirectDownload),
 			Proxy:    direct("/api/v2/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy),
 		}
+		if downloadSvc != nil && jwtService != nil {
+			v2deps.DirectDownloadLinks = downloadHandler
+		}
 	}
 
 	if subtitleSearchHandler != nil {
@@ -2690,6 +3124,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ViewerSubtitleDelete = subtitleSearchHandler
 		v2deps.SubtitleDownloads = subtitleSearchHandler
 		v2deps.SubtitleUploads = subtitleSearchHandler
+		v2deps.SubtitleSync = subtitleSearchHandler
 	}
 	if subtitleAIHandler != nil {
 		v2deps.SubtitleAIReads = subtitleAIHandler
@@ -2835,6 +3270,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Post("/device/poll", authHandler.HandleDevicePoll)
 				}
 
+				// Device sign-in decisions take a user code, so they spend
+				// the lookup's guessing budget as well as authenticating.
+				var deviceDecisionMiddlewares []func(http.Handler) http.Handler
+				if deps.RateLimitMW != nil {
+					deviceDecisionMiddlewares = append(deviceDecisionMiddlewares, deps.RateLimitMW.AuthEndpointHandler("device_lookup"))
+				}
+
 				// Protected auth routes (require valid session).
 				if authMiddleware != nil {
 					r.Group(func(r chi.Router) {
@@ -2857,14 +3299,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 						}
 						r.With(passwordChangeMiddlewares...).
 							Post("/account/password", authHandler.HandleChangePassword)
-						r.Post("/device/approve", authHandler.HandleDeviceApprove)
-						r.Post("/device/deny", authHandler.HandleDeviceDeny)
+						r.With(deviceDecisionMiddlewares...).Post("/device/approve", authHandler.HandleDeviceApprove)
+						r.With(deviceDecisionMiddlewares...).Post("/device/deny", authHandler.HandleDeviceDeny)
 					})
 					if viewerAccessMiddleware != nil {
 						r.With(
 							authMiddleware.RequireAuth,
 							viewerAccessMiddleware.RequireViewerAccess,
-						).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
+						).With(deviceDecisionMiddlewares...).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
 					}
 				}
 			})
@@ -2890,7 +3332,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// /notifications subrouter below (static routes win in chi).
 		var discordNotificationsHandler *handlers.DiscordNotificationsHandler
 		if deps.Notifications != nil {
-			discordNotificationsHandler = handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+			discordNotificationsHandler = newDiscordNotificationsHandler(deps, profileTokenService)
 			if deps.OnConfigChange != nil {
 				h := discordNotificationsHandler
 				deps.OnConfigChange(func(_, updated *config.Config) { h.SetPublicURL(updated.Server.PublicURL) })
@@ -2917,7 +3359,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Use(demoGuard.Guard)
 				}
 
-				apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
+				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 				r.Route("/api-keys", func(r chi.Router) {
 					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
 					r.Get("/", apiKeyHandler.HandleListAPIKeys)
@@ -3027,6 +3469,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 				if viewerAccessMiddleware != nil {
 					r.Use(viewerAccessMiddleware.RequireViewerAccess)
 				}
+				// v1 bridge fix: the profile-optional viewer reads below
+				// refuse a request without X-Profile-Id when the account
+				// has a PIN-protected or access-restricted profile, which
+				// account scope would otherwise bypass. Capability probes,
+				// profile selection, and account routes stay
+				// profile-optional; see apimw.HouseholdProfileGate. It is
+				// wired with viewer access: without a user store neither runs.
+				householdProfileGate := func(next http.Handler) http.Handler { return next }
+				if viewerAccessMiddleware != nil {
+					householdProfileGate = apimw.NewHouseholdProfileGate(deps.UserStoreProvider).Require
+				}
 
 				// User-facing library route (all authenticated users).
 				if libraryHandler != nil {
@@ -3043,6 +3496,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
+					if sessionRepo != nil {
+						eventsHandler.SetSessionRoles(sessionRepo)
+					}
+					eventsHandler.SetProfileVerifier(viewerResolver)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
@@ -3062,7 +3519,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
 					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
-					// the login account, not a profile, so these stay outside
+					// the login account. Writes require the household manager
+					// in the handler; the optional profile routes stay outside
 					// the RequireProfile subrouter below (static paths coexist
 					// with it, same as the public email-link routes above).
 					if discordNotificationsHandler != nil {
@@ -3115,6 +3573,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				// config stay admin-only (see the /admin group below).
 				if markersHandler != nil && markerEditAccess != nil {
 					r.Route("/markers", func(r chi.Router) {
+						r.Use(householdProfileGate)
 						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
 						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
 						r.Group(func(r chi.Router) {
@@ -3165,24 +3624,27 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 				// Browse, search, and item detail routes.
 				if itemsHandler != nil {
-					r.Get("/catalog", catalogHandler.HandleGetCatalog)
-					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
-					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
-					r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
-					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
-					if literaryWorkHandler != nil {
-						r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
-					}
-					if catalogResourceHandler != nil {
-						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
-						r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
-						r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
-						r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
-						r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
-						r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
-						r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)
-					}
-					r.Get("/watch/{id}", itemsHandler.HandleGetWatchDetail)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/catalog", catalogHandler.HandleGetCatalog)
+						r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
+						r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
+						r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
+						r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
+						if literaryWorkHandler != nil {
+							r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
+						}
+						if catalogResourceHandler != nil {
+							r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
+							r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
+							r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
+							r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
+							r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
+							r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
+							r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)
+						}
+						r.Get("/watch/{id}", itemsHandler.HandleGetWatchDetail)
+					})
 				}
 
 				if calendarRepo != nil {
@@ -3190,15 +3652,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 
 				if peopleHandler != nil {
-					r.Get("/people", peopleHandler.HandleSearch)
-					r.Get("/people/{id}", peopleHandler.HandleGetPerson)
-					r.Post("/people/{id}/refresh", peopleHandler.HandleRefreshPerson)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/people", peopleHandler.HandleSearch)
+						r.Get("/people/{id}", peopleHandler.HandleGetPerson)
+						r.Post("/people/{id}/refresh", peopleHandler.HandleRefreshPerson)
+					})
 				}
 
 				if libraryCollectionHandler != nil {
-					r.Get("/library/{id}/collections", libraryCollectionHandler.HandleListLibraryCollections)
-					r.Get("/library/{id}/collections/{collection_id}/items", libraryCollectionHandler.HandleGetLibraryCollectionItems)
-					r.Get("/library/{id}/user-collections", libraryCollectionHandler.HandleListLibraryUserCollections)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/library/{id}/collections", libraryCollectionHandler.HandleListLibraryCollections)
+						r.Get("/library/{id}/collections/{collection_id}/items", libraryCollectionHandler.HandleGetLibraryCollectionItems)
+						r.Get("/library/{id}/user-collections", libraryCollectionHandler.HandleListLibraryUserCollections)
+					})
 				}
 
 				// Profile routes.
@@ -3516,7 +3984,25 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
-						r.Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
+						if deps.FolderRepo != nil {
+							metadataAIHandler.Libraries = deps.FolderRepo
+						} else if deps.DB != nil {
+							metadataAIHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+						}
+						if detailSvc != nil {
+							metadataAIHandler.Pending = detailSvc
+						}
+						metadataAIHandler.ItemLibraries = itemRepo
+						// The budget caps provider spend, so like the profile
+						// PIN limiter it counts in Redis whenever Redis is
+						// configured, whatever ratelimit.backend says, and per
+						// node only without Redis.
+						if deps.RedisClient != nil {
+							metadataAIHandler.Limiter = ratelimit.NewRedisLimiter(deps.RedisClient)
+						} else {
+							metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
+						}
+						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
@@ -3544,7 +4030,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						// in-memory fallback.
 						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
 						itemsHandler.SetTrailerRefreshRequester(requester)
-						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
+						r.With(householdProfileGate).Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
 					}
 					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
 				}
@@ -3569,25 +4055,34 @@ func newChiRouter(deps Dependencies) chi.Router {
 						// the /{media_file_id} route below, while
 						// /providers/status never competes with it in chi.
 						r.Get("/providers/status", subtitleSearchHandler.HandleProviderStatus)
-						r.Post("/search", subtitleSearchHandler.HandleSearch)
-						r.Post("/download", subtitleSearchHandler.HandleDownload)
-						r.Post("/upload", subtitleSearchHandler.HandleUpload)
+						// The probes and the file-less language detection
+						// do not authorize against the viewer scope.
 						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
 						if subtitleAIHandler != nil {
 							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
 							r.Get("/ai/quota", subtitleAIHandler.HandleQuota)
-							r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
-							r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
-							r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
-							r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
 						} else {
 							// Answer the capability probe with 200 {"enabled": false}
 							// when AI translation isn't wired, so the client gets a
 							// clean negative instead of a 404.
 							r.Get("/ai/status", handlers.WriteSubtitleAIDisabledStatus)
 						}
-						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
-						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+						// Media-file actions authorize against the viewer
+						// scope, so they take the household gate.
+						r.Group(func(r chi.Router) {
+							r.Use(householdProfileGate)
+							r.Post("/search", subtitleSearchHandler.HandleSearch)
+							r.Post("/download", subtitleSearchHandler.HandleDownload)
+							r.Post("/upload", subtitleSearchHandler.HandleUpload)
+							if subtitleAIHandler != nil {
+								r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
+								r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
+								r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
+								r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
+							}
+							r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
+							r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+						})
 					})
 				} else {
 					// The whole group above is conditional (it needs the DB,
@@ -3669,8 +4164,23 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 				r.Route("/downloads", func(r chi.Router) {
 					r.Get("/capability", downloadHandler.HandleCapability)
-					r.Post("/", downloadHandler.HandleCreateDownload)
-					r.Get("/", downloadHandler.HandleListDownloads)
+					// Create, list, delete and the file routes serve an
+					// ephemeral (device-less) download under the request's
+					// scope, so they take the household gate. The managed
+					// routes below already refuse a request without a profile.
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Post("/", downloadHandler.HandleCreateDownload)
+						r.Get("/", downloadHandler.HandleListDownloads)
+						r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
+						// GET+HEAD: background download stacks probe with HEAD
+						// before issuing ranged GETs; http.ServeContent handles
+						// HEAD natively.
+						r.Get("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
+						r.Head("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
+						r.Get("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
+						r.Head("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
+					})
 					// Series monitoring (auto-download) subscriptions.
 					r.Post("/subscriptions", downloadHandler.HandleCreateSubscription)
 					r.Post("/subscriptions/sync", downloadHandler.HandleSyncSubscriptions)
@@ -3680,22 +4190,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
 					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
 					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
-					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
-					// GET+HEAD: background download stacks probe with HEAD
-					// before issuing ranged GETs; http.ServeContent handles
-					// HEAD natively.
-					r.Get("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-					r.Head("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-					r.Get("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
-					r.Head("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
 					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
 					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
 					r.Get("/{id}/subtitles/{ref}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle))
 				})
-				r.Get("/direct-download", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-				r.Head("/direct-download", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-				r.Get("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
-				r.Head("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+				r.Group(func(r chi.Router) {
+					r.Use(householdProfileGate)
+					r.Get("/direct-download", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
+					r.Head("/direct-download", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
+					r.Get("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+					r.Head("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+				})
 
 				// Recipe gallery catalog (no profile required — purely static metadata).
 				recipeHandler := &handlers.RecipeHandler{}
@@ -3992,6 +4497,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 									deps.PluginImageResolver,
 									restartStatus,
 								)
+								pluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
 								r.Route("/plugins", func(r chi.Router) {
 									r.Get("/catalog-settings", pluginHandler.HandleGetCatalogSettings)
 									r.Put("/catalog-settings", pluginHandler.HandlePutCatalogSettings)
@@ -4359,7 +4865,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
-		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID))
+		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
 }
 
@@ -4527,11 +5033,16 @@ func resolveOptionalPluginAccessUser(
 	if claims.PasswordChangeRequired {
 		return false, false, 0, ""
 	}
-	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)
-	if err != nil || !valid {
+	// Plugin launch tokens copy the role of the access token they were minted
+	// from, and a role change keeps the session, so admin access follows the
+	// account's current role rather than the token's.
+	// A remote-playback handoff only plays on its device; plugins are not
+	// part of that.
+	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID)
+	if err != nil || !active || authority.IsRemotePlayback() {
 		return false, false, 0, ""
 	}
-	return true, claims.Role == "admin", claims.UserID, claims.ProfileID
+	return true, authority.Role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.
@@ -4552,29 +5063,19 @@ func (a *tmdbCollectionAdapter) GetCollectionPreset(ctx context.Context, preset,
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
+	return tmdbCollectionEntries(results), nil
+}
 
-		// Fetch external IDs (IMDb, TVDB) for better matching against local library.
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
+func (a *tmdbCollectionAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
 
-		entries[i] = entry
-	}
-	return entries, nil
+func (a *tmdbCollectionAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
 }
 
 // tmdbFranchiseAdapter adapts tmdb.Client to catalog.TMDBCollectionByIDFetcher
-// for the `tmdb_collection` sync mode. Like the preset adapter, it enriches
-// each TMDB collection part with external IDs so the catalog matcher can fall
-// back to IMDb/TVDB when a local item lacks a TMDB ID.
+// for the `tmdb_collection` sync mode.
 type tmdbFranchiseAdapter struct {
 	client *tmdb.Client
 }
@@ -4593,24 +5094,25 @@ func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]cat
 		if mediaType == "" {
 			mediaType = "movie"
 		}
-		entry := catalog.TMDBCollectionEntry{
+		entries[i] = catalog.TMDBCollectionEntry{
 			ID:        p.ID,
 			MediaType: mediaType,
 			Title:     p.Title,
 		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, mediaType, p.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
 	}
 	return entries, nil
 }
 
+func (a *tmdbFranchiseAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbFranchiseAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
 // tmdbDiscoverAdapter adapts tmdb.Client to catalog.TMDBDiscoverFetcher for
-// the `tmdb_discover` sync mode. Like the preset adapter, it enriches each
-// result with external IDs so the catalog matcher can fall back to IMDb/TVDB
-// when a local item lacks a TMDB ID.
+// the `tmdb_discover` sync mode.
 type tmdbDiscoverAdapter struct {
 	client *tmdb.Client
 }
@@ -4634,26 +5136,110 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
-	}
-	return entries, nil
+	return tmdbCollectionEntries(results), nil
 }
 
-// traktClientIDSettingKey holds the Trakt app client ID. It is deliberately
-// not in config.restartRequiredKeys: the adapter re-reads it before every
-// upstream call, so a saved change converges without a restart.
-const traktClientIDSettingKey = "watchsync.trakt.client_id"
+func (a *tmdbDiscoverAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbDiscoverAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
+// tmdbListAdapter adapts tmdb.Client to catalog.TMDBListFetcher for the
+// `tmdb_list` sync mode.
+type tmdbListAdapter struct {
+	client *tmdb.Client
+}
+
+func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog.TMDBCollectionEntry, error) {
+	results, err := a.client.GetList(ctx, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	return tmdbCollectionEntries(results), nil
+}
+
+func (a *tmdbListAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbListAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
+func tmdbCollectionEntries(results []tmdb.CollectionResult) []catalog.TMDBCollectionEntry {
+	entries := make([]catalog.TMDBCollectionEntry, len(results))
+	for i, r := range results {
+		entries[i] = catalog.TMDBCollectionEntry{ID: r.ID, MediaType: r.MediaType, Title: r.Title}
+	}
+	return entries
+}
+
+// tmdbExternalIDLookups bounds the concurrent external-ID lookups of one sync.
+// The client's shared rate limit sets the pace; concurrency only keeps the
+// round trips from adding up, since an import runs its first sync inside the
+// request.
+const tmdbExternalIDLookups = 8
+
+// enrichTMDBExternalIDs fills in the IMDb and TVDB IDs of entries, which lets
+// the matcher find a local title that lacks a TMDB ID. The matcher asks only
+// for the entries their TMDB ID left unmatched.
+func enrichTMDBExternalIDs(ctx context.Context, client *tmdb.Client, entries []catalog.TMDBCollectionEntry) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i := range entries {
+		g.Go(func() error {
+			// A failed lookup leaves the entry matchable by TMDB ID alone; only
+			// cancellation ends the sync.
+			if externalIDs, err := client.GetExternalIDs(gctx, entries[i].MediaType, entries[i].ID); err == nil && externalIDs != nil {
+				entries[i].IMDbID = externalIDs.IMDbID
+				entries[i].TVDBID = externalIDs.TVDBID
+			}
+			return gctx.Err()
+		})
+	}
+	return g.Wait()
+}
+
+// findTMDBIDs looks up the TMDB ID of each catalog title known only by IMDb or
+// TVDB ID, trying the provider that identifies itemType best first. A title
+// TMDB does not know, or whose lookup fails, gets 0; only cancellation ends
+// the sync.
+func findTMDBIDs(ctx context.Context, client *tmdb.Client, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	ids := make([]int, len(titles))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i, title := range titles {
+		g.Go(func() error {
+			lookups := [][2]string{{tmdb.ExternalSourceIMDb, title.IMDbID}, {tmdb.ExternalSourceTVDB, title.TVDBID}}
+			if itemType == "series" {
+				lookups[0], lookups[1] = lookups[1], lookups[0]
+			}
+			for _, lookup := range lookups {
+				if lookup[1] == "" {
+					continue
+				}
+				results, err := client.FindByExternalIDCached(gctx, lookup[0], lookup[1])
+				if err != nil {
+					continue
+				}
+				for _, result := range results {
+					if result.MediaType == itemType {
+						ids[i] = result.ID
+						return nil
+					}
+				}
+			}
+			return gctx.Err()
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
 
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
 // out, so the two backends expire a download link on the same schedule.
@@ -4672,80 +5258,18 @@ func newAdminJobArtifactSigner(deps *Dependencies) *artworkurl.Signer {
 	return artworkurl.NewJobArtifactSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
 }
 
-type traktCollectionAdapter struct {
-	client *metatrakt.Client
-	// settings is the live source of the app client ID. Nil only where no
-	// settings store exists (tests), where the client ID stays empty and the
-	// upstream call fails the same way it always did.
-	settings catalog.SettingsStore
-}
-
-// refreshClientID pushes the currently saved app client ID onto the shared
-// client. A read failure leaves the last known value in place: failing the
-// request at Trakt is more useful than failing it here on a transient DB blip.
-func (a *traktCollectionAdapter) refreshClientID(ctx context.Context) {
-	if a.settings == nil {
-		return
-	}
-	if clientID, err := a.settings.Get(ctx, traktClientIDSettingKey); err == nil {
-		a.client.SetClientID(clientID)
-	}
-}
-
-func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
-}
-
-func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetUserList(ctx, user, list, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
-}
-
 // llmConfigFromServer derives the shared AI client config from the server
 // config. Used at construction and again on every config reload.
 func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
-		BaseURL:    cfg.AI.BaseURL,
-		APIKey:     cfg.AI.APIKey,
-		ChatModel:  cfg.AI.ChatModel,
-		ASRBaseURL: cfg.AI.ASRBaseURL,
-		ASRAPIKey:  cfg.AI.ASRAPIKey,
-		ASRModel:   cfg.AI.ASRModel,
+		AuthMode:        cfg.AI.AuthMode,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		ChatModel:       cfg.AI.ChatModel,
+		ASRBaseURL:      cfg.AI.ASRBaseURL,
+		ASRAPIKey:       cfg.AI.ASRAPIKey,
+		ASRModel:        cfg.AI.ASRModel,
 	}
 }
 
@@ -4813,7 +5337,7 @@ func v2Dependencies(
 	deps Dependencies,
 	auth *apimw.AuthMiddleware,
 	viewer *apimw.ViewerAccessMiddleware,
-	actingAdmin func(http.Handler) http.Handler,
+	actingAdmin apimw.ActingAdminDecider,
 	metadataCuration func(http.Handler) http.Handler,
 	markerEdit func(http.Handler) http.Handler,
 	settings catalog.SettingsStore,
@@ -4828,6 +5352,11 @@ func v2Dependencies(
 		ArtworkSigner:   deps.ArtworkSigner,
 		ArtworkRepair:   deps.ArtworkRepair,
 	}
+	if viewer != nil && deps.UserStoreProvider != nil {
+		// The same household rule v1 mounts on its profile-optional viewer
+		// reads; v2 operations opt in with Operation.HouseholdProfileGate.
+		out.HouseholdProfile = apimw.NewHouseholdProfileGate(deps.UserStoreProvider).Require
+	}
 	if metadataCuration != nil {
 		out.PermissionGates[policy.PermissionMetadataCuration] = metadataCuration
 	}
@@ -4837,6 +5366,13 @@ func v2Dependencies(
 	if settings != nil {
 		out.DemoSettings = settings
 		out.CatalogSettings = settings
+		var declared ratingsources.DeclaredFunc
+		if deps.DB != nil {
+			declared = func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
+				return metadata.DeclaredRatingSources(ctx, deps.DB)
+			}
+		}
+		out.RatingSources = ratingsources.NewPolicy(settings, declared)
 	}
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler
@@ -4846,4 +5382,50 @@ func v2Dependencies(
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)
 	}
 	return out
+}
+
+// profileNamesByUser resolves an account's profile names through its user
+// store; nil when there is no store provider.
+func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNamesFunc {
+	if stores == nil {
+		return nil
+	}
+	return func(ctx context.Context, userID int) (map[string]string, error) {
+		store, err := stores.ForUser(ctx, userID)
+		if err != nil || store == nil {
+			return nil, err
+		}
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := make(map[string]string, len(profiles))
+		for _, profile := range profiles {
+			if name := strings.TrimSpace(profile.Name); name != "" {
+				names[profile.ID] = name
+			}
+		}
+		return names, nil
+	}
+}
+
+// newPersonalAPIKeyHandler builds the account-scoped API key handler with the
+// household check its creation path runs.
+func newPersonalAPIKeyHandler(
+	repo *auth.APIKeyRepository,
+	stores userstore.UserStoreProvider,
+	tokens *access.ProfileTokenService,
+) *handlers.APIKeyHandler {
+	h := handlers.NewAPIKeyHandler(repo)
+	h.Stores = stores
+	h.ProfileTokens = tokens
+	return h
+}
+
+// Both API versions use the same household authority dependencies.
+func newDiscordNotificationsHandler(deps Dependencies, tokens *access.ProfileTokenService) *handlers.DiscordNotificationsHandler {
+	h := handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+	h.Stores = deps.UserStoreProvider
+	h.ProfileTokens = tokens
+	return h
 }

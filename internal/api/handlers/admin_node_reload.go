@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -17,7 +18,9 @@ func (h *NodeHandler) forceReloadRequest(ctx context.Context, node *nodepool.Nod
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
+	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+		return nil, err
+	}
 	return req, nil
 }
 func (h *NodeHandler) ForceReloadAdminNodes(ctx context.Context) ([]ForceReloadResult, error) {

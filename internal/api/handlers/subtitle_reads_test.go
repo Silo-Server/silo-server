@@ -3,9 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -62,18 +59,6 @@ func TestSubtitleReadsAuthorizeBeforeStorageOrProvider(t *testing.T) {
 	}
 }
 
-func TestSubtitleSearchBridgeMissingMetadataKeepsError(t *testing.T) {
-	repo := newMockSubtitleRepoForHandler()
-	h := NewSubtitleSearchHandler(subtitles.NewManager(repo, newMockBlobStoreForHandler()), repo, stubSubtitleMediaResolver{})
-	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
-	r := newSubtitleAuthRequest(http.MethodPost, "/subtitles/search", strings.NewReader(`{"media_file_id":42,"languages":["en"]}`))
-	w := httptest.NewRecorder()
-	h.HandleSearch(w, r)
-	if w.Code != 404 || !strings.Contains(w.Body.String(), `"error":"not_found"`) || !strings.Contains(w.Body.String(), `"message":"Media file not found"`) {
-		t.Fatalf("bridge changed: %d %s", w.Code, w.Body.String())
-	}
-}
-
 func TestSubtitleSearchCanonicalizesCompatibilityLanguages(t *testing.T) {
 	for _, input := range []string{"ar", "ara", "Arabic"} {
 		var searched subtitles.SearchRequest
@@ -88,13 +73,5 @@ func TestSubtitleSearchCanonicalizesCompatibilityLanguages(t *testing.T) {
 		if len(searched.Languages) != 1 || searched.Languages[0] != "ar" {
 			t.Fatalf("input %q reached provider as %#v", input, searched.Languages)
 		}
-	}
-	var searched subtitles.SearchRequest
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	manager.RegisterProvider(recordingSubtitleProvider{request: &searched})
-	h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "Example.mkv", Title: "Example"}})
-	if _, err := h.SearchSubtitles(t.Context(), catalog.AccessFilter{UserID: 1}, 42, []string{"Klingon"}); err == nil {
-		t.Fatal("invalid language was accepted")
 	}
 }

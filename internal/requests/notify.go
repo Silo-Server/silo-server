@@ -11,7 +11,13 @@ import (
 // the same request (delivery creation is idempotent); returning nil means the
 // request counts as handled and will not be retried.
 type FulfillmentNotifier interface {
+	// NotifyFulfilled tells the requester, and every profile in
+	// req.Followers, that the title is available. It may run again for the
+	// same request, so each recipient's delivery must be idempotent.
 	NotifyFulfilled(ctx context.Context, req Request, contentID string) error
+	// AnnounceFulfilled posts the server-wide announcement. It runs once per
+	// request, after the request is stamped as notified, and is best-effort.
+	AnnounceFulfilled(ctx context.Context, req Request)
 }
 
 // SetFulfillmentNotifier wires the notification system into the reconcile
@@ -76,6 +82,15 @@ func (s *Service) notifyApproval(ctx context.Context, req Request, origin Approv
 // the next reconcile run.
 const notifyFulfilledLimit = 100
 
+// markNotifyChecked stamps a completed request the fulfilled pass checked
+// without notifying, which rotates it behind the others.
+func (s *Service) markNotifyChecked(ctx context.Context, id string) {
+	if err := s.store.MarkReconciled(ctx, id); err != nil {
+		slog.WarnContext(ctx, "request fulfill-notify: stamp check failed", "component", "requests",
+			"request_id", id, "err", err)
+	}
+}
+
 // notifyFulfilledPending notifies completed requests whose media has arrived
 // in the catalog. Requests completed by an integration before the library
 // scan imports the files stay pending (fulfilled_notified_at IS NULL) and are
@@ -101,20 +116,56 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 		if err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: presence lookup failed", "component", "requests",
 				"request_id", req.ID, "tmdb_id", req.TMDBID, "err", err)
+			s.markNotifyChecked(ctx, req.ID)
 			continue
 		}
 		match := matches[req.TMDBID]
-		if !match.Available {
-			continue // not in the catalog yet; retry next run
+		fulfilled, _, err := s.requestFulfilled(ctx, *req, match)
+		if err != nil {
+			slog.WarnContext(ctx, "request fulfill-notify: season lookup failed", "component", "requests",
+				"request_id", req.ID, "err", err)
+			s.markNotifyChecked(ctx, req.ID)
+			continue
 		}
+		if !fulfilled {
+			// Not in the catalog yet (or not every requested season); retry
+			// next run, after the requests not checked as recently.
+			s.markNotifyChecked(ctx, req.ID)
+			continue
+		}
+		followers, err := s.store.ListRequestFollowers(ctx, *req)
+		if err != nil {
+			slog.WarnContext(ctx, "request fulfill-notify: list followers failed", "component", "requests",
+				"request_id", req.ID, "err", err)
+			continue
+		}
+		req.Followers = followers
 		if err := s.notifier.NotifyFulfilled(ctx, *req, match.ContentID); err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: dispatch failed", "component", "requests",
 				"request_id", req.ID, "err", err)
 			continue
 		}
-		if err := s.store.MarkFulfilledNotified(ctx, req.ID); err != nil {
+		// The followers have been told. Only the listed rows are cleared,
+		// leaving the follows made for other requests of the title. They are
+		// cleared before the request is stamped, so a failed clear leaves it
+		// unstamped and the next run retries it (the deliveries dedupe)
+		// instead of leaving follows behind for a later request of the title.
+		if err := s.store.ClearRequestFollowers(ctx, *req, followers); err != nil {
+			slog.WarnContext(ctx, "request fulfill-notify: clear followers failed", "component", "requests",
+				"request_id", req.ID, "err", err)
+			continue
+		}
+		stamped, err := s.store.MarkFulfilledNotified(ctx, req.ID)
+		if err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: mark failed", "component", "requests",
 				"request_id", req.ID, "err", err)
+			continue
+		}
+		// The announcement has no per-recipient dedupe, so it goes out only
+		// from the pass whose stamp took: a retry after a failed write above
+		// does not repeat it.
+		if stamped {
+			s.notifier.AnnounceFulfilled(ctx, *req)
 		}
 	}
 }

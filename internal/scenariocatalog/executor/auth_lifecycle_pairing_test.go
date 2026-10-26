@@ -212,10 +212,12 @@ func (e *Env) checkAuthLifecycleEffects(t *testing.T, id, transport string, repl
 			if prior[target] != nil || len(current) != len(prior)+1 {
 				t.Fatal("login must add exactly one fresh session")
 			}
-			if len(row) != 9 {
+			if len(row) != 11 {
 				t.Fatal("unexpected new session field inventory")
 			}
-			expected := map[string]any{"id": target, "user_id": user.ID, "device_name": "silo-scenario-executor/1", "ip_address": "127.0.0.1", "revoked_at": nil, "impersonator_user_id": nil, "impersonation_started_at": nil}
+			// A password login opens no session through an external sign-in
+			// provider: no identity to re-check, no provider sign-in time.
+			expected := map[string]any{"id": target, "user_id": user.ID, "device_name": "silo-scenario-executor/1", "ip_address": "127.0.0.1", "revoked_at": nil, "impersonator_user_id": nil, "impersonation_started_at": nil, "identity_id": nil, "provider_since": nil}
 			for key, value := range expected {
 				want, err := json.Marshal(value)
 				if err != nil {

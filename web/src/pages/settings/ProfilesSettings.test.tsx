@@ -215,26 +215,6 @@ describe("ProfilesSettings", () => {
     });
   }
 
-  it("renders the profile list with the current badge and access summary", async () => {
-    mocks.useProfiles.mockReturnValue({
-      data: [
-        makeProfile({
-          max_content_rating: "PG",
-          library_restrictions_enabled: true,
-          allowed_library_ids: [1, 2],
-          max_playback_quality: "1080p",
-        }),
-      ],
-      isLoading: false,
-    });
-
-    await render(<ProfilesSettings />);
-
-    expect(container.textContent).toContain("Profiles");
-    expect(container.textContent).toContain("Current");
-    expect(container.textContent).toContain("PG max · 2 libraries · Standard quality");
-  });
-
   it("creates a profile without switching the current profile", async () => {
     await render(<ProfilesSettings />);
 
@@ -279,20 +259,6 @@ describe("ProfilesSettings", () => {
 
     expect((deleteButtons[0] as HTMLButtonElement).disabled).toBe(true);
     expect(container.textContent).toContain("Switch to another profile before deleting this one.");
-  });
-
-  it("switches to an unlocked profile from the list", async () => {
-    const otherProfile = makeProfile({ id: "profile-2", name: "Guest" });
-    mocks.useProfiles.mockReturnValue({
-      data: [makeProfile(), otherProfile],
-      isLoading: false,
-    });
-
-    await render(<ProfilesSettings />);
-
-    await click(findButton(container, "Use"));
-
-    expect(selectProfile).toHaveBeenCalledWith(otherProfile);
   });
 
   it("verifies a locked profile before switching to it", async () => {

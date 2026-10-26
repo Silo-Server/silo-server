@@ -105,25 +105,31 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 				return out, fmt.Errorf("%w: selected server is not in the Plex session", ErrInvalidInput)
 			}
 			selected := session.Servers[index]
-			baseURL := firstNonEmpty(selected.RemoteURL, selected.LocalURL)
-			if baseURL == "" {
+			candidates := plexSessionCandidates(selected)
+			if len(candidates) == 0 {
 				return out, fmt.Errorf("%w: selected Plex server has no usable address", ErrInvalidInput)
 			}
 			// plex.tv lists whatever addresses the account's server reports.
-			if _, err := s.localNetwork.CheckServerURL(ctx, userID, baseURL); err != nil {
+			candidates, err = s.allowedPlexCandidates(ctx, userID, candidates)
+			if err != nil {
 				return out, err
 			}
 			out.PlexSession = session
 			out.SelectedServerID = selected.ClientIdentifier
-			out.Credentials = personalRunCredentials{BaseURL: baseURL, ServerToken: selected.AccessToken, AccountToken: session.AuthToken}
-		case input.PlexBaseURL != "":
+			out.Credentials = plexRunCredentials(candidates, selected.AccessToken, session.AuthToken)
+		case input.PlexBaseURL != "" || len(plexBaseURLCandidates("", input.PlexBaseURLs, 1)) > 0:
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)
 			}
-			if _, err := s.localNetwork.CheckServerURL(ctx, userID, input.PlexBaseURL); err != nil {
+			candidates := plexSecureBaseURLCandidates(input.PlexBaseURL, input.PlexBaseURLs)
+			if len(candidates) == 0 {
+				return out, fmt.Errorf("%w: Plex server address is required", ErrInvalidInput)
+			}
+			candidates, err := s.allowedPlexCandidates(ctx, userID, candidates)
+			if err != nil {
 				return out, err
 			}
-			out.Credentials = personalRunCredentials{BaseURL: input.PlexBaseURL, ServerToken: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}
+			out.Credentials = plexRunCredentials(candidates, input.PlexToken, firstNonEmpty(input.PlexAccountToken, input.PlexToken))
 		case input.SourceID > 0:
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +17,16 @@ const (
 
 	// minThresholdSeconds is the minimum allowed throttle threshold.
 	minThresholdSeconds = 60
+)
+
+// Server settings that control transcode throttling, and the values that apply
+// while a setting has no stored value. The admin settings defaults reference
+// these so the settings form and the runtime agree.
+const (
+	TranscodeThrottleEnabledSettingKey = "enable_transcode_throttle"
+	TranscodeThrottleSecondsSettingKey = "transcode_throttle_seconds"
+	DefaultTranscodeThrottleEnabled    = true
+	DefaultTranscodeThrottleSeconds    = 300
 )
 
 // TranscodeThrottleSettings reads the server settings controlling how far
@@ -38,12 +49,21 @@ func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeT
 	if settings == nil {
 		return 0
 	}
-	enabled, _ := settings.Get(ctx, "enable_transcode_throttle")
-	if enabled != "true" {
+	// An unreadable setting disables throttling rather than overriding a
+	// stored "false" with the default.
+	raw, err := settings.Get(ctx, TranscodeThrottleEnabledSettingKey)
+	if err != nil {
 		return 0
 	}
-	threshold := 300
-	if raw, _ := settings.Get(ctx, "transcode_throttle_seconds"); raw != "" {
+	enabled := DefaultTranscodeThrottleEnabled
+	if raw = strings.TrimSpace(raw); raw != "" {
+		enabled = strings.EqualFold(raw, "true")
+	}
+	if !enabled {
+		return 0
+	}
+	threshold := DefaultTranscodeThrottleSeconds
+	if raw, _ := settings.Get(ctx, TranscodeThrottleSecondsSettingKey); raw != "" {
 		if configured, err := strconv.Atoi(raw); err == nil && configured > 0 {
 			threshold = max(configured, minThresholdSeconds)
 		}
@@ -52,7 +72,7 @@ func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeT
 }
 
 // StartConfiguredTranscodeThrottler starts throttling when enabled, using the
-// configured forward-buffer duration or the 300-second default.
+// configured forward-buffer duration or DefaultTranscodeThrottleSeconds.
 func StartConfiguredTranscodeThrottler(ctx context.Context, settings TranscodeThrottleSettings, starter TranscodeThrottleStarter) {
 	if starter == nil {
 		return

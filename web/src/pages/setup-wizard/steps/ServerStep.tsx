@@ -49,7 +49,7 @@ export function ServerStep() {
       onSubmit={handleSubmit}
       busy={busy}
       onSkip={skip}
-      footnote="Everything here is in Admin › Settings › General."
+      footnote="Everything here is in Admin › Server › General."
     >
       <StepSection>
         <SettingField

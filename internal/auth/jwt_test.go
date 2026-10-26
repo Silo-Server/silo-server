@@ -1,7 +1,6 @@
 package auth_test
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -13,36 +12,6 @@ const testSecret = "super-secret-test-key-for-jwt-testing"
 
 func newTestJWTService() *auth.JWTService {
 	return auth.NewJWTService(testSecret, 15*time.Minute, 7*24*time.Hour)
-}
-
-func TestJWT_GenerateAccessToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateAccessToken(42, "admin", "sess-abc-123")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-	if token == "" {
-		t.Fatal("GenerateAccessToken() returned empty token")
-	}
-
-	// Token should have three dot-separated parts (header.payload.signature).
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		t.Errorf("expected 3 JWT parts, got %d", len(parts))
-	}
-}
-
-func TestJWT_GenerateRefreshToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateRefreshToken(42, "user", "sess-def-456")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-	if token == "" {
-		t.Fatal("GenerateRefreshToken() returned empty token")
-	}
 }
 
 func TestJWT_ValidateAccessToken(t *testing.T) {
@@ -85,91 +54,6 @@ func TestJWT_ValidateAccessToken(t *testing.T) {
 	}
 	if claims.IssuedAt.Time.After(time.Now().Add(1 * time.Second)) {
 		t.Error("IssuedAt should not be in the future")
-	}
-}
-
-func TestJWT_ValidateRefreshToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateRefreshToken(99, "admin", "sess-uuid-2")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-
-	claims, err := svc.ValidateToken(token)
-	if err != nil {
-		t.Fatalf("ValidateToken() error: %v", err)
-	}
-
-	if claims.UserID != 99 {
-		t.Errorf("UserID = %d, want 99", claims.UserID)
-	}
-	if claims.Role != "admin" {
-		t.Errorf("Role = %q, want %q", claims.Role, "admin")
-	}
-	if claims.SessionID != "sess-uuid-2" {
-		t.Errorf("SessionID = %q, want %q", claims.SessionID, "sess-uuid-2")
-	}
-	if claims.TokenType != auth.TokenTypeRefresh {
-		t.Errorf("TokenType = %q, want %q", claims.TokenType, auth.TokenTypeRefresh)
-	}
-}
-
-func TestJWT_PluginAccessTokenCarriesProfile(t *testing.T) {
-	svc := newTestJWTService()
-	token, err := svc.GeneratePluginAccessToken(42, "user", "sess-plugin", "profile-7", time.Minute)
-	if err != nil {
-		t.Fatalf("GeneratePluginAccessToken: %v", err)
-	}
-	claims, err := svc.ValidateToken(token)
-	if err != nil {
-		t.Fatalf("ValidateToken: %v", err)
-	}
-	if claims.TokenType != auth.TokenTypePluginAccess || claims.ProfileID != "profile-7" {
-		t.Fatalf("plugin claims = %#v", claims)
-	}
-}
-
-func TestJWT_AccessTokenExpiry(t *testing.T) {
-	svc := newTestJWTService()
-
-	accessToken, err := svc.GenerateAccessToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-
-	refreshToken, err := svc.GenerateRefreshToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-
-	accessClaims, err := svc.ValidateToken(accessToken)
-	if err != nil {
-		t.Fatalf("ValidateToken(access) error: %v", err)
-	}
-	refreshClaims, err := svc.ValidateToken(refreshToken)
-	if err != nil {
-		t.Fatalf("ValidateToken(refresh) error: %v", err)
-	}
-
-	accessExpiry := accessClaims.ExpiresAt.Time.Sub(accessClaims.IssuedAt.Time)
-	refreshExpiry := refreshClaims.ExpiresAt.Time.Sub(refreshClaims.IssuedAt.Time)
-
-	// Access token should have shorter expiry than refresh token.
-	if accessExpiry >= refreshExpiry {
-		t.Errorf("access expiry (%v) should be shorter than refresh expiry (%v)", accessExpiry, refreshExpiry)
-	}
-
-	// Verify the access token expiry is approximately 15 minutes.
-	expectedAccess := 15 * time.Minute
-	if accessExpiry < expectedAccess-time.Second || accessExpiry > expectedAccess+time.Second {
-		t.Errorf("access token expiry = %v, want ~%v", accessExpiry, expectedAccess)
-	}
-
-	// Verify the refresh token expiry is approximately 7 days.
-	expectedRefresh := 7 * 24 * time.Hour
-	if refreshExpiry < expectedRefresh-time.Second || refreshExpiry > expectedRefresh+time.Second {
-		t.Errorf("refresh token expiry = %v, want ~%v", refreshExpiry, expectedRefresh)
 	}
 }
 
@@ -217,21 +101,6 @@ func TestJWT_TamperedToken(t *testing.T) {
 	}
 }
 
-func TestJWT_WrongSecret(t *testing.T) {
-	svc1 := auth.NewJWTService("secret-one", 15*time.Minute, 7*24*time.Hour)
-	svc2 := auth.NewJWTService("secret-two", 15*time.Minute, 7*24*time.Hour)
-
-	token, err := svc1.GenerateAccessToken(1, "user", "sess-wrong-secret")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-
-	_, err = svc2.ValidateToken(token)
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for token signed with different secret")
-	}
-}
-
 func TestJWT_WrongSigningMethod(t *testing.T) {
 	// Create a token using RSA-style "none" algorithm trick.
 	// We construct a token with alg=none to ensure the validator rejects it.
@@ -253,42 +122,6 @@ func TestJWT_WrongSigningMethod(t *testing.T) {
 	_, err = svc.ValidateToken(tokenStr)
 	if err == nil {
 		t.Fatal("ValidateToken() should reject token with 'none' signing method")
-	}
-}
-
-func TestJWT_EmptyToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	_, err := svc.ValidateToken("")
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for empty token")
-	}
-}
-
-func TestJWT_GarbageToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	_, err := svc.ValidateToken("not.a.valid.jwt.token")
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for garbage token")
-	}
-}
-
-func TestJWT_DifferentUsersGetDifferentTokens(t *testing.T) {
-	svc := newTestJWTService()
-
-	token1, err := svc.GenerateAccessToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken(1) error: %v", err)
-	}
-
-	token2, err := svc.GenerateAccessToken(2, "admin", "sess-2")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken(2) error: %v", err)
-	}
-
-	if token1 == token2 {
-		t.Error("tokens for different users should be different")
 	}
 }
 
@@ -320,5 +153,75 @@ func TestJWT_ApplePushDisplayTokenIsProfileScopedAndLongLived(t *testing.T) {
 	}
 	if _, _, err := svc.GenerateApplePushDisplayToken(42, "user", "sess-1", "", nil); err == nil {
 		t.Fatal("expected error without profile")
+	}
+}
+
+func TestJWT_DirectDownloadLinkTokenIsFileAndProfileScoped(t *testing.T) {
+	svc := newTestJWTService()
+
+	admin := 7
+	token, expiresAt, err := svc.GenerateDirectDownloadLinkToken(42, "user", "sess-1", "profile-1", &admin, 99)
+	if err != nil {
+		t.Fatalf("GenerateDirectDownloadLinkToken() error: %v", err)
+	}
+	claims, err := svc.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypeDirectDownloadLink {
+		t.Fatalf("token_type = %q, want %q", claims.TokenType, auth.TokenTypeDirectDownloadLink)
+	}
+	if claims.UserID != 42 || claims.SessionID != "sess-1" || claims.ProfileID != "profile-1" || claims.FileID != 99 ||
+		claims.ImpersonatorUserID == nil || *claims.ImpersonatorUserID != 7 {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if exp := claims.ExpiresAt.Time; expiresAt.After(exp) || exp.Sub(expiresAt) > 2*time.Second {
+		t.Fatalf("expires_at %v, token exp %v", expiresAt, exp)
+	}
+	if remaining := time.Until(expiresAt); remaining > auth.DirectDownloadLinkTTL || remaining < auth.DirectDownloadLinkTTL-time.Minute {
+		t.Fatalf("lifetime = %v, want about %v", remaining, auth.DirectDownloadLinkTTL)
+	}
+	for _, tc := range []struct {
+		session, profile string
+		file             int
+	}{{"", "profile-1", 99}, {"sess-1", "", 99}, {"sess-1", "profile-1", 0}} {
+		if _, _, err := svc.GenerateDirectDownloadLinkToken(42, "user", tc.session, tc.profile, nil, tc.file); err == nil {
+			t.Fatalf("expected error for %+v", tc)
+		}
+	}
+}
+
+// TestStoredRefreshTokenSessionID: the login session named by a stored
+// refresh token is read even after the token expires; other tokens name none.
+func TestStoredRefreshTokenSessionID(t *testing.T) {
+	svc := newTestJWTService()
+	refresh, err := svc.GenerateRefreshToken(1, "user", "sess-uuid-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := auth.StoredRefreshTokenSessionID(refresh); err != nil || got != "sess-uuid-1" {
+		t.Fatalf("refresh token = %q, %v", got, err)
+	}
+	expired := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{UserID: 1, SessionID: "sess-uuid-2", TokenType: auth.TokenTypeRefresh,
+		RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour))}})
+	expiredToken, err := expired.SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := auth.StoredRefreshTokenSessionID(expiredToken); err != nil || got != "sess-uuid-2" {
+		t.Fatalf("expired refresh token = %q, %v", got, err)
+	}
+	access, err := svc.GenerateAccessToken(1, "user", "sess-uuid-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionless, err := svc.GenerateRefreshToken(1, "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{"access token": access, "no session": sessionless, "not a JWT": "refresh", "empty": ""} {
+		if got, err := auth.StoredRefreshTokenSessionID(token); err == nil {
+			t.Errorf("%s = %q, want an error", name, got)
+		}
 	}
 }

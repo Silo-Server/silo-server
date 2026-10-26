@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MangaChapter } from "@/api/types";
-import { buildMangaList, prettifyVolumeLabel } from "./mangaChapters";
+import { buildMangaList } from "./mangaChapters";
 
 function chapter(partial: Partial<MangaChapter>): MangaChapter {
   return {
@@ -108,25 +108,6 @@ describe("buildMangaList", () => {
       expect(entries[0].chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-c2", "v1-cNull"]);
     }
   });
-
-  it("returns an empty array for no chapters", () => {
-    expect(buildMangaList([])).toEqual([]);
-  });
-});
-
-describe("prettifyVolumeLabel", () => {
-  it("expands a v-prefixed token to a Volume label", () => {
-    expect(prettifyVolumeLabel("v13")).toBe("Volume 13");
-    expect(prettifyVolumeLabel("V2")).toBe("Volume 2");
-  });
-
-  it("expands a bare numeric token to a Volume label", () => {
-    expect(prettifyVolumeLabel("7")).toBe("Volume 7");
-  });
-
-  it("passes through non-numeric tokens unchanged", () => {
-    expect(prettifyVolumeLabel("Omnibus")).toBe("Omnibus");
-  });
 });
 
 describe("volume token normalization", () => {
@@ -152,6 +133,6 @@ describe("volume token normalization", () => {
       { content_id: "a", title: "Omnibus", chapter_index: 1, volume: "Omnibus" },
       { content_id: "b", title: "v2", chapter_index: 2, volume: "v2" },
     ]);
-    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.label)).toEqual(["Omnibus", "Volume 2"]);
   });
 });

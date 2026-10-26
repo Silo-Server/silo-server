@@ -25,7 +25,7 @@ func (s *adminTestEmailSender) Send(_ context.Context, message silomail.Message)
 }
 func TestAdminEmailSingleSendAndSafeFailure(t *testing.T) {
 	sender := &adminTestEmailSender{}
-	h := NewEmailHandler(sender)
+	h := NewEmailHandler(sender, nil)
 	result, err := h.SendAdminTestEmail(t.Context(), "recipient@example.test")
 	if err != nil || !result.OK || sender.calls != 1 || len(sender.message.To) != 1 || sender.message.To[0] != "recipient@example.test" || sender.message.Subject != "Silo test email" || sender.message.HTMLBody == "" {
 		t.Fatal(result, err, sender)

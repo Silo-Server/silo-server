@@ -1,6 +1,11 @@
 package handlers
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+)
 
 // APIError is a handler decision the transport has not rendered yet: the v1
 // handler writes it as {error, message} with Status, the v2 listener as the
@@ -25,8 +30,27 @@ func (e *APIError) Unwrap() error { return e.cause }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
+// WithCause records err as the error's cause, so a caller can branch on it
+// with errors.Is while the status, code and message stay as they are.
+func (e *APIError) WithCause(err error) *APIError {
+	e.cause = err
+	return e
+}
+
 func apiError(status int, code, message string) *APIError {
 	return &APIError{Status: status, Code: code, Message: message}
+}
+
+// busyError answers a password or PIN the server was too busy to hash or
+// check (passwordhash.ErrBusy) as a retryable 503, never as a wrong password;
+// nil for any other error. v2 renders it as dependency_unavailable.
+func busyError(err error) *APIError {
+	if !errors.Is(err, passwordhash.ErrBusy) {
+		return nil
+	}
+	e := apiError(http.StatusServiceUnavailable, "service_unavailable", "The server is busy; try again in a moment")
+	e.RetryAfter = passwordhash.RetryAfterSeconds
+	return e.WithCause(err)
 }
 
 func fieldError(field, message string) *APIError {

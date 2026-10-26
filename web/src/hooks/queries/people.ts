@@ -4,36 +4,21 @@ import {
   type QueryClient,
   QueryObserver,
   useMutation,
-  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { adminRefreshPerson, adminUpdatePerson } from "@/api/v2/people";
 import type { ItemDetail, Person, UpdatePersonRequest } from "@/api/types";
-import {
-  getPerson,
-  refreshPerson,
-  getPeopleSearchCapabilities,
-  searchPeople,
-  type PersonRefreshResult,
-  type PersonSearchMediaScope,
-} from "@/api/v2/people";
+import { getPerson, refreshPerson, type PersonRefreshResult } from "@/api/v2/people";
 import { scheduleWhenIdle } from "@/lib/routeChunkPrefetch";
 
 import { personKeys } from "./keys";
 import { isItemDetailQueryKey } from "./mediaSurfaceRefresh";
+import { fetchPeopleSearchCapabilities } from "./personSearch";
 
 const PEOPLE_PREFETCH_CONCURRENCY = 3;
 const PEOPLE_PREFETCH_STALE_TIME_MS = 5 * 60_000;
-
-function fetchPeopleSearchCapabilities(queryClient: QueryClient) {
-  return queryClient.fetchQuery({
-    queryKey: personKeys.searchCapabilities(),
-    queryFn: ({ signal }) => getPeopleSearchCapabilities({ signal }),
-    staleTime: 5 * 60 * 1000,
-  });
-}
 
 function isPersonItemDetail(query: Query, personId: string) {
   const item = query.state.data as ItemDetail | undefined;
@@ -210,28 +195,6 @@ export function usePrefetchPeople(personIds: readonly string[], enabled = true) 
       }
     };
   }, [enabled, idsKey, queryClient]);
-}
-
-export function usePersonSearch(
-  query: string,
-  limit = 20,
-  enabled = true,
-  mediaScope?: PersonSearchMediaScope,
-) {
-  const normalizedQuery = query.trim();
-  const queryClient = useQueryClient();
-
-  return useQuery({
-    queryKey: personKeys.search(normalizedQuery, limit, mediaScope),
-    queryFn: async ({ signal }) => {
-      const capabilities = await fetchPeopleSearchCapabilities(queryClient);
-      // This capability also guarantees viewer access filtering for All.
-      if (!capabilities.people_media_scope) return [];
-      return searchPeople(normalizedQuery, limit, { signal, mediaScope });
-    },
-    enabled: enabled && normalizedQuery.length > 0,
-    staleTime: 5 * 60 * 1000,
-  });
 }
 
 type RefreshPersonResult =

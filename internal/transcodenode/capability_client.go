@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -42,7 +43,9 @@ func FetchHWCapabilitiesPayload(ctx context.Context, baseClient *http.Client, no
 	if err != nil {
 		return playback.HWAccelInfo{}, nil, 0, logredact.SanitizeURLError(err)
 	}
-	request.Header.Set("Authorization", "Bearer "+jwtSecret)
+	if err := nodeauth.Sign(request, nodeURL, jwtSecret); err != nil {
+		return playback.HWAccelInfo{}, nil, 0, err
+	}
 
 	if baseClient == nil {
 		baseClient = http.DefaultClient

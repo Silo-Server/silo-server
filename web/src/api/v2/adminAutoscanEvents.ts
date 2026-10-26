@@ -3,7 +3,12 @@ import {
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
-import type { AutoscanEvent, AutoscanEventStatus, AutoscanEventScanRun } from "@/api/types";
+import type {
+  AutoscanEvent,
+  AutoscanEventChange,
+  AutoscanEventStatus,
+  AutoscanEventScanRun,
+} from "@/api/types";
 import { v2 } from "./request";
 export type AutoscanEventQuery = {
   sourceId?: string;
@@ -80,6 +85,12 @@ export async function readAdminAutoscanEvents(
             status: run.status as AutoscanEventScanRun["status"],
           };
         });
+        // Outcomes are an additive response enum: an unknown value passes
+        // through and renders as its raw text instead of failing the page.
+        const changes: AutoscanEventChange[] = (row.changes ?? []).map((change) => ({
+          ...change,
+          library_id: change.library_id == null ? undefined : safeID(change.library_id),
+        }));
         return {
           ...row,
           id: safeID(row.id),
@@ -87,6 +98,8 @@ export async function readAdminAutoscanEvents(
           status: row.status as AutoscanEventStatus,
           delivery_mode: row.delivery_mode as AutoscanEvent["delivery_mode"],
           scan_runs,
+          changes,
+          changes_truncated: row.changes_truncated === true,
         };
       });
       return { rows, total: result.total };

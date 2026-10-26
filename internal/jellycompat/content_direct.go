@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -322,10 +323,11 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 			continue
 		}
 		lib := upstreamUserLibrary{
-			ID:         f.ID,
-			Name:       f.Name,
-			Type:       f.Type,
-			PosterPath: f.PosterPath,
+			ID:                 f.ID,
+			Name:               f.Name,
+			Type:               f.Type,
+			PosterPath:         f.PosterPath,
+			RealtimeMonitoring: f.RealtimeMonitoring,
 		}
 		if f.PosterPath != "" && s.posterPresigner != nil {
 			ttl := s.presignTTL
@@ -346,11 +348,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 // AllowedLibraryIDs means unrestricted (all enabled libraries); a non-nil but
 // empty allowlist grants access to no libraries at all.
 func (s *directContentService) accessibleFolders(ctx context.Context, filter catalog.AccessFilter) ([]*models.MediaFolder, error) {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return nil, nil
-		}
-		return s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
+	libraryIDs, none := filter.LibraryScope(nil)
+	if none {
+		return nil, nil
+	}
+	if libraryIDs != nil {
+		return s.folderRepo.ListByIDs(ctx, libraryIDs)
 	}
 	return s.folderRepo.GetEnabled(ctx)
 }
@@ -449,6 +452,9 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		AudioLanguages:          splitCommaValues([]string{params.Get("audio_languages")}),
 		SubtitleLanguages:       splitCommaValues([]string{params.Get("subtitle_languages")}),
 		MaxPlaybackQuality:      filter.MaxPlaybackQuality,
+	}
+	if collectionID := params.Get("collection_id"); collectionID != "" {
+		filters.RestrictToLibraryCollection(collectionID)
 	}
 	// Limit=0 wants only the total. Count directly unless played state is a
 	// profile overlay applied after the catalog query.
@@ -752,7 +758,13 @@ func (s *directContentService) enrichDetailUserData(ctx context.Context, store u
 				result.UserData = catalog.SeasonUserDataFromCounts(counts[contentID])
 				return
 			}
-			slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+			// Once ctx is done the fallback would fail on it too.
+			fallBack := ctx.Err() == nil
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "series watch rollup query failed",
+				"component", "jellycompat", "error", err, "fallback", fallBack)
+			if !fallBack {
+				return
+			}
 		}
 		if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
 			episodes := episodesBySeries[contentID]
@@ -851,10 +863,11 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 				// A transient store error must not blank played/position state
 				// for the whole page at once: fall back to the per-item lookups
 				// below, which degrade one id at a time exactly like the
-				// pre-batch path did.
-				leafBatchFailed = true
-				slog.WarnContext(ctx, "jellycompat: batch leaf progress lookup failed; falling back to per-item lookups", "component", "jellycompat",
-					"error", err, "leaf_count", len(leafIDs))
+				// pre-batch path did. Not once ctx is done: they would fail on
+				// it too.
+				leafBatchFailed = ctx.Err() == nil
+				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: batch leaf progress lookup failed", "component", "jellycompat",
+					"error", err, "leaf_count", len(leafIDs), "fallback", leafBatchFailed)
 			}
 		}
 	}
@@ -1192,7 +1205,13 @@ func (s *directContentService) enrichSeriesListUserData(ctx context.Context, ses
 			}
 			return
 		}
-		slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+		// Once ctx is done the fallback would fail on it too.
+		fallBack := ctx.Err() == nil
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "series watch rollup query failed",
+			"component", "jellycompat", "error", err, "fallback", fallBack)
+		if !fallBack {
+			return
+		}
 	}
 
 	episodesBySeries, err := s.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
@@ -1414,6 +1433,10 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 		BackdropPath:      mi.BackdropPath,
 		BackdropThumbhash: mi.BackdropThumbhash,
 		LogoPath:          mi.LogoPath,
+		BannerPath:        mi.BannerPath,
+		ThumbPath:         mi.ThumbPath,
+		ClearArtPath:      mi.ClearArtPath,
+		DiscPath:          mi.DiscPath,
 		UpdatedAt:         mi.UpdatedAt,
 		Runtime:           mi.Runtime,
 		SeasonCount:       mi.SeasonCount,
@@ -1428,6 +1451,8 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 
 func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	versions := append([]catalog.FileVersion(nil), d.Versions...)
+	// applyListFileFields picks the same first version in SQL; keep the two
+	// orders in step.
 	sort.SliceStable(versions, func(i, j int) bool {
 		return compatPrimaryVideoTrack(versions[i]).Width > compatPrimaryVideoTrack(versions[j]).Width
 	})
@@ -1452,6 +1477,11 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		PosterURL:        d.PosterURL,
 		BackdropURL:      d.BackdropURL,
 		LogoURL:          d.LogoURL,
+		BannerURL:        d.BannerURL,
+		ThumbURL:         d.ThumbURL,
+		ClearArtURL:      d.ClearArtURL,
+		DiscURL:          d.DiscURL,
+		BackdropURLs:     d.BackdropURLs,
 		Studios:          d.Studios,
 		Countries:        d.Countries,
 		SeasonCount:      d.SeasonCount,
@@ -1468,6 +1498,28 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		Crew:             d.Crew,
 		Videos:           d.Videos,
 		Extras:           d.Extras,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         d.BannerPath,
+		ThumbPath:          d.ThumbPath,
+		ClearArtPath:       d.ClearArtPath,
+		DiscPath:           d.DiscPath,
+		ExtraBackdropPaths: d.ExtraBackdropPaths,
+		// The stored paths seed the image tags alongside UpdatedAt; without
+		// them the timestamp alone would give every language's artwork, and
+		// every artwork update that leaves the item row alone, the same tag.
+		PosterPath:   d.PosterPath,
+		BackdropPath: d.BackdropPath,
+		LogoPath:     d.LogoPath,
+		UpdatedAt:    d.UpdatedAt,
+	}
+	// A thumbhash joins the seed only with its stored path. Episode and season
+	// details carry no paths, and a thumbhash alone would keep a replaced
+	// image's tag; without either their tags follow the presigned URL.
+	if d.PosterPath != "" {
+		detail.PosterThumbhash = d.PosterThumbhash
+	}
+	if d.BackdropPath != "" {
+		detail.BackdropThumbhash = d.BackdropThumbhash
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}
@@ -1492,6 +1544,7 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
 	// playback.show_forced_subtitles defaults to true.
 	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
+	detail.SubtitleTrackSignature = d.EffectiveSubtitleTrackSignature
 	return detail
 }
 

@@ -47,7 +47,7 @@ func TestAdminUpdateSettingsGrandfathersUntouchedLegacyInvalidSettings(t *testin
 		{
 			name: "watchsync pair",
 			initial: map[string]string{
-				"watchsync.trakt.client_id": "configured-client-id",
+				"watchsync.simkl.client_id": "configured-client-id",
 			},
 		},
 		{
@@ -166,9 +166,9 @@ func TestAdminUpdateSettingsRequiresTouchedLegacyRelationshipsToBeValid(t *testi
 		{
 			name: "watchsync pair",
 			initial: map[string]string{
-				"watchsync.trakt.client_id": "old-client-id",
+				"watchsync.simkl.client_id": "old-client-id",
 			},
-			body: `{"values":{"watchsync.trakt.client_id":"new-client-id"}}`,
+			body: `{"values":{"watchsync.simkl.client_id":"new-client-id"}}`,
 		},
 		{
 			name: "Redis transport relationship",
@@ -243,7 +243,7 @@ func TestAdminUpdateSettingsDoesNotHideNewInvalidRelationshipBehindGrandfathered
 	req := httptest.NewRequest(
 		http.MethodPut,
 		"/admin/settings",
-		strings.NewReader(`{"values":{"watchsync.trakt.client_id":"new-client-id"}}`),
+		strings.NewReader(`{"values":{"watchsync.simkl.client_id":"new-client-id"}}`),
 	)
 	rec := httptest.NewRecorder()
 

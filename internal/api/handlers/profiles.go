@@ -12,12 +12,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -28,6 +32,9 @@ type ProfileHandler struct {
 	UserRepo       interface {
 		GetByID(ctx context.Context, id int) (*models.User, error)
 	}
+	// AccessGroups resolves the profile limit an account inherits from its
+	// access group. Nil resolves every account as ungrouped.
+	AccessGroups   access.GroupPolicyProvider
 	ProfileTokens  *access.ProfileTokenService
 	AvatarStore    profileAvatarStore
 	AvatarResolver artworkurl.Resolver
@@ -38,10 +45,48 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// Connections, when set, deletes the playback connection rows of the
+	// deleted profile's devices that no other profile registers.
+	Connections *connectionstore.Store
+	// DroppedSeriesPurger removes a deleted profile's dropped series, which
+	// live in Postgres whichever store holds the profile.
+	DroppedSeriesPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// WatchlistTitlesPurger removes a deleted profile's watchlist entries for
+	// titles outside the library, and the titles no profile keeps any more.
+	// They live in Postgres whichever store holds the profile.
+	WatchlistTitlesPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// EbookReaderPurger removes a deleted profile's ebook reading progress,
+	// reader settings and annotations, which live in Postgres whichever
+	// store holds the profile.
+	EbookReaderPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// RecommendationsPurger removes a deleted profile's ratings, taste
+	// profile and cached recommendations, which live in Postgres whichever
+	// store holds the profile.
+	RecommendationsPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// WatchlistRequestWithdrawer cancels the unsent requests a deleted
+	// profile's watchlist made, as removing each title would.
+	WatchlistRequestWithdrawer interface {
+		WithdrawProfileWatchlistRequests(ctx context.Context, userID int, profileID string) error
+	}
 	// EventsHub, when set, receives a user_settings.changed event for every
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
+	// PINAttempts bounds wrong PIN guesses per profile (see
+	// ratelimit.ProfilePINPolicy). The router always sets it; nil, as in
+	// tests that do not exercise the limit, allows every attempt.
+	PINAttempts *ratelimit.AttemptLimiter
+	// RecWorker is told when an update changes a profile's access scope, so
+	// its recommendations are rebuilt under the new one. Optional.
+	RecWorker SignalsChangedNotifier
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -166,17 +211,7 @@ type verifyPINResponse struct {
 // device settings, and two definitions of "is this the household parent" would
 // eventually disagree.
 func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store userstore.UserStore) (bool, error) {
-	return canManageHousehold(r, store, h.userLookupOrNil(), h.ProfileTokens)
-}
-
-// userLookupOrNil returns UserRepo as the narrow interface the household check
-// wants, preserving nil-ness: a typed nil in a non-nil interface would defeat
-// the fail-closed check there.
-func (h *ProfileHandler) userLookupOrNil() userLookup {
-	if h.UserRepo == nil {
-		return nil
-	}
-	return h.UserRepo
+	return canManageHousehold(r, store, h.ProfileTokens)
 }
 
 func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
@@ -197,9 +232,9 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 // This is a check-then-write guard with no store-level uniqueness constraint
 // (the userstore's dual Postgres/SQLite backends carry no unique index on
 // name), so two concurrent requests can both pass and insert duplicates —
-// the same window the profile_limit_reached check accepts. Good enough for
-// interactive profile management; a functional unique index is the fix if
-// that ever stops being true.
+// unlike the profile limit, which is re-counted inside the creating
+// transaction. Good enough for interactive profile management; a functional
+// unique index is the fix if that ever stops being true.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
@@ -211,6 +246,12 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 		}
 	}
 	return false
+}
+
+// profileLimitReached is the 409 for a household already at its limit.
+func profileLimitReached(limit int) *APIError {
+	return apiError(http.StatusConflict, "profile_limit_reached",
+		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
@@ -290,7 +331,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -329,6 +370,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if strings.TrimSpace(req.Name) == "" {
 		return none, fieldError("name", "Profile name is required")
 	}
+	if len(req.PIN) > 72 {
+		return none, fieldError("pin", "PIN must be at most 72 bytes")
+	}
 	avatarRef, err := normalizePresetAvatarReference(req.Avatar)
 	if err != nil {
 		return none, fieldError("avatar", err.Error())
@@ -359,8 +403,8 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	// The very first profile on a user can be bootstrapped without
 	// primary/admin privileges (it becomes the primary); everything after
-	// requires either the server admin role or the caller's active profile
-	// being primary.
+	// requires the household manager (canManageHouseholdAs): the caller's
+	// active profile being the verified primary, whatever the account role.
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
 		allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
@@ -380,14 +424,27 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// profileLimit is the account's household limit (0 = unlimited). This
+	// early check answers a full household before the name check, as it always
+	// has; the guarantee under concurrency is the re-count inside the creating
+	// transaction (createProfileWithSettingsSync).
+	profileLimit := 0
 	if h.UserRepo != nil {
 		user, err := h.UserRepo.GetByID(ctx, userID)
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
 		}
-		if user != nil && user.MaxProfiles >= 1 && len(existingProfiles) >= user.MaxProfiles {
-			return none, apiError(http.StatusConflict, "profile_limit_reached",
-				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles))
+		if user != nil {
+			effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+			if err != nil {
+				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
+			}
+			if effective.MaxProfiles >= 1 {
+				profileLimit = effective.MaxProfiles
+			}
+			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+				return none, profileLimitReached(profileLimit)
+			}
 		}
 	}
 
@@ -400,12 +457,27 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		showForcedSubtitles = *req.ShowForcedSubtitles
 	}
 
+	// Prepare PIN protection before the transaction publishes the profile. A
+	// failed hash must not leave behind a profile that can be used without proof.
+	var pinHash string
+	if req.PIN != "" {
+		hash, err := passwordhash.Generate(ctx, []byte(req.PIN), bcrypt.DefaultCost)
+		if apiErr := busyError(err); apiErr != nil {
+			return none, apiErr
+		}
+		if err != nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+		}
+		pinHash = string(hash)
+	}
+
 	profileID := uuid.New().String()
 	profile := userstore.Profile{
 		ID: profileID,
 		// Store the trimmed form the conflict check compared, so " Laura "
 		// doesn't persist with stray whitespace.
 		Name:                       strings.TrimSpace(req.Name),
+		PINHash:                    pinHash,
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
@@ -426,7 +498,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync); err != nil {
+		if errors.Is(err, errProfileLimitReached) {
+			return none, profileLimitReached(profileLimit)
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -439,20 +514,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	// If PIN was provided, update the profile to set it.
-	if req.PIN != "" {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			PIN: &req.PIN,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
-		}
-		// Re-read the profile to get the updated state.
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
-		}
-		created = *p
-	}
 	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
 		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			ShowForcedSubtitles: req.ShowForcedSubtitles,
@@ -494,7 +555,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -601,10 +662,15 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
+	pinHash, err := hashProfilePIN(ctx, req.PIN)
+	if err != nil {
+		return none, err
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
-		PIN:                        req.PIN,
+		PINHash:                    pinHash,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
@@ -633,6 +699,18 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
+	}
+	// A new or removed PIN starts with a clean attempt count, so a manager
+	// who resets a locked profile's PIN can use the new one straight away.
+	// The PIN is already committed, so the reset must not depend on the
+	// client staying connected.
+	if req.PIN != nil {
+		resetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		h.PINAttempts.Reset(resetCtx, ratelimit.ProfilePINKey(userID, profileID))
+		cancel()
+	}
+	if profileScopeSet(req) {
+		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
@@ -685,7 +763,7 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 		ProfileID:       profileID,
 		ActiveProfileID: activeProfileIDOf(r),
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -739,8 +817,29 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
 	}
 
+	// The profile's devices, read before the delete takes their registrations.
+	registry, _ := store.(userstore.DeviceRegistry)
+	var devices []string
+	if registry != nil && h.Connections != nil {
+		entries, err := registry.ListDevices(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "listing profile devices before delete failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		}
+		for _, entry := range entries {
+			if entry.ProfileID == profileID {
+				devices = append(devices, entry.DeviceID)
+			}
+		}
+	}
 	if err := store.DeleteProfile(ctx, profileID); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	if h.WatchlistRequestWithdrawer != nil {
+		withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if withdrawErr := h.WatchlistRequestWithdrawer.WithdrawProfileWatchlistRequests(withdrawCtx, userID, profileID); withdrawErr != nil {
+			slog.WarnContext(ctx, "profile watchlist request withdrawal failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", withdrawErr)
+		}
 	}
 	if isUploadedAvatarRef(profile.Avatar) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
@@ -752,6 +851,35 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	forgetPlaybackConnections(ctx, h.Connections, registry, userID, devices)
+	if h.DroppedSeriesPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.DroppedSeriesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile dropped-series purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.WatchlistTitlesPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.EbookReaderPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.EbookReaderPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile ebook reader purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.RecommendationsPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.RecommendationsPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile recommendation purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	return nil
@@ -836,29 +964,92 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
-	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
+	// Read the PIN revision before checking the PIN. A PIN change that lands
+	// between the two reads leaves the token on the older revision, which
+	// validation refuses; reading after would bind a proof of the old PIN to
+	// the new revision. Only a profile that exists and has a PIN gets an
+	// attempt budget, so requests naming arbitrary IDs add no limiter entries.
+	profile, err := store.GetProfile(ctx, cmd.ProfileID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load profile")
+	}
+	if profile == nil || profile.PINHash == "" {
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
+	}
+
+	// The account revision is the claim an older node checks during a rolling
+	// deploy, so it is read before the PIN check for the same reason.
+	var user *models.User
+	if h.UserRepo != nil && h.ProfileTokens != nil {
+		user, err = h.UserRepo.GetByID(ctx, cmd.UserID)
+		if err != nil || user == nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user policy")
+		}
+	}
+
+	// The attempt is counted before the PIN is checked, so concurrent
+	// guesses cannot overrun the limit, and while the profile is locked even
+	// the right PIN is refused. The check then waits for a hashing turn ahead
+	// of sign-ins, and compares against the hash read with the revision above.
+	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
+	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
+		return none, PINLockedError(retryAfter)
+	}
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if apiErr := busyError(err); apiErr != nil {
+		return none, apiErr
+	}
+	valid, err := permit.Matches([]byte(profile.PINHash), []byte(cmd.PIN))
+	permit.Release()
 	if err != nil {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}
-	if !valid || h.UserRepo == nil || h.ProfileTokens == nil {
+	if valid {
+		h.PINAttempts.Reset(ctx, attemptKey)
+	}
+	if !valid || user == nil {
 		return ProfileVerification{Valid: valid}, nil
 	}
 
-	user, err := h.UserRepo.GetByID(ctx, cmd.UserID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user policy")
-	}
-
 	token, expiresAt, err := h.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         cmd.UserID,
-		SessionID:      cmd.SessionID,
-		ProfileID:      cmd.ProfileID,
+		UserID:      cmd.UserID,
+		SessionID:   cmd.SessionID,
+		ProfileID:   cmd.ProfileID,
+		PINRevision: profile.PINRevision,
+		// Only for nodes running an older release during a rolling deploy.
 		PolicyRevision: user.AccessPolicyRevision,
 	})
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
 	}
 	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
+}
+
+// hashProfilePIN prepares a requested PIN for storage before the profile
+// transaction opens, as creation does, so the transaction never waits for a
+// hashing turn: its bcrypt hash, "" to remove the PIN, or nil to keep it.
+func hashProfilePIN(ctx context.Context, pin *string) (*string, error) {
+	if pin == nil || *pin == "" {
+		return pin, nil
+	}
+	raw, err := passwordhash.Generate(ctx, []byte(*pin), bcrypt.DefaultCost)
+	if apiErr := busyError(err); apiErr != nil {
+		return nil, apiErr
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+	}
+	hash := string(raw)
+	return &hash, nil
+}
+
+// PINLockedError is the 429 a PIN check answers while the profile is locked
+// after too many wrong PINs. Both listeners render RetryAfter as the
+// Retry-After header.
+func PINLockedError(retryAfter time.Duration) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many incorrect PINs. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(retryAfter)
+	return e
 }
 
 // --- Helpers ---
@@ -943,7 +1134,7 @@ func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *h
 		UserID:          userID,
 		ActiveProfileID: activeProfileIDOf(r),
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {

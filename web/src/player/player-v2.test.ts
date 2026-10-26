@@ -157,6 +157,43 @@ describe("playerV2", () => {
       message: "The profile is locked.",
     });
   });
+
+  it("surfaces a validation problem's field details instead of its generic detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+              title: "Validation failed",
+              status: 422,
+              detail: "The request did not pass validation; see errors.",
+              errors: [
+                {
+                  location: "body",
+                  code: "invalid",
+                  detail:
+                    "credits marker: credits must start at or after 32:30, in the end-credits window",
+                },
+              ],
+            }),
+            { status: 422, headers: { "Content-Type": "application/problem+json" } },
+          ),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/markers/files/{file_id}", {
+      path: { file_id: "2" },
+      body: { credits: { start_seconds: 94, end_seconds: 112 } },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toMatchObject({
+      status: 422,
+      code: "validation_failed",
+      message: "credits marker: credits must start at or after 32:30, in the end-credits window",
+    });
+  });
 });
 
 it("sends subtitle multipart bytes once without a JSON content type", async () => {
@@ -181,4 +218,37 @@ it("sends subtitle multipart bytes once without a JSON content type", async () =
   expect(form.get("file")).toBe(file);
   expect(form.get("language_override")).toBe("true");
   expect(form.get("media_file_id")).toBe("42");
+});
+
+it("sends an operation's own headers and exposes the response metadata", async () => {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ subtitle: { id: "7" } }), {
+        status: 200,
+        headers: { ETag: '"rev-4"' },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  let etag: string | null = null;
+
+  await playerV2(config, "PUT /api/v2/subtitles/stored/{id}/timing", {
+    path: { id: "7" },
+    headers: { "If-Match": '"rev-3"' },
+    body: { offset_ms: 0, scale: 1 },
+    onResponse: (response) => {
+      etag = response.headers.get("ETag");
+    },
+  });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v2/subtitles/stored/7/timing",
+    expect.objectContaining({
+      method: "PUT",
+      headers: expect.objectContaining({
+        "If-Match": '"rev-3"',
+        Authorization: "Bearer token-1",
+      }),
+    }),
+  );
+  expect(etag).toBe('"rev-4"');
 });

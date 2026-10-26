@@ -96,19 +96,6 @@ func TestRuntimeConfigEncryptionRoundTrip(t *testing.T) {
 	if decoded["api_key"] != "clawrouter-e2e-secret" || decoded["enabled"] != true {
 		t.Fatalf("decoded = %#v", decoded)
 	}
-}
-
-func TestRuntimeConfigEncryptionBindsInstallationAndKey(t *testing.T) {
-	cipher, err := secret.New(bytes.Repeat([]byte("k"), secret.MinMasterKeyLen))
-	if err != nil {
-		t.Fatalf("secret.New: %v", err)
-	}
-	encoded, err := encodeRuntimeConfigValue(cipher, 42, "account", map[string]any{
-		"api_key": "clawrouter-e2e-secret",
-	})
-	if err != nil {
-		t.Fatalf("encodeRuntimeConfigValue: %v", err)
-	}
 	if _, err := decodeRuntimeConfigValue(cipher, 43, "account", encoded); err == nil {
 		t.Fatal("decode with a different installation id succeeded")
 	}

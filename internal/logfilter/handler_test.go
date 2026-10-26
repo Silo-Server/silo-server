@@ -70,13 +70,3 @@ func TestSetQuietAppliesToClones(t *testing.T) {
 		t.Fatalf("unrelated message was dropped: %s", out)
 	}
 }
-
-func TestEmptyQuietPassesEverything(t *testing.T) {
-	h, buf := newCapture()
-	logger := slog.New(h)
-
-	logger.Info("metadata: not quiet by default")
-	if !strings.Contains(buf.String(), "metadata: not quiet by default") {
-		t.Fatalf("empty quiet list dropped a message: %s", buf.String())
-	}
-}

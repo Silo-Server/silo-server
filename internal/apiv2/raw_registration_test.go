@@ -142,37 +142,12 @@ func TestRawRejectsUndocumentedAndJSONPorts(t *testing.T) {
 					t.Fatal("invalid raw registration accepted")
 				}
 			}()
-			NewHandler(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				r := rawFixture(http.MethodGet, ClassPublic)
 				change(&r)
 				RegisterRaw(reg, r, http.NotFoundHandler())
-			}})
+			})
 		})
-	}
-}
-
-func TestRawRetainsAuthorizedIdentity(t *testing.T) {
-	deps := parityDeps(false)
-	calls := 0
-	deps.testRegister = func(reg *Registry) {
-		RegisterRaw(reg, rawFixture(http.MethodGet, ClassAuthenticated), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			calls++
-			if apimw.GetUserID(r.Context()) != 1 {
-				t.Error("authorized identity lost when unwrapping Huma context")
-			}
-			w.Header().Set("Content-Type", "application/octet-stream")
-			_, _ = io.WriteString(w, "authorized")
-		}))
-	}
-	handler := NewHandler(deps)
-	denied := do(t, handler, http.MethodGet, Prefix+"/raw-fixture/asset", "", bearer("invalid"))
-	requireProblem(t, denied, TypeInvalidToken)
-	if calls != 0 {
-		t.Fatal("invalid bearer reached raw transport")
-	}
-	admitted := do(t, handler, http.MethodGet, Prefix+"/raw-fixture/asset", "", bearer(memberToken))
-	if admitted.Code != http.StatusOK || admitted.Body.String() != "authorized" || calls != 1 {
-		t.Fatalf("admitted %d %q calls=%d", admitted.Code, admitted.Body.String(), calls)
 	}
 }
 

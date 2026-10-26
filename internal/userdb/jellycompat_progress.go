@@ -50,15 +50,18 @@ func (s *SQLiteUserStore) ApplyJellycompatProgress(ctx context.Context, profileI
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if edit.ClearHistory {
-		if err := removeHistoryItems(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
+	if edit.ClearWatched {
+		if err := clearWatchedState(ctx, tx, profileID, []string{edit.MediaItemID}, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
 	if edit.History != nil {
+		// The played mark is idempotent, as on the mark-played path: a leaf
+		// that is already completed gets no new history row.
 		entry := *edit.History
 		entry.ProfileID, entry.MediaItemID = profileID, edit.MediaItemID
-		if _, err := addVisibleHistory(ctx, tx, entry); err != nil {
+		target := userstore.MarkWatchedTarget{MediaItemID: edit.MediaItemID, DurationSeconds: edit.DurationSeconds, EventAt: &edit.EventAt}
+		if _, err := markWatchedBatchTx(ctx, tx, profileID, []userstore.MarkWatchedTarget{target}, []userstore.WatchHistoryEntry{entry}); err != nil {
 			return err
 		}
 	}

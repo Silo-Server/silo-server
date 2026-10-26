@@ -43,3 +43,13 @@ func ProtocolDownloadPreparation(schemas huma.Registry) workerprotocol.Operation
 	}
 	return op
 }
+
+// ProtocolDownloadPreparationProgress describes the live progress read the API
+// polls while its synchronous prepare request is open.
+func ProtocolDownloadPreparationProgress(schemas huma.Registry) workerprotocol.Operation {
+	op := workerprotocol.JSONRead[downloadprepare.Progress](schemas, "transcode_node", "/downloads/prepare/{artifact_id}/progress",
+		"(*internal/transcodenode.Server).handleDownloadPrepareProgress", http.StatusBadRequest, http.StatusUnauthorized)
+	op.Description = "Read the in-memory progress of a prepare attempt running on this node. An id with no encode in flight answers running=false, never 404, so callers can treat 404 as a node that predates this operation. Readings are not durable and say nothing about a completed artifact."
+	op.Parameters = []*huma.Param{{Name: "artifact_id", In: "path", Required: true, Schema: &huma.Schema{Type: huma.TypeString, Pattern: `^[A-Za-z0-9_-]{1,128}$`}}}
+	return op
+}

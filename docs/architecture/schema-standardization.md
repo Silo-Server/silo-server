@@ -37,6 +37,6 @@ for controlled migration testing and does not establish supported release
 rollback. Lock duration on a production database has not been measured.
 
 Table renames do not change native API operations, schema names, JSON fields,
-Jellyfin contracts, or Apple/Android client behavior. OAuth completion encryption
-continues using its fixed derivation label and `code_hash` as authenticated data.
+Jellyfin contracts, or Apple/Android client behavior. The OAuth completion key
+keeps its fixed derivation label, and what it seals is bound to the row's `code_hash`.
 Encrypted settings keys and notification encryption identifiers stay unchanged.

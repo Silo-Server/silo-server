@@ -1,0 +1,190 @@
+package cache
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/redis/go-redis/v9"
+
+	"github.com/Silo-Server/silo-server/internal/config"
+)
+
+func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want int
+	}{
+		{"redis://localhost:6379", 0},
+		{"redis://localhost:6379/7", 7},
+		{"redis://localhost:6379?db=4", 4},
+		{"redis://sentinel-1:26379/5?master_name=mymaster", 5},
+		// Not a URL: the bus falls back to treating it as an address.
+		{"localhost:6379", 0},
+	} {
+		bus := newRedisEventBus(config.RedisConfig{URL: tc.url})
+		if bus.db != tc.want {
+			t.Errorf("newRedisEventBus(%q) scopes channels to database %d, want %d", tc.url, bus.db, tc.want)
+		}
+		if err := bus.Close(); err != nil {
+			t.Errorf("close bus for %q: %v", tc.url, err)
+		}
+	}
+}
+
+func TestRedisClientsTakeDatabaseNumberFromRedisDB(t *testing.T) {
+	for _, cfg := range []config.RedisConfig{
+		{URL: "redis://localhost:6379", DB: "5"},
+		{URL: "redis://localhost:6379/7", DB: "5"},
+		{URL: "redis://sentinel-1:26379/7?master_name=mymaster", DB: "5"},
+	} {
+		bus := newRedisEventBus(cfg)
+		if bus.db != 5 {
+			t.Errorf("newRedisEventBus(%+v) scopes channels to database %d, want redis.db's 5", cfg, bus.db)
+		}
+		if err := bus.Close(); err != nil {
+			t.Errorf("close bus for %+v: %v", cfg, err)
+		}
+
+		client, err := NewRedisClientForRole(cfg, "test")
+		if err != nil {
+			t.Fatalf("NewRedisClientForRole(%+v): %v", cfg, err)
+		}
+		if got := client.Options().DB; got != 5 {
+			t.Errorf("NewRedisClientForRole(%+v) selects database %d, want redis.db's 5", cfg, got)
+		}
+		if err := client.Close(); err != nil {
+			t.Errorf("close client for %+v: %v", cfg, err)
+		}
+	}
+
+	// The URL is fine here, so the error must not blame it.
+	client, err := NewRedisClientForRole(config.RedisConfig{URL: "redis://localhost:6379/7", DB: "five"}, "test")
+	if err == nil {
+		_ = client.Close()
+		t.Fatal("NewRedisClientForRole built a client for a redis.db that is not a number")
+	}
+	if got := err.Error(); !strings.Contains(got, config.RedisDBSettingKey) || strings.Contains(got, "redis URL") {
+		t.Errorf("error for a redis.db that is not a number = %q, want one that names redis.db and not the URL", got)
+	}
+}
+
+// Runs without a Redis server: the name Redis receives must carry the database
+// number that the same connection selected.
+func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
+	bare := []string{"SUBSCRIBE silo:admin on database 0", "PUBLISH silo:admin on database 0"}
+	db5 := []string{"SUBSCRIBE silo:admin@db5 on database 5", "PUBLISH silo:admin@db5 on database 5"}
+	for _, tc := range []struct {
+		name string
+		path string
+		db   string
+		want []string
+		bare bool
+	}{
+		{"database 3", "/3", "", []string{"SUBSCRIBE silo:admin@db3 on database 3", "PUBLISH silo:admin@db3 on database 3"}, false},
+		{"database 0", "/0", "", bare, false},
+		{"no database number", "", "", bare, false},
+		{"negative database number", "/-1", "", bare, false},
+		{"redis.db replaces the number in the URL", "/3", "5", db5, false},
+		{"redis.db on a URL without a number", "", "5", db5, false},
+		{"redis.db 0 replaces the number in the URL", "/3", "0", bare, false},
+		{"redis.db on a bare address", "", "5", db5, true},
+		{"normalized redis.db on a bare address", "", " 05 ", db5, true},
+		{"redis.db 0 on a bare address", "", "0", bare, true},
+		{"no redis.db on a bare address", "", "", bare, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := startRESPTestServer(t, nil, respTestRedis)
+			redisURL := "redis://" + server.addr + tc.path
+			if tc.bare {
+				redisURL = server.addr
+			}
+			bus := newRedisEventBus(config.RedisConfig{URL: redisURL, DB: tc.db})
+			t.Cleanup(func() { _ = bus.Close() })
+
+			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+			if got := server.pubsub(); !slices.Equal(got, tc.want) {
+				t.Errorf("Redis received %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The admin settings check subscribes the way a starting server does: to every
+// event bus channel, scoped to the database number.
+func TestCheckEventBusChannels(t *testing.T) {
+	check := func(t *testing.T, server *respTestServer, path string) error {
+		t.Helper()
+		client, err := NewRedisClientForRole(config.RedisConfig{URL: "redis://" + server.addr + path}, "checks")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = CloseRedisClient(client) })
+		return CheckEventBusChannels(t.Context(), client)
+	}
+
+	for _, tc := range []struct{ path, want string }{
+		{"/3", "SUBSCRIBE silo:catalog@db3 silo:admin@db3 silo:playback@db3 silo:logs@db3 silo:events@db3"},
+		{"/0", "SUBSCRIBE silo:catalog silo:admin silo:playback silo:logs silo:events"},
+	} {
+		server := startRESPTestServer(t, nil, respTestRedis)
+		if err := check(t, server, tc.path); err != nil {
+			t.Fatalf("%s: %v", tc.path, err)
+		}
+		if got := server.received(); !slices.Contains(got, tc.want) {
+			t.Errorf("%s: Redis received %q, want %q", tc.path, got, tc.want)
+		}
+	}
+
+	server := startRESPTestServer(t, nil, func(args []string) (string, bool) {
+		if args[0] != "SUBSCRIBE" {
+			return "", false
+		}
+		return "-NOPERM User silo has no permissions to access the 'silo:catalog' channel\r\n", true
+	})
+	err := check(t, server, "/0")
+	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "NOPERM") {
+		t.Errorf("a subscription the ACL denies: %v, want the NOPERM reply", err)
+	}
+
+	// A server that answers each channel on its own can confirm the first and
+	// refuse a later one.
+	server = startRESPTestServer(t, nil, func(args []string) (string, bool) {
+		if args[0] != "SUBSCRIBE" {
+			return "", false
+		}
+		return fmt.Sprintf("*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:1\r\n", len(args[1]), args[1]) +
+			"-NOPERM User silo has no permissions to access the '" + args[2] + "' channel\r\n", true
+	})
+	err = check(t, server, "/0")
+	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "silo:admin") {
+		t.Errorf("a later channel refused: %v, want the NOPERM reply for silo:admin", err)
+	}
+}
+
+func TestRedisEventBusRejectsInvalidDatabaseOnBareAddress(t *testing.T) {
+	for _, db := range []string{"five", "-1"} {
+		t.Run(db, func(t *testing.T) {
+			server := startRESPTestServer(t, nil, respTestRedis)
+			bus := newRedisEventBus(config.RedisConfig{URL: server.addr, DB: db})
+			t.Cleanup(func() { _ = bus.Close() })
+
+			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("subscribe with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("publish with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if got := server.received(); len(got) != 0 {
+				t.Errorf("Redis received %q for an invalid redis.db, want no commands", got)
+			}
+		})
+	}
+}

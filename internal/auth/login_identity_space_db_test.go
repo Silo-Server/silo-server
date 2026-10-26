@@ -297,7 +297,7 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		}
 		defer func() { _ = rename.Rollback(ctx) }()
 		renamed := prefix + "-legacy10"
-		if err := updateUser(ctx, rename, legacyID, models.UpdateUserInput{Username: &renamed}); err != nil {
+		if err := updateUser(ctx, rename, legacyID, models.UpdateUserInput{Username: &renamed}, nil); err != nil {
 			t.Fatal(err)
 		}
 
@@ -305,7 +305,7 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		released := make(chan error, 1)
 		go func() {
 			email := prefix + "-ivan-new@example.invalid"
-			released <- updateUser(ctx, conn, owner.ID, models.UpdateUserInput{Email: &email})
+			released <- updateUser(ctx, conn, owner.ID, models.UpdateUserInput{Email: &email}, nil)
 		}()
 		waitBlocked(t, pid, released)
 		if err := rename.Commit(ctx); err != nil {
@@ -334,7 +334,7 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		email := prefix + "-judy-new@example.invalid"
-		err = updateUser(ctx, tx, owner.ID, models.UpdateUserInput{Email: &email})
+		err = updateUser(ctx, tx, owner.ID, models.UpdateUserInput{Email: &email}, nil)
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "40001" {
 			t.Fatalf("err = %v, want a serialization failure", err)
@@ -348,21 +348,31 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 	})
 
 	t.Run("accounts exchanging identifiers concurrently do not deadlock", func(t *testing.T) {
+		// These rows exercise identifier-update contention; password hashing is
+		// covered by the account-creation cases above.
+		seedAccount := func(username, email string) int {
+			t.Helper()
+			var id int
+			if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role, enabled) VALUES ($1, $2, 'unused', 'user', true) RETURNING id`, username, email).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
 		for i := range 20 {
 			x := fmt.Sprintf("%s-swap%d-x@example.invalid", prefix, i)
 			y := fmt.Sprintf("%s-swap%d-y@example.invalid", prefix, i)
-			a := mustCreate(t, fmt.Sprintf("%s-swap%d-a", prefix, i), x)
-			b := mustCreate(t, y, fmt.Sprintf("%s-swap%d-b@example.invalid", prefix, i))
+			a := seedAccount(fmt.Sprintf("%s-swap%d-a", prefix, i), x)
+			b := seedAccount(y, fmt.Sprintf("%s-swap%d-b@example.invalid", prefix, i))
 
 			start := make(chan struct{})
 			results := make(chan error, 2)
 			go func() {
 				<-start
-				results <- users.Update(ctx, a.ID, models.UpdateUserInput{Email: &y})
+				results <- users.Update(ctx, a, models.UpdateUserInput{Email: &y})
 			}()
 			go func() {
 				<-start
-				results <- users.Update(ctx, b.ID, models.UpdateUserInput{Username: &x})
+				results <- users.Update(ctx, b, models.UpdateUserInput{Username: &x})
 			}()
 			close(start)
 			for range 2 {

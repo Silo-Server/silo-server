@@ -6,13 +6,24 @@
 // stages (stream URL selection, WebSocket origin checks) can act on it.
 package netaccess
 
-import "context"
+import (
+	"context"
+	"net/netip"
+)
 
 // Path is the access path of one request. The zero value is the default
 // path; Provider names the network access provider (e.g. "tailscale") whose
 // listener the request came through.
 type Path struct {
 	Provider string
+	// InstallationID is the plugin installation whose ingress token the
+	// request carried; 0 on the default path.
+	InstallationID int
+	// Peer is the overlay peer the provider vouched for with
+	// X-Silo-Ingress-Peer; the zero Addr when it sent none. It says where the
+	// request came from, never who may do what: a network identity sign-in
+	// asks the provider's plugin who the peer is.
+	Peer netip.Addr
 }
 
 // IsDefault reports whether the request did not arrive through a provider.

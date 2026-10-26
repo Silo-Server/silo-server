@@ -29,7 +29,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-[20px] font-bold">Episodes</h2>
+          <h2 className="text-[1.25rem] font-bold">Episodes</h2>
           <span className="text-muted-foreground text-base">{current.episode_count} Episodes</span>
         </div>
         <Button asChild variant="outline" size="sm">
@@ -73,7 +73,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
               </div>
             )}
             {current.user_data && (
-              <div className="text-muted-foreground mt-1 flex flex-wrap gap-2 text-[11px]">
+              <div className="text-muted-foreground mt-1 flex flex-wrap gap-2 text-[0.6875rem]">
                 <span>{current.user_data.watched_count} watched</span>
                 <span>{current.user_data.unplayed_count} left</span>
                 {current.user_data.in_progress_count > 0 && (
@@ -99,7 +99,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
               id={`season-tab-${season.content_id}`}
               aria-selected={isActive}
               onClick={() => setActiveSeason(season.content_id)}
-              className={`cursor-pointer rounded-md px-5 py-2 text-[13px] font-medium transition-colors duration-150 ${
+              className={`cursor-pointer rounded-md px-5 py-2 text-[0.8125rem] font-medium transition-colors duration-150 ${
                 isActive ? "text-primary bg-accent" : "text-muted-foreground hover:text-foreground"
               }`}
             >

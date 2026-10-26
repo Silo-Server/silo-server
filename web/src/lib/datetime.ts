@@ -77,7 +77,35 @@ export function preferredDateLocale(): string | undefined {
   }
 }
 
+const CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Parse a `YYYY-MM-DD` calendar date (air, release, and birth dates) as local
+ * midnight, so it shows the same day in every time zone. `new Date("2026-10-18")`
+ * reads it as UTC midnight instead, which is still Oct 17 west of UTC.
+ * Returns null when the value is not a calendar date or names a day that does
+ * not exist on the local calendar.
+ */
+export function parseCalendarDate(value: string | null | undefined): Date | null {
+  const match = value ? CALENDAR_DATE_PATTERN.exec(value) : null;
+  if (!match) {
+    return null;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, month, day);
+  // The constructor reads years 0-99 as 1900-1999; setFullYear does not.
+  date.setFullYear(year, month, day);
+  return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
+    ? date
+    : null;
+}
+
 function toDate(value: Date | string | number): Date | null {
+  if (typeof value === "string" && CALENDAR_DATE_PATTERN.test(value)) {
+    return parseCalendarDate(value);
+  }
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -87,7 +115,8 @@ function pad2(value: number): string {
 }
 
 /**
- * Format a calendar date.
+ * Format a calendar date. A `YYYY-MM-DD` string shows that day in every time
+ * zone (see parseCalendarDate).
  * - "numeric": all-digit form, honoring the exact preferred pattern.
  * - "medium": abbreviated month name ("Jun 5, 2026" / "5 Jun 2026"); the
  *   YYYY-MM-DD preference always renders ISO digits since it has no
