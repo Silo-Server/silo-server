@@ -249,11 +249,9 @@ func (h *PlaybackHandler) recordNodeRoutingAssignment(ctx context.Context, playS
 // transcode onto the upstream session. StartSession only records the transport
 // method (play_method "transcode", transcodeAudio false), so without this an
 // audio-only re-encode — video copied — syncs to session sync and the admin
-// activity views as a full video transcode, and a MaxStreamingBitrate-capped
-// resolution/bitrate never reaches admin observability at all (see #920) — it
-// stays whatever StartSession defaulted to (unset), and the admin view falls
-// back to displaying the source's own resolution/bitrate as if uncapped. Shared
-// by the local (ensureTranscodeSession) and remote (startRemoteTranscode) paths.
+// activity views as a full video transcode, and the admin views show the
+// source's resolution and bitrate instead of the encode's target. Shared by the
+// local (ensureTranscodeSession) and remote (startRemoteTranscode) paths.
 func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upstreamSessionID string, opts playback.TranscodeOpts) {
 	h.recordOutputFormat(upstreamSessionID, playback.HLSOutputContainer(opts), playback.OutputProtocolHLS)
 	setter, ok := h.sessionMgr.(transcodeStreamDetailsSetter)
