@@ -67,3 +67,17 @@ func TestSourceAudioChannelsRoundTripUsesDistinctClaim(t *testing.T) {
 		t.Fatalf("legacy source channels = %d, audio channels = %d; want 0 and 2", legacyClaims.SourceAudioChannels, legacyClaims.AudioChannels)
 	}
 }
+
+func TestNativeHLSRecipeRoundTrip(t *testing.T) {
+	token, err := Sign(Claims{SessionID: "native-hls", CopyFMP4RecipeVersion: "4", SeparateAudioHLS: true, DV7ToDV81: true, HLSCodecs: "dvh1.08.06,ec-3", HLSVideoRange: "PQ"}, "secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := Verify(token, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claims.SeparateAudioHLS || !claims.DV7ToDV81 || claims.CopyFMP4RecipeVersion != "4" || claims.HLSCodecs != "dvh1.08.06,ec-3" || claims.HLSVideoRange != "PQ" {
+		t.Fatal("signed recipe lost native HLS output facts")
+	}
+}

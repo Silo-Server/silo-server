@@ -114,6 +114,10 @@ type RecipeCard struct {
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
 	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	SeparateAudioHLS           bool                   `json:"separate_audio_hls,omitempty"`
+	DV7ToDV81                  bool                   `json:"dv7_to_dv81,omitempty"`
+	HLSCodecs                  string                 `json:"hls_codecs,omitempty"`
+	HLSVideoRange              string                 `json:"hls_video_range,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
@@ -200,7 +204,7 @@ func ValidateCopyFMP4RecipeCard(c RecipeCard) error {
 	marked := c.PlayMethod == playMethodCopyFMP4V1
 	versioned := c.CopyFMP4RecipeVersion != ""
 	if copyTarget || marked || versioned {
-		if !marked || c.CopyFMP4RecipeVersion != CopyFMP4RecipeVersion || (!copyTarget && c.TargetCodecVideo != "") {
+		if !marked || c.CopyFMP4RecipeVersion != CopyHLSRecipeVersion(c.SeparateAudioHLS, c.DV7ToDV81) || (!copyTarget && c.TargetCodecVideo != "") {
 			return fmt.Errorf("%w: method=%q target_codec=%q recipe_version=%q",
 				ErrCopyFMP4RecipeVersionMismatch, c.PlayMethod, c.TargetCodecVideo, c.CopyFMP4RecipeVersion)
 		}
@@ -219,7 +223,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 	copyFMP4RecipeVersion := ""
 	if strings.EqualFold(strings.TrimSpace(opts.TargetCodecVideo), "copy") {
 		playMethod = playMethodCopyFMP4V1
-		copyFMP4RecipeVersion = CopyFMP4RecipeVersion
+		copyFMP4RecipeVersion = CopyHLSRecipeVersion(opts.SeparateAudioHLS, opts.DV7ToDV81)
 	}
 	return RecipeCard{
 		SessionID:                  opts.SessionID,
@@ -253,6 +257,10 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		VideoSampleEntry:           opts.VideoSampleEntry,
 		VideoRange:                 opts.VideoRange,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
+		SeparateAudioHLS:           opts.SeparateAudioHLS,
+		DV7ToDV81:                  opts.DV7ToDV81,
+		HLSCodecs:                  opts.HLSCodecs,
+		HLSVideoRange:              opts.HLSVideoRange,
 		KeyframePlaylist:           opts.KeyframePlaylist,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
@@ -359,6 +367,10 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		VideoSampleEntry:           c.VideoSampleEntry,
 		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		SeparateAudioHLS:           c.SeparateAudioHLS,
+		DV7ToDV81:                  c.DV7ToDV81,
+		HLSCodecs:                  c.HLSCodecs,
+		HLSVideoRange:              c.HLSVideoRange,
 		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
@@ -475,6 +487,10 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		VideoSampleEntry:           c.VideoSampleEntry,
 		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		SeparateAudioHLS:           c.SeparateAudioHLS,
+		DV7ToDV81:                  c.DV7ToDV81,
+		HLSCodecs:                  c.HLSCodecs,
+		HLSVideoRange:              c.HLSVideoRange,
 		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
@@ -566,6 +582,10 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		VideoSampleEntry:              c.VideoSampleEntry,
 		VideoRange:                    c.VideoRange,
 		CopyVideoMPEGTS:               c.CopyVideoMPEGTS,
+		SeparateAudioHLS:              c.SeparateAudioHLS,
+		DV7ToDV81:                     c.DV7ToDV81,
+		HLSCodecs:                     c.HLSCodecs,
+		HLSVideoRange:                 c.HLSVideoRange,
 		KeyframePlaylist:              c.KeyframePlaylist,
 		SeekSeconds:                   c.SeekSeconds,
 		StreamOriginSeconds:           c.StreamOriginSeconds,

@@ -107,7 +107,7 @@ func SubtitleRenditionExecutable(totalDuration float64, segmentDuration int) boo
 // subtitleRenditionActive is the single gate shared by the ffmpeg output, the
 // playlists, and segment serving, so they cannot disagree about a recipe.
 func subtitleRenditionActive(opts TranscodeOpts) bool {
-	return opts.SubtitleRendition && opts.SubtitleTrackIndex >= 0 && !opts.SubtitleBurnIn &&
+	return !opts.SeparateAudioHLS && opts.SubtitleRendition && opts.SubtitleTrackIndex >= 0 && !opts.SubtitleBurnIn &&
 		SubtitleRenditionCodecSupported(opts.SubtitleCodec) &&
 		SubtitleRenditionExecutable(opts.TotalDuration, opts.SegmentDuration)
 }

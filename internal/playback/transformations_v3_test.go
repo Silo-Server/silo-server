@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -127,4 +128,30 @@ func writeProbeFFmpegV3(t *testing.T, script string) string {
 		t.Fatal(err)
 	}
 	return ffmpeg
+}
+
+func TestDVConversionProbeRequiresTranscoding(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			dir := t.TempDir()
+			marker := filepath.Join(dir, "converted")
+			t.Setenv("SILO_DV_POLICY_MARKER", marker)
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if err := os.WriteFile(filepath.Join(dir, "dovi_tool"), []byte("#!/bin/sh\ntouch \"$SILO_DV_POLICY_MARKER\"\nexit 1\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\nexit 0\n")
+			registry, _ := ProbeTransformationRegistryWithPlaybackPolicyV3Result(t.Context(), ffmpeg, nil, enabled)
+			_, err := os.Stat(marker)
+			if (err == nil) != enabled {
+				t.Fatalf("conversion probe ran=%v with transcoding=%v", err == nil, enabled)
+			}
+			if !enabled && registry.NeedsRefresh(time.Now().Add(time.Hour)) {
+				t.Fatal("unchanged disabled policy should stay cached")
+			}
+			if !enabled && registry.Available(TransformationServerDV7DV81V3) {
+				t.Fatal("disabled conversion was advertised")
+			}
+		})
+	}
 }

@@ -1441,3 +1441,68 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTranscodeSegment_RecoversEvictedSeparateAudio(t *testing.T) {
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	script := `#!/bin/sh
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nseg_00000.m4s\n#EXTINF:10,\nseg_00001.m4s\n' > stream.m3u8
+printf '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\naudio_00000.ts\n#EXTINF:4,\naudio_00001.ts\n#EXTINF:4,\naudio_00002.ts\n#EXT-X-ENDLIST\n' > audio.m3u8
+printf audio > audio_00000.ts
+printf recovered > audio_00001.ts
+printf audio > audio_00002.ts
+exec sleep 30
+`
+	if err := os.WriteFile(ffmpeg, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	probe := `#!/bin/sh
+printf '%s' '{"packets":[{"stream_index":0,"dts_time":"0"},{"stream_index":1,"dts_time":"0"}],"streams":[{"index":0,"codec_type":"video"},{"index":1,"codec_type":"audio"}],"format":{"start_time":"0"}}'
+`
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte(probe), 0700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "audio-recovery"
+	session, err := playback.StartTranscode(t.Context(), playback.TranscodeOpts{SessionID: id, InputPath: "fixture.mkv", OutputDir: dir, FFmpegPath: ffmpeg, TargetCodecVideo: "copy", TargetCodecAudio: "copy", SeparateAudioHLS: true, SegmentDuration: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	ready, err := session.OpenMediaSegment("audio_00002.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ready.Close()
+	current := time.Now().Add(time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "audio.m3u8"), current, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "audio_00001.ts")); err != nil {
+		t.Fatal(err)
+	}
+	sessions := playback.NewSessionManager(0, 0)
+	sessions.RegisterReconstructed(&playback.Session{ID: id, UserID: 1, PlayMethod: playback.PlayTranscode})
+	handler := NewPlaybackHandler(sessions)
+	handler.TranscodeManager().RegisterTranscodeSession(id, session)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/playback/transcode/"+id+"/segment/audio_00001.ts", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("session_id", id)
+	route.URLParams.Add("name", "audio_00001.ts")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { handler.HandleGetTranscodeSegment(response, req); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		_ = session.Close()
+		<-done
+		t.Fatal("known evicted audio waited on the live producer")
+	}
+	if response.Code != http.StatusOK || response.Body.String() != "recovered" {
+		t.Fatalf("evicted audio response = %d %q", response.Code, response.Body.String())
+	}
+	if session.LastRequestedSegment() != 0 {
+		t.Fatal("audio recovery used its ordinal as video demand")
+	}
+}

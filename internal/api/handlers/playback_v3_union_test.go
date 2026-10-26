@@ -38,6 +38,7 @@ func (p enumeratingNodePlannerV3) ProxyNodeURLs() []string     { return p.proxyU
 // presetLocalRegistryV3 pins the handler's local transformation registry so
 // tests never probe the machine's real ffmpeg.
 func presetLocalRegistryV3(h *PlaybackHandler, registry *playback.TransformationRegistryV3) {
+	h.v3RegistryTranscodeEnabled = h.playbackConfig().TranscodeEnabled
 	h.v3Registry = registry
 }
 
@@ -355,16 +356,17 @@ func TestHLSPlanningCapabilitiesV3RespectWorkloadExecutionPolicy(t *testing.T) {
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
-	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
-	}))
+
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionAPIOnly
 	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
 	handler.PlaybackConfig = func() config.PlaybackConfig {
 		return config.PlaybackConfig{Routing: policy}
 	}
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+	}))
 
 	remuxRegistry := handler.hlsPlanningRegistryWithInputsForWorkloadV3(
 		t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{}, noderouting.WorkloadRemux,
@@ -1536,5 +1538,42 @@ func TestVideoBitstreamFilterForPlanV3UsesTheCurrentChainForEveryRecipe(t *testi
 	}
 	if got := videoBitstreamFilterForPlanV3(&playback.PlanV3{}); got != "" {
 		t.Fatalf("plan without the strip filter = %q, want none", got)
+	}
+}
+
+func TestTransformationRegistryV3TracksPlaybackPolicy(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	enabled := false
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{TranscodeEnabled: enabled} }
+	calls := 0
+	handler.v3RegistryProbe = func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
+		calls++
+		return playback.NewTransformationRegistryV3(nil), nil
+	}
+	for _, step := range []struct {
+		enabled bool
+		probes  int
+	}{{false, 1}, {false, 1}, {true, 2}, {true, 2}, {false, 3}, {false, 3}, {true, 4}, {true, 4}} {
+		enabled = step.enabled
+		handler.transformationRegistryV3(t.Context())
+		if calls != step.probes {
+			t.Fatalf("policy=%v: probes=%d, want %d", enabled, calls, step.probes)
+		}
+	}
+}
+
+func TestLocalDVConversionDisabledUsesCanonicalTerminalV3(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{} }
+	result := playback.PlannerResultV3{Plan: &playback.PlanV3{
+		Delivery: playback.DeliveryRemuxHLSV3,
+		Transformations: []playback.TransformationV3{
+			{Name: playback.TransformationHLSSeparateAudioV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationHLSSeparateAudioRecipeVersionV3},
+			{Name: playback.TransformationServerDV7DV81V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7DV81RecipeVersionV3},
+		},
+	}}
+	_, err := handler.prepareLocalTransportV3(httptest.NewRequest(http.MethodPost, "/", nil), nil, nil, result, preparedTimelineV3{}, mediaAuthModeV3{})
+	if err == nil || err.reason != "local_transcode_disabled" || err.retryable {
+		t.Fatalf("terminal=%#v", err)
 	}
 }

@@ -133,6 +133,9 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	s.sessions[sid] = &playback.TranscodeSession{} // a different session owns the id
 	s.mu.Unlock()
 
+	if err := s.recoverAudioSegmentLocked(t.Context(), sid, &playback.TranscodeSession{}, "audio_00001.ts"); !errors.Is(err, playback.ErrSessionSuperseded) {
+		t.Fatalf("stale audio recovery = %v", err)
+	}
 	err := s.restartSessionLocked(context.Background(), sid, &playback.TranscodeSession{}, 0, 0)
 	if !errors.Is(err, playback.ErrSessionSuperseded) {
 		t.Fatalf("want ErrSessionSuperseded for a replaced session, got %v", err)

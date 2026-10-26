@@ -343,7 +343,7 @@ func TestProbeTransformationRegistryV3DoesNotAdvertiseFailedHEVCSmoke(t *testing
 func TestProbeTransformationRegistryV3HEVCTimeoutKeepsBaselineInventory(t *testing.T) {
 	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*' -c:v libx265 '*) exec sleep 30 ;;\nesac\n"
 	ffmpeg := writeProbeFFmpegV3(t, script)
-	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
+	registry, err := ProbeTransformationRegistryWithPlaybackPolicyV3Result(context.Background(), ffmpeg, nil, false)
 	if err != nil {
 		t.Fatalf("optional HEVC timeout invalidated baseline inventory: %v", err)
 	}

@@ -83,6 +83,7 @@ func TestSubtitleRenditionInactiveOutsideItsRecipe(t *testing.T) {
 		name   string
 		mutate func(*TranscodeOpts)
 	}{
+		{"separate audio", func(o *TranscodeOpts) { o.SeparateAudioHLS = true }},
 		{"not requested", func(o *TranscodeOpts) { o.SubtitleRendition = false }},
 		{"no track", func(o *TranscodeOpts) { o.SubtitleTrackIndex = -1 }},
 		{"burn in", func(o *TranscodeOpts) { o.SubtitleBurnIn = true }},

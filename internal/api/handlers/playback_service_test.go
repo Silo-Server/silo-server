@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -785,4 +787,23 @@ func TestStaleCopyExpiryLeavesTheRemoteTransport(t *testing.T) {
 			t.Fatalf("expiry of a copy stopped on another replica did not stop its remote transport: %v", got)
 		}
 	})
+}
+
+func TestPlaybackCapabilitiesV2DVConversionRequiresTranscoding(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			f.handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{TranscodeEnabled: enabled} }
+			view, err := f.handler.PlaybackCapabilities(f.ctx, 1, "profile-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(view.Features, playback.FeatureServerDV7ToDV81V3) != enabled {
+				t.Fatalf("DV conversion advertised with transcoding=%v: %v", enabled, view.Features)
+			}
+			if !slices.Contains(view.Features, playback.ClientNativeHLSSeparateAudioV3) {
+				t.Fatal("ordinary separate-audio HLS was removed")
+			}
+		})
+	}
 }

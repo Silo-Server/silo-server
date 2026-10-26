@@ -54,6 +54,14 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 `server_remux_hls` and, when transcoding is enabled, `server_transcode_hls`.
 `revision` is a digest of the rest.
 
+Native v3 clients may negotiate `native_hls_separate_audio_v1` and `server_dv7_to_dv81_v1` through `features`.
+Packaging also requires the matching HLS delivery feature in the start request;
+DV conversion requires separate audio and a validated serving executor. Capability
+presence describes negotiation support, not a promise that every source, device
+or worker can execute it. See [native HLS recipes](architecture/playback-protocol-v3.md#11-transformations)
+for recipe versions, output claims and mixed-worker behavior. Existing clients
+that omit the features keep their current delivery behavior.
+
 ## Bandwidth probe
 
 `GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)

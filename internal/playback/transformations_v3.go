@@ -46,7 +46,18 @@ func ProbeTransformationRegistryWithToneMapV3(ctx context.Context, ffmpegPath st
 // ProbeTransformationRegistryWithToneMapV3Result reports incomplete baseline
 // probing and caller cancellation. An incomplete optional HEVC probe leaves
 // baseline capabilities usable and marks the registry for a later refresh.
+// DV conversion is excluded from this unscoped inventory.
 func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegPath string, toneMapCapabilities tonemap.Capabilities) (*TransformationRegistryV3, error) {
+	return probeTransformationRegistryWithPlaybackPolicyV3Result(ctx, ffmpegPath, toneMapCapabilities, false)
+}
+
+// ProbeTransformationRegistryWithPlaybackPolicyV3Result admits conversion smoke
+// tests only when the caller's existing playback policy permits transcoding.
+func ProbeTransformationRegistryWithPlaybackPolicyV3Result(ctx context.Context, ffmpegPath string, toneMapCapabilities tonemap.Capabilities, transcodeEnabled bool) (*TransformationRegistryV3, error) {
+	return probeTransformationRegistryWithPlaybackPolicyV3Result(ctx, ffmpegPath, toneMapCapabilities, transcodeEnabled)
+}
+
+func probeTransformationRegistryWithPlaybackPolicyV3Result(ctx context.Context, ffmpegPath string, toneMapCapabilities tonemap.Capabilities, transcodeEnabled bool) (*TransformationRegistryV3, error) {
 	// Resolve exactly like the execution paths (remux and transcode) so every
 	// capability advertised here holds for the binary that later runs.
 	ffmpegPath = ResolveFFmpegPath(ffmpegPath)
@@ -62,7 +73,15 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	downmixRecipeErr, downmixRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "5.1", stereoDownmixBoostFilterV3)
 	hevcRecipeErr, hevcRecipeContextErr := probeHEVCRecipeV3(ctx, ffmpegPath, encoders)
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
+	_, ffprobeErr := exec.LookPath(ffprobePathFromFFmpeg(ffmpegPath))
+	dv81Available := false
+	conversionAllowed := transcodeEnabled
+	if conversionAllowed {
+		_, dv81Available = probeDV7ToDV81ToolchainV3(ctx)
+	}
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: ffmpegErr == nil && ffprobeErr == nil && dv81Available, RequiredCapability: "dovi_tool:mode2+mp4_fragment_timing_v1", PromisedDynamicRange: DynamicRangeDolbyVisionV3, ValidatedClaims: []string{ClaimHDR10BaseLayerPreservedV3, ClaimEnhancementLayerDiscardedV3, "dolby_vision_profile_8_1"}, TerminalReason: TerminalDVConversionUnsupportedV3},
+		{Name: TransformationHLSSeparateAudioV3, RecipeVersion: TransformationHLSSeparateAudioRecipeVersionV3, Available: ffmpegErr == nil && ffprobeErr == nil, RequiredCapability: "ffmpeg_muxer:hls+mpegts"},
 		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: bytes.Contains(bsfs, []byte("dovi_rpu")) && bytes.Contains(bsfs, []byte("filter_units")), RequiredCapability: "ffmpeg_bsf:dovi_rpu+filter_units", PromisedDynamicRange: DynamicRangeHDR10V3, ValidatedClaims: DV7ToHDR10ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")) && normalizeRecipeErr == nil && downmixRecipeErr == nil, RequiredCapability: "ffmpeg_encoder:aac+ffmpeg_filter_smoke:timestamp_normalization_and_stereo_downmix_v4", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimH264DecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},

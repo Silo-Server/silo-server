@@ -192,7 +192,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
+	view.Features = append(h.nativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -233,9 +233,9 @@ func isNativeAPIV2(ctx context.Context) bool {
 // surface the request arrived through. The decision is persisted as the
 // attempt's StartResponse, so a /api/v2 decision also records durably that
 // this server offered subrip_sidecar_v1 to the attempt.
-func serverFeaturesForRequestV3(ctx context.Context) []string {
+func (h *PlaybackHandler) serverFeaturesForRequestV3(ctx context.Context) []string {
 	if isNativeAPIV2(ctx) {
-		return playback.NativeServerFeaturesV3()
+		return h.nativeServerFeaturesV3()
 	}
 	return playback.ServerFeaturesV3()
 }
@@ -295,9 +295,9 @@ func replanSubtitleFeaturesV3(record *playback.AttemptRecordV3, clientFeatures [
 
 // withNativeServerFeaturesV3 advertises the /api/v2-only features on a
 // decision the shared start/replan application produced.
-func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
+func (h *PlaybackHandler) withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if len(response.ServerFeatures) > 0 {
-		response.ServerFeatures = playback.NativeServerFeaturesV3()
+		response.ServerFeatures = h.nativeServerFeaturesV3()
 	}
 	return response
 }
@@ -339,7 +339,7 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
 		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
 	}
-	return withNativeServerFeaturesV3(response), err
+	return h.withNativeServerFeaturesV3(response), err
 }
 
 // ApplyProgressV2 is POST /api/v2/playback/{session_id}/progress. The sample
@@ -738,7 +738,7 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 			return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
 		}
 	}
-	return withNativeServerFeaturesV3(response), err
+	return h.withNativeServerFeaturesV3(response), err
 }
 
 // ReportRouteEventV2 is POST /api/v2/playback/route-events. Only the ownership
@@ -924,4 +924,12 @@ func (h *PlaybackHandler) attemptActiveElsewhere(ctx context.Context, session *p
 		return false
 	}
 	return record.LastSampleAt.After(session.LastActivityAt)
+}
+
+func (h *PlaybackHandler) nativeServerFeaturesV3() []string {
+	features := playback.NativeServerFeaturesV3()
+	if !h.playbackConfig().TranscodeEnabled {
+		features = playback.WithoutFeatureV3(features, playback.FeatureServerDV7ToDV81V3)
+	}
+	return features
 }

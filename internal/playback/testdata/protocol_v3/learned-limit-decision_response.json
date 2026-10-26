@@ -22,6 +22,8 @@
     "playback_plan_summary_v1",
     "subrip_sidecar_v1",
     "marker_thumbnails_v1",
+    "native_hls_separate_audio_v1",
+    "server_dv7_to_dv81_v1",
     "hls_subtitle_renditions_v1",
     "plan_active_quality_v1",
     "hls_remux_subtitle_renditions_v1",

@@ -68,6 +68,9 @@ func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
 		!slices.Contains(info.TransportFeatures, playback.TransportFeatureThemeAudioEgressV1) {
 		t.Fatalf("transport features = %v, want progressive remux relay and theme audio egress", info.TransportFeatures)
 	}
+	if !slices.Contains(info.TransportFeatures, "native_hls_renditions_relay_v1") {
+		t.Fatal("native HLS rendition relay is not advertised")
+	}
 	served := info
 	served.CapabilityHash = ""
 	if want := playback.ComputeCapabilityHash(served); want != info.CapabilityHash {

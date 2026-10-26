@@ -1223,12 +1223,14 @@ func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
 	// order, two seconds apart, as FFmpeg writes them; empty ones after them.
 	tests := []struct {
 		name     string
+		dv7      bool
 		start    int
 		present  []int
 		empty    []int
 		wantHead int
 		wantLast int // the segment whose write time is reported, or -1 for none
 	}{
+		{name: "private DV producer", dv7: true, present: []int{6, 7, 8, 9}, wantHead: 9, wantLast: 9},
 		{name: "pruned prefix", present: []int{6, 7, 8, 9}, wantHead: 9, wantLast: 9},
 		{
 			name:    "missing and zero-byte tail, gap, unlisted newer file",
@@ -1240,7 +1242,14 @@ func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
+			outputDir := t.TempDir()
+			dir := outputDir
+			if tt.dv7 {
+				dir = filepath.Join(outputDir, dv7SourceDirectory)
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			writeManifestRange(t, dir, 0, 9, ".ts")
 			written := time.Now().Add(-time.Hour).Truncate(time.Second)
 			writtenAt := map[int]time.Time{}
@@ -1255,8 +1264,8 @@ func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
 			for _, n := range tt.empty {
 				write(n, nil)
 			}
-			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{
-				TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tt.start,
+			session := &TranscodeSession{outputDir: outputDir, running: true, opts: TranscodeOpts{
+				DV7ToDV81: tt.dv7, TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tt.start,
 			}}
 
 			got := session.SegmentProgress(time.Now())

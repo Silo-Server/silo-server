@@ -1982,6 +1982,78 @@ A transformation is a named, versioned media operation with claims attached.
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `hls_separate_audio` | `server` | `1` | copied fMP4 video with a separate MPEG-TS audio rendition | — |
+| `server_dv7_to_dv81` | `server` | `1` | Profile 8.1 output with copied HDR10 base samples | `hdr10_base_layer_preserved`, `enhancement_layer_discarded`, `dolby_vision_profile_8_1` |
+
+Separate audio requires explicit `native_hls_separate_audio_v1` opt-in on both
+`client_features` and the HLS delivery's `features`, an available executor, and
+an audio track. It does not synthesize audio. Clients may fall back to canonical
+`hls_copy_mpegts_v1` packaging when that delivery feature is negotiated and the
+separate-audio recipe is unavailable or has already been attempted. Separate
+audio keeps text subtitles on the sidecar route. Clients that omit packaging
+features keep the existing HLS recipe.
+
+Separate audio uses one FFmpeg process and a shared timestamp origin. The
+master and its `?rendition=video` and `?rendition=audio` children share the same
+authorized manifest route. Segment URLs retain the media grant, including
+`EXT-X-MEDIA` URIs passing through a relay. The master reads video codec facts
+from the emitted initialization segment; unknown audio profile detail omits
+`CODECS` rather than guessing it. Audio completions advance the shared throttle window in media time, without
+changing video recovery or pruning ordinals. Each rendition prunes behind its own
+completed-download high-water mark using the configured retention window. Audio
+uses its actual EXTINF durations; absent or inherited timeline metadata cannot
+supply a retention floor. Startup files, inherited audio files, and files at or
+ahead of the retained floor survive. No audio acknowledgement means no audio
+pruning; skipped files behind its confirmed high-water mark can expire. Both
+renditions reuse bounded prune batches, freshness guards and generation fences.
+An already-open response retains its file descriptor across unlink.
+
+`server_dv7_to_dv81_v1` is an additional client feature, not a claim that the
+client can decode Profile 7. Server conversion requires the existing
+`playback.transcode_enabled` setting. Disabling it removes this feature from
+the native capability document and prevents new or reconstructed conversion
+recipes on API and worker executors. Live sessions recheck the setting before
+converting an uncached fragment or restarting; converted segments remain
+readable. Ordinary native HLS packaging remains available. Conversion smoke tests are also skipped while disabled; the
+existing probe retry window can delay re-enablement by up to 15 seconds. The
+planner requires proven Profile 7 base/RPU
+facts and validates Profile 8.1 against the output's profile, compatibility ID
+and level limits. It keeps the original file and track identities. An executor
+must pass a bounded `dovi_tool -m 2 convert --discard` smoke test that checks a
+known converted RPU and unchanged base-layer NAL units. Missing or failing
+tools leave this transformation unavailable; the planner retains the existing
+HDR10, SDR and alternate-version decisions.
+
+Conversion replaces RPUs and removes enhancement-layer NAL units within each
+original fMP4 sample. Decode times, composition offsets, durations and base
+samples are preserved. Original Profile 7 fragments stay in a private producer
+directory; only converted initialization and media files are served. Restart
+cancels and fences conversion from the old generation before publication.
+Separate-audio recovery replays the frozen original seek/numbering and timestamp
+origin rather than moving to a video segment's keyframe anchor. Cold
+reconstruction uses that same signed recipe. Missing audio waits for its own
+filename. A missing cut already passed by the producer restarts under the same
+owner lifecycle lock as video recovery; the file is rechecked before replay so
+concurrent requests do not restart a replacement. Active filename requests follow
+replay only while the selected audio track and channel count remain unchanged.
+Known audio targets use playlist durations and the configured forward
+window; duplicate requests share a generation-owned target. A fulfilled target
+no longer exempts other pending requests from throttling. Cold recovery without
+that target's timeline must still replay until the requested file materializes:
+a guessed time limit would reject valid distant seeks. Replaying from the
+original origin can make long forward recovery slower. Bounded retention does
+not remove that replay CPU cost; recovery without origin replay remains an open
+concern for this opt-in recipe.
+This discards the enhancement layer and is not lossless Profile 7 playback.
+
+Copy-HLS reconstruction recipe `3` requires separate audio; recipe `4` also
+requires DV conversion. Workers must echo the requested recipe after readiness.
+Older workers reject these versions. Separate-audio routes use only relays
+advertising `native_hls_renditions_relay_v1`, or the existing API-egress fallback
+when routing policy permits it. A missing receipt or transport capability fails
+closed without changing the accepted output recipe. These additions target
+`/api/v2`; frozen v1 capabilities do not advertise them. Apple, Android and
+Jellyfin-compatible clients do not opt in implicitly.
 
 `server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
 enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby

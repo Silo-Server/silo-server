@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -663,5 +664,17 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Fatalf("starts = %d, want 1", starts)
+	}
+}
+
+func TestLoadOrReconstructDVConversionRequiresTranscoding(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	manager := NewTranscodeManager()
+	manager.Sessions = sessions
+	manager.Config = func() TranscodeRuntimeConfig { return TranscodeRuntimeConfig{TranscodeDir: t.TempDir()} }
+	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{SessionID: "dv-policy", InputPath: "fixture.mkv", TargetCodecVideo: "copy", SeparateAudioHLS: true, DV7ToDV81: true})
+	_, runtime, _, err := manager.LoadOrReconstructTranscodeWithError(t.Context(), sessions.GetSession, "dv-policy", 5, -1, &card)
+	if runtime != nil || err == nil || !strings.Contains(err.Error(), "transcoding is disabled") {
+		t.Fatalf("disabled reconstruction = %v, %v", runtime, err)
 	}
 }

@@ -244,6 +244,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	requireWorkerRoutingV3(handler)
+	handler.v3RegistryTranscodeEnabled = handler.playbackConfig().TranscodeEnabled
 	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},

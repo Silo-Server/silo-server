@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -92,8 +93,8 @@ var (
 	androidTVHDR10Display = append(append([]string(nil), androidTVDVProfile8Disabled...), "HDR10Plus")
 )
 
-// newDVStripHandler serves one profile 8.1 version with tone mapping off (the
-// server default), so a full HDR encode is never available.
+// newDVStripHandler serves one profile 8.1 version with tone mapping explicitly
+// off, so a full HDR encode is never available.
 func newDVStripHandler(t *testing.T, localStrip bool) (*PlaybackHandler, string) {
 	t.Helper()
 	return newDVStripHandlerWithTrack(t, localStrip, dvStripProfile8Track())
@@ -112,7 +113,10 @@ func newDVStripHandlerWithTrack(t *testing.T, localStrip bool, track models.Vide
 	version.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}
 	version.SubtitleTracks = nil
 	handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
-	handler.SettingsRepo = stubSettingsReader{values: map[string]string{}}
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
+	}}
 	handler.compatDVRPUProbe = func(context.Context, string) bool { return true }
 	handler.compatDVStripLocalProbe = func() bool { return localStrip }
 	return handler, routeID

@@ -163,7 +163,11 @@ func (t *TranscodeThrottler) CheckOnce() {
 	if segmentDuration <= 0 {
 		segmentDuration = t.segmentDuration
 	}
-	gap := gapSegments * segmentDuration
+	gap := float64(gapSegments * segmentDuration)
+	mediaGap, mediaTime, audioReplay := t.session.separateAudioThrottleGap(progress)
+	if mediaTime {
+		gap = mediaGap
+	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -175,21 +179,21 @@ func (t *TranscodeThrottler) CheckOnce() {
 	// new process before it writes its first segment, so the manifest never
 	// refreshes and the gap never shrinks: the stream deadlocks until the user
 	// seeks. Resume instead if a previous check already paused on stale output.
-	if progressPredatesGeneration(progress) {
+	if progressPredatesGeneration(progress) || audioReplay {
 		if t.paused {
-			log.Printf("playback: throttler resuming ffmpeg (produced output predates current generation)")
+			log.Printf("playback: throttler resuming ffmpeg (generation startup or unresolved audio recovery)")
 			t.sendResume()
 			t.paused = false
 		}
 		return
 	}
 
-	if gap >= t.thresholdSeconds && !t.paused {
-		log.Printf("playback: throttler pausing ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
+	if gap >= float64(t.thresholdSeconds) && !t.paused {
+		log.Printf("playback: throttler pausing ffmpeg (gap=%.3fs, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendPause()
 		t.paused = true
-	} else if gap < t.thresholdSeconds && t.paused {
-		log.Printf("playback: throttler resuming ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
+	} else if gap < float64(t.thresholdSeconds) && t.paused {
+		log.Printf("playback: throttler resuming ffmpeg (gap=%.3fs, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendResume()
 		t.paused = false
 	}

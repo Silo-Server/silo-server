@@ -212,6 +212,9 @@ func TestRestartSessionLocked_SupersededWhenUnregistered(t *testing.T) {
 	if !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("want ErrSessionSuperseded for an unmapped session, got %v", err)
 	}
+	if err := m.RecoverAudioSegmentLocked(t.Context(), "sess-x", s, "audio_00001.ts"); !errors.Is(err, ErrSessionSuperseded) {
+		t.Fatalf("unmapped audio recovery = %v", err)
+	}
 	if s.IsRunning() {
 		t.Fatal("a superseded restart must not spawn ffmpeg")
 	}
@@ -229,10 +232,97 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	if !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("want ErrSessionSuperseded for a replaced session, got %v", err)
 	}
+	if err := m.RecoverAudioSegmentLocked(t.Context(), sid, stale, "audio_00001.ts"); !errors.Is(err, ErrSessionSuperseded) {
+		t.Fatalf("stale audio recovery = %v", err)
+	}
 	if stale.IsRunning() {
 		t.Fatal("a superseded restart must not spawn ffmpeg for the stale handle")
 	}
 	if live.IsRunning() {
 		t.Fatal("the live session must be untouched by a stale restart")
+	}
+}
+
+func TestAudioDemandFollowsFrozenOriginRestart(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same track", true: "changed track"}[changed], func(t *testing.T) {
+			s := newFakeFFmpegSession(t)
+			s.opts.SeparateAudioHLS = true
+			s.opts.TargetCodecVideo = "copy"
+			s.opts.TargetCodecAudio = "copy"
+			s.opts.SegmentDuration = 2
+			s.running = true
+			probe := `#!/bin/sh
+printf '%s' '{"packets":[{"stream_index":0,"dts_time":"0"},{"stream_index":1,"dts_time":"0"}],"streams":[{"index":0,"codec_type":"video"},{"index":1,"codec_type":"audio"}],"format":{"start_time":"0"}}'
+`
+			if err := os.WriteFile(filepath.Join(s.outputDir, "fake-ffprobe.sh"), []byte(probe), 0700); err != nil {
+				t.Fatal(err)
+			}
+			writeManifestRange(t, s.outputDir, 0, 100, ".m4s")
+			writeSegmentFile(t, s.outputDir, "seg_00100.m4s", []byte("video"), time.Now())
+			writer := &recordingWriteCloser{}
+			throttler := NewTranscodeThrottler(s, writer, 60, 2)
+			throttler.CheckOnce()
+			if writer.writes != "p" {
+				t.Fatal("initial video buffer did not pause")
+			}
+			done := make(chan error, 1)
+			go func() {
+				lease, err := s.OpenMediaSegment("audio_00150.ts")
+				if lease != nil {
+					_ = lease.Close()
+				}
+				done <- err
+			}()
+			t.Cleanup(func() { _ = s.Close(); <-done })
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
+			deadline := time.Now().Add(2 * time.Second)
+			for writer.writes != "pu" {
+				throttler.CheckOnce()
+				if time.Now().After(deadline) {
+					t.Fatal("audio request never resumed producer")
+				}
+				<-ticker.C
+			}
+			if changed {
+				s.SetAudioTrackIndex(1)
+			}
+			if err := s.Restart(t.Context(), 0, 0); err != nil {
+				t.Fatal(err)
+			}
+			writeManifestRange(t, s.outputDir, 0, 100, ".m4s")
+			writeSegmentFile(t, s.outputDir, "seg_00100.m4s", []byte("video"), time.Now())
+			current := time.Now().Add(time.Second)
+			if err := os.Chtimes(filepath.Join(s.outputDir, "stream.m3u8"), current, current); err != nil {
+				t.Fatal(err)
+			}
+			if progress := s.SegmentProgress(time.Now()); progress.ProducedHead != 100 || progressPredatesGeneration(progress) {
+				t.Fatalf("replacement output unavailable: head=%d predates=%v", progress.ProducedHead, progressPredatesGeneration(progress))
+			}
+			replacementWriter := &recordingWriteCloser{}
+			NewTranscodeThrottler(s, replacementWriter, 60, 2).CheckOnce()
+			want := ""
+			if changed {
+				want = "p"
+			}
+			if replacementWriter.writes != want {
+				t.Fatalf("replacement producer command = %q, want %q", replacementWriter.writes, want)
+			}
+		})
+	}
+}
+
+func TestRecoverAudioSegmentLockedRejectsCanceledRequest(t *testing.T) {
+	s := newFakeFFmpegSession(t)
+	m := NewTranscodeManager()
+	m.RegisterTranscodeSession("audio", s)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := m.RecoverAudioSegmentLocked(ctx, "audio", s, "audio_00001.ts"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled audio recovery = %v", err)
+	}
+	if s.IsRunning() {
+		t.Fatal("canceled request spawned a producer")
 	}
 }

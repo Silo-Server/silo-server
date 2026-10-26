@@ -414,7 +414,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1, playback.TransportFeatureNativeHLSRenditionsRelayV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -1162,7 +1162,8 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	targetURL := claims.TranscodeNode + path
 	isSegmentRoute := strings.Contains(path, "/segment/")
 	_, segmentParseErr := playback.ParseSegmentNumber(filepath.Base(path))
-	isMediaSegment := segmentParseErr == nil
+	_, audioParseErr := playback.ParseAudioSegmentNumber(filepath.Base(path))
+	isMediaSegment := segmentParseErr == nil || audioParseErr == nil
 	if rawQuery := r.URL.RawQuery; rawQuery != "" {
 		targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
 	}

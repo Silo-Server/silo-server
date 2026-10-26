@@ -85,6 +85,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 		handler.PlanStoreV3 = f.attempts
 		handler.SessionRecipeStore = f.recipes
 		handler.NodeRecipeStore = nodeRecipes
+		handler.v3RegistryTranscodeEnabled = handler.playbackConfig().TranscodeEnabled
 		handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 			{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
 			{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},

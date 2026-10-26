@@ -228480,6 +228480,15 @@
           "copy_video_mpegts": {
             "type": "boolean"
           },
+          "dv7_to_dv81": {
+            "type": "boolean"
+          },
+          "hls_codecs": {
+            "type": "string"
+          },
+          "hls_video_range": {
+            "type": "string"
+          },
           "hw_accel": {
             "type": "string"
           },
@@ -228499,6 +228508,9 @@
           "segment_duration": {
             "format": "int64",
             "type": "integer"
+          },
+          "separate_audio_hls": {
+            "type": "boolean"
           },
           "session_id": {
             "type": "string"
