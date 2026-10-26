@@ -12,12 +12,12 @@ interface UpcomingPresentationEvent {
   badges: string[];
 }
 
+// Every client shows these labels in capitals: PREMIERE, NEW SEASON, FINALE.
 export function upcomingBadgeLabel(badge: string): string {
   switch (badge) {
     case "series_premiere":
-      return "Series Premiere";
+      return "Premiere";
     case "season_premiere":
-      // Matches the native apps, which show this badge as NEW SEASON.
       return "New Season";
     case "finale":
       return "Finale";
