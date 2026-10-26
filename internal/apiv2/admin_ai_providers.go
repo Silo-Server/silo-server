@@ -27,7 +27,7 @@ type AdminAIProvider struct {
 	BaseURL      string   `json:"base_url" format:"uri"`
 	HasAPIKey    bool     `json:"has_api_key"`
 	Capabilities []string `json:"capabilities" enum:"chat,embeddings,speech" doc:"What the provider serves."`
-	UsedBy       []string `json:"used_by" enum:"text,speech" doc:"Jobs currently sending requests to the provider. A provider in use cannot be deleted."`
+	UsedBy       []string `json:"used_by" enum:"text,speech,embeddings" doc:"Jobs currently sending requests to the provider. A provider in use cannot be deleted."`
 }
 
 type AdminAIProviderType struct {

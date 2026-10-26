@@ -591,7 +591,8 @@
             "items": {
               "enum": [
                 "text",
-                "speech"
+                "speech",
+                "embeddings"
               ],
               "type": "string"
             },

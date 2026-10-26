@@ -13108,7 +13108,7 @@ export interface components {
       /** @enum {string} */
       type: "openai" | "gemini" | "openrouter" | "groq" | "ollama" | "whisper" | "custom";
       /** @description Jobs currently sending requests to the provider. A provider in use cannot be deleted. */
-      used_by: ("text" | "speech")[];
+      used_by: ("text" | "speech" | "embeddings")[];
     };
     AdminAIProviderCheck: {
       message: string;
