@@ -37,46 +37,14 @@ function withCardPresentation(cardPresentation: CardPresentation, children: Reac
 }
 
 describe("RequestPosterCard (discover variant)", () => {
-  it("puts the Request action in the card's Play slot and sends the request", () => {
-    const onRequest = vi.fn();
-    render(
-      <MemoryRouter>
-        <RequestPosterCard variant="discover" item={requestable} onRequest={onRequest} />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: /^Request Test Movie \(Movie/ });
-    expect(button).toHaveTextContent("Request");
-    expect(button).toHaveClass("media-card-play-trigger");
-    expect(button.closest(".group\\/media")).not.toBeNull();
-    // Beside the artwork link, not inside it.
-    expect(button.closest("a")).toBeNull();
-
-    // The action sits over the artwork link; clicking it must not navigate.
-    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
-    fireEvent(button, click);
-    expect(onRequest).toHaveBeenCalledOnce();
-    expect(click.defaultPrevented).toBe(true);
-  });
-
-  it("offers no Request action without a handler or for an unrequestable title", () => {
-    const withoutHandler = renderToStaticMarkup(
+  it("offers no Request action on the card", () => {
+    const markup = renderToStaticMarkup(
       <MemoryRouter>
         <RequestPosterCard variant="discover" item={requestable} />
       </MemoryRouter>,
     );
-    const unrequestable = renderToStaticMarkup(
-      <MemoryRouter>
-        <RequestPosterCard
-          variant="discover"
-          item={{ ...requestable, request: { requestable: false, reason: "quota_exceeded" } }}
-          onRequest={() => {}}
-        />
-      </MemoryRouter>,
-    );
 
-    expect(withoutHandler).not.toContain("<button");
-    expect(unrequestable).not.toContain("<button");
+    expect(markup).not.toContain("<button");
   });
 
   it("marks a title already in the library as Available and links to it", () => {

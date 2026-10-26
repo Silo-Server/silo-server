@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { MediaRequest, RequestDiscoverySection, RequestMediaResult } from "@/api/types";
+import type { MediaRequest, RequestDiscoverySection } from "@/api/types";
 import {
   useCancelMediaRequest,
   useDiscoverGenres,
@@ -23,7 +23,6 @@ import {
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { formatRelativeTime } from "@/lib/date";
@@ -184,7 +183,6 @@ function DiscoverTab() {
   const studios = useDiscoverStudios();
   const networks = useDiscoverNetworks();
   const genres = useDiscoverGenres();
-  const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
 
   if (discovery.isLoading) return <DiscoverRowsSkeleton />;
@@ -207,13 +205,7 @@ function DiscoverTab() {
         </div>
       ) : (
         (discovery.data ?? []).map((section) => (
-          <DiscoverRow
-            key={section.key}
-            section={section}
-            isSubmitting={isSubmitting}
-            onRequest={submit}
-            watchlist={watchlist}
-          />
+          <DiscoverRow key={section.key} section={section} watchlist={watchlist} />
         ))
       )}
       <BrandCarousel
@@ -246,13 +238,9 @@ function DiscoverTab() {
 
 function DiscoverRow({
   section,
-  isSubmitting,
-  onRequest,
   watchlist,
 }: {
   section: RequestDiscoverySection;
-  isSubmitting: (item: RequestMediaResult) => boolean;
-  onRequest: (item: RequestMediaResult) => void;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
   if (section.results.length === 0) return null;
@@ -266,8 +254,6 @@ function DiscoverRow({
           key={`${item.media_type}-${item.tmdb_id}`}
           variant="discover"
           item={item}
-          isSubmitting={isSubmitting(item)}
-          onRequest={() => onRequest(item)}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
         />
