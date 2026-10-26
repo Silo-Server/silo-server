@@ -104,7 +104,7 @@ var AIProviderTypes = []AIProviderTypeSpec{
 	},
 	{
 		Type: AIProviderOpenRouter, Label: "OpenRouter", DefaultBaseURL: openRouterBaseURL,
-		Capabilities: []AICapability{AICapabilityChat, AICapabilitySpeech}, KeyRequired: true,
+		Capabilities: []AICapability{AICapabilityChat, AICapabilityEmbeddings, AICapabilitySpeech}, KeyRequired: true,
 	},
 	{
 		Type: AIProviderGroq, Label: "Groq", DefaultBaseURL: groqBaseURL,
@@ -179,6 +179,13 @@ func ParseAIProviderRegistry(raw string) (AIProviderRegistry, error) {
 	}
 	if err := json.Unmarshal([]byte(raw), &registry); err != nil {
 		return AIProviderRegistry{}, fmt.Errorf("%s is not valid JSON: %w", AIProvidersSettingKey, err)
+	}
+	// A known type's capabilities are the type's, so a provider stored before
+	// its type gained one (OpenRouter embeddings) serves it too.
+	for i, provider := range registry.Providers {
+		if spec, ok := LookupAIProviderType(provider.Type); ok && spec.Capabilities != nil {
+			registry.Providers[i].Capabilities = slices.Clone(spec.Capabilities)
+		}
 	}
 	return registry, nil
 }

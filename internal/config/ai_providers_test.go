@@ -184,6 +184,18 @@ func TestPlanAIProviderConversionReportsRefusedEndpoints(t *testing.T) {
 	}
 }
 
+// A known type's capabilities follow the type, so providers stored before the
+// type gained one can serve it.
+func TestParseAIProviderRegistryUsesTheTypeCapabilities(t *testing.T) {
+	registry, err := ParseAIProviderRegistry(`{"version":1,"providers":[{"id":"or-1","type":"openrouter","name":"OpenRouter","base_url":"https://openrouter.ai/api/v1","api_key":"k","capabilities":["chat","speech"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseURL, _, ok := registry.Resolve("or-1", AICapabilityEmbeddings); !ok || baseURL != "https://openrouter.ai/api/v1" {
+		t.Fatalf("OpenRouter embeddings resolve to %q, %v", baseURL, ok)
+	}
+}
+
 func TestValidateAIProviderBindings(t *testing.T) {
 	registry := `{"version":1,"providers":[{"id":"groq-1","type":"groq","name":"Groq","base_url":"https://api.groq.com/openai","api_key":"k","capabilities":["chat","speech"]}]}`
 	for _, test := range []struct {
