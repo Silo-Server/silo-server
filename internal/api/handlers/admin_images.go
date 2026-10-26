@@ -520,8 +520,11 @@ func (h *AdminImageHandler) publishItemImage(ctx context.Context, contentID stri
 		// Re-applying the image the target shows, or uploading its bytes
 		// again, publishes the revision it already serves: leave that one be.
 		if shownPath, _, _ := shownArtwork(resolved, imageType); result.StoredPath != shownPath {
+			// A cancelled request must not stop the cleanup it caused.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
 			if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
-				ctx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
+				cleanupCtx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
 			); cleanupErr != nil {
 				slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
 					"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)

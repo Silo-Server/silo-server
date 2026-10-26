@@ -25,6 +25,7 @@ const (
 type recordingArtworkPublisher struct {
 	published []catalog.ArtworkSelection
 	queued    []string
+	queuedErr []error // the cleanup context's error at the call
 	err       error
 }
 
@@ -33,8 +34,9 @@ func (p *recordingArtworkPublisher) PublishArtworkSelection(_ context.Context, s
 	return p.err
 }
 
-func (p *recordingArtworkPublisher) QueueArtworkRevisionGC(_ context.Context, originalPath, _ string, _ time.Time) error {
+func (p *recordingArtworkPublisher) QueueArtworkRevisionGC(ctx context.Context, originalPath, _ string, _ time.Time) error {
 	p.queued = append(p.queued, originalPath)
+	p.queuedErr = append(p.queuedErr, ctx.Err())
 	return nil
 }
 
@@ -248,7 +250,7 @@ func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
 }
 
 // When publication fails, only a revision the target does not already show is
-// queued for cleanup.
+// queued for cleanup, even when the request was cancelled.
 func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
 	cases := []struct {
 		name, id string
@@ -262,15 +264,22 @@ func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			publisher := &recordingArtworkPublisher{err: errors.New("database unavailable")}
 			h := newUploadImageHandlerForTest(&localImageServiceFake{}, publisher)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
 			var err error
 			if tc.apply {
-				_, err = h.ApplyAdminItemImage(context.Background(), tc.id, AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster"})
+				_, err = h.ApplyAdminItemImage(ctx, tc.id, AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster"})
 			} else {
-				_, err = h.UploadAdminItemImage(context.Background(), tc.id, "poster", []byte("image-bytes"))
+				_, err = h.UploadAdminItemImage(ctx, tc.id, "poster", []byte("image-bytes"))
 			}
 			requireAPIStatus(t, err, http.StatusInternalServerError)
 			if strings.Join(publisher.queued, ",") != strings.Join(tc.queued, ",") {
 				t.Fatalf("queued %v, want %v", publisher.queued, tc.queued)
+			}
+			for _, queueErr := range publisher.queuedErr {
+				if queueErr != nil {
+					t.Fatalf("cleanup ran with a cancelled context: %v", queueErr)
+				}
 			}
 		})
 	}
