@@ -598,15 +598,23 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 // failure leaves those jobs unconfigured rather than stopping the server.
 func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
 	converted := false
+	var unconverted []string
 	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
-		writes, err := config.PlanAIProviderConversion(current)
-		converted = len(writes) > 0
+		writes, refused, err := config.PlanAIProviderConversion(current)
+		converted, unconverted = len(writes) > 0, refused
 		return writes, err
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "AI provider conversion failed", "component", "app", "error", err)
-	} else if converted {
+		return
+	}
+	if converted {
 		slog.InfoContext(ctx, "AI endpoints converted to providers", "component", "app")
+	}
+	if len(unconverted) > 0 {
+		// Only setting names: the refused URLs can carry credentials.
+		slog.WarnContext(ctx, "AI endpoints not converted: provider addresses cannot carry credentials or a query; connect these providers again in AI Services",
+			"component", "app", "settings", unconverted)
 	}
 }
 

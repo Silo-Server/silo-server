@@ -123,7 +123,7 @@ func TestPlanAIProviderConversionKeepsEachJobOnItsEndpoint(t *testing.T) {
 
 func checkAIConversion(t *testing.T, test aiConversionCase) {
 	t.Helper()
-	writes, err := PlanAIProviderConversion(test.stored)
+	writes, _, err := PlanAIProviderConversion(test.stored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func checkAIConversion(t *testing.T, test aiConversionCase) {
 			t.Fatalf("speech provider = %+v", provider)
 		}
 	}
-	again, err := PlanAIProviderConversion(converted)
+	again, _, err := PlanAIProviderConversion(converted)
 	if err != nil || again != nil {
 		t.Fatalf("second conversion = %v, %v; want nothing to do", again, err)
 	}
@@ -163,12 +163,24 @@ func checkAIConversion(t *testing.T, test aiConversionCase) {
 
 func TestPlanAIProviderConversionKeepsAdministratorBindings(t *testing.T) {
 	stored := map[string]string{"ai.api_key": "sk-text", AITextProviderSettingKey: "chosen"}
-	writes, err := PlanAIProviderConversion(stored)
+	writes, _, err := PlanAIProviderConversion(stored)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := writes[AITextProviderSettingKey]; ok {
 		t.Fatalf("conversion replaced the administrator's text provider: %v", writes)
+	}
+}
+
+// An endpoint the registry refuses is reported by setting name, so startup can
+// tell the administrator which job to set up again.
+func TestPlanAIProviderConversionReportsRefusedEndpoints(t *testing.T) {
+	_, unconverted, err := PlanAIProviderConversion(map[string]string{
+		"ai.base_url": "https://user:secret@proxy.example.test/v1", "subtitle_ai.transcribe_enabled": "true",
+		"ai.asr_base_url": "http://speaches:8000",
+	})
+	if err != nil || len(unconverted) != 1 || unconverted[0] != "ai.base_url" {
+		t.Fatalf("unconverted = %v, %v; want [ai.base_url]", unconverted, err)
 	}
 }
 

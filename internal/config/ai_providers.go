@@ -403,39 +403,62 @@ const (
 	legacySubtitleKeySetting = "subtitle_ai.api_key"
 )
 
-// PlanAIProviderConversion moves endpoints stored by older builds into the
-// registry, once. It returns the writes for one atomic settings update, or nil
-// when the stored registry has already seen every conversion. A binding the
-// administrator already set is never replaced.
-func PlanAIProviderConversion(stored map[string]string) (map[string]string, error) {
-	registry, err := ParseAIProviderRegistry(stored[AIProvidersSettingKey])
-	if err != nil {
-		return nil, err
-	}
-	if registry.Version >= aiProvidersVersion {
-		return nil, nil
-	}
-	writes := map[string]string{}
-	if registry.Version < 1 {
-		convertLegacyTextAndSpeech(&registry, stored, writes)
-	}
-	registry.Version = aiProvidersVersion
-	writes[AIProvidersSettingKey] = registry.Encode()
-	return writes, nil
+// aiConversion collects one conversion's writes and the legacy settings whose
+// endpoint it could not turn into a provider.
+type aiConversion struct {
+	registry    *AIProviderRegistry
+	stored      map[string]string
+	writes      map[string]string
+	unconverted []string
 }
 
-func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]string, writes map[string]string) {
-	bind := func(key, id string) {
-		if id != "" && strings.TrimSpace(stored[key]) == "" {
-			writes[key] = id
-		}
+// bind sets a job's binding unless the administrator already chose one.
+func (c *aiConversion) bind(key, id string) {
+	if id != "" && strings.TrimSpace(c.stored[key]) == "" {
+		c.writes[key] = id
 	}
+}
+
+// adopt is adoptAIProvider, recording setting when its endpoint is refused.
+func (c *aiConversion) adopt(setting, baseURL, apiKey string, capability AICapability) string {
+	id, err := adoptAIProvider(c.registry, baseURL, apiKey, capability)
+	if err != nil && !slices.Contains(c.unconverted, setting) {
+		c.unconverted = append(c.unconverted, setting)
+	}
+	return id
+}
+
+// PlanAIProviderConversion moves endpoints stored by older builds into the
+// registry, once. It returns the writes for one atomic settings update, or nil
+// when the stored registry has already seen every conversion, and the legacy
+// settings whose endpoint the registry refuses (credentials or a query in the
+// URL), which leave their job unconfigured. A binding the administrator
+// already set is never replaced.
+func PlanAIProviderConversion(stored map[string]string) (writes map[string]string, unconverted []string, err error) {
+	registry, err := ParseAIProviderRegistry(stored[AIProvidersSettingKey])
+	if err != nil {
+		return nil, nil, err
+	}
+	if registry.Version >= aiProvidersVersion {
+		return nil, nil, nil
+	}
+	c := &aiConversion{registry: &registry, stored: stored, writes: map[string]string{}}
+	if registry.Version < 1 {
+		convertLegacyTextAndSpeech(c)
+	}
+	registry.Version = aiProvidersVersion
+	c.writes[AIProvidersSettingKey] = registry.Encode()
+	return c.writes, c.unconverted, nil
+}
+
+func convertLegacyTextAndSpeech(c *aiConversion) {
+	stored := c.stored
 	storedTextURL := firstNonEmpty(stored[legacyAITextURLSetting], stored[legacySubtitleURLSetting])
 	textKey := firstNonEmpty(stored[legacyAITextKeySetting], stored[legacySubtitleKeySetting])
 	// The text endpoint defaulted to OpenAI when none was stored.
 	textBaseURL := strings.TrimRight(firstNonEmpty(storedTextURL, openAIBaseURL), "/")
 	if storedTextURL != "" || textKey != "" {
-		bind(AITextProviderSettingKey, adoptAIProvider(registry, textBaseURL, textKey, AICapabilityChat))
+		c.bind(AITextProviderSettingKey, c.adopt(legacyAITextURLSetting, textBaseURL, textKey, AICapabilityChat))
 	}
 
 	// Speech resolved its endpoint and key independently of text: an empty
@@ -444,7 +467,7 @@ func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]
 	speechBaseURL := strings.TrimSpace(stored[legacyAISpeechURLSetting])
 	speechKey := firstNonEmpty(stored[legacyAISpeechKeySetting], textKey)
 	if speechBaseURL != "" {
-		bind(AISpeechProviderSettingKey, adoptAIProvider(registry, speechBaseURL, speechKey, AICapabilitySpeech))
+		c.bind(AISpeechProviderSettingKey, c.adopt(legacyAISpeechURLSetting, speechBaseURL, speechKey, AICapabilitySpeech))
 		return
 	}
 	if storedTextURL == "" && speechKey == "" {
@@ -456,23 +479,24 @@ func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]
 	if providerType == AIProviderCustom && !AdminSettingEnabled("subtitle_ai.transcribe_enabled", stored["subtitle_ai.transcribe_enabled"]) {
 		return
 	}
-	bind(AISpeechProviderSettingKey, adoptAIProvider(registry, textBaseURL, speechKey, AICapabilitySpeech))
+	c.bind(AISpeechProviderSettingKey, c.adopt(legacyAITextURLSetting, textBaseURL, speechKey, AICapabilitySpeech))
 }
 
 // adoptAIProvider returns the id of a provider that serves capability at exactly
 // baseURL with apiKey, connecting one when none does. It returns "" for a
-// hosted endpoint that has no key, which could never have worked.
-func adoptAIProvider(r *AIProviderRegistry, baseURL, apiKey string, capability AICapability) string {
+// hosted endpoint that has no key, which could never have worked, and an error
+// for an endpoint the registry refuses.
+func adoptAIProvider(r *AIProviderRegistry, baseURL, apiKey string, capability AICapability) (string, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	apiKey = strings.TrimSpace(apiKey)
 	providerType, providerBaseURL := detectAIProviderType(baseURL, apiKey, capability)
 	if providerType == "" {
-		return ""
+		return "", nil
 	}
 	for _, provider := range r.Providers {
 		if provider.Type == providerType && provider.BaseURL == providerBaseURL && provider.APIKey == apiKey {
 			addAIProviderCapability(r, provider.ID, capability)
-			return provider.ID
+			return provider.ID, nil
 		}
 	}
 	spec, _ := LookupAIProviderType(providerType)
@@ -498,12 +522,11 @@ func adoptAIProvider(r *AIProviderRegistry, baseURL, apiKey string, capability A
 	})
 	if err != nil {
 		// An entry that fails validation would block every later provider
-		// edit. An address it rejects (a query string, credentials in the URL)
-		// never worked with the AI clients, so the job stays unconfigured.
-		return ""
+		// edit, so the job stays unconfigured and the caller reports it.
+		return "", err
 	}
 	r.Providers = append(r.Providers, provider)
-	return provider.ID
+	return provider.ID, nil
 }
 
 func addAIProviderCapability(r *AIProviderRegistry, id string, capability AICapability) {

@@ -70,7 +70,12 @@ drafts exclude it; the operations below are its only administrative boundary.
 longer reads them and rejects writes to them. On first start, a server moves the
 endpoints those keys held into providers and binds each job to the provider that
 serves the endpoint and key it used, then leaves the old rows in place.
-Transcription no longer falls back to the text endpoint.
+Transcription no longer falls back to the text endpoint. A stored endpoint
+whose URL carries credentials (`https://user:password@host`) or a query is not
+converted, because provider addresses are shown to administrators and the AI
+clients never handled a query; that job stays unconfigured and startup logs a
+warning naming the legacy setting. HTTP Basic authentication through the URL
+is not supported; such a proxy needs to accept the provider's API key.
 
 The following operations require an acting administrator:
 
