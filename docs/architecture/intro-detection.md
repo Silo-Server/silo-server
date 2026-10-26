@@ -51,9 +51,17 @@ for a single item does not take the lock.
    seconds to 3 minutes.
    A file's intro is the median of the pair results that agree with its
    most-confirmed one (`chromaprint:v4`).
-3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
-   of a Chromaprint intro, the start moves to the end of that dialogue
-   (`chromaprint:dialogue:v4`).
+
+Earlier versions moved a Chromaprint start past subtitle cues in its first
+15 seconds (`chromaprint:dialogue:v4`). Most such cues belonged to the opening
+itself: song lyrics, often in a translated or karaoke subtitle, title-sequence
+narration, or caption credits. The start moved a median 13 to 15 seconds later
+and agreed with TheIntroDB and Plex markers far less often. Moving it only past
+cues that overlap the start, or begin within half a second after it, still
+agreed with TheIntroDB less often than the unrefined start, so
+`chromaprint:v4` no longer uses subtitles, and re-analysis replaces
+`chromaprint:dialogue:v4` markers under the same-version rule in
+`markers.CanWriteMarkerUpdate`.
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
@@ -567,3 +575,18 @@ the answer. Report the share of files whose start and end both fall within one
 and three seconds of the chapter bounds, and the median and 90th percentile
 error per boundary. Evaluate a matcher change this way before changing
 constants.
+
+TheIntroDB's markers are a second reference. Look up a sample of episodes with
+the plugin's own client, so the request matches what the server sends, and
+compare them with a replay over cached fingerprints rather than stored
+markers, which a provider marker replaces. Count only answers for a release
+within two seconds of the file's duration, since other releases shift the
+timings, and report entries with a confidence of at least 0.5 and two or more
+submissions apart: single submissions are often wrong, and TheIntroDB credits
+include anime openings, which `CheckCreditsPlacement` rejects. On 162 such
+entries, almost all anime with chapter-snapped starts, intros without subtitle
+refinement had both boundaries within three seconds for 93 percent of files.
+Plex's own markers for the same media files are a third reference, with
+different coverage: on 13,211
+replayed files from a mostly non-anime library, 69 percent were within three
+seconds and 90 percent within five; Plex intros end about 1.7 seconds earlier.
