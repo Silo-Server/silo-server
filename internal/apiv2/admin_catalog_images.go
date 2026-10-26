@@ -44,7 +44,7 @@ type AdminImageApplyInput struct {
 }
 type AdminImageUploadForm struct {
 	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster only."`
-	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp" required:"true" doc:"The image: JPEG, PNG or WebP, at most 10 MiB."`
+	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp,application/octet-stream" required:"true" doc:"The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when the image is."`
 }
 type AdminImageUploadInput struct {
 	ID      string `path:"id" minLength:"1" maxLength:"512"`
@@ -168,6 +168,7 @@ func registerAdminCatalogImages(reg *Registry) {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: "an image file is required"})
 		}
+		defer func() { _ = form.Image.Close() }()
 		tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
 		if form.Image.Size > metadata.MaxUploadedImageBytes {
 			return nil, tooLarge

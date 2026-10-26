@@ -137,7 +137,9 @@ export default function ImageSelectorTab({
     // Clear the input so choosing the same file again uploads it again.
     event.target.value = "";
     if (!file) return;
-    if (!UPLOAD_TYPES.includes(file.type)) {
+    // A browser that cannot name the type leaves it empty; the server checks
+    // those bytes itself.
+    if (file.type && !UPLOAD_TYPES.includes(file.type)) {
       toast.error("Choose a JPEG, PNG or WebP image");
       return;
     }

@@ -168,6 +168,19 @@ describe("ImageSelectorTab", () => {
     expect(onImageApplied).toHaveBeenCalledOnce();
   });
 
+  it("uploads a file whose type the browser cannot name, for the server to check", () => {
+    noImages();
+    const mutate = vi.fn();
+    mocks.useUploadItemImage.mockReturnValue({ mutate, isPending: false });
+
+    render(<ImageSelectorTab item={item("movie")} enabled />);
+    const file = new File(["jpeg"], "poster", { type: "" });
+    chooseFile(file);
+
+    expect(mutate).toHaveBeenCalledWith(expect.objectContaining({ file }), expect.any(Object));
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["a format the server does not take", new File(["gif"], "poster.gif", { type: "image/gif" })],
     [

@@ -186,20 +186,20 @@ func TestAdminImageUpload(t *testing.T) {
 	if p := requireProblem(t, post(body, ct, adminToken), TypeValidationFailed); len(p.Errors) == 0 || p.Errors[0].Location != "body.type" {
 		t.Fatalf("errors = %+v, want body.type", p.Errors)
 	}
-	for name, form := range map[string][2]string{
-		"no image": func() [2]string { b, c := itemImageForm(t, "poster", "", -1); return [2]string{b, c} }(),
-		"gif part": func() [2]string { b, c := itemImageForm(t, "poster", "image/gif", 16); return [2]string{b, c} }(),
-	} {
-		requireProblem(t, post(form[0], form[1], adminToken), TypeValidationFailed)
-		if f.calls != 1 {
-			t.Fatalf("%s reached the service", name)
-		}
-	}
+	body, ct = itemImageForm(t, "poster", "", -1)
+	requireProblem(t, post(body, ct, adminToken), TypeValidationFailed)
 	body, ct = itemImageForm(t, "backdrop", "image/jpeg", metadata.MaxUploadedImageBytes+1)
 	requireProblem(t, post(body, ct, adminToken), TypePayloadTooLarge)
 	requireProblem(t, do(t, h, http.MethodPost, path, `{"type":"poster"}`, bearer(adminToken)), TypeUnsupportedMediaType)
 	if f.calls != 1 {
 		t.Fatalf("service saw %d calls, want the one accepted upload", f.calls)
+	}
+
+	// A browser that cannot name the file's type sends it as
+	// application/octet-stream; the service checks its bytes instead.
+	body, ct = itemImageForm(t, "poster", "application/octet-stream", 16)
+	if rec := post(body, ct, adminToken); rec.Code != http.StatusOK || f.calls != 2 || f.uploadType != "poster" {
+		t.Fatalf("untyped part %d, service calls %d", rec.Code, f.calls)
 	}
 
 	body, ct = itemImageForm(t, "poster", "image/webp", 16)

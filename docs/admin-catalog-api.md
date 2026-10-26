@@ -597,7 +597,9 @@ the migration inventory.
 `type` (`poster`, `backdrop` or `logo`) and `image`, a JPEG, PNG or WebP file
 of at most 10 MiB. Movies and series take all three types and seasons take a
 poster; episodes and other item types return `422`. The bytes decide the
-format, not the part's declared type: anything else returns `422`, a larger
+format, not the part's declared type, so a part sent as
+`application/octet-stream` is accepted when the image is. Anything else
+returns `422`, a larger
 file `413`, and a server without artwork storage `503`. The image is stored as
 the item's local artwork and published like an applied image, with the same
 images lock, source record (`upload://` and the image's SHA-256), orphan
