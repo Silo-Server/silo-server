@@ -213,7 +213,7 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 		if len(sourceEpisodeIDs) > 0 {
 			if _, err := tx.Exec(ctx, `
 				DELETE FROM episode_libraries el
-				WHERE el.episode_id = ANY($1::text[])
+				WHERE el.episode_id IN `+catalog.SpanReachSQL("$1::text[]")+`
 				  AND `+catalog.NoServingEpisodeFileSQL+`
 			`, sourceEpisodeIDs); err != nil {
 				return nil, fmt.Errorf("filesplit: removing stale source episode library membership: %w", err)

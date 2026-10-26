@@ -3944,7 +3944,7 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM episode_libraries el
 			WHERE el.media_folder_id = $1
-			  AND el.episode_id = ANY($2::text[])
+			  AND el.episode_id IN `+catalog.SpanReachSQL("$2::text[]")+`
 			  AND `+catalog.NoServingEpisodeFileSQL+`
 		`, folderID, oldEpisodeIDs); err != nil {
 			return 0, fmt.Errorf("deleting stale episode library links by path prefix: %w", err)
@@ -4013,7 +4013,7 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM episode_libraries el
 			WHERE el.media_folder_id = $1
-			  AND el.episode_id = $2
+			  AND el.episode_id IN `+catalog.SpanReachSQL("ARRAY[$2]::text[]")+`
 			  AND `+catalog.NoServingEpisodeFileSQL+`
 		`, folderID, *oldEpisodeID); err != nil {
 			return fmt.Errorf("deleting old episode library link: %w", err)
@@ -4266,11 +4266,12 @@ func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episode
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (served.episode_id) served.episode_id, mf.duration
-		FROM (`+catalog.ServedEpisodeFilesSQL+`) served(episode_id, file_id)
-		JOIN media_files mf ON mf.id = served.file_id
-		WHERE mf.duration > 0
-		ORDER BY served.episode_id, mf.id ASC`, episodeIDs)
+		SELECT DISTINCT ON (episode_id) episode_id, duration
+		FROM media_files
+		WHERE episode_id = ANY($1)
+		  AND missing_since IS NULL
+		  AND duration > 0
+		ORDER BY episode_id, id ASC`, episodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("querying first durations by episode ids: %w", err)
 	}

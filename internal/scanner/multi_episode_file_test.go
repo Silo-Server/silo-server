@@ -97,7 +97,8 @@ func TestMultiEpisodeFileServesSpannedEpisodesDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE media_files SET missing_since = NOW() WHERE id = $1`, file.ID); err != nil {
 		t.Fatalf("mark file missing: %v", err)
 	}
-	if _, err := memberships.RemoveStaleFolderMemberships(ctx, folderID); err != nil {
+	// A scoped scan names the file's own episode; the spanned one goes too.
+	if _, err := memberships.RemoveStaleEpisodeMemberships(ctx, folderID, episodeIDs[:1]); err != nil {
 		t.Fatalf("remove stale memberships: %v", err)
 	}
 	assertEpisodeMemberships(t, ctx, pool, folderID, nil)

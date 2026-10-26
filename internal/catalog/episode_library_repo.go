@@ -130,7 +130,7 @@ func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int,
 	scope := "el.media_folder_id = $1"
 	args := []any{folderID}
 	if episodeIDs != nil {
-		scope += " AND el.episode_id = ANY($2::text[])"
+		scope += " AND el.episode_id IN " + SpanReachSQL("$2::text[]")
 		args = append(args, episodeIDs)
 	}
 	var staleEpisodeIDs, staleSeriesIDs []string

@@ -13,30 +13,38 @@ import (
 // These statements give such an episode the folder membership and the file a
 // direct link would.
 
+// MaxEpisodeSpan bounds how many episodes past its first one a multi-episode
+// file serves, so a lookup by episode searches only a few earlier episodes.
+// Watch history import expands a multi-episode play over the same bound.
+const MaxEpisodeSpan = 10
+
+// spannedEpisodeJoinSQL joins episodes "covered" to the present multi-episode
+// files "mf" spanning it, linked to an earlier episode "first" of its season.
+var spannedEpisodeJoinSQL = fmt.Sprintf(`
+	JOIN episodes first ON first.series_id = covered.series_id
+	     AND first.season_number = covered.season_number
+	     AND first.episode_number BETWEEN covered.episode_number - %d AND covered.episode_number - 1
+	JOIN media_files mf ON mf.episode_id = first.content_id
+	     AND mf.missing_since IS NULL
+	     AND mf.multi_episode_end > mf.multi_episode_start
+	     AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end`, MaxEpisodeSpan)
+
 // ServedEpisodeFilesSQL selects (episode_id, media_file_id) for every present
 // file serving an episode in $1::text[]: a file linked to it, or a
-// multi-episode file linked to an earlier episode of its season whose range
-// spans it.
-const ServedEpisodeFilesSQL = `
+// multi-episode file spanning it.
+var ServedEpisodeFilesSQL = `
 	SELECT mf.episode_id, mf.id
 	FROM media_files mf
 	WHERE mf.episode_id = ANY($1::text[])
 	  AND mf.missing_since IS NULL
 	UNION
 	SELECT covered.content_id, mf.id
-	FROM episodes covered
-	JOIN episodes first ON first.series_id = covered.series_id
-	     AND first.season_number = covered.season_number
-	     AND first.episode_number < covered.episode_number
-	JOIN media_files mf ON mf.episode_id = first.content_id
-	     AND mf.missing_since IS NULL
-	     AND mf.multi_episode_end > mf.multi_episode_start
-	     AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end
+	FROM episodes covered` + spannedEpisodeJoinSQL + `
 	WHERE covered.content_id = ANY($1::text[])`
 
 // NoServingEpisodeFileSQL holds for a membership el whose episode has no
 // present file in its folder, linked or spanning it.
-const NoServingEpisodeFileSQL = `NOT EXISTS (
+var NoServingEpisodeFileSQL = `NOT EXISTS (
 		SELECT 1
 		FROM media_files mf
 		WHERE mf.media_folder_id = el.media_folder_id
@@ -45,17 +53,37 @@ const NoServingEpisodeFileSQL = `NOT EXISTS (
 	)
 	AND NOT EXISTS (
 		SELECT 1
-		FROM episodes covered
-		JOIN episodes first ON first.series_id = covered.series_id
-		     AND first.season_number = covered.season_number
-		     AND first.episode_number < covered.episode_number
-		JOIN media_files mf ON mf.episode_id = first.content_id
-		     AND mf.media_folder_id = el.media_folder_id
-		     AND mf.missing_since IS NULL
-		     AND mf.multi_episode_end > mf.multi_episode_start
-		     AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
 		WHERE covered.content_id = el.episode_id
+		  AND mf.media_folder_id = el.media_folder_id
 	)`
+
+// EpisodeHasServingFileSQL holds for an episode e with a present file, linked
+// or spanning it.
+var EpisodeHasServingFileSQL = `(EXISTS (
+		SELECT 1 FROM media_files mf
+		WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL
+	) OR EXISTS (
+		SELECT 1
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
+		WHERE covered.content_id = e.content_id
+	))`
+
+// SpanReachSQL selects the episodes in the text[] parameter param and the ones
+// a multi-episode file linked to one of them could span. Membership cleanup
+// after a file changes checks them all.
+func SpanReachSQL(param string) string {
+	return fmt.Sprintf(`(
+		SELECT later.content_id
+		FROM episodes listed
+		JOIN episodes later ON later.series_id = listed.series_id
+		     AND later.season_number = listed.season_number
+		     AND later.episode_number BETWEEN listed.episode_number AND listed.episode_number + %d
+		WHERE listed.content_id = ANY(%s)
+		UNION
+		SELECT unnest(%s)
+	)`, MaxEpisodeSpan, param, param)
+}
 
 // InsertSpannedEpisodeMemberships adds the missing memberships of episodes
 // spanned by present multi-episode files, after each file's first episode, and
@@ -73,15 +101,8 @@ func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredica
 			       mf.media_folder_id,
 			       MIN(mf.created_at),
 			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]
-			FROM media_files mf
-			JOIN episodes first ON first.content_id = mf.episode_id
-			JOIN episodes covered ON covered.series_id = first.series_id
-			     AND covered.season_number = first.season_number
-			     AND covered.episode_number > first.episode_number
-			     AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end
+			FROM episodes covered`+spannedEpisodeJoinSQL+`
 			WHERE `+filePredicate+`
-			  AND mf.missing_since IS NULL
-			  AND mf.multi_episode_end > mf.multi_episode_start
 			GROUP BY covered.content_id, mf.media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 			RETURNING episode_id

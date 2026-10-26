@@ -827,13 +827,23 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
+	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
 		files := filesByEpisode[ep.ContentID]
 		if len(files) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
+		file := pref.pick(ep.ContentID, allowedCandidates(files, filter))
+		// A multi-episode file serves each episode it spans; download it once,
+		// for the first of them.
+		if file != nil && file.MultiEpisodeEnd > file.MultiEpisodeStart {
+			if queued[file.ID] {
+				continue
+			}
+			queued[file.ID] = true
+		}
+		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: ep.ContentID})
 	}
 	return items, skipped, nil
 }
