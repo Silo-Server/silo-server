@@ -29,6 +29,10 @@ type MatroskaTrack struct {
 	Number  uint64
 	Type    uint64
 	CodecID string
+	// LanguageBCP47 is the entry's BCP 47 language tag, such as "pt-BR".
+	// Matroska makes it override the legacy ISO 639-2 Language element,
+	// which is all FFprobe reports, so a region or script is lost without it.
+	LanguageBCP47 string
 }
 
 const (
@@ -44,6 +48,7 @@ const (
 	mkvIDTrackNumber   = 0xD7
 	mkvIDTrackType     = 0x83
 	mkvIDCodecID       = 0x86
+	mkvIDLanguageBCP47 = 0x22B59D
 	mkvIDCluster       = 0x1F43B675
 	ebmlUnknownSize    = -1
 	maxEBMLHeaderSize  = 4 << 10
@@ -184,6 +189,8 @@ func readMatroskaTracksElement(r io.ReaderAt, off, size int64) ([]MatroskaTrack,
 				track.Type = ebmlUint(v)
 			case mkvIDCodecID:
 				track.CodecID = ebmlString(v)
+			case mkvIDLanguageBCP47:
+				track.LanguageBCP47 = ebmlString(v)
 			}
 		})
 		tracks = append(tracks, track)

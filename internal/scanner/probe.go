@@ -163,7 +163,7 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	}
 
 	probe := convertProbeData(&raw)
-	applyMatroskaSubtitleTrackIDs(ctx, filePath, probe)
+	applyMatroskaSubtitleTracks(ctx, filePath, probe)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
 			// A failed or empty packet scan must not discard the codec and

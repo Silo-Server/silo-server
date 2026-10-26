@@ -31,11 +31,24 @@ func ebmlUintElement(id, v uint64) []byte {
 }
 
 func trackEntry(number, kind uint64, codec string) []byte {
-	return ebmlElement(mkvIDTrackEntry,
+	return languageTrackEntry(number, kind, codec, "")
+}
+
+// languageTrackEntry writes the legacy ISO 639-2 Language a muxer such as
+// mkvmerge pairs with LanguageBCP47, so the test shows only the latter is read.
+func languageTrackEntry(number, kind uint64, codec, bcp47 string) []byte {
+	children := [][]byte{
 		ebmlUintElement(mkvIDTrackNumber, number),
 		ebmlUintElement(mkvIDTrackType, kind),
 		ebmlElement(mkvIDCodecID, []byte(codec)),
-	)
+	}
+	if bcp47 != "" {
+		children = append(children,
+			ebmlElement(0x22B59C, []byte("por")), // Language
+			ebmlElement(0x22B59D, []byte(bcp47)), // LanguageBCP47
+		)
+	}
+	return ebmlElement(mkvIDTrackEntry, children...)
 }
 
 func ebmlHeader(docType string) []byte {
@@ -46,12 +59,13 @@ var testTracks = []MatroskaTrack{
 	{Number: 1, Type: MatroskaTrackTypeVideo, CodecID: "V_MPEG4/ISO/AVC"},
 	{Number: 4, Type: MatroskaTrackTypeAudio, CodecID: "A_EAC3"},
 	{Number: 5, Type: MatroskaTrackTypeSubtitle, CodecID: "S_TEXT/UTF8"},
+	{Number: 6, Type: MatroskaTrackTypeSubtitle, CodecID: "S_TEXT/UTF8", LanguageBCP47: "pt-BR"},
 }
 
 func testTracksElement() []byte {
 	var entries [][]byte
 	for _, track := range testTracks {
-		entries = append(entries, trackEntry(track.Number, track.Type, track.CodecID))
+		entries = append(entries, languageTrackEntry(track.Number, track.Type, track.CodecID, track.LanguageBCP47))
 	}
 	return ebmlElement(mkvIDTracks, entries...)
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 )
 
@@ -102,17 +103,17 @@ func ffmpegCreatesMatroskaStream(track mediaprobe.MatroskaTrack) bool {
 	}
 }
 
-// matroskaSubtitleTrackIDs returns the canonical TrackNumber of each probed
-// subtitle stream, aligned with subtitles. It returns an error when the
-// Tracks element and the probed layout disagree anywhere, and an empty ID for
-// a track whose codec it cannot corroborate.
+// matroskaSubtitleEntries returns the TrackEntry each probed subtitle stream
+// came from, aligned with subtitles. It returns an error when the Tracks
+// element and the probed layout disagree anywhere, and a nil entry for a
+// track whose codec it cannot corroborate.
 //
 // The probed layout is the number of playable video and audio streams plus
 // the subtitle streams. FFmpeg numbers streams in TrackEntry order, so the
 // match holds only when the entries FFmpeg turns into streams have exactly
 // those counts per type and every subtitle stream index lands on a subtitle
 // entry with the same codec.
-func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, audioStreams int, subtitles []matroskaSubtitleStream) ([]string, error) {
+func matroskaSubtitleEntries(tracks []mediaprobe.MatroskaTrack, videoStreams, audioStreams int, subtitles []matroskaSubtitleStream) ([]*mediaprobe.MatroskaTrack, error) {
 	numbers := make(map[uint64]struct{}, len(tracks))
 	var streams []mediaprobe.MatroskaTrack
 	video, audio, subtitle := 0, 0, 0
@@ -146,7 +147,7 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 			errMatroskaLayoutMismatch, video, audio, subtitle, videoStreams, audioStreams, len(subtitles))
 	}
 
-	ids := make([]string, len(subtitles))
+	entries := make([]*mediaprobe.MatroskaTrack, len(subtitles))
 	seen := make(map[int]struct{}, len(subtitles))
 	for i, sub := range subtitles {
 		if sub.Index < 0 || sub.Index >= len(streams) {
@@ -156,7 +157,7 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 			return nil, fmt.Errorf("%w: duplicate subtitle stream %d", errMatroskaLayoutMismatch, sub.Index)
 		}
 		seen[sub.Index] = struct{}{}
-		track := streams[sub.Index]
+		track := &streams[sub.Index]
 		if track.Type != mediaprobe.MatroskaTrackTypeSubtitle {
 			return nil, fmt.Errorf("%w: stream %d is track type %d", errMatroskaLayoutMismatch, sub.Index, track.Type)
 		}
@@ -168,12 +169,35 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 			return nil, fmt.Errorf("%w: stream %d is %q, track %d is %q",
 				errMatroskaLayoutMismatch, sub.Index, sub.Codec, track.Number, track.CodecID)
 		}
-		if unresolvableMatroskaCodecIDs[track.CodecID] {
-			continue
-		}
-		ids[i] = strconv.FormatUint(track.Number, 10)
+		entries[i] = track
+	}
+	return entries, nil
+}
+
+// matroskaSubtitleTrackIDs returns the canonical TrackNumber of each probed
+// subtitle stream, aligned with subtitles, with the error and empty IDs of
+// matroskaSubtitleEntries. A legacy codec ID that players cannot resolve also
+// leaves the ID empty.
+func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, audioStreams int, subtitles []matroskaSubtitleStream) ([]string, error) {
+	entries, err := matroskaSubtitleEntries(tracks, videoStreams, audioStreams, subtitles)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(entries))
+	for i, entry := range entries {
+		ids[i] = matroskaContainerTrackID(entry)
 	}
 	return ids, nil
+}
+
+// matroskaContainerTrackID is the container track ID recorded for a matched
+// entry: its TrackNumber, or empty for no match or a legacy codec ID that
+// players cannot resolve.
+func matroskaContainerTrackID(entry *mediaprobe.MatroskaTrack) string {
+	if entry == nil || unresolvableMatroskaCodecIDs[entry.CodecID] {
+		return ""
+	}
+	return strconv.FormatUint(entry.Number, 10)
 }
 
 // matroskaTracksReadTimeout bounds one Tracks read. The read is a few small
@@ -252,11 +276,15 @@ func readMatroskaTracksFile(path string) ([]mediaprobe.MatroskaTrack, os.FileInf
 	return tracks, info, err
 }
 
-// applyMatroskaSubtitleTrackIDs fills the container track ID of probed
-// Matroska subtitle tracks that FFprobe left without one. Failure is not a
-// probe failure: the tracks keep an empty ID and play through extraction.
-func applyMatroskaSubtitleTrackIDs(ctx context.Context, filePath string, probe *ProbeData) {
-	if probe == nil || probe.Container != containerMKV || !subtitleTracksMissingContainerID(probe.SubtitleTracks) {
+// applyMatroskaSubtitleTracks fills what FFprobe leaves out of probed
+// Matroska subtitle tracks: the container track ID, and the region or script
+// of the language. FFprobe reports only the legacy ISO 639-2 Language
+// element, so two tracks muxed as pt-BR and pt-PT both probe as "por"; the
+// entry's LanguageBCP47 overrides it, as the Matroska specification says.
+// Failure is not a probe failure: the tracks keep FFprobe's values and play
+// through extraction.
+func applyMatroskaSubtitleTracks(ctx context.Context, filePath string, probe *ProbeData) {
+	if probe == nil || probe.Container != containerMKV || len(probe.SubtitleTracks) == 0 {
 		return
 	}
 	subtitles := make([]matroskaSubtitleStream, len(probe.SubtitleTracks))
@@ -264,27 +292,25 @@ func applyMatroskaSubtitleTrackIDs(ctx context.Context, filePath string, probe *
 		subtitles[i] = matroskaSubtitleStream{Index: track.Index, Codec: track.Codec}
 	}
 	tracks, _, err := readMatroskaTracks(ctx, filePath)
-	var ids []string
+	var entries []*mediaprobe.MatroskaTrack
 	if err == nil {
-		ids, err = matroskaSubtitleTrackIDs(tracks, len(probe.VideoTracks), len(probe.AudioTracks), subtitles)
+		entries, err = matroskaSubtitleEntries(tracks, len(probe.VideoTracks), len(probe.AudioTracks), subtitles)
 	}
 	if err != nil {
-		slog.DebugContext(ctx, "scanner: Matroska subtitle track numbers not recorded",
+		slog.DebugContext(ctx, "scanner: Matroska subtitle tracks not read",
 			"component", "scanner", "path", filePath, "error", err)
 		return
 	}
-	for i := range probe.SubtitleTracks {
-		if probe.SubtitleTracks[i].ContainerTrackID == "" {
-			probe.SubtitleTracks[i].ContainerTrackID = ids[i]
+	for i, entry := range entries {
+		if entry == nil {
+			continue
 		}
-	}
-}
-
-func subtitleTracksMissingContainerID(tracks []SubtitleTrackInfo) bool {
-	for _, track := range tracks {
+		track := &probe.SubtitleTracks[i]
 		if track.ContainerTrackID == "" {
-			return true
+			track.ContainerTrackID = matroskaContainerTrackID(entry)
+		}
+		if language := lang.CanonicalTag(entry.LanguageBCP47); language != "" {
+			track.Language = language
 		}
 	}
-	return false
 }

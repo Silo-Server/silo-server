@@ -171,26 +171,42 @@ func TestMatroskaSubtitleTrackIDsRejectsUncertainLayouts(t *testing.T) {
 	}
 }
 
-func TestProbeFileRecordsMatroskaSubtitleTrackNumbers(t *testing.T) {
+func TestProbeFileRecordsMatroskaSubtitleTracks(t *testing.T) {
 	ffprobe, err := exec.LookPath("ffprobe")
 	if err != nil {
 		t.Skip("ffprobe not installed")
 	}
-	probe, err := ProbeFile(context.Background(), ffprobe, "testdata/subtitles.mkv")
-	if err != nil {
-		t.Fatal(err)
+	type subtitle struct {
+		index    int
+		codec    string
+		id       string
+		language string
 	}
-	if probe.Container != "mkv" || len(probe.SubtitleTracks) != 2 {
-		t.Fatalf("container %q with subtitle tracks %+v", probe.Container, probe.SubtitleTracks)
+	tests := []struct {
+		fixture string
+		want    []subtitle
+	}{
+		{"testdata/subtitles.mkv", []subtitle{{2, "subrip", "3", "en"}, {3, "ass", "4", "ja"}}},
+		// Written like mkvmerge: legacy Language "por", which is all FFprobe
+		// reports, and LanguageBCP47 "pt-BR" / "pt-PT".
+		{"testdata/subtitles-bcp47.mkv", []subtitle{{1, "subrip", "2", "pt-BR"}, {2, "subrip", "3", "pt-PT"}}},
 	}
-	for i, want := range []struct {
-		index int
-		codec string
-		id    string
-	}{{2, "subrip", "3"}, {3, "ass", "4"}} {
-		got := probe.SubtitleTracks[i]
-		if got.Index != want.index || got.Codec != want.codec || got.ContainerTrackID != want.id {
-			t.Fatalf("subtitle %d = index %d codec %q id %q, want %+v", i, got.Index, got.Codec, got.ContainerTrackID, want)
-		}
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			probe, err := ProbeFile(context.Background(), ffprobe, tt.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if probe.Container != "mkv" || len(probe.SubtitleTracks) != len(tt.want) {
+				t.Fatalf("container %q with subtitle tracks %+v", probe.Container, probe.SubtitleTracks)
+			}
+			for i, want := range tt.want {
+				got := probe.SubtitleTracks[i]
+				if got.Index != want.index || got.Codec != want.codec || got.ContainerTrackID != want.id || got.Language != want.language {
+					t.Fatalf("subtitle %d = index %d codec %q id %q language %q, want %+v",
+						i, got.Index, got.Codec, got.ContainerTrackID, got.Language, want)
+				}
+			}
+		})
 	}
 }
