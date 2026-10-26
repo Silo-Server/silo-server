@@ -272,7 +272,7 @@ func decorateTranscribeError(err error) error {
 	if !likelyUnsupported {
 		return err
 	}
-	return fmt.Errorf("%w — the configured endpoint likely does not support audio transcription; "+
-		"set a Whisper-compatible Transcription base URL (and model) under Admin Settings → AI Services "+
-		"(e.g. a self-hosted faster-whisper/speaches server, api.groq.com/openai with whisper-large-v3-turbo, or api.openai.com with whisper-1)", err)
+	return fmt.Errorf("%w — the selected provider likely does not support audio transcription; "+
+		"choose a Whisper-compatible speech-to-text provider and model under Admin Settings → AI Services "+
+		"(e.g. a self-hosted faster-whisper/speaches server, Groq with whisper-large-v3-turbo, or OpenAI with whisper-1)", err)
 }

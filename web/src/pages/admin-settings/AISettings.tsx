@@ -13,7 +13,11 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
-import { useAIProviders, type AIProvider } from "@/hooks/queries/admin/aiProviders";
+import {
+  useAIProviders,
+  useRefreshAIProviders,
+  type AIProvider,
+} from "@/hooks/queries/admin/aiProviders";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -517,6 +521,7 @@ export default function AISettings() {
   const capabilities = useAdminAICapabilities(capabilityModel);
   const chatGPTSupported = capabilities.data?.chatgpt_sign_in === true;
   const providerList = useAIProviders();
+  const refreshProviders = useRefreshAIProviders();
   const connection = useChatGPTStatus(false, authMode === "chatgpt" || chatGPTSupported);
   const authenticatedAccount = connection.data?.accounts.find(
     (account) =>
@@ -711,6 +716,8 @@ export default function AISettings() {
       return;
     }
     await form.save();
+    // A job's provider choice changes which providers report it in use.
+    void refreshProviders();
   }
 
   function discard() {

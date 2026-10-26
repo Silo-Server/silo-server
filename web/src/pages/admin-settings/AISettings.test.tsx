@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   refetchChatGPTStatus: vi.fn(),
   refetchChatGPTModels: vi.fn(),
+  refreshProviders: vi.fn(),
 }));
 
 const values: Record<string, string> = {};
@@ -147,6 +148,7 @@ vi.mock("@/hooks/queries/admin/chatgpt", () => ({
 vi.mock("@/hooks/queries/admin/aiProviders", () => ({
   useAIProviders: () => ({ data: { providers, types: [] }, isLoading: false }),
   useAIProviderModels: () => ({ data: { success: true, message: "", models: [] } }),
+  useRefreshAIProviders: () => mocks.refreshProviders,
 }));
 vi.mock("./ChatGPTConnection", () => ({
   ChatGPTConnection: () => <div>ChatGPT connection controls</div>,

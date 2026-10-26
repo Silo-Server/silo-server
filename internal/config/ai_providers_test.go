@@ -95,6 +95,11 @@ func TestPlanAIProviderConversionKeepsEachJobOnItsEndpoint(t *testing.T) {
 			providers: 1,
 		},
 		{
+			// The client appends its path after the query, so this never worked.
+			name:   "endpoint with a query string",
+			stored: map[string]string{"ai.base_url": "https://res.openai.azure.com/openai?api-version=2024-10-21", "ai.api_key": "az"},
+		},
+		{
 			name:   "default endpoint saved without a key never worked",
 			stored: map[string]string{"ai.base_url": "https://api.openai.com"},
 		},

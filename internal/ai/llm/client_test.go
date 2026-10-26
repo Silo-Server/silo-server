@@ -241,7 +241,7 @@ func TestTranscribeRequiresConfig(t *testing.T) {
 
 func TestTranscribeChatOnlyGatewayGetsConfigHint(t *testing.T) {
 	_, err := transcribeStub(t, http.StatusBadRequest, `{"error":{"message":"invalid content-type: multipart/form-data","code":400}}`)
-	if err == nil || !strings.Contains(err.Error(), "Whisper-compatible Transcription base URL") {
+	if err == nil || !strings.Contains(err.Error(), "Whisper-compatible speech-to-text provider") {
 		t.Fatalf("err = %v, want configuration hint", err)
 	}
 }

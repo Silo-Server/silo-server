@@ -19,6 +19,15 @@ export function useAIProviders() {
   });
 }
 
+/**
+ * Refetches the provider list, whose `used_by` follows the job settings: call
+ * it after a save that can change which provider a job uses.
+ */
+export function useRefreshAIProviders() {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: providersKey });
+}
+
 /** The models a stored provider lists, fetched when a job selects it. */
 export function useAIProviderModels(id: string) {
   return useQuery({

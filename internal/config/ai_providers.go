@@ -484,13 +484,23 @@ func adoptAIProvider(r *AIProviderRegistry, baseURL, apiKey string, capability A
 		}
 		capabilities = []AICapability{capability}
 	}
-	provider := AIProvider{
+	// Room for the " (n)" suffix uniqueAIProviderName may add.
+	if runes := []rune(name); len(runes) > maxAIProviderNameRunes-5 {
+		name = string(runes[:maxAIProviderNameRunes-5])
+	}
+	provider, err := NormalizeAIProvider(AIProvider{
 		ID:           NewAIProviderID(providerType),
 		Type:         providerType,
 		Name:         uniqueAIProviderName(r, name),
 		BaseURL:      providerBaseURL,
 		APIKey:       apiKey,
 		Capabilities: capabilities,
+	})
+	if err != nil {
+		// An entry that fails validation would block every later provider
+		// edit. An address it rejects (a query string, credentials in the URL)
+		// never worked with the AI clients, so the job stays unconfigured.
+		return ""
 	}
 	r.Providers = append(r.Providers, provider)
 	return provider.ID
