@@ -911,15 +911,15 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 	if err != nil {
 		return nil, err
 	}
-	binaryPath, err := s.localInstallPath(installation)
-	if err != nil {
-		return nil, err
-	}
 	client, err := s.host.Client(installationID)
 	if err == nil {
 		cachedManifest := client.Manifest()
 		if !allowResident && isResidentManifest(cachedManifest) {
 			return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
+		}
+		binaryPath, pathErr := s.localInstallPath(installation)
+		if pathErr != nil {
+			return nil, pathErr
 		}
 		installedManifest, manifestErr := LoadManifestFile(InstalledManifestPath(binaryPath))
 		if manifestErr != nil {

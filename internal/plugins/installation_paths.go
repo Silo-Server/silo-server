@@ -2,12 +2,18 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ErrInvalidPluginIdentity marks a plugin ID or version that cannot name a
+// plugin directory. Admission refuses such packages; a row admitted before
+// that check fails every load with it, which list reads tolerate per row.
+var ErrInvalidPluginIdentity = errors.New("plugin identity is not a directory component")
 
 // pluginIdentitySegments preserves the host's existing mapping. Empty and dot
 // components cannot name a plugin directory, regardless of the configured root.
@@ -26,7 +32,7 @@ func pluginIdentitySegments(pluginID, version string) (string, string, error) {
 func pluginPathSegment(value, label string) (string, error) {
 	segment := sanitizeFilesystemSegment(value)
 	if segment == "" || segment == "." || segment == ".." {
-		return "", fmt.Errorf("%s %q is not a directory component", label, value)
+		return "", fmt.Errorf("%s %q: %w", label, value, ErrInvalidPluginIdentity)
 	}
 	return segment, nil
 }

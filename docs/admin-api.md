@@ -3179,9 +3179,10 @@ restart, an update or a configuration change clears that failure.
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
 an enabled plugin is restarted. Row delete and file removal are not one transaction and a
-repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A row whose stored ID or
-version would be refused today keeps its files on disk; the row is still removed. Success
-is 204.
+repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A row
+admitted before the host refused IDs and versions that map to an empty, `.` or `..` directory
+name never loads: the installation list shows it without manifest fields, the user settings
+list omits it, and deleting it removes the row but leaves its files on disk. Success is 204.
 
 `POST /api/v2/admin/plugins/uploads` installs one uploaded archive from the multipart
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at

@@ -348,6 +348,12 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
+# the row and leaves its files, which can sit above the plugin root, and the
+# installation and user settings lists still answer with the row present.
+./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
