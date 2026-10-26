@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 )
 
 // AI provider registry. An administrator connects each AI provider once, in
@@ -543,7 +545,7 @@ func sameRequestEndpoint(a, b string, capability AICapability) bool {
 		return a == b
 	}
 	withVersion := func(base string) string {
-		if strings.Contains(base, "/v1") {
+		if llm.HasAPIVersion(base) {
 			return base
 		}
 		return base + "/v1"

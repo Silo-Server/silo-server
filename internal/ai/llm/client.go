@@ -14,6 +14,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -352,10 +354,31 @@ func isExhaustedQuota(body []byte) bool {
 // (https://api.openai.com) and prefixed hosts (https://api.groq.com/openai).
 func endpointURL(base, path string) string {
 	base = strings.TrimRight(base, "/")
-	if strings.Contains(base, "/v1") {
+	if HasAPIVersion(base) {
 		return base + "/" + path
 	}
 	return base + "/v1/" + path
+}
+
+// apiVersionSegment matches a path segment that names an API version: v1,
+// v2, v1beta.
+var apiVersionSegment = regexp.MustCompile(`^v[0-9]+(?:(?:alpha|beta)[0-9]*)?$`)
+
+// HasAPIVersion reports whether baseURL's path already names an API version,
+// as in https://host/v1 or https://host/v1beta/openai. AI clients add /v1 to
+// a base URL that has none. A host or segment that merely starts with v1,
+// such as v1-embed.internal or /v1-router, is not a version.
+func HasAPIVersion(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if apiVersionSegment.MatchString(segment) {
+			return true
+		}
+	}
+	return false
 }
 
 // Truncate caps a string for inclusion in an error or log line.

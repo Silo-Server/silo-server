@@ -248,12 +248,16 @@ func TestTranscribeChatOnlyGatewayGetsConfigHint(t *testing.T) {
 
 func TestEndpointURLToleratesVersionedBases(t *testing.T) {
 	cases := map[string]string{
-		"https://api.openai.com":              "https://api.openai.com/v1/chat/completions",
-		"https://api.groq.com/openai":         "https://api.groq.com/openai/v1/chat/completions",
-		"https://api.deepinfra.com/v1/openai": "https://api.deepinfra.com/v1/openai/chat/completions",
-		"http://localhost:8969":               "http://localhost:8969/v1/chat/completions",
-		"http://localhost:8969/v1":            "http://localhost:8969/v1/chat/completions",
-		"https://api.openai.com/":             "https://api.openai.com/v1/chat/completions",
+		"https://api.openai.com":                                  "https://api.openai.com/v1/chat/completions",
+		"https://api.groq.com/openai":                             "https://api.groq.com/openai/v1/chat/completions",
+		"https://api.deepinfra.com/v1/openai":                     "https://api.deepinfra.com/v1/openai/chat/completions",
+		"http://localhost:8969":                                   "http://localhost:8969/v1/chat/completions",
+		"http://localhost:8969/v1":                                "http://localhost:8969/v1/chat/completions",
+		"https://api.openai.com/":                                 "https://api.openai.com/v1/chat/completions",
+		"https://generativelanguage.googleapis.com/v1beta/openai": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+		// Only a whole path segment names a version.
+		"http://v1-embed.internal:11434": "http://v1-embed.internal:11434/v1/chat/completions",
+		"https://host/proxy/v1-router":   "https://host/proxy/v1-router/v1/chat/completions",
 	}
 	for base, want := range cases {
 		if got := endpointURL(base, "chat/completions"); got != want {
