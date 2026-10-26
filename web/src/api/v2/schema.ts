@@ -15697,7 +15697,7 @@ export interface components {
     AdminImageUploadForm: {
       /**
        * Format: binary
-       * @description The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when the image is.
+       * @description The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when its bytes are a JPEG, PNG or WebP image.
        */
       image: string;
       /**
