@@ -81,6 +81,11 @@ const KEYS: string[] = Array.from(
 
 /** The text provider select's value for the ChatGPT plan. */
 const CHATGPT_PROVIDER = "chatgpt";
+/**
+ * A provider select's value for no provider. Choosing it releases the
+ * provider, so it can be removed once no job uses it.
+ */
+const NO_PROVIDER = "none";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -294,7 +299,7 @@ function TextModelTile({
       <SettingField
         label="Provider"
         type="select"
-        value={selected || "choose"}
+        value={selected || NO_PROVIDER}
         onChange={onProviderChange}
         description={
           providers.some((candidate) => candidate.capabilities.includes("chat"))
@@ -302,7 +307,7 @@ function TextModelTile({
             : "Add a provider that serves chat under Providers, or use a ChatGPT plan."
         }
         options={[
-          { value: "choose", label: "Choose a provider", disabled: true },
+          { value: NO_PROVIDER, label: "None" },
           ...(chatGPTSupported || chatGPT
             ? [{ value: CHATGPT_PROVIDER, label: "ChatGPT plan", disabled: !chatGPTSupported }]
             : []),
@@ -431,15 +436,15 @@ function SpeechModelTile({
       <SettingField
         label="Provider"
         type="select"
-        value={providerID || "choose"}
-        onChange={(next) => onChange("ai.speech_provider_id", next)}
+        value={providerID || NO_PROVIDER}
+        onChange={(next) => onChange("ai.speech_provider_id", next === NO_PROVIDER ? "" : next)}
         description={
           providers.some((candidate) => candidate.capabilities.includes("speech"))
             ? "A Whisper-compatible endpoint that returns timestamps."
             : "Add a provider that serves speech under Providers. ChatGPT plans do not include it."
         }
         options={[
-          { value: "choose", label: "Choose a provider", disabled: true },
+          { value: NO_PROVIDER, label: "None" },
           ...providerOptions(providers, "speech", providerID),
         ]}
       />
@@ -607,7 +612,7 @@ export default function AISettings() {
       return;
     }
     setValue("ai.auth_mode", "api_key");
-    setValue("ai.text_provider_id", next);
+    setValue("ai.text_provider_id", next === NO_PROVIDER ? "" : next);
   }
 
   // The plan's sign-in lives in the text model tile, the only job it serves.

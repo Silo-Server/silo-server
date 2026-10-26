@@ -397,6 +397,21 @@ describe("AISettings", () => {
     expect(mocks.setValue).toHaveBeenCalledWith("ai.text_provider_id", "router");
   });
 
+  // Releasing a job's provider is how an unused provider becomes removable.
+  it.each([
+    ["Text model", "ai.text_provider_id"],
+    ["Speech-to-text", "ai.speech_provider_id"],
+  ])("clears the %s provider when None is chosen", async (tileName, key) => {
+    const user = userEvent.setup();
+    render(<AISettings />);
+    const tile = await openTile(user, tileName);
+
+    await user.click(within(tile).getByRole("combobox", { name: "Provider" }));
+    await user.click(screen.getByRole("option", { name: "None" }));
+
+    expect(mocks.setValue).toHaveBeenCalledWith(key, "");
+  });
+
   it("blocks turning on a feature whose model cannot serve it", () => {
     // Whitespace leaves the speech model unconfigured.
     values["ai.asr_model"] = " ";
