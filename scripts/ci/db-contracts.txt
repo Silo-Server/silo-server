@@ -215,6 +215,7 @@
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
 ./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
 ./internal/markers TestProviderConfigDefaultSharingDB
+./internal/markers TestProviderConfigEnsureDefaultSharingDB
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
@@ -559,3 +560,7 @@
 # A stored collection's Jellyfin BoxSet page skips members the viewer can't see
 # without shortening the page or shifting later pages.
 ./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB
+
+# A server set up before the setup wizard saved its marker sharing choice keeps
+# sharing by default; a database with no account waits for the wizard.
+./migrations TestMarkersShareByDefaultExistingInstallsMigrationPostgres
