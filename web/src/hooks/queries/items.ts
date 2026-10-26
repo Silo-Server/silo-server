@@ -612,6 +612,13 @@ export function useItemImages(contentId: string | undefined, enabled = true) {
 
 type ApplyImageItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "season_number">;
 
+// A validation problem's first field detail says why an image was refused;
+// its summary only says that it was.
+function imageErrorMessage(err: unknown, fallback: string) {
+  if (err instanceof V2ProblemError) return err.problem.errors?.[0]?.detail ?? err.message;
+  return err instanceof Error ? err.message : fallback;
+}
+
 // Refreshes every view that shows the item's artwork, and the series' views
 // for a season or episode.
 async function invalidateAppliedImage(queryClient: QueryClient, item: ApplyImageItem) {
@@ -658,7 +665,7 @@ export function useApplyItemImage() {
       await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to apply image");
+      toast.error(imageErrorMessage(err, "Failed to apply image"));
     },
   });
 }
@@ -682,7 +689,7 @@ export function useUploadItemImage() {
       await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to upload image");
+      toast.error(imageErrorMessage(err, "Failed to upload image"));
     },
   });
 }

@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
@@ -17,6 +19,24 @@ const (
 	uploadedPosterPath   = "local/series/series/ab12cd34/poster/original.webp"
 	uploadedPosterSource = "upload://sha256:ab12cd34"
 )
+
+// recordingArtworkPublisher records publications and the revisions queued for
+// cleanup, failing every publication when err is set.
+type recordingArtworkPublisher struct {
+	published []catalog.ArtworkSelection
+	queued    []string
+	err       error
+}
+
+func (p *recordingArtworkPublisher) PublishArtworkSelection(_ context.Context, selection catalog.ArtworkSelection) error {
+	p.published = append(p.published, selection)
+	return p.err
+}
+
+func (p *recordingArtworkPublisher) QueueArtworkRevisionGC(_ context.Context, originalPath, _ string, _ time.Time) error {
+	p.queued = append(p.queued, originalPath)
+	return nil
+}
 
 // cardImageResolver resolves every stored path to a display URL that names
 // the path and variant.
@@ -38,7 +58,7 @@ func (r cardImageResolver) ResolveImageURLs(ctx context.Context, paths []string,
 // uploaded poster and a provider backdrop, an audiobook, the series' second
 // season with an uploaded poster, and (through curationImageEpisodes) an
 // episode of the series.
-func newUploadImageHandlerForTest(svc *localImageServiceFake) *AdminImageHandler {
+func newUploadImageHandlerForTest(svc *localImageServiceFake, publisher ...*recordingArtworkPublisher) *AdminImageHandler {
 	items := imageItemLookupFake{
 		"movie": {ContentID: "movie", Type: "movie", TmdbID: "7"},
 		"series": {
@@ -52,40 +72,51 @@ func newUploadImageHandlerForTest(svc *localImageServiceFake) *AdminImageHandler
 		ContentID: "season-2", SeriesID: "series", SeasonNumber: 2,
 		PosterPath: "local/series/series/seasons/2/ef56/poster/original.webp", PosterSourcePath: "upload://sha256:ef56",
 	}}
-	return NewAdminImageHandler(items, seasons, curationImageEpisodes{}, nil, svc, cardImageResolver{}, nil)
+	h := NewAdminImageHandler(items, seasons, curationImageEpisodes{}, nil, svc, cardImageResolver{}, nil)
+	if len(publisher) > 0 {
+		h.detailSvc = publisher[0]
+	}
+	return h
 }
 
 // An upload is cached under the movie or series, scoped to the season for a
-// season poster, before it is published like an applied image. The handler
-// has no catalog here, so publication fails after the cache.
-func TestAdminUploadItemImageCachesForTheTarget(t *testing.T) {
+// season poster, and published to the target with its upload:// source and
+// the images lock. A season's lock goes on its series.
+func TestAdminUploadItemImagePublishesToTheTarget(t *testing.T) {
 	cases := []struct {
-		name, id, imageType string
-		want                metadata.ApplyUploadedItemImageRequest
-		season              int
+		name, id string
+		season   int
+		want     catalog.ArtworkSelection
 	}{
-		{"movie poster", "movie", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "movie", ContentType: "movie", ImageType: metadata.ImagePoster}, -1},
-		{"season poster", "season-2", "poster", metadata.ApplyUploadedItemImageRequest{ContentID: "series", ContentType: "series", ImageType: metadata.ImagePoster}, 2},
+		{"movie poster", "movie", -1, catalog.ArtworkSelection{TargetType: "movie", TargetContentID: "movie", ParentContentID: "movie"}},
+		{"season poster", "season-2", 2, catalog.ArtworkSelection{TargetType: "season", TargetContentID: "season-2", ParentContentID: "series"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &localImageServiceFake{}
-			_, err := newUploadImageHandlerForTest(svc).UploadAdminItemImage(context.Background(), tc.id, tc.imageType, []byte("image-bytes"))
-			if apiErr := requireAPIStatus(t, err, http.StatusInternalServerError); apiErr.Message != "Image cached but failed to update item" {
-				t.Fatalf("message = %q, want the publication failure", apiErr.Message)
+			publisher := &recordingArtworkPublisher{}
+			out, err := newUploadImageHandlerForTest(svc, publisher).UploadAdminItemImage(context.Background(), tc.id, "poster", []byte("image-bytes"))
+			if err != nil {
+				t.Fatalf("UploadAdminItemImage: %v", err)
 			}
 			if len(svc.uploads) != 1 {
 				t.Fatalf("uploads = %d, want 1", len(svc.uploads))
 			}
 			got := svc.uploads[0]
-			if got.ContentID != tc.want.ContentID || got.ContentType != tc.want.ContentType || got.ImageType != tc.want.ImageType || string(got.Data) != "image-bytes" {
-				t.Fatalf("upload request = %+v, want %+v", got, tc.want)
+			if got.ContentID != tc.want.ParentContentID || (tc.season < 0) != (got.SeasonNumber == nil) || (got.SeasonNumber != nil && *got.SeasonNumber != tc.season) {
+				t.Fatalf("upload request = %+v, want the cache under %q, season %d", got, tc.want.ParentContentID, tc.season)
 			}
-			if (tc.season < 0) != (got.SeasonNumber == nil) || (got.SeasonNumber != nil && *got.SeasonNumber != tc.season) {
-				t.Fatalf("season number = %v, want %d", got.SeasonNumber, tc.season)
+			want := tc.want
+			want.ImageType = "poster"
+			want.StoredPath = uploadedPosterPath
+			want.SourcePath = uploadedPosterSource
+			want.Thumbhash = "th-upload"
+			want.LockField = int(metadata.FieldImages)
+			if len(publisher.published) != 1 || publisher.published[0] != want {
+				t.Fatalf("published %+v, want %+v", publisher.published, want)
 			}
-			if svc.providerCalls != 0 || len(svc.applyLocal) != 0 {
-				t.Fatalf("provider calls %d, local calls %d, want none", svc.providerCalls, len(svc.applyLocal))
+			if out.StoredPath != uploadedPosterPath || len(publisher.queued) != 0 {
+				t.Fatalf("result %+v, queued %v", out, publisher.queued)
 			}
 		})
 	}
@@ -190,22 +221,57 @@ func TestAdminItemImagesListsTheShownUpload(t *testing.T) {
 func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
 	t.Run("another upload is refused", func(t *testing.T) {
 		svc := &localImageServiceFake{}
-		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: "upload://sha256:other", Type: "poster"})
+		publisher := &recordingArtworkPublisher{}
+		_, err := newUploadImageHandlerForTest(svc, publisher).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: "upload://sha256:other", Type: "poster"})
 		requireAPIStatus(t, err, http.StatusBadRequest)
-		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 {
-			t.Fatalf("provider calls %d, local calls %d, want none", svc.providerCalls, len(svc.applyLocal))
+		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 || len(publisher.published) != 0 {
+			t.Fatalf("provider %d, local %d calls, published %v, want none", svc.providerCalls, len(svc.applyLocal), publisher.published)
 		}
 	})
 
 	t.Run("the shown upload is published again", func(t *testing.T) {
 		svc := &localImageServiceFake{}
-		_, err := newUploadImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster", ProviderID: "local"})
-		// Publication is the only step left, and it fails without a catalog.
-		if apiErr := requireAPIStatus(t, err, http.StatusInternalServerError); apiErr.Message != "Image cached but failed to update item" {
-			t.Fatalf("message = %q, want the publication failure", apiErr.Message)
+		publisher := &recordingArtworkPublisher{}
+		if _, err := newUploadImageHandlerForTest(svc, publisher).ApplyAdminItemImage(context.Background(), "series", AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster", ProviderID: "local"}); err != nil {
+			t.Fatalf("ApplyAdminItemImage: %v", err)
 		}
 		if svc.providerCalls != 0 || len(svc.applyLocal) != 0 || len(svc.uploads) != 0 {
 			t.Fatalf("provider %d, local %d, upload %d calls, want none", svc.providerCalls, len(svc.applyLocal), len(svc.uploads))
 		}
+		if len(publisher.published) != 1 {
+			t.Fatalf("published %v, want one", publisher.published)
+		}
+		if got := publisher.published[0]; got.StoredPath != uploadedPosterPath || got.SourcePath != uploadedPosterSource || got.Thumbhash != "th-upload" {
+			t.Fatalf("published %+v, want the shown upload", got)
+		}
 	})
+}
+
+// When publication fails, only a revision the target does not already show is
+// queued for cleanup.
+func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
+	cases := []struct {
+		name, id string
+		apply    bool
+		queued   []string
+	}{
+		{"re-applying the shown upload", "series", true, nil},
+		{"a new upload", "movie", false, []string{uploadedPosterPath}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			publisher := &recordingArtworkPublisher{err: errors.New("database unavailable")}
+			h := newUploadImageHandlerForTest(&localImageServiceFake{}, publisher)
+			var err error
+			if tc.apply {
+				_, err = h.ApplyAdminItemImage(context.Background(), tc.id, AdminItemImageRequest{OriginalURL: uploadedPosterSource, Type: "poster"})
+			} else {
+				_, err = h.UploadAdminItemImage(context.Background(), tc.id, "poster", []byte("image-bytes"))
+			}
+			requireAPIStatus(t, err, http.StatusInternalServerError)
+			if strings.Join(publisher.queued, ",") != strings.Join(tc.queued, ",") {
+				t.Fatalf("queued %v, want %v", publisher.queued, tc.queued)
+			}
+		})
+	}
 }

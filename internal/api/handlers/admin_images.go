@@ -53,6 +53,13 @@ type ImageURLResolver interface {
 	ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string
 }
 
+// artworkPublisher publishes a chosen image and reclaims one that could not
+// be published. *catalog.DetailService implements it.
+type artworkPublisher interface {
+	PublishArtworkSelection(ctx context.Context, selection catalog.ArtworkSelection) error
+	QueueArtworkRevisionGC(ctx context.Context, originalPath, imageType string, notBefore time.Time) error
+}
+
 // AdminImageHandler handles endpoints for browsing and selecting item images.
 type AdminImageHandler struct {
 	items         ImageItemLookup
@@ -61,7 +68,7 @@ type AdminImageHandler struct {
 	folders       MatchFolderLookup
 	imageSvc      ImageService
 	imageResolver ImageURLResolver
-	detailSvc     *catalog.DetailService
+	detailSvc     artworkPublisher
 	EventsHub     *evt.Hub
 }
 
@@ -499,11 +506,15 @@ func (h *AdminImageHandler) publishItemImage(ctx context.Context, contentID stri
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
-		if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
-			ctx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
-		); cleanupErr != nil {
-			slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
-				"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
+		// Re-applying the image the target shows, or uploading its bytes
+		// again, publishes the revision it already serves: leave that one be.
+		if shownPath, _, _ := shownArtwork(resolved, imageType); result.StoredPath != shownPath {
+			if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
+				ctx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
+			); cleanupErr != nil {
+				slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
+					"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
+			}
 		}
 		switch {
 		case errors.Is(err, catalog.ErrItemNotFound),
