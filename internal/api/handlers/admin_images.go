@@ -286,13 +286,23 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch images")
 	}
 
-	// Batch-resolve plugin-prefixed URLs for display. Local files get an
-	// inline preview below instead.
-	rawPaths := make([]string, 0, len(images))
+	// An image an admin uploaded exists only in artwork storage, so the list
+	// offers it with the local choices while the item shows it.
+	var uploads []itemImageEntry
+	if includeLocal {
+		uploads = shownUploads(resolved)
+	}
+
+	// Batch-resolve plugin-prefixed URLs and uploads' stored paths for
+	// display. Local files get an inline preview below instead.
+	rawPaths := make([]string, 0, len(images)+len(uploads))
 	for _, img := range images {
 		if !withLocal || !metadata.IsLocalImageSource(img.URL) {
 			rawPaths = append(rawPaths, img.URL)
 		}
+	}
+	for _, upload := range uploads {
+		rawPaths = append(rawPaths, upload.URL)
 	}
 	var resolvedURLs map[string]string
 	if h.imageResolver != nil && len(rawPaths) > 0 {
@@ -334,10 +344,11 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		})
 	}
 
-	// An image an admin uploaded exists only in artwork storage, so the list
-	// offers it with the local choices while the item shows it.
-	if includeLocal {
-		entries = append(entries, h.uploadedImageEntries(ctx, resolved)...)
+	for _, upload := range uploads {
+		if displayURL := resolvedURLs[upload.URL]; displayURL != "" {
+			upload.URL = displayURL
+		}
+		entries = append(entries, upload)
 	}
 
 	// Include current image paths so the frontend can highlight them.
@@ -642,9 +653,9 @@ func shownArtwork(resolved *resolvedItem, imageType metadata.ImageType) (storedP
 	return "", "", ""
 }
 
-// uploadedImageEntries lists the uploaded images a movie, series or season
-// shows, as local choices.
-func (h *AdminImageHandler) uploadedImageEntries(ctx context.Context, resolved *resolvedItem) []itemImageEntry {
+// shownUploads lists the uploaded images a movie, series or season shows, as
+// local choices whose URL is still the stored path.
+func shownUploads(resolved *resolvedItem) []itemImageEntry {
 	if resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
 		return nil
 	}
@@ -654,15 +665,9 @@ func (h *AdminImageHandler) uploadedImageEntries(ctx context.Context, resolved *
 		if storedPath == "" || !metadata.IsUploadedImageSource(sourcePath) {
 			continue
 		}
-		displayURL := storedPath
-		if h.imageResolver != nil {
-			if resolvedURL := h.imageResolver.ResolveImageURL(ctx, storedPath, "card"); resolvedURL != "" {
-				displayURL = resolvedURL
-			}
-		}
 		entries = append(entries, itemImageEntry{
 			ProviderID:  metadata.LocalImageProviderID,
-			URL:         displayURL,
+			URL:         storedPath,
 			OriginalURL: sourcePath,
 			Type:        metadata.ImageTypeToString(imageType),
 		})
