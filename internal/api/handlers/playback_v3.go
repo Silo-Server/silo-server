@@ -1959,19 +1959,18 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if audioDegraded {
 		warnings = append(warnings, playback.AudioTrackUnavailableWarningV3())
 	}
+	// serverAudio marks a track the server chose by preference alone, which
+	// the request's capabilities may still refine below.
+	serverAudio := false
 	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
-		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceID, requestedFile)
+		var saved bool
+		audioIndex, saved, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceID, requestedFile)
 		if err != nil {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to load the saved audio preference")
 		}
+		serverAudio = !saved
 	}
 	timings.mark("audio_preference")
-	// The viewer's intent on the requested file, before any version fallback
-	// remaps it; replans restore it on a version that has it.
-	intent := startIntentV3{audioIndex: audioIndex}
-	if req.SubtitleTrackID != "" || req.SubtitleTrackIndex != nil {
-		intent.subtitle = &playback.TrackIdentityV3{ID: req.SubtitleTrackID, Index: copyOptionalIntV3(req.SubtitleTrackIndex)}
-	}
 	effectiveFile := requestedFile
 	settings, settingsErr := h.plannerSettingsV3Result(r.Context())
 	timings.mark("planner_settings")
@@ -1979,6 +1978,16 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackPreflightOperationError(err)
 	}
 	timings.mark("file_preflight")
+	if serverAudio && settingsErr == nil {
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, audioIndex, settings)
+		timings.mark("audio_capabilities")
+	}
+	// The viewer's intent on the requested file, before any version fallback
+	// remaps it; replans restore it on a version that has it.
+	intent := startIntentV3{audioIndex: audioIndex}
+	if req.SubtitleTrackID != "" || req.SubtitleTrackIndex != nil {
+		intent.subtitle = &playback.TrackIdentityV3{ID: req.SubtitleTrackID, Index: copyOptionalIntV3(req.SubtitleTrackIndex)}
+	}
 	if req.StartPosition == nil {
 		req.StartPosition, err = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
 		if err != nil {
@@ -3790,18 +3799,21 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 // language this profile has settled on for this series, this library, this
 // device, or generally — the same resolution the catalog performs when it
 // publishes `effective_audio_track_index`, so the track a client sees on the
-// detail page is the track that plays when it does not ask for one.
+// detail page is the track that plays when it does not ask for one, unless
+// playableStartAudioV3 finds one this request plays without conversion.
+// saved reports that the viewer's saved series track decided, which plays as
+// saved.
 //
 // The client sends a track identity only when the viewer picked one. Defaulting
 // to ordinal zero instead would silently play the first track on the reel.
-func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID, deviceID string, file *models.MediaFile) (int, error) {
+func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID, deviceID string, file *models.MediaFile) (index int, saved bool, err error) {
 	if file == nil || len(file.AudioTracks) == 0 || h.StoreProvider == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
-		return 0, err
+		return 0, false, err
 	}
 	seriesID := h.playbackPreferenceKey(ctx, file)
 	var seriesPref *playback.AudioTrackPreference
@@ -3809,7 +3821,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID)
 		if prefErr != nil {
 			slog.ErrorContext(ctx, "protocol v3 start: series audio preference lookup failed", "component", "api", "profile_id", profileID, "series_id", seriesID, "error", prefErr)
-			return 0, prefErr
+			return 0, false, prefErr
 		}
 		if stored != nil {
 			seriesPref = &playback.AudioTrackPreference{AudioTrackIndex: stored.AudioTrackIndex, AudioLanguage: stored.AudioLanguage, TrackSignature: stored.TrackSignature}
@@ -3826,7 +3838,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	preferredLang, err := resolvedPlaybackAudioLanguage(ctx, store, rc)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: canonical audio preference lookup failed", "component", "api", "profile_id", profileID, "device_id", deviceID, "error", err)
-		return 0, err
+		return 0, false, err
 	}
 	if playback.IsOriginalLanguagePreference(preferredLang) {
 		preferredLang = h.resolveOriginalLanguage(ctx, file)
@@ -3834,7 +3846,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 			preferredLang, err = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
 			if err != nil {
 				slog.ErrorContext(ctx, "protocol v3 start: profile audio preference fallback failed", "component", "api", "profile_id", profileID, "error", err)
-				return 0, err
+				return 0, false, err
 			}
 			if playback.IsOriginalLanguagePreference(preferredLang) {
 				preferredLang = h.resolveOriginalLanguage(ctx, file)
@@ -3846,7 +3858,29 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		// settings own the language and its scope precedence.
 		seriesPref.AudioLanguage = preferredLang
 	}
-	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)), nil
+	chosen := playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
+	return normalizeAudioTrackIndex(file, chosen), playback.SavedAudioTrackChosen(file.AudioTracks, seriesPref, chosen), nil
+}
+
+// playableStartAudioV3 refines a preference-chosen start track by planning the
+// requested file once per candidate (playback.PreferUnconvertedAudioTrackV3):
+// a same-language track this request plays unconverted replaces one it would
+// convert. The plan for the chosen track alone settles most starts.
+func (h *PlaybackHandler) playableStartAudioV3(ctx context.Context, req playback.StartRequestV3, file *models.MediaFile, chosen int, settings playback.PlannerSettingsV3) int {
+	if file == nil || len(file.AudioTracks) < 2 {
+		return chosen
+	}
+	registry := h.transformationRegistryV3(ctx)
+	dvRPUStrippable := h.lazyDVRPUStrippableV3(ctx, file)
+	subtitles := h.downloadedSubtitleInventoryV3(ctx, file)
+	return playback.PreferUnconvertedAudioTrackV3(file, chosen, func(index int) playback.StartAudioOutcomeV3 {
+		result, _ := h.planPlaybackWithCapabilitiesV3(ctx, playback.PlannerInputV3{
+			Request: req, RequestedFile: file, EffectiveFile: file, ServerBitrateCapKbps: serverBitrateCapV3(ctx),
+			AudioTrackIndex: index, Settings: settings, Registry: registry, DVRPUStrippable: dvRPUStrippable,
+			Now: time.Now(), AdditionalSubtitles: subtitles,
+		})
+		return playback.StartAudioOutcomeFromResultV3(result)
+	})
 }
 
 // resumePositionV3 answers what an omitted `start_position` means: resume where
