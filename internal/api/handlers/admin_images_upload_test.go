@@ -250,7 +250,7 @@ func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
 }
 
 // When publication fails, only a revision the target does not already show is
-// queued for cleanup, even when the request was cancelled.
+// queued for cleanup, even when the request has ended.
 func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
 	cases := []struct {
 		name, id string
@@ -278,7 +278,7 @@ func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
 			}
 			for _, queueErr := range publisher.queuedErr {
 				if queueErr != nil {
-					t.Fatalf("cleanup ran with a cancelled context: %v", queueErr)
+					t.Fatalf("cleanup ran with a done context: %v", queueErr)
 				}
 			}
 		})

@@ -53,7 +53,7 @@ func TestApplyUploadedItemImageCachesUnderLocalKeys(t *testing.T) {
 		t.Fatalf("result = %+v, want stored path %q and source %q", result, wantPath, wantSource)
 	}
 	if !IsUploadedImageSource(result.SourcePath) || IsLocalImageSource(result.SourcePath) {
-		t.Fatalf("source %q is not recognised as an upload only", result.SourcePath)
+		t.Fatalf("source %q should count as an upload and nothing else", result.SourcePath)
 	}
 }
 

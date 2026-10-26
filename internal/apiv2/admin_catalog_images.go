@@ -11,9 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/metadata"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type AdminCatalogImagesService interface {
