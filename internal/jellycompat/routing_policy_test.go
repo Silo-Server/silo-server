@@ -146,8 +146,10 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 			if (dto.DirectStreamURL != "") != test.wantDirectStream {
 				t.Fatalf("DirectStreamURL = %q, advertised direct stream = %v", dto.DirectStreamURL, test.wantDirectStream)
 			}
-			if dto.TranscodingURL == "" {
-				t.Fatal("TranscodingURL is empty, want HLS fallback")
+			// Swiftfin plays any TranscodingUrl before the direct URL, so only
+			// a source without a direct flag carries the HLS fallback.
+			if (dto.TranscodingURL != "") == test.wantDirectStream {
+				t.Fatalf("TranscodingURL = %q, advertised direct stream = %v", dto.TranscodingURL, test.wantDirectStream)
 			}
 		})
 	}
