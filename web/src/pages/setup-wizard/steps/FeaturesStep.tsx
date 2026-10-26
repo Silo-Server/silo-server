@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ConnectionCheckAction,
@@ -52,6 +52,17 @@ export function FeaturesStep() {
   const recsCheck = useConnectionCheck("recommendations_embedding", form, RECS_KEYS);
   const [showDisclosure, setShowDisclosure] = useState(false);
   const [presetId, setPresetId] = useState<string | null>(null);
+  const sharePrefilled = useRef(false);
+
+  // A new server shares markers by default only once this choice is saved,
+  // so stage the switch's on default while nothing is stored. Continuing
+  // saves it; leaving the step unsaved keeps sharing off.
+  const { loaded, getPersistedValue, setValue } = form;
+  useEffect(() => {
+    if (sharePrefilled.current || !loaded) return;
+    sharePrefilled.current = true;
+    if (getPersistedValue(SHARE_MARKERS_KEY) === "") setValue(SHARE_MARKERS_KEY, "true");
+  }, [loaded, getPersistedValue, setValue]);
 
   // Both push keys are written together; either still on means push is on.
   // The snapshot carries the server default (on) for a fresh install, so the
@@ -64,7 +75,7 @@ export function FeaturesStep() {
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const localMarkersEnabled = markerMode === "local" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
-  // Only an explicit false turns sharing off, as on the server.
+  // Unset reads as on, the default the effect above stages.
   const shareMarkers = form.getValue(SHARE_MARKERS_KEY) !== "false";
 
   const baseUrl = form.getValue("recommendations.embedding_base_url");
