@@ -73,6 +73,9 @@ func validateManifestShared(manifest *pluginv1.PluginManifest) error {
 	if err := publicmanifest.Validate(manifest); err != nil {
 		return err
 	}
+	if _, _, err := pluginIdentitySegments(manifest.GetPluginId(), manifest.GetVersion()); err != nil {
+		return err
+	}
 	if isReservedPluginID(manifest.GetPluginId()) {
 		return fmt.Errorf("plugin id %q is reserved for built-in host providers", manifest.GetPluginId())
 	}

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTopActivity } from "@/hooks/queries/admin/dashboardInsights";
 import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
@@ -9,6 +9,7 @@ import { SectionError } from "../feedback";
 import { formatWatchTime } from "../format";
 import { rangeDays, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 
 const ROW_LIMIT = 8;
@@ -38,18 +39,15 @@ export function TopTitlesWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">{rangeTitle("Top titles", range)}</CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          <Link
-            to="/admin/history"
-            className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
-          >
-            All history ›
-          </Link>
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+      <WidgetHeader title={rangeTitle("Top titles", range)}>
+        <Link
+          to="/admin/history"
+          className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
+        >
+          All history ›
+        </Link>
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />

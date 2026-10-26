@@ -16299,7 +16299,7 @@ export interface components {
       contribute_enabled: boolean;
       /** Format: double */
       contribute_min_confidence: number;
-      /** @description The provider's plugin manifest turns sharing on when the provider is first configured, unless the markers.share_by_default server setting is false. Turning that setting off also turns sharing off for these providers. */
+      /** @description The provider's plugin manifest turns sharing on when the provider is first configured, if the markers.share_by_default server setting is true. Turning that setting off also turns sharing off for these providers. */
       default_contribute_enabled: boolean;
       display_name?: string;
       fetch_enabled: boolean;

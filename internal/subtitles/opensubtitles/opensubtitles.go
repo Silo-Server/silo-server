@@ -243,6 +243,9 @@ func (p *Provider) fetchDownloadLink(ctx context.Context, body io.Reader) ([]byt
 		return nil, "", fmt.Errorf("opensubtitles: fetch file: %w", err)
 	}
 	defer fileResp.Body.Close()
+	if fileResp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("opensubtitles: file download returned %d: %s", fileResp.StatusCode, subtitles.ProviderErrorBody(fileResp.Body))
+	}
 
 	data, err := subtitles.ReadProviderResponse(fileResp.Body)
 	if err != nil {

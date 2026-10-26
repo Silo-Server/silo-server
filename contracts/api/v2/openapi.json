@@ -10072,7 +10072,7 @@
             "type": "number"
           },
           "default_contribute_enabled": {
-            "description": "The provider's plugin manifest turns sharing on when the provider is first configured, unless the markers.share_by_default server setting is false. Turning that setting off also turns sharing off for these providers.",
+            "description": "The provider's plugin manifest turns sharing on when the provider is first configured, if the markers.share_by_default server setting is true. Turning that setting off also turns sharing off for these providers.",
             "type": "boolean"
           },
           "display_name": {

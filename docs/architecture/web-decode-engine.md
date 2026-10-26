@@ -58,7 +58,8 @@ The server needs no change: the planner already honours both claims on
 `web/src/player/engine/routing.ts` decides who plays the plan:
 
 1. The media element, when it plays the container, video codec and audio codec
-   natively, the source is SDR, and the selected audio track is the container
+   natively, the plan's dynamic range is SDR or HDR that the plan's
+   `claims.video` validated for this display, and the selected audio track is the container
    default (the first track flagged default, else the first, as the server
    computes it). Hardware decode and the browser's own A/V sync win whenever
    they can.
@@ -106,7 +107,7 @@ VideoPlayer (page)
   wherever they land.
 - **Audio.** The AudioContext opens at the track's sample rate. Surround
   passes through when `destination.maxChannelCount` allows it; otherwise the
-  worker downmixes with ATSC A/52 Lo/Ro coefficients and the worklet soft-limits
+  worker downmixes with ATSC A/52 Lo/Ro coefficients and soft-limits
   overs. At a playback rate other than 1 the worklet's read head still steps
   through the queue at that rate, which keeps the clock and the credits as at
   1x, but the samples come from a WSOLA time stretcher (`timeStretch.ts`) that

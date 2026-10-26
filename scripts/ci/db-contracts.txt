@@ -215,6 +215,7 @@
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
 ./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
 ./internal/markers TestProviderConfigDefaultSharingDB
+./internal/markers TestProviderConfigEnsureDefaultSharingDB
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
@@ -346,6 +347,12 @@
 # Plugin event deliveries: a claim takes at most its limit, never shares a row,
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
+
+# A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
+# the row and leaves its files, which can sit above the plugin root, and the
+# installation and user settings lists still answer with the row present.
+./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
@@ -559,3 +566,7 @@
 # A stored collection's Jellyfin BoxSet page skips members the viewer can't see
 # without shortening the page or shifting later pages.
 ./internal/jellycompat TestBoxSetChildrenPageVisibleMembersDB
+
+# A server set up before the setup wizard saved its marker sharing choice keeps
+# sharing by default; a database with no account waits for the wizard.
+./migrations TestMarkersShareByDefaultExistingInstallsMigrationPostgres

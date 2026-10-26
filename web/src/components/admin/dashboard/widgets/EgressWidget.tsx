@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
 import { formatDataTotal, formatMbps, formatMbpsValue } from "../format";
 import {
@@ -11,6 +11,7 @@ import {
   rangeTitle,
 } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
@@ -57,23 +58,20 @@ export function EgressWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">{rangeTitle("Egress", range)}</CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          {totalBytes != null ? (
-            // Secondary to the peak: when the header is too narrow for both
-            // beside the range picker, the total is dropped rather than
-            // truncated. CardHeader is the `card-header` container.
-            <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums @md/card-header:inline">
-              Total {formatDataTotal(totalBytes)}
-            </span>
-          ) : null}
-          <span className="text-muted-foreground text-[11px] tabular-nums">
-            Peak {formatMbps(peak)}
+      <WidgetHeader title={rangeTitle("Egress", range)}>
+        {totalBytes != null ? (
+          // Secondary to the peak: when the header is too narrow for both
+          // beside the range picker, the total is dropped rather than
+          // truncated. CardHeader is the `card-header` container.
+          <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums @md/card-header:inline">
+            Total {formatDataTotal(totalBytes)}
           </span>
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+        ) : null}
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          Peak {formatMbps(peak)}
+        </span>
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <TimeseriesChartBody
           query={query}

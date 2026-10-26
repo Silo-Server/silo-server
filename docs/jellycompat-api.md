@@ -48,6 +48,10 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
+A `LastPlayedDate` or `datePlayed` more than two minutes ahead of the server
+clock is stored and reported as the server's current time, the same bound
+native progress sync applies, so a client with a wrong clock cannot block
+later progress for the item.
 Positional updates require a playable item; marking a series or season played
 uses its child episodes. Parent reads and mutation responses derive `Played`,
 `PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
