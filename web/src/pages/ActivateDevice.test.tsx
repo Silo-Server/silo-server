@@ -557,27 +557,43 @@ it("follows a pending remote-playback request until the app approves it", async 
   expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
 });
 
-it("doesn't ask a signed-out approver to sign in for a remote-playback request", async () => {
-  auth.user = null;
-  lookups = [remotePlayback];
+it("keeps a decline when a slower watch lookup answers after it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let answerWatch = () => {};
+  const watch = new Promise((resolve) => {
+    answerWatch = () => resolve({ ...remotePlayback, status: "approved" });
+  });
+  const answers: Array<unknown> = [remotePlayback, watch, { ...remotePlayback, status: "denied" }];
+  vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
+    if (op === "GET /api/v2/auth/device") return Promise.resolve(answers.shift());
+    decisions.push({ op, body: options?.body });
+    return Promise.resolve({ status: "denied" });
+  }) as never);
   mount("/activate?code=48217730");
   await screen.findByText("Play on Living room TV?");
-  expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  // The watch lookup goes out and is still unanswered when Not now is clicked.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This request was declined.");
+  await act(async () => answerWatch());
+  expect(screen.getByText("This request was declined.")).toBeTruthy();
+  expect(screen.queryByText("This request was approved in the Silo app.")).toBeNull();
 });
 
-it("offers a phone the Silo app for a remote-playback request", async () => {
+it("doesn't send a phone to sign in, here or in the app, for a remote-playback request", async () => {
   auth.user = null;
   lookups = [{ ...remotePlayback, server_id: "3f2a9d5e-6b1c" }];
+  // The apps' device link opens their TV sign-in, which can't approve a handoff.
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
   );
   mount("/activate?code=48217730");
-  const app = await screen.findByRole("link", { name: "Open in the Silo app" });
-  expect(app.getAttribute("href")).toBe(
-    `silo://device?server=3f2a9d5e-6b1c&url=${encodeURIComponent(window.location.origin)}&code=48217730`,
-  );
+  await screen.findByText("Play on Living room TV?");
+  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
 });
 
 it.each(["approved", "consumed"])(

@@ -93,11 +93,15 @@ function ActivateDeviceRequest() {
   }, [searchParams]);
   const loginHref = `/login?redirect=${encodeURIComponent(redirectTarget)}`;
 
+  // Numbers the lookups, so only the newest answer updates the card: a watch
+  // lookup still in flight when a decision lands must not replace its result.
+  const lookupSeq = useRef(0);
   // keepOnError leaves the last known details on screen when a refresh
   // fails, for the reloads after a decision and while watching. Returns the
   // details it loaded, or null.
   const loadDetails = useCallback(
     async (keepOnError = false): Promise<DeviceLoginDetails | null> => {
+      const seq = ++lookupSeq.current;
       if ((!token && !code) || (needsAccount && lookupAccount === null)) {
         setDetails(null);
         setLoadError(null);
@@ -107,11 +111,13 @@ function ActivateDeviceRequest() {
         const result = await v2("GET /api/v2/auth/device", {
           query: token ? { token } : { code },
         });
-        setDetails(result);
-        setLoadError(null);
+        if (seq === lookupSeq.current) {
+          setDetails(result);
+          setLoadError(null);
+        }
         return result;
       } catch (error) {
-        if (keepOnError) {
+        if (keepOnError || seq !== lookupSeq.current) {
           return null;
         }
         setDetails(null);
@@ -138,8 +144,9 @@ function ActivateDeviceRequest() {
     void loadDetails().finally(() => setLoadingDetails(false));
   }, [loadDetails]);
 
-  // Once approved here, follow the request until it settles. The server
-  // answers expired once expires_at passes, so this always ends.
+  // Follow a request approved here, or a pending remote-playback request,
+  // until it settles. The server answers expired once expires_at passes, so
+  // this always ends.
   const status = details?.status;
   // Every Quick Connect lookup spends the account's code budget, so a Quick
   // Connect approval is not watched.
@@ -320,12 +327,18 @@ function ActivateDeviceRequest() {
       resultMessage = remotePlayback ? "This request was declined." : "This sign-in was declined.";
       break;
     case "canceled":
-      resultMessage = "This TV stopped waiting. Start again on the TV.";
+      resultMessage = remotePlayback
+        ? "The TV stopped waiting. Send playback from the Silo app again."
+        : "This TV stopped waiting. Start again on the TV.";
       break;
     case "expired":
-      resultMessage = isQuickConnect
-        ? "This code expired. Start Quick Connect again in the app."
-        : "This code expired. Your TV is showing a new one; scan it again.";
+      if (remotePlayback) {
+        resultMessage = "This request expired. Send playback from the Silo app again.";
+      } else if (isQuickConnect) {
+        resultMessage = "This code expired. Start Quick Connect again in the app.";
+      } else {
+        resultMessage = "This code expired. Your TV is showing a new one; scan it again.";
+      }
       break;
   }
 
@@ -440,13 +453,8 @@ function ActivateDeviceRequest() {
                       The TV plays with the profile chosen in the app instead of signing in, so this
                       page can&apos;t approve it.
                     </p>
-                    {appLink ? (
-                      <Button asChild className="w-full">
-                        <a href={appLink}>
-                          <Smartphone aria-hidden="true" /> Open in the Silo app
-                        </a>
-                      </Button>
-                    ) : null}
+                    {/* No "Open in the Silo app": the apps' link opens their TV
+                        sign-in, which can't approve a handoff. */}
                     {user && !isImpersonating ? (
                       <>
                         {actionError ? (
