@@ -620,16 +620,32 @@ func (r headerErrorReader) ReadAt(p []byte, off int64) (int, error) {
 // A storage error reading an element header is reported as itself, not as a
 // short read that looks like the end of the file.
 func TestReadMatroskaPreservesHeaderReadErrors(t *testing.T) {
-	f := file(layout{cuesFirst: true})
+	segStart := int64(len(ebmlHeader) + 12) // past the segment's 4-byte ID and 8-byte size
+	// A cluster without a cue after the last cued one, which only the
+	// coverage check's look at the cluster after each sample reads.
+	clusterC := cluster(6000, block(videoTrack, 0, false))
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
+	}
+	posA := uint64(len(seekHead(0)) + len(info) + len(tracks))
+	posB := posA + uint64(len(clusterA))
+	posC := posB + uint64(len(clusterB))
+	uncued := slices.Concat(ebmlHeader, el(idSegment, seekHead(posC+uint64(len(clusterC))),
+		info, tracks, clusterA, clusterB, clusterC, cuesFor(layout{}, posA, posB)))
+
 	failure := errors.New("storage read failed")
-	for _, count := range []int{1, 12} {
-		// The segment's first child: past its 4-byte ID and 8-byte size.
-		reader := headerErrorReader{
-			ReaderAt: bytes.NewReader(f), offset: int64(len(ebmlHeader) + 12),
-			bytes: count, err: failure,
-		}
-		if _, err := ReadMatroska(reader, int64(len(f))); !errors.Is(err, failure) {
-			t.Errorf("read %d bytes: err = %v, want storage error", count, err)
+	for name, c := range map[string]struct {
+		data   []byte
+		offset int64
+	}{
+		"segment's first child":           {file(layout{cuesFirst: true}), segStart},
+		"cluster after the last cued one": {uncued, segStart + int64(posC)},
+	} {
+		for _, count := range []int{1, 12} {
+			reader := headerErrorReader{ReaderAt: bytes.NewReader(c.data), offset: c.offset, bytes: count, err: failure}
+			if _, err := ReadMatroska(reader, int64(len(c.data))); !errors.Is(err, failure) {
+				t.Errorf("%s, read %d bytes: err = %v, want storage error", name, count, err)
+			}
 		}
 	}
 }
