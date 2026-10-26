@@ -691,18 +691,26 @@ func (s *Server) activeSessionIDs() map[string]struct{} {
 	}
 	// Node-local prepared downloads may live under the existing persistent
 	// transcode volume. They have their own lifecycle and must never be mistaken
-	// for an orphaned HLS session directory. Protect the top-level container for
-	// both the default and an explicitly nested artifact directory.
-	if s.transcodeDir != "" && s.artifactRoot != "" {
-		if rel, err := filepath.Rel(s.transcodeDir, s.artifactRoot); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			if first, _, ok := strings.Cut(rel, string(filepath.Separator)); ok {
-				active[first] = struct{}{}
-			} else {
-				active[rel] = struct{}{}
-			}
-		}
+	// for an orphaned HLS session directory.
+	if name := s.artifactContainerName(); name != "" {
+		active[name] = struct{}{}
 	}
 	return active
+}
+
+// artifactContainerName returns the top-level directory under the transcode
+// root that holds prepared downloads, for both the default and an explicitly
+// nested artifact directory, or "" when the artifact root lies elsewhere.
+func (s *Server) artifactContainerName() string {
+	if s.transcodeDir == "" || s.artifactRoot == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(s.transcodeDir, s.artifactRoot)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return first
 }
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
@@ -1277,10 +1285,15 @@ func (s *Server) sessionOutputDir(sessionID string) string {
 // root), ".." (its parent), separators and % are all refused.
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
-// validSessionID also refuses the prepared-download store's directory name,
-// which sits under the same root by default.
-func validSessionID(sessionID string) bool {
-	return sessionIDPattern.MatchString(sessionID) && sessionID != downloadprepare.ArtifactDirectoryName
+// validSessionID also refuses the directory holding prepared downloads when it
+// sits under the same root, as it does by default. The comparison ignores case
+// because a macOS node's volume usually does.
+func (s *Server) validSessionID(sessionID string) bool {
+	if !sessionIDPattern.MatchString(sessionID) {
+		return false
+	}
+	reserved := s.artifactContainerName()
+	return reserved == "" || !strings.EqualFold(sessionID, reserved)
 }
 
 func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1685,7 +1698,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
 		return
 	}
-	if !validSessionID(req.SessionID) {
+	if !s.validSessionID(req.SessionID) {
 		http.Error(w, "invalid session_id", http.StatusBadRequest)
 		return
 	}
@@ -2076,7 +2089,7 @@ func recipeIsComplete(card playback.RecipeCard) bool {
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
 func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
 	defer s.trackInFlight()()
-	if !validSessionID(sessionID) {
+	if !s.validSessionID(sessionID) {
 		slog.WarnContext(r.Context(), "transcode node reconstruct session id rejected", "component", "transcodenode", "session", sessionID)
 		return nil, nil
 	}

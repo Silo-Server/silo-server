@@ -1088,6 +1088,7 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 		name         string
 		prepare      bool
 		catalogPaths bool
+		artifactDir  string // relative to the transcode root; empty keeps the default
 		body         any
 	}{
 		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
@@ -1110,6 +1111,15 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			SessionID: downloadprepare.ArtifactDirectoryName, InputPath: "/media/movie.mkv",
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 		}},
+		{name: "start with session id naming the prepared-download store in another case", body: TranscodeStartRequest{
+			SessionID: "Download-Artifacts", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming a configured prepared-download store", artifactDir: "prepared/store",
+			body: TranscodeStartRequest{
+				SessionID: "prepared", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+			}},
 		{name: "start with unapproved input path", catalogPaths: true,
 			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
 		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
@@ -1125,6 +1135,9 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			server := newTestServer(t)
 			if test.catalogPaths {
 				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			if test.artifactDir != "" {
+				server.artifactRoot = filepath.Join(server.transcodeDir, test.artifactDir)
 			}
 			post := postStartRequest
 			if test.prepare {
