@@ -284,7 +284,10 @@ persists (`decode_invalid_data`, `tonemap_unsupported`, `ffmpeg_probe_failed`,
 own log rules rather than `Classify`, because those reasons decide per-file
 backoff. Its `Runner.Fallback` ends the run only after a hardware attempt
 that found invalid data or whose VideoToolbox software tone mapping was
-refused; every other failure moves on to the next planned attempt.
+refused; every other failure moves on to the next planned attempt. When a
+frame was extracted but encoding or storing its image fails, the chapter
+records `chapter_upload_failed` and backs off on its own; the file is not
+marked failed.
 
 ## Sheets
 

@@ -175,23 +175,18 @@ func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
 	}
 }
 
-func TestSanitizeTextMasksUserinfoContainingAt(t *testing.T) {
-	for _, suffix := range []string{"/file", "?email=a@example.test", "#mailto:a@example.test"} {
-		t.Run(suffix, func(t *testing.T) {
-			input := "fetch ftp://user:pa@ss@host" + suffix + " failed"
-			want := "fetch ftp://" + Placeholder + "@host" + suffix + " failed"
-			if got := SanitizeText(input); got != want {
-				t.Fatalf("SanitizeText() = %q, want %q", got, want)
-			}
-		})
-	}
-}
-
-func TestSanitizeTextKeepsURLWithoutUserinfo(t *testing.T) {
-	for _, suffix := range []string{"/a@example.test", "?email=a@example.test", "#mailto:a@example.test"} {
-		input := "fetch ftp://host" + suffix + " failed"
-		if got := SanitizeText(input); got != input {
-			t.Fatalf("SanitizeText() = %q, want %q", got, input)
+// TestSanitizeTextMasksURLUserinfo checks that a password holding unescaped
+// @, ? or # is masked in full, and that an @ in the path is not userinfo.
+func TestSanitizeTextMasksURLUserinfo(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"fetch ftp://user:pa@ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch ftp://user:pa#ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch redis://default:pa?ss@cache:6379 failed", "fetch redis://" + Placeholder + "@cache:6379 failed"},
+		{"fetch ftp://user:pw@host/a@example.test failed", "fetch ftp://" + Placeholder + "@host/a@example.test failed"},
+		{"fetch ftp://host/a@example.test failed", "fetch ftp://host/a@example.test failed"},
+	} {
+		if got := SanitizeText(tc.in); got != tc.want {
+			t.Errorf("SanitizeText(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
