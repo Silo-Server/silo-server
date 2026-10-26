@@ -112,7 +112,7 @@ type WatchProviderSettings struct {
 	ImportWatchedEnabled         bool           `json:"import_watched_enabled"`
 	ImportProgressEnabled        bool           `json:"import_progress_enabled"`
 	ExportWatchedEnabled         bool           `json:"export_watched_enabled"`
-	ExportUnwatchedEnabled       bool           `json:"export_unwatched_enabled"`
+	ExportUnwatchedEnabled       bool           `json:"export_unwatched_enabled" doc:"Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals."`
 	ImportFavoritesEnabled       bool           `json:"import_favorites_enabled"`
 	ExportFavoritesEnabled       bool           `json:"export_favorites_enabled"`
 	SyncFavoriteRemovalsEnabled  bool           `json:"sync_favorite_removals_enabled"`
@@ -190,7 +190,7 @@ type WatchProviderDeviceAuth struct {
 	ID              ID      `json:"id"`
 	Provider        string  `json:"provider"`
 	UserCode        string  `json:"user_code"`
-	VerificationURL string  `json:"verification_url"`
+	VerificationURL string  `json:"verification_url" format:"uri-reference"`
 	IntervalSeconds int     `json:"interval_seconds"`
 	ExpiresAt       Instant `json:"expires_at"`
 }
@@ -469,7 +469,7 @@ type WatchProviderCapabilities struct {
 	ImportWatched   bool `json:"import_watched"`
 	ImportProgress  bool `json:"import_progress"`
 	ExportWatched   bool `json:"export_watched"`
-	ExportUnwatched bool `json:"export_unwatched"`
+	ExportUnwatched bool `json:"export_unwatched" doc:"Always false: mark unwatched keeps watch history, so Silo sends providers no history removals."`
 	ImportFavorites bool `json:"import_favorites"`
 	ExportFavorites bool `json:"export_favorites"`
 	RemoveFavorites bool `json:"remove_favorites"`
@@ -515,7 +515,7 @@ type WatchProviderConnection struct {
 	ImportWatchedEnabled         bool                      `json:"import_watched_enabled"`
 	ImportProgressEnabled        bool                      `json:"import_progress_enabled"`
 	ExportWatchedEnabled         bool                      `json:"export_watched_enabled"`
-	ExportUnwatchedEnabled       bool                      `json:"export_unwatched_enabled"`
+	ExportUnwatchedEnabled       bool                      `json:"export_unwatched_enabled" doc:"Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals."`
 	ImportFavoritesEnabled       bool                      `json:"import_favorites_enabled"`
 	ExportFavoritesEnabled       bool                      `json:"export_favorites_enabled"`
 	SyncFavoriteRemovalsEnabled  bool                      `json:"sync_favorite_removals_enabled"`

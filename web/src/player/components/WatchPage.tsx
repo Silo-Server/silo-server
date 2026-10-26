@@ -5,21 +5,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PlayerFileVersion, PlayerPlaybackStateChange, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
-import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
-import {
-  buildSubtitleChoiceRequests,
-  sendSubtitleChoiceRequest,
-} from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
+import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
 
 function patchChapterThumbnail(
@@ -150,6 +146,7 @@ function WatchPagePlayer({
   year,
   playbackRequestKey,
   fileId,
+  versionPicked = false,
   libraryId,
   versions,
   playbackVariants = [],
@@ -165,8 +162,8 @@ function WatchPagePlayer({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
   introSkipMode,
+  bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
   canEditMarkers,
@@ -219,6 +216,8 @@ function WatchPagePlayer({
     initialSubtitleTrackIndexByFileId,
     initialBitmapSubtitleTrackIndexByFileId,
     !watchTogetherRoomId,
+    bufferingMode,
+    versionPicked,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);
@@ -296,8 +295,8 @@ function WatchPagePlayer({
   );
 
   const handleSwitchVersion = useCallback(
-    (newFileId: number, currentPosition: number) => {
-      session.switchVersion(newFileId, currentPosition);
+    (newFileId: number, currentPosition: number, onAdopt?: (planRevision?: number) => void) => {
+      session.switchVersion(newFileId, currentPosition, onAdopt);
     },
     [session],
   );
@@ -354,6 +353,7 @@ function WatchPagePlayer({
     refresh();
   }, [refetchTrickplay, session.mediaFileId, trickplayQuery.isError]);
 
+  const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
@@ -363,14 +363,22 @@ function WatchPagePlayer({
       lastHDR: activePlaybackVersion?.hdr,
       lastCodecVideo: activePlaybackVersion?.codec_video,
       lastEditionKey: activePlaybackVersion?.edition_key,
+      versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId]);
+  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
 
+  const { saveAudioChoice, saveSubtitleChoice } = useTrackChoicePersistence({
+    seriesId: seriesContext?.seriesId ?? contentId,
+    audioTracks,
+    subtitleTracks: playableSubtitles,
+  });
+  // A viewer's audio pick from the player menu: switch now, save for the series.
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {
       session.switchAudioTrack(index, currentPosition);
+      saveAudioChoice(index);
     },
-    [session],
+    [saveAudioChoice, session],
   );
 
   const updatePlaybackState = session.updatePlaybackState;
@@ -380,32 +388,6 @@ function WatchPagePlayer({
       onPlaybackStateChange?.(state);
     },
     [onPlaybackStateChange, updatePlaybackState],
-  );
-
-  /**
-   * Persists an in-player subtitle choice for the whole series.
-   *
-   * buildSubtitleChoiceRequests decides what a pick is worth storing and
-   * where; this only issues the requests. They are independent on purpose: a
-   * failed settings write must not cost the user the track they picked, and a
-   * failed track write must not cost them the language, so each is best effort
-   * on its own rather than one composite request that half-applies.
-   */
-  const handleSubtitleChanged = useCallback(
-    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
-      const requests = buildSubtitleChoiceRequests({
-        seriesId: seriesContext?.seriesId ?? contentId,
-        index,
-        tracks: playableSubtitles,
-        inventoryTrack,
-      });
-      for (const request of requests) {
-        void sendSubtitleChoiceRequest(config, request).catch(() => {
-          // Best effort.
-        });
-      }
-    },
-    [config, seriesContext, contentId, playableSubtitles],
   );
 
   useEffect(() => {
@@ -706,9 +688,20 @@ function WatchPagePlayer({
       preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
       subtitleMode={session.initialSubtitleError ? "off" : subtitleMode}
       showForcedSubtitles={session.initialSubtitleError ? false : showForcedSubtitles}
-      profileLanguage={profileLanguage}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      bufferingMode={bufferingMode}
+      bandwidthCapKbps={maxBitrateKbps}
+      bufferingTitleId={contentId}
+      playbackAttemptId={session.playbackAttemptId}
+      onKeptEstimate={session.setKeptEstimate}
+      onBufferingSummary={(plan, summary, pageEnding) =>
+        session.reportEvent("plan_summary", {
+          adoptionId: plan.adoption_id,
+          diagnostics: { ...summary },
+          keepalive: pageEnding,
+        })
+      }
       credits={activeMarkers.credits}
       recap={activeMarkers.recap}
       autoSkipRecap={autoSkipRecap}
@@ -750,7 +743,7 @@ function WatchPagePlayer({
       audioTracks={audioTracks}
       activeAudioIndex={session.audioTrackIndex}
       onAudioSelect={handleSwitchAudio}
-      onSubtitleChanged={handleSubtitleChanged}
+      onSubtitleChanged={saveSubtitleChoice}
       onReturnFromPostRoll={onReturnFromPostRoll}
       watchTogetherRoomId={watchTogetherRoomId}
       watchTogetherConnection={watchTogetherConnection}

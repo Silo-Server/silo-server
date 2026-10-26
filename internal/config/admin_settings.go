@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -73,6 +74,17 @@ const (
 // the beginning.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
 
+// The connection speed test's schedule, delivered to clients with the probe
+// URL. Automatic tests run only when this is true; Test speed always works.
+// A reading lasts the max age, in days, before an automatic test is due again.
+const (
+	PlaybackBandwidthProbeAutomaticSettingKey  = "playback.bandwidth_probe_automatic"
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey = "playback.bandwidth_probe_max_age_days"
+	// DefaultBandwidthProbeMaxAgeDays matches the lifetime of a learned limit.
+	DefaultBandwidthProbeMaxAgeDays = 7
+	maxBandwidthProbeMaxAgeDays     = 30
+)
+
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
 // sources metadata plugins declare, such as rt_critic. Empty, the
@@ -115,9 +127,10 @@ func splitRatingSourceList(raw string) (sources []string, malformed string) {
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
 const (
-	Allow4KTranscodeSettingKey               = "allow_4k_transcode"
-	PlaybackAllowHEVCEncodingSettingKey      = "playback.allow_hevc_encoding"
-	DownloadLocalTranscodeFallbackSettingKey = "download.local_transcode_fallback"
+	Allow4KTranscodeSettingKey                    = "allow_4k_transcode"
+	PlaybackAllowHEVCEncodingSettingKey           = "playback.allow_hevc_encoding"
+	PlaybackPreferLowerVersionTranscodeSettingKey = "playback.prefer_lower_version_transcode"
+	DownloadLocalTranscodeFallbackSettingKey      = "download.local_transcode_fallback"
 )
 
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
@@ -152,6 +165,16 @@ const MetadataImageWorkersSettingKey = "metadata.image_workers"
 // on provider limits a scan shares. On-demand lookups (a person page) aren't
 // counted.
 const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
+
+// MetadataFallbackLanguageSettingKey is the ISO 639-1 language metadata
+// refreshes fall back to when providers have no title or description in a
+// library's metadata language, before the original language.
+// MetadataFallbackOriginal turns the fallback off: the original language is
+// used, as before the setting existed.
+const (
+	MetadataFallbackLanguageSettingKey = "metadata.fallback_language"
+	MetadataFallbackOriginal           = "original"
+)
 
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
@@ -328,9 +351,11 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
+	"markers.share_by_default":             "true",
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
+	MetadataFallbackLanguageSettingKey:       "en",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
@@ -338,6 +363,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.hw_accel":                              "auto",
 	"playback.transcode_enabled":                     "true",
 	PlaybackAllowHEVCEncodingSettingKey:              "false",
+	PlaybackPreferLowerVersionTranscodeSettingKey:    "true",
 	PlaybackRoutingDirectPlayEgressSettingKey:        string(PlaybackEgressPreferProxy),
 	PlaybackRoutingRemuxExecutionSettingKey:          string(PlaybackExecutionPreferTranscode),
 	PlaybackRoutingRemuxEgressSettingKey:             string(PlaybackEgressPreferProxy),
@@ -491,6 +517,9 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.binary_quantized":         "false",
 
 	PlaybackKeyframePlaylistSettingKey: "false",
+
+	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -606,8 +635,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
-		PlaybackKeyframePlaylistSettingKey,
+	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
+		PlaybackKeyframePlaylistSettingKey, PlaybackBandwidthProbeAutomaticSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
@@ -681,6 +710,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalized, nil
 	case "playback.trickplay_interval_seconds":
 		return normalizeAdminInt(key, value, 5, 60)
+	case PlaybackBandwidthProbeMaxAgeDaysSettingKey:
+		// Rows are retained 30 days after their last update, so a longer
+		// lifetime would outlive the reading it describes.
+		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
 	case "playback.trickplay_workers":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
@@ -809,6 +842,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":
 		return normalizeAdminEnum(key, value, "off", "button", "auto")
+	case MetadataFallbackLanguageSettingKey:
+		value = strings.ToLower(value)
+		if value == "" || value == MetadataFallbackOriginal || (len(value) == 2 && lang.RegisteredTag(value) == value) {
+			return value, nil
+		}
+		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
 		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
 	case "ai.reasoning_effort":

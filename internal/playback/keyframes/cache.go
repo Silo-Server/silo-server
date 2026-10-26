@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // maxCachedFiles bounds the process-wide result cache. An index is a few
@@ -49,7 +50,7 @@ var indexCache = struct {
 // Matroska or WebM or is malformed, gets ErrNoIndex, as does one Reject
 // marked.
 func Load(path string) (Index, error) {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		return Index{}, err
 	}
@@ -77,7 +78,7 @@ func Load(path string) (Index, error) {
 // FFmpeg's playlist. The cache is in memory, so a restart reads the file
 // again.
 func Reject(path string) error {
-	info, err := os.Stat(path)
+	info, err := fspath.Stat(path)
 	if err != nil {
 		return err
 	}

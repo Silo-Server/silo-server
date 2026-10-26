@@ -29,6 +29,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -1296,6 +1297,9 @@ func main() {
 	var ipResolver *clientip.Resolver
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
+	// Assigned below with the marker plugin providers; nil without plugins.
+	// Runs after a save that turns markers.share_by_default off commits.
+	var defaultMarkerSharingStopped func(context.Context)
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
 		shutdownWork = append(shutdownWork, done)
@@ -1341,7 +1345,17 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, key, _ string) {
+		BeforeServerSettingCommit: func(ctx context.Context, tx pgx.Tx, key, value string) error {
+			// Turning sharing by default off also stops providers that
+			// started sharing because their manifest asked to. It shares the
+			// save's transaction, so a failure fails the save instead of
+			// leaving them sharing.
+			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) {
+				return stopDefaultMarkerSharingInTx(ctx, tx)
+			}
+			return nil
+		},
+		OnServerSettingUpdated: func(_ context.Context, key, value string) {
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
 			// unrelated malformed setting failing config.LoadFromDB. Uses a
@@ -1356,6 +1370,9 @@ func main() {
 			// are built under the unrated-content decision.
 			if key == config.AccessUnratedContentSettingKey {
 				settingsRecWorker.NotifyUnratedContentChanged(context.Background(), config.UnratedContentCacheTTL+time.Second)
+			}
+			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && defaultMarkerSharingStopped != nil {
+				defaultMarkerSharingStopped(context.Background())
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
@@ -1863,6 +1880,18 @@ func main() {
 					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
+			defaultMarkerSharingStopped = func(ctx context.Context) {
+				if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
+					slog.WarnContext(ctx, "reload marker provider config failed", "error", err)
+				}
+				// Other nodes reload provider config only on this event.
+				if deps.EventBus != nil {
+					_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
+						Type:    cache.EventMarkerProviderConfigChanged,
+						Payload: markers.SettingShareByDefault,
+					})
+				}
+			}
 		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
 			log.Fatalf("preload enabled plugins: %v", err)
@@ -2134,6 +2163,10 @@ func main() {
 		// Scans and the scheduled refresh re-apply local NFO and artwork
 		// metadata whose sidecar files changed.
 		metadataService.SetLocalSidecarStore(metadata.NewLocalSidecarRepository(deps.DB))
+		metadataService.SetFallbackLanguage(cfg.Metadata.FallbackLanguage)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			metadataService.SetFallbackLanguage(updated.Metadata.FallbackLanguage)
+		})
 
 		// Wire the image cacher whenever object storage is available so explicit
 		// admin image applies can succeed even if automatic metadata caching is off.
@@ -2837,13 +2870,17 @@ func main() {
 		isMemory := true
 
 		if cfg.RateLimit.Backend == "redis" {
-			redisClient, redisErr := cache.NewRedisClientForRole(cfg.Redis, "tasks")
+			// Each check bounds its own call, so the client must let that
+			// deadline end a stalled socket read.
+			redisClient, redisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "tasks")
 			if redisErr != nil {
 				log.Fatalf("failed to create Redis client for rate limiting: %v", redisErr)
 			}
 			if redisClient != nil {
-				perKeyLimiter = ratelimit.NewRedisLimiter(redisClient)
-				globalLimiter = ratelimit.NewRedisLimiter(redisClient)
+				// One limiter for both, so a Redis outage pauses every check
+				// of a request at once.
+				redisLimiter := ratelimit.NewRedisLimiter(redisClient)
+				perKeyLimiter, globalLimiter = redisLimiter, redisLimiter
 				isMemory = false
 				defer func() { _ = cache.CloseRedisClient(redisClient) }()
 			}
@@ -2880,6 +2917,10 @@ func main() {
 	// The Quick Connect code budget per account follows the same rule, and
 	// the native approval routes and Jellyfin's Authorize share it.
 	deps.QuickConnectCodeAttempts = ratelimit.NewQuickConnectCodeAttemptLimiter(apiRedisClient)
+	// The per-name password sign-in budget follows the same rule. One
+	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
+	// so no listener gets its own allowance.
+	deps.SignInAttempts = ratelimit.NewSignInNameAttemptLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -3466,6 +3507,7 @@ func main() {
 			nil, // settings: not needed here
 			nil, // user store: not needed here
 		)
+		absAuthSvc.SetSignInAttempts(deps.SignInAttempts)
 		// Audiobookshelf compatibility (beta) signs in local accounts only:
 		// its sessions refresh without the provider re-check, so directory
 		// users are not routed to their provider here.
@@ -3838,6 +3880,7 @@ func main() {
 			})
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
+			compatDeps.AuthService.SetSignInAttempts(deps.SignInAttempts)
 			// Jellyfin Quick Connect runs on the device sign-in requests the
 			// native API approves; profile tokens are only for remote playback.
 			if devices := auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo, compatDeps.UserStoreProvider, nil); devices != nil {
@@ -4697,10 +4740,58 @@ type markerLegacySettingsStore interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
+// markerProviderConfigDefaults is the part of markers.ProviderConfigStore that
+// seeds a provider's config row.
+type markerProviderConfigDefaults interface {
+	Get(provider string) (markers.ProviderConfig, bool)
+	Ensure(ctx context.Context, c markers.ProviderConfig) error
+	EnsureDefaultSharing(ctx context.Context, c markers.ProviderConfig) error
+}
+
+// markerContributionDefaults is the contribution config a marker capability's
+// manifest asks for. A fetch-only capability gets none, and automatic sharing
+// needs contribution on.
+func markerContributionDefaults(metadata map[string]any) markers.PluginContributionDefaults {
+	contribution := markers.PluginContributionDefaultsFromMetadata(metadata)
+	contribution.Enabled = contribution.Enabled && markers.PluginSupportsContributionFromMetadata(metadata)
+	contribution.AutoLocal = contribution.AutoLocal && contribution.Enabled
+	return contribution
+}
+
+// stopDefaultMarkerSharingInTx runs in the transaction that saves
+// markers.share_by_default=false. It reads the manifests from the database, not
+// the registry, so disabled plugins and ones this node has not loaded stop too,
+// and reads them through tx, so the save needs no second connection.
+func stopDefaultMarkerSharingInTx(ctx context.Context, tx pgx.Tx) error {
+	return markers.StopDefaultSharingInTx(ctx, tx, defaultSharingMarkerProviders)
+}
+
+// defaultSharingMarkerProviders lists the installed marker providers whose
+// manifest turns contribution on by default. It reads the manifest key alone,
+// not whether the current version accepts submissions, so a provider that is
+// fetch-only for now cannot resume sharing after a later update restores it.
+func defaultSharingMarkerProviders(ctx context.Context, tx pgx.Tx) ([]string, error) {
+	capabilities, err := plugins.ListCapabilitiesOfType(ctx, tx, sdkcapability.MarkerProvider)
+	if err != nil {
+		return nil, err
+	}
+	var providers []string
+	for _, capability := range capabilities {
+		descriptor, err := plugins.DecodeCapability(capability)
+		if err != nil {
+			return nil, fmt.Errorf("decode marker provider capability %d/%s: %w", capability.InstallationID, capability.ID, err)
+		}
+		if markers.PluginContributionDefaultsFromMetadata(markerCapabilityMetadata(descriptor)).Enabled {
+			providers = append(providers, markers.PluginProviderID(capability.InstallationID, capability.ID))
+		}
+	}
+	return providers, nil
+}
+
 func reloadMarkerPluginProviders(
 	ctx context.Context,
 	registry *markers.Registry,
-	configStore *markers.ProviderConfigStore,
+	configStore markerProviderConfigDefaults,
 	store markerPluginCapabilityStore,
 	runtimeConfigs markerPluginRuntimeConfigStore,
 	legacySettings markerLegacySettingsStore,
@@ -4801,19 +4892,24 @@ func reloadMarkerPluginProviders(
 				}
 				refreshedRuntimes[installation.ID] = true
 			}
+			supportsContribution := markers.PluginSupportsContributionFromMetadata(metadataMap)
+			contribution := markerContributionDefaults(metadataMap)
 			pluginProvider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
-				InstallationID:      installation.ID,
-				CapabilityID:        capability.ID,
-				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
-				PluginID:            installation.PluginID,
-				CacheRevision:       cacheRevision,
-				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
+				InstallationID:           installation.ID,
+				CapabilityID:             capability.ID,
+				DisplayName:              firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
+				PluginID:                 installation.PluginID,
+				CacheRevision:            cacheRevision,
+				RequiredExternalIDs:      markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
+				SupportsAmend:            markers.PluginSupportsAmendFromMetadata(metadataMap),
+				SupportsAbsent:           markers.PluginSupportsAbsentFromMetadata(metadataMap),
+				DefaultContributeEnabled: contribution.Enabled,
 			}, resolver)
 			if err != nil {
 				return err
 			}
 			var provider markers.Provider = pluginProvider
-			if !markers.PluginSupportsContributionFromMetadata(metadataMap) {
+			if !supportsContribution {
 				provider = markers.NewReadOnlyPluginProvider(pluginProvider)
 			}
 			providers = append(providers, provider)
@@ -4828,14 +4924,19 @@ func reloadMarkerPluginProviders(
 					Provider:                provider.ID(),
 					FetchEnabled:            true,
 					FetchPriority:           priority,
-					ContributeEnabled:       false,
-					ContributeAutoLocal:     false,
-					ContributeMinConfidence: 0.95,
+					ContributeEnabled:       contribution.Enabled,
+					ContributeAutoLocal:     contribution.AutoLocal,
+					ContributeMinConfidence: contribution.MinConfidence,
 				}
+				ensure := configStore.Ensure
 				if legacy, ok := legacyIntroDBProviderConfig(configStore, installation, capability, provider.ID()); ok {
 					defaultConfig = legacy
+				} else if defaultConfig.ContributeEnabled {
+					// The manifest's sharing default applies only while the
+					// server shares by default, which the setup wizard records.
+					ensure = configStore.EnsureDefaultSharing
 				}
-				if err := configStore.Ensure(ctx, defaultConfig); err != nil {
+				if err := ensure(ctx, defaultConfig); err != nil {
 					return err
 				}
 			}
@@ -4850,7 +4951,7 @@ func reloadMarkerPluginProviders(
 }
 
 func legacyIntroDBProviderConfig(
-	configStore *markers.ProviderConfigStore,
+	configStore markerProviderConfigDefaults,
 	installation *plugins.Installation,
 	capability *plugins.Capability,
 	providerID string,

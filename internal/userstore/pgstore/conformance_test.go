@@ -37,6 +37,50 @@ func TestPostgresMarkWatchedBatch(t *testing.T) {
 	})
 }
 
+// TestPostgresUnmarkKeepsHistory runs the mark-unwatched conformance test
+// against the Postgres backend; the SQLite backend runs it in internal/userdb.
+// Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresUnmarkKeepsHistory(t *testing.T) {
+	pool := testPool(t)
+	newUnmarkStore := func(t *testing.T) userstore.UserStore {
+		userID := seedTestUser(t, pool, "conf-unmark")
+		t.Cleanup(func() {
+			ctx := context.Background()
+			for _, table := range []string{"user_watch_history", "user_history_hidden_items", "user_watch_progress", "user_favorites", "user_profiles"} {
+				_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
+			}
+		})
+		return newStore(pool, userID)
+	}
+	storetest.RunUnmarkKeepsHistory(t, newUnmarkStore)
+	storetest.RunPlayFinishedAfterUnmark(t, newUnmarkStore)
+}
+
+// TestPostgresAtomicJellycompatProgress runs the leaf UserData edit conformance
+// test against the Postgres backend; the SQLite backend runs it in
+// internal/userdb. A trigger scoped to this test's user rejects position 321.
+// Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresAtomicJellycompatProgress(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	userID := seedTestUser(t, pool, "conf-jellyprogress")
+	function := fmt.Sprintf("fail_jellycompat_progress_%d", userID)
+	if _, err := pool.Exec(ctx, `CREATE FUNCTION `+function+`() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced progress failure'; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT OR UPDATE ON user_watch_progress FOR EACH ROW WHEN (NEW.user_id = %d AND NEW.position_seconds = 321) EXECUTE FUNCTION %s()`, function, userID, function)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DROP TRIGGER IF EXISTS `+function+` ON user_watch_progress`)
+		_, _ = pool.Exec(ctx, `DROP FUNCTION IF EXISTS `+function+`()`)
+		for _, table := range []string{"user_watch_history", "user_history_hidden_items", "user_watch_progress", "user_profiles"} {
+			_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
+		}
+	})
+	storetest.RunAtomicJellycompatProgress(t, newStore(pool, userID))
+}
+
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
 // and membership-change conformance tests against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.

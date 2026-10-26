@@ -1118,7 +1118,7 @@ func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler,
 	}
 	if pin != "" {
 		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{
-			PIN: &pin,
+			PINHash: storedPIN(t, pin),
 		}); err != nil {
 			t.Fatalf("set pin: %v", err)
 		}

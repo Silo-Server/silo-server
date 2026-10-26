@@ -142,9 +142,18 @@ only for a play the provider accepted, `REJECTED` for one the provider cannot
 take, and `RETRY` for one it cannot confirm. Silo records `APPLIED` as sent and
 never sends that play again.
 
+Mark unwatched keeps the plays in Silo's history, so Silo sends a provider no
+history removals: the server reports the `export_unwatched` capability as false
+whatever a plugin's descriptor declares, and the `export_unwatched_enabled`
+connection setting has no effect. A play stops being exported once a mark
+unwatched covers it. A live mark-watched event checks again before it sends,
+which narrows the window but does not close it: an unmark that lands while the
+event is being sent does not take the play back. A provider import of a play
+from before the unmark is skipped, so the item does not come back as watched.
+
 ## Event media
 
-Playback scrobbles, watched exports and unwatch events send a plugin the
+Playback scrobbles and watched exports send a plugin the
 item's catalog `title`, `year`, `series_title` and `series_year` with its
 external IDs, so a provider can create a title it has not seen. The service
 fills them from the catalog just before the events go out, because neither
@@ -157,7 +166,7 @@ It starts before the event joins its ordered dispatch queue, so lookups for
 queued events overlap, and a slow lookup can cost the event its titles but
 never the event. A confirmed stop, which has already claimed its delivery,
 waits for that lookup for at most half of the time it has left. Lookups that
-run on the caller's context, for watched exports, unwatch events and the
+run on the caller's context, for watched exports and the
 open-scrobble sweep (one lookup for all its sessions), take at most five
 seconds and at most half of the time the caller has left.
 

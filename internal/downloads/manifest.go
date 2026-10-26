@@ -61,13 +61,13 @@ type OfflineChapter struct {
 // delivered bytes can change, such as a timing correction, so an offline
 // client knows to fetch the asset again.
 type OfflineSubtitle struct {
-	Language        string `json:"language"`
+	Language        string `json:"language" doc:"Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value"`
 	Title           string `json:"title,omitempty"`
 	Format          string `json:"format"`
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
-	FetchURL        string `json:"fetch_url"`
+	FetchURL        string `json:"fetch_url" format:"uri-reference"`
 	FileSize        int64  `json:"file_size,omitempty"`
 	Revision        string `json:"revision,omitempty"`
 }
@@ -76,7 +76,7 @@ type OfflineSubtitle struct {
 type OfflineAudioTrack struct {
 	Index      int    `json:"index"`
 	Title      string `json:"title,omitempty"`
-	Language   string `json:"language,omitempty"`
+	Language   string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 	Codec      string `json:"codec,omitempty"`
 	Layout     string `json:"layout,omitempty"`
 	Channels   int    `json:"channels,omitempty"`

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -457,11 +460,22 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 	if startIndex >= len(items) {
 		return []T{}
 	}
-	if limit <= 0 {
-		limit = len(items)
+	// Compare limit with what is left rather than adding it to startIndex: a
+	// client Limit near math.MaxInt would overflow the sum.
+	end := len(items)
+	if limit > 0 && limit < end-startIndex {
+		end = startIndex + limit
 	}
-	end := min(startIndex+limit, len(items))
 	return items[startIndex:end]
+}
+
+// pageFetchLimit returns how many rows to read from offset 0 to serve the
+// page at startIndex, saturating at math.MaxInt instead of wrapping negative.
+func pageFetchLimit(startIndex, limit int) int {
+	if startIndex > 0 && limit > math.MaxInt-startIndex {
+		return math.MaxInt
+	}
+	return startIndex + limit
 }
 
 // handleBoxSetItem serves GET /Items/{id} when the ID decodes as a collection.
@@ -616,6 +630,24 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
+
+	// Stored collections keep their membership in SQL: an explicit sort or a
+	// filter browses the catalog joined to it, and the curated order pages it
+	// directly, so neither path loads every member to serve one page.
+	if !catalog.IsLiveQueryType(collection.CollectionType) {
+		if query.sortExplicit || query.hasItemTypeFilter || query.hasMemberFilters() {
+			params := buildBrowseParams(query)
+			params.Set("collection_id", collection.ID)
+			h.writeCollectionBrowsePage(w, r, session, query, routeID, params)
+			return
+		}
+		if pool := h.compatPool(); pool != nil {
+			h.writeStoredCollectionPage(w, r, session, query, routeID, pool, collection.ID)
+			return
+		}
+	}
+
 	contentIDs, err := h.collectionMemberIDs(r.Context(), session, collection)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -625,8 +657,6 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
-
-	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 
 	if query.sortExplicit || query.hasItemTypeFilter || query.hasMemberFilters() {
 		// Catalog browse reads media_items only, so an episode-scoped smart
@@ -658,18 +688,12 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		// access-filtered allowlist.
 		params := buildBrowseParams(query)
 		params.Set("content_ids", strings.Join(contentIDs, ","))
-		result, browseErr := h.content.BrowseItems(r.Context(), session, params)
-		if browseErr != nil {
-			writeCompatUpstreamError(w, browseErr)
-			return
-		}
-		h.writeCollectionItemsPage(w, r, session, query, routeID, result.Items, nil, result.Total)
+		h.writeCollectionBrowsePage(w, r, session, query, routeID, params)
 		return
 	}
 
-	// Position order: hydrate the surviving members (collections are capped
-	// well below the browse limit), rebuild curated order, then page locally
-	// before building DTOs.
+	// Position order without a database pool: hydrate the surviving members,
+	// rebuild curated order, then page locally before building DTOs.
 	ordered, episodeTargets, err := h.hydrateCollectionMembers(r.Context(), session, contentIDs, catalog.IsLiveQueryType(collection.CollectionType))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -677,6 +701,76 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 	}
 	page := slicePage(ordered, query.startIndex, query.limit)
 	h.writeCollectionItemsPage(w, r, session, query, routeID, page, episodeTargets, len(ordered))
+}
+
+// writeCollectionBrowsePage lets the catalog browse order, filter, and page a
+// collection's members, then writes that page.
+func (h *ItemsHandler) writeCollectionBrowsePage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, params url.Values) {
+	result, err := h.content.BrowseItems(r.Context(), session, params)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeCollectionItemsPage(w, r, session, query, routeID, result.Items, nil, result.Total)
+}
+
+// writeStoredCollectionPage writes one page of a stored collection in curated
+// order, paged in SQL over the members the viewer can see.
+func (h *ItemsHandler) writeStoredCollectionPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, pool *pgxpool.Pool, collectionID string) {
+	pageIDs, total, err := h.storedCollectionContentIDPage(r.Context(), session, pool, collectionID, query.startIndex, query.limit)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if len(pageIDs) == 0 {
+		result := emptyQueryResult(query.startIndex)
+		result.TotalRecordCount = total
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	// Stored members only reference media_items, so no episode lookup.
+	ordered, _, err := h.hydrateCollectionMembers(r.Context(), session, pageIDs, false)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeCollectionItemsPage(w, r, session, query, routeID, ordered, nil, total)
+}
+
+// storedCollectionContentIDPage returns the [offset, offset+limit) window of a
+// stored collection's members in curated order, plus the member total. Both
+// count only members the viewer can see, with the same access rules as
+// loadCompatItemsByContentIDs, so a hidden member neither shortens a page nor
+// shifts later pages. limit <= 0 means no cap.
+func (h *ItemsHandler) storedCollectionContentIDPage(ctx context.Context, session *Session, pool *pgxpool.Pool, collectionID string, offset, limit int) ([]string, int, error) {
+	access := h.resolveAccessFilter(ctx, session)
+	conditions := []string{"lci.collection_id = $1"}
+	args := []any{collectionID}
+	argIdx := 2
+	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
+		return nil, 0, nil
+	}
+	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
+	from := "library_collection_items lci JOIN media_items mi ON mi.content_id = lci.media_item_id WHERE " + strings.Join(conditions, " AND ")
+
+	offset = max(offset, 0)
+	var limitArg any // NULL is LIMIT ALL
+	if limit > 0 {
+		limitArg = limit
+	}
+	args = append(args, limitArg, offset)
+	// One statement, so the total and the page come from the same snapshot
+	// even while a sync replaces the membership.
+	var (
+		total int
+		ids   []string
+	)
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		"SELECT (SELECT COUNT(*) FROM %[1]s), ARRAY(SELECT lci.media_item_id FROM %[1]s ORDER BY lci.position, lci.source_rank, lci.media_item_id LIMIT $%[2]d OFFSET $%[3]d)",
+		from, argIdx, argIdx+1), args...).Scan(&total, &ids); err != nil {
+		return nil, 0, fmt.Errorf("paging collection members: %w", err)
+	}
+	return ids, total, nil
 }
 
 // writeSmartCollectionPage pages a smart collection's query in SQL and writes

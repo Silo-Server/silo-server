@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // ErrNotFound is returned by TokenStore when a JTI is absent.
@@ -84,7 +87,12 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 
 	principal, err := h.deps.CredValidator.Validate(r.Context(), body.Username, body.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			// The name has used its sign-in budget, shared with every other
+			// sign-in surface.
+			w.Header().Set("Retry-After", strconv.Itoa(ratelimit.RetryAfterSeconds(throttled.RetryAfter)))
+			http.Error(w, "too many failed sign-ins for this name; try again later", http.StatusTooManyRequests)
+		} else if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		} else if errors.Is(err, ErrProfilePINRequired) {
 			http.Error(w, "this profile has a PIN: sign in as username#profile with password#PIN", http.StatusUnauthorized)
@@ -105,6 +113,9 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		} else if errors.Is(err, auth.ErrPasswordChangeRequired) {
 			// This client cannot run the change a temporary password requires.
 			http.Error(w, "sign in to Silo to replace your temporary password", http.StatusUnauthorized)
+		} else if errors.Is(err, passwordhash.ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(passwordhash.RetryAfterSeconds))
+			http.Error(w, "the server is busy; try again in a moment", http.StatusServiceUnavailable)
 		} else {
 			slog.ErrorContext(r.Context(), "abs login: cred validator failed", "component", "audiobooks", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)

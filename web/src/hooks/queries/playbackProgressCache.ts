@@ -1,5 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ItemDetail, LeafItemUserData, WatchDetail } from "@/api/types";
+import {
+  leafUserData,
+  type ItemDetail,
+  type LeafItemUserData,
+  type WatchDetail,
+} from "@/api/types";
 import type { ProgressList } from "./progress";
 import { progressKeys } from "./keys";
 
@@ -48,8 +53,7 @@ function applySnapshotToItemDetail(
 ): ItemDetail | undefined {
   if (!existing) return existing;
 
-  const currentUserData =
-    existing.user_data && "position_seconds" in existing.user_data ? existing.user_data : undefined;
+  const currentUserData = leafUserData(existing.user_data);
 
   return {
     ...existing,

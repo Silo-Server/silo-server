@@ -160,7 +160,7 @@ func TestLocalizationRefreshKeepsTranslationsAndLocks(t *testing.T) {
 		manual := buildItemLocalizationRecord(&models.MediaItemLocalization{
 			Overview: "An English overview.", OverviewSource: models.LocalizationSourceManual,
 		}, "series-shared", "fr", "series", &MetadataResult{}, &MetadataResult{Overview: "An English overview."},
-			nil, modeMergeMode(mode), "fr", false, true)
+			nil, modeMergeMode(mode), "fr", "", false, true)
 		if manual.Overview != "An English overview." {
 			t.Errorf("mode %d: manual overview = %q, want it kept", mode, manual.Overview)
 		}
@@ -204,6 +204,40 @@ func TestLocalizationIgnoresFallbackTitle(t *testing.T) {
 		refreshShared(t, h, mode, "fr", &MetadataResult{Title: "千と千尋の神隠し", TitleIsFallback: true})
 		if got := locs.rows["series-shared/fr"].Title; got != "Le Voyage de Chihiro" {
 			t.Errorf("mode %d: title = %q, want the stored translation kept", mode, got)
+		}
+	}
+}
+
+// With a fallback language on, text a provider marks as another language is
+// no translation: the second library's localization row stays empty and shows
+// the base text, and AI translation still sees it as missing. With the
+// fallback off the original language is wanted and the row keeps it.
+func TestLocalizationDropsTextInAnotherLanguage(t *testing.T) {
+	for _, fallback := range []string{"en", ""} {
+		for _, mode := range []RefreshMode{ModeScheduledRefresh, ModeManualRefresh} {
+			h, locs := sharedItemHarness(t, "en", "Mob Psycho 100", "An English overview.", "")
+			h.service.SetFallbackLanguage(fallback)
+			refreshShared(t, h, mode, "ru", &MetadataResult{
+				Title: "Моб Психо 100", Overview: "日本語のあらすじ", OverviewLanguage: "ja", Tagline: "日本語",
+			})
+			wantOverview := ""
+			if fallback == "" {
+				wantOverview = "日本語のあらすじ"
+			}
+			loc := locs.rows["series-shared/ru"]
+			if loc == nil || loc.Title != "Моб Психо 100" || loc.Overview != wantOverview {
+				t.Errorf("fallback %q mode %d: localization = %+v, want the Russian title and overview %q", fallback, mode, loc, wantOverview)
+			}
+
+			// A title marked as another language is no translation either.
+			refreshShared(t, h, mode, "ru", &MetadataResult{Title: "モブサイコ100", TitleLanguage: "ja"})
+			wantTitle := "Моб Психо 100"
+			if fallback == "" && mode == ModeManualRefresh {
+				wantTitle = "モブサイコ100"
+			}
+			if got := locs.rows["series-shared/ru"].Title; got != wantTitle {
+				t.Errorf("fallback %q mode %d: title = %q, want %q", fallback, mode, got, wantTitle)
+			}
 		}
 	}
 }

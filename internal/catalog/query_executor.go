@@ -77,6 +77,9 @@ func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access A
 }
 
 func (e *QueryExecutor) buildCountQuery(def QueryDefinition, access AccessFilter) (string, []any, error) {
+	if countSQL, countArgs, ok, err := e.episodeCatalogCountQuery(def, access); ok || err != nil {
+		return countSQL, countArgs, err
+	}
 	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
 	if err != nil {
 		return "", nil, err
@@ -100,7 +103,7 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, fmt.Errorf("query executor requires a database pool")
 	}
 
-	if !e.GroupByWork && e.SourceWhere == "" && e.SourceJoin == "" && len(e.SourceOrder) == 0 {
+	if e.usesEpisodeCatalogQueries() {
 		if items, total, hasMore, ok, err := e.tryEpisodeCatalogUserStatePreviewPage(
 			ctx,
 			def,

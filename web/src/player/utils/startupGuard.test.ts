@@ -2,9 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HLS_STARTUP_TIMEOUT_MS, HlsStartupGuard } from "./hlsStartupGuard";
+import { STARTUP_TIMEOUT_MS, StartupGuard } from "./startupGuard";
 
-describe("HlsStartupGuard", () => {
+describe("StartupGuard", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -15,24 +15,24 @@ describe("HlsStartupGuard", () => {
 
   it("fails startup when no playable frame arrives before the deadline", () => {
     const onFailure = vi.fn();
-    const guard = new HlsStartupGuard(onFailure);
+    const guard = new StartupGuard(onFailure);
 
-    vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS - 1);
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS - 1);
     expect(onFailure).not.toHaveBeenCalled();
     expect(guard.hasFailed()).toBe(false);
 
     vi.advanceTimersByTime(1);
-    expect(onFailure).toHaveBeenCalledOnce();
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
     expect(guard.hasFailed()).toBe(true);
     guard.dispose();
   });
 
   it("disarms startup limits after playable media arrives", () => {
     const onFailure = vi.fn();
-    const guard = new HlsStartupGuard(onFailure);
+    const guard = new StartupGuard(onFailure);
 
     guard.markPlaybackStarted();
-    vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS);
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
 
     expect(onFailure).not.toHaveBeenCalled();
     expect(guard.hasFailed()).toBe(false);
@@ -42,10 +42,10 @@ describe("HlsStartupGuard", () => {
 
   it("does not fail after disposal", () => {
     const onFailure = vi.fn();
-    const guard = new HlsStartupGuard(onFailure);
+    const guard = new StartupGuard(onFailure);
 
     guard.dispose();
-    vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS);
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
 
     expect(onFailure).not.toHaveBeenCalled();
   });

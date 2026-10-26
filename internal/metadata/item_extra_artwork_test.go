@@ -87,7 +87,7 @@ func TestApplyBestImagesFillsExtraSlots(t *testing.T) {
 		{ProviderID: "nfo", URL: "file:///m/Film/landscape.jpg", Type: ImageThumb},
 		{ProviderID: "nfo", URL: "file:///m/Film/clearart.png", Type: ImageClearArt},
 		{ProviderID: "tvdb", URL: "https://img.example/disc.png", Type: ImageDisc, Language: "en"},
-	}, MergeFillEmpty, "en")
+	}, MergeFillEmpty, "en", "")
 
 	want := map[string]string{
 		"banner":   "file:///m/Film/banner.jpg",
@@ -113,7 +113,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		existing := &models.MediaItem{BannerSourcePath: pending}
 		item := &models.MediaItem{}
 		carryItemOnlyArtwork(item, existing)
-		applyBestImages(item, nil, MergeFillEmpty, "en")
+		applyBestImages(item, nil, MergeFillEmpty, "en", "")
 		prepareItemImagesForQueue(item, existing, true)
 		if item.BannerSourcePath != pending || item.BannerPath != "" {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
@@ -133,7 +133,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 	})
 	t.Run("locked artwork", func(t *testing.T) {
 		item := &models.MediaItem{BannerSourcePath: pending, LockedFields: []int{int(FieldImages)}}
-		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en")
+		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en", "")
 		if item.BannerPath != "" {
 			t.Fatalf("a locked pending banner was replaced by %q", item.BannerPath)
 		}

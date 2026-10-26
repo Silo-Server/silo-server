@@ -151,6 +151,10 @@ type AttemptRecordV3 struct {
 	// A replica reaping a stale local copy compares it with its own activity
 	// clock, since requests can land on other replicas.
 	LastSampleAt time.Time
+	// DesiredTracks is the audio and subtitle the viewer asked for, which
+	// can differ from CurrentPlan's selection after a version change had to
+	// fall back. Nil on rows written before it existed.
+	DesiredTracks *DesiredTracksV3
 }
 
 // AttemptIdentityV3 carries only the ownership columns of an attempt so
@@ -163,6 +167,13 @@ type AttemptIdentityV3 struct {
 }
 
 type RouteEventRecordV3 struct {
+	ConnectionDeviceID string
+	ConnectionKey      string
+	Delivery           string
+	ReceivedAt         time.Time
+	// SampleLifetime is the speed reading lifetime when the event was
+	// received; a plan summary's throughput replaces an older sample.
+	SampleLifetime time.Duration
 	RouteEventV3
 	// EventID is the client-minted identity of one report. Empty for legacy
 	// v1 reports; a v2 report always carries one so a retry after a lost 202

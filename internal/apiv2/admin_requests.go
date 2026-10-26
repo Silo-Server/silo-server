@@ -103,7 +103,7 @@ type AdminRequestIntegrationBody struct {
 	SupportedMediaTypes []string       `json:"supported_media_types"`
 	PluginConfig        map[string]any `json:"plugin_config"`
 	Enabled             bool           `json:"enabled"`
-	BaseURL             string         `json:"base_url"`
+	BaseURL             string         `json:"base_url" doc:"Service base URL; a host[:port] without a scheme gets http://; not validated as a URI"`
 	APIKey              string         `json:"api_key_ref,omitempty" writeOnly:"true" doc:"New credential; omitted or blank preserves the saved credential on update"`
 }
 type AdminRequestIntegration struct {
@@ -114,7 +114,7 @@ type AdminRequestIntegration struct {
 	SupportedMediaTypes []string        `json:"supported_media_types"`
 	PluginConfig        map[string]any  `json:"plugin_config"`
 	Enabled             bool            `json:"enabled"`
-	BaseURL             string          `json:"base_url"`
+	BaseURL             string          `json:"base_url" doc:"Service base URL as stored; not validated as a URI"`
 	HasAPIKey           bool            `json:"has_api_key"`
 	LastCheckAt         NullableInstant `json:"last_check_at"`
 	LastCheckStatus     string          `json:"last_check_status"`
@@ -151,7 +151,7 @@ type AdminRequestOptionsInput struct {
 		Name           string         `json:"name,omitempty"`
 		CapabilityID   string         `json:"capability_id,omitempty"`
 		InstallationID *ID            `json:"installation_id,omitempty" pattern:"^[1-9][0-9]*$"`
-		BaseURL        *string        `json:"base_url,omitempty"`
+		BaseURL        *string        `json:"base_url,omitempty" doc:"Service base URL; a host[:port] without a scheme gets http://, and empty clears it; not validated as a URI"`
 		APIKey         string         `json:"api_key_ref,omitempty" writeOnly:"true"`
 		PluginConfig   map[string]any `json:"plugin_config,omitempty"`
 	}

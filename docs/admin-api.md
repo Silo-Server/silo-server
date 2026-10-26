@@ -1344,15 +1344,15 @@ season binge reads as one show and a title's `media_item_id` is a series
 content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
-(`admin_playback_history.watched_seconds`) that *ended* inside the same window
+(`admin_playback_history`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry with no finalized session in the window reports `0`. Because
-`watched_seconds` records a session's final absolute position, a resumed
-session would claim the already-watched stretch again, so each
-session's contribution is capped at its wall-clock length; the figure is an
-estimate until playback records true elapsed viewing time.
+minute. An entry with no finalized session in the window reports `0`. Each
+session contributes its measured watch time (`played_seconds`, below). A
+session recorded before watch time was measured only knows where it ended
+(`watched_seconds`), so its end position is capped at its wall-clock length;
+that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
@@ -1497,7 +1497,10 @@ read the live log. Account and file identifiers are strings, instants are RFC 33
 `duration_seconds` is null when the media duration was never recorded. A deleted account
 lists with an empty `username`; an item no longer in the catalog lists with an empty
 `media_title` and `media_type`. The stored client address is not part of this projection,
-matching v1. A missing database returns 503; storage errors are masked as 500.
+matching v1. It is the viewer's last address on the playback session. Rows written by
+earlier server versions hold the address of the request that ended the attempt instead:
+the administrator's when an administrator stopped or terminated it, and none when it
+expired. A missing database returns 503; storage errors are masked as 500.
 
 Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
 attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
@@ -1505,6 +1508,20 @@ like the other filters, so a cursor from one window is refused under another. Ea
 also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
 they come from the catalog episode and its series (`series_title` is empty when the series
 left the catalog); for anything else they are empty and null.
+
+`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
+resumed partway through reports the resume point plus what was watched. `played_seconds`
+is the measured watch time: media advanced through by normal playback, without pauses,
+seeks or buffering. The playback session measures it from its progress reports
+(`playback.WatchTime`): a position advance between two reports counts as watched when it
+fits playback at up to twice normal speed plus a short allowance for report jitter, and
+anything larger is a seek. Time after the last progress report before the stop is not
+counted. It is null for an attempt with no measurement, which includes every attempt
+recorded before measurement existed. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them when
+one began measuring after the other ended (a session rebuilt under the same id after it was
+finalized). The history row also stores the first reported
+position and the time spent paused; the route does not expose them.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
@@ -1518,7 +1535,8 @@ for source configuration and `/api/v2/admin/history-imports` for mappings, crede
 and runs. All operations require an acting administrator. Mutations enforce the
 demo restriction; reads do not.
 `GET /api/v2/admin/history-imports/capabilities` reports availability, guarded
-configuration, durable administrative runs, and the 200-mapping bulk limit.
+configuration, durable administrative runs, the 200-mapping bulk limit, and
+`played_lookback` with its `max_lookback_hours` bound.
 
 Read a source or mapping by ID before editing it. The response contains its canonical
 configuration and a strong `ETag`. Send that exact tag in `If-Match` on source,
@@ -1550,6 +1568,29 @@ locations when available, and counts for each outcome. A source with more than 2
 mappings is rejected before any run admission. Bulk work is partially successful;
 it is not an atomic transaction across mappings. Mutations are not automatically
 retryable after an uncertain response.
+
+Run and bulk start take an optional body. Without one, with an empty or
+whitespace-only body (whatever its `Content-Type`), or with `lookback_hours`
+omitted or `null`, a run imports the full history; any other body must be
+`application/json`. `{"lookback_hours": N}`, N a plain JSON integer (1 to 8760),
+imports only items last played in the N hours before the run was queued: the
+cutoff is fixed at admission and stored with the run, so a run that waits in the
+queue still reads its window, and a bulk start gives every run one cutoff.
+Resume positions and favorites are still read in full. A lookback never removes
+or un-marks anything: items outside the window are left as they are. Because
+favorites are read in full, an item un-favorited in Silo but still a favorite in
+Jellyfin is favorited again by every run, as a full import already does;
+scheduled lookback runs make that more noticeable. If Jellyfin does not return
+plays newest first, the run reads the full played history instead and records a
+warning saying so. A play during the read can move an unread item ahead of the
+pages already read; the run detects that, reads the window again once, and falls
+back to the full played history if the list moves again. Only Jellyfin sources support it; an Emby or Plex source
+answers 422 `validation_failed`, and a bulk start on one queues nothing. A
+completed lookback run does not update the mapping's `last_imported_at`, which
+records the last completed full import. Run responses carry the cutoff as
+`played_since`, absent for a full import. The intended pattern is one full
+import per mapping, then recurring lookback runs with a window comfortably wider
+than the interval between them.
 
 Cancellation records intent. A queued run can become cancelled immediately; a running
 worker acknowledges cancellation at its next boundary. Pending cancellation returns

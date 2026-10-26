@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -181,4 +182,29 @@ func TestOpenRefusesEscapingSymlink(t *testing.T) {
 		}
 		t.Fatal("escaping symlink accepted", err)
 	}
+}
+
+// Catalog paths are fspath-encoded; Open must reach a theme whose owner
+// directory and file name are not UTF-8.
+func TestOpenEncodedNonUTF8Path(t *testing.T) {
+	owner := filepath.Join(t.TempDir(), "B\xe5rd")
+	if err := os.Mkdir(owner, 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	path := filepath.Join(owner, "theme-music", "Ylvis\xe5ker.mp3")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Open(File{OwnerPath: fspath.Encode(owner), Path: fspath.Encode(path), Size: info.Size(), Modified: info.ModTime().Truncate(time.Microsecond)})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	_ = f.Close()
 }

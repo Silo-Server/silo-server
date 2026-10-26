@@ -102,6 +102,7 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 	for _, tt := range []struct {
 		name                 string
 		requested, effective []models.AudioTrack
+		index, want          int
 	}{
 		{"remaps a reordered language", []models.AudioTrack{
 			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
@@ -109,17 +110,52 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 		}, []models.AudioTrack{
 			{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
 			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
-		}},
+		}, 1, 0},
 		{"falls back to the language across codecs", []models.AudioTrack{
 			{Language: "ja", Codec: "aac", Channels: 2},
 			{Language: "en", Codec: "truehd", Channels: 8},
 		}, []models.AudioTrack{
 			{Language: "en", Codec: "eac3", Channels: 6},
 			{Language: "es", Codec: "aac", Channels: 2, Default: true},
-		}},
+		}, 1, 0},
+		{"keeps the language when the codec changes and the order differs", []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 6, Default: true},
+			{Language: "ja", Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"keeps the language when only the channels change", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+			{Language: "ja", Codec: "aac", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"prefers the exact regional tag", []models.AudioTrack{
+			{Language: "en-GB", Codec: "eac3", Channels: 6},
+			{Language: "en-US", Codec: "eac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "en-GB", Codec: "aac", Channels: 2},
+			{Language: "en-US", Codec: "aac", Channels: 2},
+		}, 1, 1},
+		{"keeps main audio over commentary in the same language", []models.AudioTrack{
+			{Language: "en", Codec: "truehd", Channels: 8, Title: "Main"},
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+		}, []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+			{Language: "en", Codec: "eac3", Channels: 6, Title: "Main"},
+		}, 0, 1},
+		{"matches an untagged track among untagged tracks", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2},
+			{Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
 	} {
-		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, 1); got != 0 {
-			t.Fatalf("%s: MatchAudioTrackAcrossVersions() = %d, want English track 0", tt.name, got)
+		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, tt.index); got != tt.want {
+			t.Errorf("%s: MatchAudioTrackAcrossVersions() = %d, want %d", tt.name, got, tt.want)
 		}
 	}
 }

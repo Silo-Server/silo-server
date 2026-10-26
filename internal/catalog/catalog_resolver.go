@@ -1930,6 +1930,7 @@ var catalogQueryRuleFields = map[string]bool{
 	"subtitle_language": true,
 
 	querySortTitle:              true,
+	ruleFieldShowTitle:          true,
 	ruleFieldDecade:             true,
 	querySortRuntime:            true,
 	querySortRatingTMDb:         true,
@@ -1972,6 +1973,7 @@ var catalogPersonalRuleFields = map[string]bool{
 	"subtitle_language": true,
 
 	querySortTitle:              true,
+	ruleFieldShowTitle:          true,
 	ruleFieldDecade:             true,
 	querySortRuntime:            true,
 	querySortRatingTMDb:         true,

@@ -32,7 +32,6 @@ interface SubtitlesPopoverProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   activeAudioTrackIndex?: number | null;
   onSelectSubtitle?: (selection: PrePlaySubtitleSelection) => void;
   onSelectSubtitleOff?: () => void;
@@ -200,7 +199,6 @@ export default function SubtitlesPopover({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles = true,
-  profileLanguage,
   activeAudioTrackIndex = null,
   onSelectSubtitle,
   onSelectSubtitleOff,
@@ -232,14 +230,12 @@ export default function SubtitlesPopover({
         subtitleMode,
         showForcedSubtitles,
         audioLanguage: activeAudioLanguage,
-        profileLanguage,
       }),
     [
       activeAudioLanguage,
       candidates.all,
       preferredSubtitleLanguage,
       preferredSubtitleTrackSignature,
-      profileLanguage,
       showForcedSubtitles,
       subtitleMode,
     ],

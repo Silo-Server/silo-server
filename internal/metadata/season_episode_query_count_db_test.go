@@ -138,8 +138,9 @@ func TestPersistSeasonsAndEpisodes_QueryCountIsBounded(t *testing.T) {
 		language       string
 		wantStatements int
 	}{
-		{name: "canonical", language: "en", wantStatements: 9},
-		{name: "localized", language: "fr", wantStatements: 13},
+		// Each count includes locking the series before its air-date refresh.
+		{name: "canonical", language: "en", wantStatements: 10},
+		{name: "localized", language: "fr", wantStatements: 14},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			queryCounts := make([]int, 0, 2)

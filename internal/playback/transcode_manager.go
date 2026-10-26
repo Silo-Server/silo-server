@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -799,6 +800,9 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		ClientChannel:    normalizeClientMetadataValue(card.ClientChannel, 32),
 		ClientUserAgent:  normalizeClientMetadataValue(card.ClientUserAgent, 512),
 		IsJellyfinCompat: card.IsJellyfinCompat,
+		// The card carries no address; the media request rebuilding the
+		// session comes from the viewer's player.
+		ClientIP: clientip.FromContext(ctx),
 		// Preserve the byte-affecting recipe so an audio switch after a restart
 		// rebuilds the same stream (subtitles/cadence) instead of dropping them.
 		SubtitleTrackIndex: card.SubtitleTrackIndex,

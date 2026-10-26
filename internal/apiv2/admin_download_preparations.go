@@ -76,7 +76,7 @@ type AdminDownloadPreparationSource struct {
 type AdminDownloadPreparationAudioTrack struct {
 	Codec    string `json:"codec,omitempty"`
 	Channels *int   `json:"channels,omitempty"`
-	Language string `json:"language,omitempty"`
+	Language string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 }
 
 type AdminDownloadPreparationOutput struct {

@@ -22,6 +22,7 @@ import {
   type SessionIdentitySnapshot,
 } from "@/api/client";
 import { endProfileEpoch, storage } from "@/utils/storage";
+import { forgetBandwidthEstimate } from "@/player/bandwidth-readings";
 import { isProfileLaunchPending } from "@/lib/profileLaunch";
 import type { LoginResponse, Profile, User } from "@/api/types";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
@@ -353,6 +354,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // an empty cache instead of being thrown away a render later.
       if (signedInUserIdRef.current !== null && signedInUserIdRef.current !== data.user.id) {
         queryClient.clear();
+        // The connection speed the server kept for the old account is not this one's.
+        forgetBandwidthEstimate();
       }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
@@ -376,6 +379,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     endProfileEpoch();
     clearProfile();
     queryClient.clear();
+    // A speed reading from before a sign-out is discarded.
+    forgetBandwidthEstimate();
     setUser(null);
     setSetupRequired(false);
   }, [clearProfile]);

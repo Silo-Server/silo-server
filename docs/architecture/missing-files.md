@@ -40,6 +40,17 @@ item that exists without any membership, whatever their age. Reconciliation
 runs first and deletes every orphan it may, so such an item is held or under
 an unreachable root, and its next orphan check needs those rows to find it.
 
+A scan never marks files missing where its walk failed: an entry it could not
+read or resolve (permission or I/O error, dangling symlink) protects what is
+cataloged at or under it, and an unreachable or suspect-empty library root
+protects its whole tree. One case is an absence, not a failure: a scan scoped
+to a folder below a library root (a monitor or webhook scan of a deleted movie
+or series folder) whose folder no longer exists (`ENOENT`) walks as empty when
+its parent is still a directory, so its titles leave the library as they would
+on a full library scan (`scopeRootVanished`). A folder whose parent is gone too,
+or that sits below a dangling symlink, stays protected, and the library root's
+own probes still apply to that scan.
+
 Arr webhooks report an upgrade as a delete followed by an import, in either
 order and possibly in separate deliveries. Neither order changes the outcome;
 the title is only hidden between the two.

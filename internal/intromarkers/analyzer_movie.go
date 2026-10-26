@@ -188,13 +188,15 @@ func (a *Analyzer) analyzeMovies(ctx context.Context, candidates []Candidate, op
 
 // analyzeMovie places one movie's credits: from a credits chapter when it
 // has one, otherwise from its tail keyframes when tailReady. A movie whose
-// credits came from a higher-priority source is left alone.
+// credits came from a higher-priority source is left alone, unless they are
+// online credits rated below its credits chapter.
 func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailReady bool, deadline time.Time) RunSummary {
 	summary := RunSummary{}
-	if !candidate.ownsMarker(kindCredits) {
+	segment, chaptered := DetectChapterCredits(candidate.Chapters, candidate.DurationSeconds, true)
+	if !candidate.ownsMarker(kindCredits) && (!chaptered || !candidate.yieldsToChapter(kindCredits, segment)) {
 		return summary
 	}
-	if segment, ok := DetectChapterCredits(candidate.Chapters, candidate.DurationSeconds, true); ok {
+	if chaptered {
 		if a.patchCredits(ctx, candidate, segment, &summary) {
 			summary.MovieCreditsMarkersWritten++
 		}

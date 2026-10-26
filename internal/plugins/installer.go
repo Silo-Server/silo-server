@@ -20,6 +20,8 @@ import (
 	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 type InstallArchiveRequest struct {
@@ -619,6 +621,7 @@ func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.P
 	defer cancel()
 
 	cmd := exec.CommandContext(execCtx, tmpBinary, "manifest")
+	cmd.Env = pluginhost.ProcessEnv()
 	manifestOut, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {

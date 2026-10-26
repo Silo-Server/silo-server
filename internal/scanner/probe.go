@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -132,7 +132,7 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := exec.CommandContext(probeCtx, ffprobePath,
+	cmd := fspath.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
@@ -338,7 +338,7 @@ const probeInputReadableBytes = 64 << 10
 // headers and indexes (an MP4 moov atom written last) live. An empty file is
 // readable: its emptiness is a content problem.
 func probeInputReadable(filePath string) error {
-	f, err := os.Open(filePath)
+	f, err := fspath.Open(filePath)
 	if err != nil {
 		return err
 	}
@@ -804,7 +804,7 @@ const frameSideDataFallbackPackets = 24
 func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(probeCtx, ffprobePath, //nolint:gosec // G204: the configured ffprobe, fixed flags, a stream specifier and the scanned file
+	cmd := fspath.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
@@ -858,7 +858,7 @@ func probeVideoPacketDuration(
 ) (int, error) {
 	packetCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(packetCtx, ffprobePath,
+	cmd := fspath.CommandContext(packetCtx, ffprobePath,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",

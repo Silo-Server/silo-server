@@ -173,13 +173,21 @@ func (h *ItemsHandler) userViews(ctx context.Context, session *Session) ([]baseI
 		order = h.loadUserViewOrder(ctx, session)
 		sortByPreferredOrder(libraries, order.libraryOrder, func(library upstreamUserLibrary) string { return strconv.Itoa(library.ID) })
 	}
+	items = append(items, h.libraryViews(libraries)...)
+	sortByPreferredOrder(items, order.orderedViews, func(item baseItemDTO) string { return item.ID })
+	return items, nil
+}
+
+// libraryViews maps libraries to their CollectionFolder items, remembering
+// each library's artwork for the image routes.
+func (h *ItemsHandler) libraryViews(libraries []upstreamUserLibrary) []baseItemDTO {
+	items := make([]baseItemDTO, 0, len(libraries))
 	for _, library := range libraries {
 		dto := h.mapper.viewFromLibrary(library)
 		h.rememberLibraryImages(library, dto.ID)
 		items = append(items, dto)
 	}
-	sortByPreferredOrder(items, order.orderedViews, func(item baseItemDTO) string { return item.ID })
-	return items, nil
+	return items
 }
 
 // HandleItems serves GET /Items.
@@ -1014,6 +1022,36 @@ func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.
 // setting's default.
 func enableRealtimeMonitor(server func() bool, library bool) bool {
 	return library && (server == nil || server())
+}
+
+const compatMediaFoldersPath = "/Library/MediaFolders"
+
+// HandleMediaFolders serves GET /Library/MediaFolders: the session's visible
+// libraries as CollectionFolder items with the same Ids as /UserViews. Jellyfin
+// SDK getMediaFolders() discovers libraries here (Maintainerr, for one). The
+// synthetic Collections view is a view, not a media folder, so it is omitted.
+// Silo has no hidden media folders, so isHidden=true lists none.
+func (h *ItemsHandler) HandleMediaFolders(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+
+	items := []baseItemDTO{}
+	if !parseBool(newCaseInsensitiveQuery(r.URL.Query()).Get("isHidden"), false) {
+		libraries, err := h.content.ListUserLibraries(r.Context(), session)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		items = h.libraryViews(libraries)
+	}
+	writeJSON(w, http.StatusOK, queryResultDTO{
+		Items:            items,
+		TotalRecordCount: len(items),
+		StartIndex:       0,
+	})
 }
 
 // HandleVirtualFolders serves GET /Library/VirtualFolders.
@@ -1860,15 +1898,7 @@ func (h *ItemsHandler) writeSeasonItemsResponse(w http.ResponseWriter, r *http.R
 	})
 	total := len(seasons)
 	if page {
-		start := query.startIndex
-		if start > total {
-			start = total
-		}
-		end := total
-		if query.limit > 0 && start+query.limit < end {
-			end = start + query.limit
-		}
-		seasons = seasons[start:end]
+		seasons = slicePage(seasons, query.startIndex, query.limit)
 	}
 
 	items := make([]baseItemDTO, 0, len(seasons))
@@ -2317,7 +2347,7 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 		UserID:          session.StreamAppUserID,
 		ProfileID:       session.ProfileID,
 		AccessFilter:    h.resolveAccessFilter(r.Context(), session),
-		Limit:           query.limit + query.startIndex, // fetch enough to paginate
+		Limit:           pageFetchLimit(query.startIndex, query.limit), // fetch enough to paginate
 		EnableResumable: parseBool(qp.Get("enableResumable"), false),
 	}
 
@@ -2401,12 +2431,13 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 	items = sliceBaseItems(items, query.startIndex, query.limit)
 	pageIDs = slicePageIDs(pageIDs, query.startIndex, query.limit)
 	if query.needsDetailFields {
+		detailsByID := h.batchListItemDetails(r.Context(), session, pageIDs, nil)
 		for i := range items {
 			if i >= len(pageIDs) {
 				break
 			}
-			detail, detailErr := h.content.GetItemDetail(r.Context(), session, pageIDs[i], nil)
-			if detailErr != nil {
+			detail := detailsByID[pageIDs[i]]
+			if detail == nil {
 				continue
 			}
 			h.rememberDetailImages(*detail)
@@ -2429,17 +2460,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 // slicePageIDs applies sliceBaseItems' bounds to the parallel content-id
 // slice so page positions stay aligned after StartIndex/Limit slicing.
 func slicePageIDs(ids []string, startIndex, limit int) []string {
-	if startIndex < 0 {
-		startIndex = 0
-	}
-	if startIndex >= len(ids) {
-		return []string{}
-	}
-	if limit <= 0 {
-		limit = len(ids)
-	}
-	end := min(startIndex+limit, len(ids))
-	return ids[startIndex:end]
+	return slicePage(ids, startIndex, limit)
 }
 
 // HandleUpcoming follows Jellyfin's UTC yesterday-and-later premiere window.
@@ -2598,13 +2619,17 @@ func (h *ItemsHandler) handleLibraryItem(w http.ResponseWriter, r *http.Request,
 // fallback behavior. Individually-unresolvable ids (e.g. season rows, which the
 // item-detail batch path does not handle) are simply absent and likewise fall
 // back to list rendering rather than a per-item detail fetch. Returns nil for an
-// empty input.
+// empty input, and when the batch fails after ctx is done, since each per-item
+// lookup would fail on the same context.
 func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) map[string]*upstreamItemDetail {
 	if len(contentIDs) == 0 {
 		return nil
 	}
 	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID); err == nil {
 		return details
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	details := make(map[string]*upstreamItemDetail, len(contentIDs))
 	for _, id := range contentIDs {
@@ -2954,15 +2979,12 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 
 	items := make([]baseItemDTO, 0, len(query.specificIDs))
 	savedMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
-	for _, contentID := range query.specificIDs {
-		detail, itemErr := h.content.GetItemDetail(r.Context(), session, contentID, libraryIDPtr(query.parentLibraryID))
-		if itemErr != nil {
-			if isHTTPStatus(itemErr, http.StatusNotFound) {
-				continue
-			}
-			writeCompatUpstreamError(w, itemErr)
-			return
-		}
+	details, err := h.specificItemDetails(r.Context(), session, query.specificIDs, libraryIDPtr(query.parentLibraryID))
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	for _, detail := range details {
 		h.rememberDetailImages(*detail)
 		dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
 		if query.requestedFields == nil {
@@ -3024,6 +3046,35 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
+}
+
+// specificItemDetails returns the details of an Ids list in its order. One
+// batch serves the movies, series, and episodes; GetItemDetail serves what the
+// batch leaves out, such as seasons, or every id when the batch fails. An id
+// GetItemDetail answers 404 for is left out, and any other error fails the
+// list.
+func (h *ItemsHandler) specificItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]*upstreamItemDetail, error) {
+	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID)
+	if batchErr != nil {
+		batch = nil
+	}
+	details := make([]*upstreamItemDetail, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		detail := batch[contentID]
+		var err error
+		if detail == nil {
+			detail, err = h.content.GetItemDetail(ctx, session, contentID, libraryID)
+		}
+		switch {
+		case isHTTPStatus(err, http.StatusNotFound):
+			// Left out of the list.
+		case err != nil:
+			return nil, err
+		case detail != nil:
+			details = append(details, detail)
+		}
+	}
+	return details, nil
 }
 
 // handlePlayedItems serves IsPlayed=True requests by querying completed
@@ -3106,6 +3157,24 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	// narrower requests are still honored. Requests scoped only to types the
 	// watching scope cannot serve (e.g. Series/Season-only) fall through to
 	// loadProgressPage below.
+	// A series or season ParentId reads that series' episodes, not the
+	// profile's recent progress, so an episode watched long ago still resumes.
+	if query.scopesProgressToParent() {
+		items, total, err := h.loadParentResume(r.Context(), session, query, typeSet)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		h.applyListFileFields(r.Context(), session, items, query)
+		applyItemsResponseOptions(items, query)
+		writeJSON(w, http.StatusOK, queryResultDTO{
+			Items:            items,
+			TotalRecordCount: total,
+			StartIndex:       query.startIndex,
+		})
+		return
+	}
+
 	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
@@ -3121,7 +3190,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		slog.WarnContext(r.Context(), "jellycompat: resume via sections failed, falling back to progress scan", "component", "jellycompat", "error", err)
 	}
 
-	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, nil)
+	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, libraryIDPtr(query.parentLibraryID))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -3197,7 +3266,8 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		SuppressNextUp: true,
 	}
 
-	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, nil, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
+	libraryID := libraryIDPtr(query.parentLibraryID)
+	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, libraryID, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3246,11 +3316,11 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		entries = entries[:pageSize]
 	}
 
-	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, libraryID)
 	if err != nil {
 		return nil, 0, err
 	}
-	dtos := h.finishProgressPage(ctx, session, hydrated, query, nil)
+	dtos := h.finishProgressPage(ctx, session, hydrated, query, libraryID)
 	return dtos, len(dtos), nil
 }
 
@@ -3263,6 +3333,57 @@ type progressHydratedItem struct {
 	dto        baseItemDTO
 }
 
+// scopesProgressToParent reports whether ParentId names a series, season or
+// item, which Resume serves from that parent's episodes. A library ParentId
+// is applied through the libraryID argument instead.
+func (q itemsQuery) scopesProgressToParent() bool {
+	return q.parentItemID != "" || q.parentSeasonID != ""
+}
+
+// loadParentResume serves Resume for a series or season ParentId from the
+// progress of that parent's episodes, so the lookup is bounded by the
+// series' size rather than by how much else the profile has watched. Other
+// item ids, such as a movie, have no episodes and list nothing, as in
+// Jellyfin. Moonfin for Roku resumes a series by asking for one resumable item
+// under it. Continue Watching's hiding rules still apply.
+func (h *ItemsHandler) loadParentResume(ctx context.Context, session *Session, query itemsQuery, typeSet map[string]bool) ([]baseItemDTO, int, error) {
+	if (len(typeSet) > 0 && !typeSet["episode"]) || h.episodeRepo == nil {
+		return []baseItemDTO{}, 0, nil
+	}
+	listIDs, parentID := h.episodeRepo.ListIDsBySeriesIDs, query.parentItemID
+	if query.parentSeasonID != "" {
+		listIDs, parentID = h.episodeRepo.ListIDsBySeasonIDs, query.parentSeasonID
+	}
+	episodeIDs, err := listIDs(ctx, []string{parentID})
+	if err != nil {
+		return nil, 0, err
+	}
+	// Hydration checks access on the series only, and a series can span
+	// libraries the viewer may and may not see.
+	visible, err := h.visibleEpisodeIDs(ctx, session, episodeIDs[parentID])
+	if err != nil {
+		return nil, 0, err
+	}
+	visibleIDs := slices.DeleteFunc(episodeIDs[parentID], func(id string) bool { return !visible[id] })
+	entries, err := h.userData.ListResumableProgress(ctx, session, visibleIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	if entries, err = h.userData.FilterResumeProgress(ctx, session, entries); err != nil {
+		return nil, 0, err
+	}
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	total := len(hydrated)
+	page := hydrated[min(query.startIndex, total):]
+	if query.limit > 0 && len(page) > query.limit {
+		page = page[:query.limit]
+	}
+	return h.finishProgressPage(ctx, session, page, query, nil), total, nil
+}
+
 // sortedTypeSet returns the (already lowercased) keys of a type set in a stable
 // order so the SQL pre-filter binds a deterministic types array.
 func sortedTypeSet(typeSet map[string]bool) []string {
@@ -3272,6 +3393,22 @@ func sortedTypeSet(typeSet map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// progressPageCapacity bounds the capacity hint for a progress page. Limit
+// comes straight from the request with no upper bound, while the page never
+// holds more than the profile's progress rows, so preallocating by Limit would
+// let one request ask the runtime for an arbitrarily large slice.
+func progressPageCapacity(limit int) int {
+	// An explicit bound check rather than min(): CodeQL's allocation-size
+	// query recognizes comparisons as guards but not builtin calls.
+	if limit < 0 {
+		return 0
+	}
+	if limit > compatBrowseMaxLimit {
+		return compatBrowseMaxLimit
+	}
+	return limit
 }
 
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
@@ -3286,7 +3423,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			batchSize = 48
 		}
 
-		result := make([]progressHydratedItem, 0, query.limit)
+		result := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 		offset := query.startIndex
 		for {
 			progressEntries, err := h.userData.ListProgress(ctx, session, status, batchSize, offset)
@@ -3355,7 +3492,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		return h.userData.ListProgress(ctx, session, status, batchSize, off)
 	}
 
-	items := make([]progressHydratedItem, 0, query.limit)
+	items := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 	matchedCount := 0
 	offset := 0
 
@@ -3777,17 +3914,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 }
 
 func sliceBaseItems(items []baseItemDTO, startIndex, limit int) []baseItemDTO {
-	if startIndex < 0 {
-		startIndex = 0
-	}
-	if startIndex >= len(items) {
-		return []baseItemDTO{}
-	}
-	if limit <= 0 {
-		limit = len(items)
-	}
-	end := min(startIndex+limit, len(items))
-	return items[startIndex:end]
+	return slicePage(items, startIndex, limit)
 }
 
 func (h *ItemsHandler) rememberLibraryImages(library upstreamUserLibrary, routeID string) {

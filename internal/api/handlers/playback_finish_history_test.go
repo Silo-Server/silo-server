@@ -3,8 +3,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -297,5 +301,97 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 
 	if got := len(listFinishHistory(t, store)); got != 2 {
 		t.Fatalf("watch history rows = %d, want 2", got)
+	}
+}
+
+// TestAdminPlaybackWatchTimeDB proves a resumed play counts what was watched,
+// not where it ended: the measured watch time survives a later finalization
+// of another copy that never saw progress, and the watch summary sums it with
+// the capped estimate for a play recorded before measurement existed.
+func TestAdminPlaybackWatchTimeDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "watch-time-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	// Deleting the account cascades to its playback history.
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	started, ended := now.Add(-15*time.Minute), now.Add(-time.Minute)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	finalize := func(position float64, completed bool, watch playback.WatchTime) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
+			WatchedSeconds: position, Completed: completed, Watch: watch,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Resumed at 1:30:00, watched two minutes; then a copy on another replica
+	// that only served media finalizes further along with no measurement. A
+	// copy that recorded completion short of that position marks the play
+	// completed without moving it back, and an incomplete copy can't clear it.
+	finalize(5520, false, playback.WatchTime{Measured: true, StartPosition: 5400, PlayedSeconds: 120, PausedSeconds: 30})
+	finalize(5600, false, playback.WatchTime{})
+	finalize(5500, true, playback.WatchTime{})
+	finalize(5590, false, playback.WatchTime{})
+	// A one-minute play recorded before measurement, ending at 100 seconds.
+	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
+		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, "legacy-"+suffix, account, now.Add(-2*time.Hour), now.Add(-2*time.Hour+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	var watched, played float64
+	var measured, completed bool
+	if err = pool.QueryRow(ctx, `SELECT watched_seconds, played_seconds, measured, completed FROM admin_playback_history WHERE session_id=$1`, "resumed-"+suffix).Scan(&watched, &played, &measured, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if watched != 5600 || played != 120 || !measured || !completed {
+		t.Fatalf("resumed row = watched %v, played %v, measured %v, completed %v; want 5600, 120, measured, completed", watched, played, measured, completed)
+	}
+	got, err := (&AdminHandler{pool: pool}).ReadAdminWatchSummary(ctx, AdminWatchSummaryQuery{UserID: account, Days: 7, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Plays != 2 || got.WatchedSeconds != 180 {
+		t.Fatalf("summary = %d plays, %v seconds; want 2 plays, 180 seconds (120 measured + 60 capped)", got.Plays, got.WatchedSeconds)
+	}
+
+	// A session finalized, rebuilt under the same id and finalized again
+	// watched two stretches; a copy that overlaps one of them, or the same
+	// copy finalized twice, is not another stretch.
+	rebuilt := "rebuilt-" + suffix
+	stretch := func(from, to time.Duration, played float64) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: rebuilt, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(to).Format(time.RFC3339Nano),
+			WatchedSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stretch(0, 2*time.Minute, 120)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(time.Minute, 7*time.Minute, 200)
+	if err = pool.QueryRow(ctx, `SELECT played_seconds FROM admin_playback_history WHERE session_id=$1`, rebuilt).Scan(&played); err != nil {
+		t.Fatal(err)
+	}
+	if played != 300 {
+		t.Fatalf("rebuilt session played = %v, want 300 (two stretches of 120 and 180)", played)
 	}
 }

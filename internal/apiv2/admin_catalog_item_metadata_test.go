@@ -52,10 +52,24 @@ func TestAdminItemMetadataTransport(t *testing.T) {
 	if rec.Code != 200 || !slices.Equal(f.clear, []string{"rating_imdb", "release_date", "air_date"}) || f.update.RatingIMDB != nil || f.update.RatingTMDB == nil || *f.update.RatingTMDB != 6.5 || f.update.Year != nil {
 		t.Fatalf("clear: %d %s clear=%v %#v", rec.Code, rec.Body, f.clear, f.update)
 	}
+	// status is the match status; a null is omission, like the other members
+	// that cannot be cleared.
+	rec = do(t, h, "PATCH", path+"/metadata", `{"status":"matched"}`, bearer(memberToken))
+	if rec.Code != 200 || f.update.Status == nil || *f.update.Status != "matched" {
+		t.Fatalf("match status: %d %s %#v", rec.Code, rec.Body, f.update)
+	}
+	rec = do(t, h, "PATCH", path+"/metadata", `{"status":null}`, bearer(memberToken))
+	if rec.Code != 200 || f.update.Status != nil {
+		t.Fatalf("null status: %d %s %#v", rec.Code, rec.Body, f.update)
+	}
 	before := f.calls
 	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))
 	if rec.Code != 422 || f.calls != before {
 		t.Fatalf("invalid mode: %d", rec.Code)
+	}
+	rec = do(t, h, "PATCH", path+"/metadata", `{"status":"Ended"}`, bearer(memberToken))
+	if rec.Code != 422 || f.calls != before {
+		t.Fatalf("invalid status: %d %s", rec.Code, rec.Body)
 	}
 	for _, tc := range []struct{ method, path string }{{"POST", "/refresh-metadata"}, {"PATCH", "/metadata"}} {
 		rec = do(t, h, tc.method, Prefix+"/admin/items/forbidden"+tc.path, `{}`, bearer(adminToken))

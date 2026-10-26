@@ -39,7 +39,7 @@ type AdminScanSourceDescriptor struct {
 	ConnectionKinds  []string             `json:"connection_kinds"`
 	EmitsNativePaths bool                 `json:"emits_native_paths"`
 	Summary          string               `json:"summary"`
-	IconURL          string               `json:"icon_url"`
+	IconURL          string               `json:"icon_url" doc:"Icon as the scan source plugin reported it; not validated as a URI"`
 	ConfigForm       *AdminScanSourceForm `json:"config_form,omitempty"`
 }
 type AdminAutoscanAvailableSourcesInput struct {

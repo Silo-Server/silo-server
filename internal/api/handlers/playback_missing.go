@@ -11,6 +11,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -102,7 +103,7 @@ func preflightPlaybackFile(
 		return &playbackFilePreflightError{notFound: true}
 	}
 
-	if _, err := os.Stat(file.FilePath); err != nil {
+	if _, err := fspath.Stat(file.FilePath); err != nil {
 		if os.IsNotExist(err) {
 			markPlaybackFileMissing(ctx, file, marker, eventsHub)
 			return &playbackFilePreflightError{notFound: true, err: err}

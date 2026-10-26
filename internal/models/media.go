@@ -484,7 +484,7 @@ func (v VideoTrack) MarshalJSON() ([]byte, error) {
 type AudioTrack struct {
 	Title         string `json:"title,omitempty"`
 	EmbeddedTitle string `json:"embedded_title,omitempty"`
-	Language      string `json:"language,omitempty"`
+	Language      string `json:"language,omitempty" doc:"Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag"`
 	Codec         string `json:"codec,omitempty"`
 	Profile       string `json:"profile,omitempty"`
 	Layout        string `json:"layout,omitempty"`

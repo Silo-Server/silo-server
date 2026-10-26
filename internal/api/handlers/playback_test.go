@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -297,6 +298,10 @@ func newPlaybackTestStore(t *testing.T) userstore.UserStore {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// Every connection to ":memory:" opens its own empty database, so a second
+	// pooled connection (playback start writes preferences concurrently) would
+	// see no tables.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
@@ -809,31 +814,84 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-// The next episode of a series should open on the version the viewer settled
-// on, so a successful start records the version traits it actually played.
-func TestHandleStartPlaybackV3_PersistsSeriesPlaybackPreferenceForEpisodes(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	file := v3HandlerFixtureFile(t)
-	file.EpisodeID = "episode-1"
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-	handler.StoreProvider = testUserStoreProvider{store: store}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
-
-	response := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
-	handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
-
-	pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("GetSeriesPlaybackPreference: %v", err)
+// A start remembers the version it played: under the series for an episode,
+// so the next episode opens on the same traits, and under the movie itself,
+// naming the exact file, so a play too short to leave progress still keeps
+// the viewer's choice. On /api/v2 it never saves the audio track: a start
+// cannot tell a pick from Auto, a Next Up carry, or a fallback, and a saved
+// track would outrank the profile's language for the rest of the series, so
+// picks reach the audio preference through PUT /audio-prefs. The frozen
+// /api/v1 bridge keeps saving it.
+func TestHandleStartPlaybackV3_RemembersVersionButNotAudioTrack(t *testing.T) {
+	tests := []struct {
+		name       string
+		episodeID  string
+		key        string
+		wantFileID int
+		v1         bool
+	}{
+		{name: "episode", episodeID: "episode-1", key: "series-1", wantFileID: 0},
+		{name: "movie", key: "movie-1", wantFileID: 42},
+		{name: "v1 bridge episode", episodeID: "episode-1", key: "series-1", wantFileID: 0, v1: true},
 	}
-	if pref == nil {
-		t.Fatal("expected series playback preference to be stored")
-	}
-	if pref.Resolution != "1080p" || pref.CodecVideo != "h264" || pref.HDR {
-		t.Fatalf("stored pref = %+v, want 1080p/h264/false", pref)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			file := v3HandlerFixtureFile(t)
+			file.EpisodeID = tt.episodeID
+			file.EditionKey = "directors-cut"
+			file.AudioTracks = []models.AudioTrack{
+				{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
+				{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
+			}
+
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+			handler.StoreProvider = testUserStoreProvider{store: store}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
+
+			request := v3HandlerStartRequest()
+			request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+			audioTrack := 1
+			request.AudioTrackIndex = &audioTrack
+			ctx, path := WithNativeAPIV2(newAuthorizedPlaybackContext()), "/api/v2/playback/start"
+			if tt.v1 {
+				ctx, path = newAuthorizedPlaybackContext(), "/api/v1/playback/start"
+			}
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, path, strings.NewReader(marshalV3StartRequest(t, request))).WithContext(ctx))
+			var response playback.DecisionResponseV3
+			if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil {
+				t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
+
+			pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", tt.key)
+			if err != nil || pref == nil {
+				t.Fatalf("GetSeriesPlaybackPreference(%q) = %+v, %v", tt.key, pref, err)
+			}
+			if pref.Resolution != "1080p" || pref.CodecVideo != "h264" || pref.HDR {
+				t.Fatalf("stored pref = %+v, want 1080p/h264/false", pref)
+			}
+			wantEdition := ""
+			if tt.wantFileID != 0 {
+				wantEdition = "directors-cut"
+			}
+			if pref.FileID != tt.wantFileID || pref.EditionKey != wantEdition {
+				t.Fatalf("stored file/edition = %d/%q, want %d/%q", pref.FileID, pref.EditionKey, tt.wantFileID, wantEdition)
+			}
+
+			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
+			switch {
+			case err != nil:
+				t.Fatalf("GetAudioPreference(%q): %v", tt.key, err)
+			case tt.v1 && (audio == nil || audio.AudioTrackIndex != 1):
+				t.Fatalf("v1 bridge saved audio %+v, want track 1", audio)
+			case !tt.v1 && audio != nil:
+				t.Fatalf("GetAudioPreference(%q) = %+v; want no saved audio preference", tt.key, audio)
+			}
+		})
 	}
 }
 
@@ -953,6 +1011,7 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetSession: %v", err)
 		}
+		handler.waitForPlaybackStartSideEffectsV3(context.Background(), session.ID)
 		return session.AudioTrackIndex
 	}
 
@@ -978,6 +1037,11 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 
 		if index := startPlayback(t, store, newFile(t), "apple-tv", nil); index != 1 {
 			t.Fatalf("AudioTrackIndex = %d, want 1 (device \"ja\" track)", index)
+		}
+		// The start above remembered its track for this movie; clear it so
+		// the next start shows only the scope resolution.
+		if err := store.DeleteAudioPreference(context.Background(), "profile-1", "movie-1"); err != nil {
+			t.Fatalf("DeleteAudioPreference: %v", err)
 		}
 		if index := startPlayback(t, store, newFile(t), "", nil); index != 0 {
 			t.Fatalf("AudioTrackIndex = %d, want 0 (profile \"en\" track without device identity)", index)
@@ -1166,6 +1230,37 @@ func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
 	}
 	if entry.MediaItemID != "movie-1" {
 		t.Fatalf("MediaItemID = %q, want movie-1", entry.MediaItemID)
+	}
+}
+
+// The finalizing request is not the viewer's: an admin terminate carries the
+// admin's address and an expiry carries none. History keeps the viewer's.
+func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"admin terminate": clientip.SetContext(context.Background(), "198.51.100.7"),
+		"expiry":          context.Background(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+				file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600},
+			})
+			handler.AdminStore = noopPlaybackAdminStore{}
+
+			entry, err := handler.buildAdminHistoryEntry(ctx, &playback.Session{
+				ID:          "session-1",
+				UserID:      1,
+				ProfileID:   "profile-1",
+				MediaFileID: 42,
+				ClientIP:    "203.0.113.20",
+				StartedAt:   time.Now().Add(-time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("buildAdminHistoryEntry: %v", err)
+			}
+			if entry == nil || entry.ClientIP != "203.0.113.20" {
+				t.Fatalf("entry = %+v, want ClientIP 203.0.113.20", entry)
+			}
+		})
 	}
 }
 

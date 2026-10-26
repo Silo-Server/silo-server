@@ -202,7 +202,7 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
-			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL
+			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL, r.played_since
 			FROM history_import_runs r
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
 			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
@@ -215,7 +215,7 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
-			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
+			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL, played_since
 			FROM history_import_runs
 			ORDER BY created_at DESC, id DESC
 			LIMIT $1`
@@ -236,7 +236,7 @@ func (r *Repository) GetRunByID(ctx context.Context, runID string) (*Run, error)
 		       mapping_id,
 		       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 		       warnings, unmatched_samples, COALESCE(error_message, ''),
-		       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
+		       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL, played_since
 		FROM history_import_runs
 		WHERE id = $1`, runID)
 	run, err := scanAdminRun(row)
@@ -258,7 +258,7 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
-			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL
+			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL, r.played_since
 			FROM history_import_runs r
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
 			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
@@ -271,7 +271,7 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
-			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
+			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL, played_since
 			FROM history_import_runs
 			WHERE status IN ($1, $2)
 			ORDER BY created_at DESC, id DESC`
@@ -362,14 +362,22 @@ type adminRunScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanAdminRun reads a run row followed by its played_since column, which
+// only the admin surfaces select.
 func scanAdminRun(s adminRunScanner) (*Run, error) {
-	return scanRunWithMappingID(s)
+	var playedSince *time.Time
+	run, err := scanRunWithMappingID(s, &playedSince)
+	if err != nil {
+		return nil, err
+	}
+	run.PlayedSince = playedSince
+	return run, nil
 }
 
 func scanAdminRuns(rows pgx.Rows) ([]Run, error) {
 	var runs []Run
 	for rows.Next() {
-		run, err := scanRunWithMappingID(rows)
+		run, err := scanAdminRun(rows)
 		if err != nil {
 			return nil, err
 		}

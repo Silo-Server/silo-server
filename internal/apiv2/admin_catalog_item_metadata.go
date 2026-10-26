@@ -30,14 +30,14 @@ type AdminItemMetadataUpdate struct {
 	Genres           *[]string `json:"genres,omitempty" nullable:"true"`
 	Studios          *[]string `json:"studios,omitempty" nullable:"true"`
 	Networks         *[]string `json:"networks,omitempty" nullable:"true"`
-	Countries        *[]string `json:"countries,omitempty" nullable:"true"`
+	Countries        *[]string `json:"countries,omitempty" nullable:"true" doc:"Country codes, ISO 3166-1 alpha-2 by convention (US); stored as sent; null clears"`
 	ReleaseDate      *string   `json:"release_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	FirstAirDate     *string   `json:"first_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	LastAirDate      *string   `json:"last_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	AirTime          *string   `json:"air_time,omitempty" nullable:"true" doc:"Null clears the stored time"`
 	AirTimezone      *string   `json:"air_timezone,omitempty" nullable:"true" doc:"IANA time zone; null clears it"`
 	AirDate          *string   `json:"air_date,omitempty" nullable:"true" doc:"Season or episode air date; null clears it"`
-	Status           *string   `json:"status,omitempty" nullable:"true"`
+	Status           *string   `json:"status,omitempty" nullable:"true" enum:"pending,matched,unmatched" doc:"Match status; null leaves it unchanged"`
 	RatingIMDB       *float64  `json:"rating_imdb,omitempty" nullable:"true" doc:"Null clears it, along with any IMDb score a metadata plugin stored"`
 	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true" doc:"Null clears it, along with any TMDB score a metadata plugin stored"`
 	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored"`

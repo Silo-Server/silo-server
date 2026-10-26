@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -231,16 +232,34 @@ func testCompatSource(codec *ResourceIDCodec, version catalog.FileVersion) Playb
 	}
 }
 
-func TestPlaybackInfoRequest_AcceptsStringAudioStreamIndex(t *testing.T) {
-	var req playbackInfoRequest
-	if err := json.Unmarshal([]byte(`{"AudioStreamIndex":"1"}`), &req); err != nil {
-		t.Fatalf("unmarshal playback request: %v", err)
+func TestPlaybackInfoRequest_DecodesLenientStreamIndexes(t *testing.T) {
+	// Jellyfin reads an empty string as an unset nullable number, and Jellyfin
+	// Web sends "SubtitleStreamIndex":"" when Play starts from a series page.
+	describe := func(v compatIntValue) string {
+		if index, ok := v.get(); ok {
+			return strconv.Itoa(index)
+		}
+		return "unset"
 	}
-	if req.AudioStreamIndex == nil {
-		t.Fatal("expected audio stream index")
-	}
-	if got := int(*req.AudioStreamIndex); got != 1 {
-		t.Fatalf("AudioStreamIndex = %d, want 1", got)
+	for _, tc := range []struct {
+		body, audio, subtitle string
+	}{
+		{body: `{"AudioStreamIndex":"1"}`, audio: "1", subtitle: "unset"},
+		{body: `{"AudioStreamIndex":1,"SubtitleStreamIndex":"3"}`, audio: "1", subtitle: "3"},
+		{body: `{"AudioStreamIndex":0,"SubtitleStreamIndex":null}`, audio: "0", subtitle: "unset"},
+		{body: `{"SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
+		{body: `{"AudioStreamIndex":" ","SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
+	} {
+		var req playbackInfoRequest
+		if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+			t.Fatalf("%s: unmarshal playback request: %v", tc.body, err)
+		}
+		if got := describe(req.AudioStreamIndex); got != tc.audio {
+			t.Errorf("%s: AudioStreamIndex = %s, want %s", tc.body, got, tc.audio)
+		}
+		if got := describe(req.SubtitleStreamIndex); got != tc.subtitle {
+			t.Errorf("%s: SubtitleStreamIndex = %s, want %s", tc.body, got, tc.subtitle)
+		}
 	}
 }
 

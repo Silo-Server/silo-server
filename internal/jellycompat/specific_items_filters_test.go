@@ -2,7 +2,9 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"slices"
@@ -25,6 +27,13 @@ func (s *mixedIDsContent) BrowseItems(_ context.Context, _ *Session, p url.Value
 func (s *mixedIDsContent) GetItemDetail(_ context.Context, _ *Session, id string, _ *int) (*upstreamItemDetail, error) {
 	s.details = append(s.details, id)
 	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: map[string]string{"a": "Alpha", "b": "Bravo"}[id]}, nil
+}
+func (s *mixedIDsContent) GetItemDetailsByIDs(ctx context.Context, session *Session, ids []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+	out := make(map[string]*upstreamItemDetail, len(ids))
+	for _, id := range ids {
+		out[id], _ = s.GetItemDetail(ctx, session, id, libraryID)
+	}
+	return out, nil
 }
 
 func TestMixedSpecificIDsApplyFiltersBeforePaging(t *testing.T) {
@@ -198,6 +207,104 @@ func TestSpecificIDsSendOnlyRequestedEmptyLists(t *testing.T) {
 			}
 			if item.People != nil || item.MediaSources != nil || item.MediaStreams != nil || item.Chapters != nil || item.LockedFields != nil {
 				t.Errorf("unrequested empty lists sent: %+v", item)
+			}
+		})
+	}
+}
+
+// batchedDetailsContent resolves the batched ids through GetItemDetailsByIDs
+// and every other id through GetItemDetail, which knows a season, answers 404
+// for "missing", and fails for "broken". It records each call.
+type batchedDetailsContent struct {
+	*librariesContentService
+	batched    map[string]bool
+	batchErr   error
+	batchCalls [][]string
+	perItem    []string
+}
+
+func batchedDetailsFixture(id string) *upstreamItemDetail {
+	if id == "season" {
+		return &upstreamItemDetail{ContentID: id, Type: "season", Title: id}
+	}
+	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: id}
+}
+
+func (s *batchedDetailsContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int) (map[string]*upstreamItemDetail, error) {
+	s.batchCalls = append(s.batchCalls, slices.Clone(ids))
+	if s.batchErr != nil {
+		return nil, s.batchErr
+	}
+	out := make(map[string]*upstreamItemDetail, len(ids))
+	for _, id := range ids {
+		if s.batched[id] {
+			out[id] = batchedDetailsFixture(id)
+		}
+	}
+	return out, nil
+}
+
+func (s *batchedDetailsContent) GetItemDetail(_ context.Context, _ *Session, id string, _ *int) (*upstreamItemDetail, error) {
+	s.perItem = append(s.perItem, id)
+	switch id {
+	case "missing":
+		return nil, &HTTPError{StatusCode: http.StatusNotFound, Message: "item not found"}
+	case "broken":
+		return nil, errors.New("database unavailable")
+	}
+	return batchedDetailsFixture(id), nil
+}
+
+// TestSpecificIDsBatchDetailLookups: an Ids list fetches its details in one
+// batch and looks up only what the batch left out one by one, keeping the
+// order the client asked for, the 404 skip, and the abort on any other error.
+func TestSpecificIDsBatchDetailLookups(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		ids         []string
+		batchErr    error
+		wantStatus  int
+		wantNames   []string
+		wantPerItem []string
+	}{
+		{name: "batch serves what it can", ids: []string{"m1", "season", "missing", "m2"}, wantStatus: http.StatusOK, wantNames: []string{"m1", "season", "m2"}, wantPerItem: []string{"season", "missing"}},
+		{name: "failed batch looks each id up", ids: []string{"m1", "season", "missing", "m2"}, batchErr: errors.New("batch failed"), wantStatus: http.StatusOK, wantNames: []string{"m1", "season", "m2"}, wantPerItem: []string{"m1", "season", "missing", "m2"}},
+		{name: "other errors abort", ids: []string{"m1", "broken", "m2"}, wantStatus: http.StatusInternalServerError, wantPerItem: []string{"broken"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
+			content := &batchedDetailsContent{librariesContentService: h.content.(*librariesContentService), batched: map[string]bool{"m1": true, "m2": true}, batchErr: tc.batchErr}
+			h.content = content
+			encoded := make([]string, len(tc.ids))
+			for i, id := range tc.ids {
+				encoded[i] = h.codec.EncodeStringID(EncodedIDItem, id)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/Items?Ids="+url.QueryEscape(strings.Join(encoded, ",")), nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+			rec := httptest.NewRecorder()
+			h.HandleItems(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if len(content.batchCalls) != 1 || !slices.Equal(content.batchCalls[0], tc.ids) {
+				t.Fatalf("batch calls = %v, want one for %v", content.batchCalls, tc.ids)
+			}
+			if !slices.Equal(content.perItem, tc.wantPerItem) {
+				t.Fatalf("per-item lookups = %v, want %v", content.perItem, tc.wantPerItem)
+			}
+			if tc.wantStatus != http.StatusOK {
+				return
+			}
+			var result queryResultDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			names := make([]string, 0, len(result.Items))
+			for _, item := range result.Items {
+				names = append(names, item.Name)
+			}
+			if !slices.Equal(names, tc.wantNames) {
+				t.Fatalf("names = %v, want %v", names, tc.wantNames)
 			}
 		})
 	}

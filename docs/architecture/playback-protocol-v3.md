@@ -108,7 +108,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, and `hls_subtitle_renditions_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1`, and `hls_copy_mpegts_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -129,6 +129,8 @@ The seventeen feature strings above are the full set this server version adverti
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 | `subrip_sidecar_v1` | `/api/v2` only. An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 | `hls_subtitle_renditions_v1` | `/api/v2` only. An opted-in client receives a `server_transcode_hls` plan's embedded text subtitle as a WebVTT `SUBTITLES` rendition of the plan's HLS stream (`subtitle.hls_rendition`) instead of a sidecar artifact (§8) |
+| `hls_remux_subtitle_renditions_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1`. The client also receives a `server_remux_hls` plan's embedded text subtitle as `subtitle.hls_rendition`, on a subtitle playlist that follows the remux's keyframe-cut segments; without it a remux keeps its sidecar (§8) |
+| `hls_copy_mpegts_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. The client's `server_remux_hls` plans that copy H.264 or HEVC are packaged as MPEG-TS instead of fragmented MP4, marked by `effective_recipe.segment_container: "mpegts"` (§5) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -930,6 +932,37 @@ carries the signed stream token `st` on its media URLs — never on subtitle or
 font-bundle routes. It is an opaque transport credential rather than a playback
 parameter, and it is outside the table above.
 
+A media playlist whose segment URIs would repeat a credential-sized query (the
+`st` token, or a media-element account token) can carry that value once through
+HLS variable substitution: an `EXT-X-DEFINE` at `EXT-X-VERSION:8`, referenced
+as `{$name}` in each URI. The resolved URIs are byte-identical to the literal
+form. Without it a long title's playlist exceeds 4 MiB, which some players
+(Roku) refuse.
+
+- The playlists the server builds itself (the synthetic VOD playlist of an
+  encoded transcode, the complete keyframe playlist of a copy remux, and the
+  subtitle-rendition media playlists) use `silo_query` for every client once
+  the saving reaches 64 KiB.
+- The playlists it rewrites use it only when the start listed
+  `hls_variable_substitution_v1` in
+  `client_playback_context.deliveries.hls.features`: FFmpeg's real copy or
+  sliding playlist (`silo_query`), and a transcode node's playlist relayed by
+  the API (`silo_st`, the token the API adds). There the decision depends only
+  on the value (each URI must save at least 64 bytes), never on how many
+  segments the playlist lists yet, so a still-growing EVENT playlist keeps one
+  form from its first fetch even when its final length is unknown. Without the
+  feature these stay literal, for clients that parse playlists themselves
+  without `EXT-X-DEFINE` support. `/api/v2` lists the feature in the
+  capabilities `features`; `/api/v1` never negotiates it. Like the
+  attempt-sticky client features, it is fixed at start: a replan's hls
+  delivery features can neither add nor drop it, because a reused HLS
+  transport keeps serving the form it was built with. It changes playlist text
+  only, so it is not part of plan identity. It rides the stream token and
+  recipe card (the `hvs` claim), so the relay and a restarted server keep the
+  negotiated form.
+
+A playlist served larger than 3.5 MiB is logged with its session id.
+
 ---
 
 ## 5. The timeline model
@@ -973,6 +1006,18 @@ For HEVC HDR copy packaging, the frozen plan also controls the sample entry: a
 preserved Dolby Vision Profile 5 or 8 plan emits `dvh1` with FFmpeg's unofficial
 strictness relaxation so the DOVI configuration record is retained, while a
 validated Dolby Vision-to-HDR10 plan emits `hvc1`.
+A client whose `hls` delivery lists `hls_copy_mpegts_v1` gets the same copy of
+H.264 or HEVC video packaged as MPEG-TS segments (`.ts`, `video/mp2t`, no `#EXT-X-MAP`), for
+players that play a muxed fMP4 copy's audio silently. The plan then carries
+`effective_recipe.segment_container: "mpegts"` and no `video_sample_entry`, the
+container is part of the plan id and attempt key, and the frozen executable
+recipe records it at version 5, so a TS plan never reuses or reopens an fMP4
+transport and a binary that predates it refuses the recipe. A preserved Dolby
+Vision copy keeps FFmpeg's unofficial strictness, under which its MPEG-TS
+muxer writes the DOVI video stream descriptor. A transcode node attests the
+packaging in its start response (`copy_video_mpegts`) and is refused without
+it. Other copied codecs and encoded video keep their packaging, and `/api/v1`
+ignores the feature.
 `stream_origin` and `timeline_offset` both equal that resolved source position,
 while `player_start` is the requested position minus the resolved origin so the
 client advances past copied pre-roll. `seek_window_start_seconds` is the resolved
@@ -1062,8 +1107,38 @@ every route reaches a terminal instead of cycling forever.
 Failure, seek, and quality replans may omit unchanged track identities. The
 server overlays only identities present in those requests and preserves the
 durable selected subtitle otherwise. Only `operation: "track_change"` gives an
-omitted `selected_tracks.subtitle` the explicit meaning "subtitles off". A
-fallback to another media version must remap the selected subtitle. It
+omitted `selected_tracks.subtitle` the explicit meaning "subtitles off".
+
+The attempt also keeps the audio and subtitle the viewer asked for, apart from
+what the current plan could deliver (`desired_tracks` on the attempt row). A
+start records the audio resolved on the requested file and the subtitle the
+client named there (or, when it named none, the one the plan selected). A
+`track_change`, `quality_change` or `output_change` (or a failure replan
+classified `audio_track_changed` or `subtitle_track_changed`) changes that
+intent, and only where its `selected_tracks` name a track other than the
+current plan's: a quality change can carry a track the client switched to
+locally, while the tracks clients echo with every replan never overwrite it.
+Other failure recoveries never change it, since they may name a track the
+client fell back to; a `track_change` that omits
+the subtitle turns subtitles off only when the current plan was showing one. Whenever a replan
+moves playback to another file, the server resolves that intent on the new
+file instead of remapping the current plan's selection: on the file a track
+was chosen on it is found by its source identity (sidecar path, embedded
+stream index, or downloaded subtitle id), and elsewhere audio matches by
+signature, then language and variant (exact regional tag, main or commentary,
+title, channels, codec), never by position alone. So a 2160p to 1080p move
+keeps Japanese audio even when the codec, channel count, or track order
+differs, and returning to the 2160p version restores a subtitle the 1080p
+version lacked. An attempt whose intent was left behind by a replan that did
+not maintain it (an older server during a rolling deploy) falls back to the
+current plan's selection. None of this writes the viewer's saved audio or
+subtitle preference: on `/api/v2`, starts and replans never save one, and
+clients save a pick with `PUT /api/v2/audio-prefs/{series_id}` and
+`PUT /api/v2/subtitle-prefs/{series_id}` (`DELETE` returns the series to Auto).
+The frozen `/api/v1` bridge keeps its old behavior and saves the audio each
+start and `track_change` plays.
+
+A fallback to another media version must remap the selected subtitle. It
 prefers a version with an equivalent track; when none has one, playback
 continues with subtitles off and the plan carries `subtitle_track_unavailable`
 rather than ending in a terminal. A selection the effective file cannot honor
@@ -1098,12 +1173,21 @@ and a replan can neither add nor drop them:
 | `authorized_media_origins_v1` | It selects which origins may serve the attempt's media. A plan that already handed out a proxy origin outlives the replan that would revoke it, so the client would be left holding a URL it no longer trusts (§4.1) |
 | `software_video_decode_v1` | It widens the direct-play evidence tiers. Dropping it converts a direct route into a transcode and persists that downgrade into the durable request |
 | `subrip_sidecar_v1` | It picks the representation of every SRT sidecar URL. A mid-attempt switch would publish one track under two URLs (§8) |
-| `hls_subtitle_renditions_v1` | It decides whether a transcode's stream URL is a multivariant playlist carrying the subtitle or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
+| `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1` | They decide whether a transcode's or a copy remux's stream URL is a multivariant playlist carrying the subtitle or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
 
 The server silently restores the negotiated state of each, whatever the replan
 sends — including an explicit list that omits one, which is otherwise a valid
 way to drop a feature. Seek replans never replace the feature list at all.
 Changing any of these modes means stopping and starting a new attempt.
+
+`hls_variable_substitution_v1` is an hls delivery feature
+(`client_playback_context.deliveries.hls.features`) rather than a client
+feature, but it is fixed the same way: the server restores its start state in
+the replan's hls delivery, because a reused HLS transport keeps serving the
+playlist form it was built with (§4.2). The start state is whether the start
+request's hls delivery listed the feature, enabled or not. A replan that
+omits the hls delivery keeps the opt-in on a disabled hls entry, which plans
+like an absent one, so a later replan that offers HLS again still gets it.
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 
@@ -1395,7 +1479,7 @@ the start retryable, with that route's message.
 
 `plan_selected`, `plan_invalidated`, `plan_failed`, `first_frame`, `terminal`,
 `stopped`, `runtime_correction_applied`, `runtime_correction_succeeded`,
-`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`.
+`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`, `plan_summary`.
 
 ### 7.5 Diagnostics allowlist
 
@@ -1413,7 +1497,9 @@ every value is truncated to 256 characters.
 `effective_media_file_id`, `audio_output_mode`, `audio_mime`, `audio_channels`,
 `audio_decoder_name`, `correction_id`, `correction_stage`, `network_transport`,
 `network_metered`, `network_validated`, `bandwidth_estimate_kbps`,
-`link_downstream_kbps`, `target_source_position_seconds`, `reason`.
+`link_downstream_kbps`, `target_source_position_seconds`, `reason`,
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode`, `buffering_action`, `throughput_kbps`.
 
 On a `first_frame` event, `first_frame_ms` is the whole milliseconds from the
 viewer's request to play (the tap, or the in-player action that started the
@@ -1492,7 +1578,7 @@ Native embedded selection requires `embedded_subtitles_v1` in `client_features` 
 
 The scanner records `container_track_id` as the MP4 track ID (`tkhd`) that FFprobe reports and, for Matroska, as the TrackEntry's `TrackNumber`, which FFprobe does not report. The scanner reads the Matroska `Tracks` element itself and maps each entry to its FFmpeg stream the way FFmpeg's demuxer creates streams. It records a number only when the per-type stream counts, the subtitle positions, and the subtitle codecs all agree with the probe. A track number is often not stream index + 1, because remuxes keep the original numbers. Tracks with the legacy codec IDs `S_ASS` and `S_SSA` get no ID: FFmpeg reports them as `ass`, but Media3 drops them, so a client could not resolve the number and its capability cannot exclude them. Files probed before Matroska numbers were recorded get them from the `backfill_matroska_track_numbers` task, which reads only the `Tracks` element and writes only when the file and the row still match the stored probe. It reads only files with a SubRip or ASS track lacking an ID, the codecs a client currently plays by track number, and records each file it reads in `matroska_track_backfill_checks` against the file's size, mtime and stored tracks. A recorded file is read again only after one of those changes or the matching rules do; a file storage could not open, or that differs on disk from its row until a scan rewrites it, is retried on the next start. A file skipped for its codecs, such as a PGS-only one, gets an ID from its next reprobe, or from the backfill once its codec is added to that list. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
 
-The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars, burn-in, or, for a transcode, an HLS subtitle rendition (below). Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
+The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars, burn-in, or, for an HLS transcode or HLS copy remux, an HLS subtitle rendition (below). Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
 
 A confirmed native selection failure triggers `failure_recovery` with `failure.classification: "subtitle_embedded_failed"`. The server disables native selection for the rest of that playback attempt, including later capability refreshes, and replans with an executable fallback. The native identity participates in both plan identifiers, so the same video route with extracted subtitles is a distinct attempt. Seek reanchors preserve the native identity and reject source drift.
 
@@ -1508,18 +1594,24 @@ A client that sends `subrip_sidecar_v1` in `client_features` to `/api/v2` receiv
 demux the entire source, because Matroska interleaves subtitle packets and
 indexes only video; on network storage that outlasts a player's readiness
 deadline. A client that sends `hls_subtitle_renditions_v1` to `/api/v2` instead
-receives such a track inside the transcode itself. It applies when all of these
+receives such a track inside the HLS stream itself. It applies when all of these
 hold:
 
-- the plan is `server_transcode_hls` (encoded video, never a copy remux);
+- the plan is `server_transcode_hls`, or `server_remux_hls` (a video stream
+  copy, including the Dolby Vision strip and either segment container) for a
+  client that also sends `hls_remux_subtitle_renditions_v1` in
+  `client_features`. A remux for a client without it keeps its sidecar and its
+  media playlist;
 - the selected track is embedded text the policy already shows as text
   (`render` or `convert`): SubRip, WebVTT, mov_text, or ASS/SSA unless the
   client requires authored fidelity;
 - the source duration is known and the playlist fits the synthetic VOD bound;
 - an executor can emit it: this server, or a transcode node advertising the
-  `hls_subtitle_rendition_v1` transport feature. Node selection then admits only
-  such nodes, and a node that does not attest `subtitle_rendition` in its start
-  response is stopped and skipped.
+  `hls_subtitle_rendition_v1` transport feature for a transcode, or
+  `hls_remux_subtitle_rendition_v1` for a copy remux, under that workload's
+  routing policy. Node selection then admits only such nodes, and a node that
+  does not attest `subtitle_rendition` in its start response is stopped and
+  skipped.
 
 The decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:2",
 "hls_rendition":{"group_id":"subs","name":"Subtitles","format":"vtt",
@@ -1530,44 +1622,79 @@ has one. The plan's stream URL is then a multivariant playlist: one
 `AUTOSELECT=YES`) and one variant naming it in `SUBTITLES`. Both URIs are the
 same `master.m3u8` with `silo_rendition=subtitles` or `silo_rendition=video`
 and the original query, so every relay path serves them unchanged. The video
-playlist is the ordinary synthetic VOD playlist; the subtitle playlist lists
-the same segments (`segment/sub_NNNNN.vtt`) with the same durations. The client
+playlist is the one the plan would serve without the rendition; the subtitle
+playlist lists the same segments (`segment/sub_NNNNN.vtt`) with the same
+durations, media sequence, and playlist type. For a transcode that is the
+synthetic VOD playlist. A copy remux cuts its segments at source keyframes, so
+they vary in length: its subtitle playlist is the keyframe-plan VOD playlist
+or, without one, FFmpeg's growing `EVENT` playlist, with the same
+`EXT-X-START` and, once FFmpeg finishes, the same `EXT-X-ENDLIST`. A copy
+remux's variant carries the `VIDEO-RANGE` of the video it copies, fixed when
+the plan starts from the source track's scanned transfer characteristic: `PQ`
+for SMPTE ST 2084, `HLG` for ARIB STD-B67, none for any other signaled
+transfer, such as Dolby Vision 8.2's SDR base layer. A track that signals no
+transfer is `PQ` when the copy keeps the Dolby Vision strip's HDR10 base layer
+or Dolby Vision in a `dvh1` sample entry (profile 5), and otherwise names
+none. HLS treats a variant without the attribute as SDR. The client
 selects the rendition in the player's subtitle (legible) group and fetches no
 sidecar. A client that scopes its media credentials to the plan's URLs must
 admit `master.m3u8` with exactly one `silo_rendition=video` or
 `silo_rendition=subtitles` query, or the player cannot open either playlist.
 
-The transcode's own FFmpeg process writes the track as WebVTT beside the HLS
-output, on the same `-copyts` source clock, so a cue is on disk once the video
-around it is. Subtitle segment N carries every cue overlapping the source
-time video segment N covers, `[O + (N−K)·d, O + (N−K+1)·d)`, with its absolute
-source time and settings; a cue spanning segments repeats in each. K is the
+The stream's own FFmpeg process writes the track as WebVTT beside the HLS
+output, on the same `-copyts` source clock (a copy remux adds `-start_at_zero`
+to both), so a cue is on disk once the video around it is. Subtitle segment N
+carries every cue overlapping the source time video segment N covers,
+`[O + T(N) − T(K), O + T(N+1) − T(K))`, with its absolute source time and
+settings; a cue spanning segments repeats in each. T(N) is where segment N
+starts on the video playlist: `N·d` on a transcode's fixed grid, the summed
+durations of the segments before it on a copy remux's playlist. K is the
 segment the generation started at and O the source time of its first video
 frame, read once per generation from that segment's first video PTS less the
-timestamp-map shift below. O is not `K·d` when the source clock does not start
+timestamp-map offset below. O is not `K·d` when the source clock does not start
 at zero: the first generation's grid starts at the first video frame, while an
 input seek counts from the container's start time. On MPEG-TS, whose
 timestamps wrap at 2^33 ticks, O takes the cue clock's epoch, and every window
 of the generation keeps it. A
 generation's output is read only while no restart is under way and no later
-generation has rewritten it; a generation whose origin cannot be read uses
-`[N·d, (N+1)·d)`. Every segment starts with
+generation has rewritten it; a generation whose origin cannot be read takes
+its first segment's planned start instead (`K·d` for a transcode, the resolved
+keyframe for a copy remux). The media's last segment also carries every later
+cue. Every segment starts with
 `X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:<offset>`, where `<offset>` is the
 video segments' shift from the source clock: 900000 (10 s) for MPEG-TS and 0
-for fMP4. A segment whose cues are not produced yet is waited for while
-FFmpeg runs: as long as its video segment would be (up to 30 s) when the
-running or restarting transcode is about to reach it, otherwise a few seconds.
-It is then answered as a valid WebVTT document with no cues, which a player
-keeps, so the longer wait is what keeps cues after a slow seek restart.
-Subtitle segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
+for fMP4, plus, for a copy remux, how much later its HLS mux put the
+generation's video. A generation that starts at the clock's zero has negative
+decode times from B-frames or AAC priming; fMP4's `make_non_negative` moves
+the whole HLS output later by that lead, and MPEG-TS's offset lands on the
+first decode time, so the video starts the lead after it. The WebVTT output
+moves with neither: on a default x264 source the lead is two frames. Each
+copy generation therefore also writes its first video packet, unshifted, as
+`framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
+first segment's observed start less that packet's time, read with O, and
+recorded with it. The packet's record is read before the segment; after three
+reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
+while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
+running or restarting stream is about to reach it, or is a keyframe-planned
+copy, which runs on to every segment; otherwise a few seconds. It is then
+answered as a valid WebVTT document with no cues, which a player keeps, so
+the longer wait is what keeps cues after a slow seek restart. A
+keyframe-planned copy is the exception: like its video segment, a subtitle
+segment FFmpeg has not reached counts as the player's position for the
+throttle while it waits, and if FFmpeg has still not reached it after the
+wait it answers `404`, which the player can retry, rather than an empty
+document it would keep. Subtitle
+segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
-produced keeps its cues. The output directory records each generation's cue
-file and the segments it finished (`subtitle_spans.json`), so a session
+produced keeps its cues. On FFmpeg's own playlist a generation keeps the
+segment durations its playlist listed, which the next generation's playlist
+replaces. The output directory records each generation's cue file, the
+segments it finished, and those durations (`subtitle_spans.json`), so a session
 rebuilt from its recipe on the same directory serves the cues of every video
 segment it serves from disk, and names its own cue files after the recorded
 ones. Bitmap tracks keep their sidecar or burn-in routes.
 
-The rendition is part of the transcode recipe. Turning subtitles on or
+The rendition is part of the stream's recipe. Turning subtitles on or
 choosing another track therefore starts a new HLS generation at the current
 position, like a burn-in change; turning them off keeps the running transport,
 whose playlist still offers the old rendition for the client to leave
@@ -1577,8 +1704,9 @@ falls back to the sidecar instead of `adaptation_exhausted`. A client whose
 player never offered the rendition sends that recovery with
 `failure.classification: "subtitle_hls_rendition_failed"`; the server then
 stops offering renditions for the rest of the attempt, so a later quality or
-track change does not repeat the failure. The feature is
-attempt-sticky (§6); `/api/v1` neither advertises nor negotiates it.
+track change does not repeat the failure, on a transcode or a remux. Both
+features are attempt-sticky (§6); `/api/v1` neither advertises nor negotiates
+them.
 
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`
@@ -1685,7 +1813,10 @@ remux without video encoding.
 
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
-version fallback. The menu then lists the
+version fallback. With 4K transcoding allowed, the same holds while
+`playback.prefer_lower_version_transcode` is on (the default), except that the
+4K rungs above the lower version's class stay on the menu and transcode the 4K
+version. The menu then lists the
 first non-4K version in fallback order at its plain resolution class (`1080p`
 or `720p`, with that version's height and bitrate; omitted when the version is
 taller than its class or the requested version is not taller than it), and the
@@ -1695,9 +1826,13 @@ the fallback adopts a later non-4K version, the plan it returns describes the
 version it adopted.
 Choosing any of them refuses the 4K source, so the fallback plays the lower
 version: unchanged for its plain label or a rung it fits, transcoded for a lower
-rung. `auto` returns to the 4K version. The menu stays the same while the
-lower version plays. It needs HLS and transcoding enabled, because the 4K
-refusal under any other policy is not one the fallback acts on.
+rung. `auto` returns to the 4K version unless a bandwidth estimate, cap or
+device limit needs a lower quality; that reduction also comes from the lower
+version, transcoded to fit, rather than the 4K source at original quality.
+When no version can play the reduction, the 4K version plans as though it had
+no lower version. The menu stays the same while the lower version plays. It
+needs HLS and transcoding enabled, because the 4K refusal under any other
+policy is not one the fallback acts on.
 
 | label | display_name | height | kbps |
 | --- | --- | --- | --- |
@@ -1711,6 +1846,11 @@ refusal under any other policy is not one the fallback acts on.
 | `720p-medium` | 720p Medium | 720 | 2000 |
 | `720p-low` | 720p Low | 720 | 1500 |
 | `480p` | 480p | 480 | 1500 |
+| `480p-low` | 480p Low | 480 | 800 |
+| `360p` | 360p | 360 | 300 |
+
+`480p-low` and `360p` let Auto lowering reach a 500 kbps link. The frozen
+`/api/v1` menus omit them.
 
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
@@ -1762,13 +1902,25 @@ source into the earned class's 16:9 box, so a 3840x1600 film at the 1080p class
 streams at 1920x800 and a 2560x1080 film at 1920x810, and encode at the class
 bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
 720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
-the cap. A transcode also never targets more than the source's own bitrate,
+the cap. Under an estimate, `auto` instead uses its 80% budget, up to the
+bitrate of the class's highest menu rung (40000 for 2160p, 10000 for 1080p,
+4000 for 720p, 1500 for 480p, and the class bitrate for 540p), and fits the AAC
+track and container inside that budget too: 95% of it for both tracks, a quarter
+of that for AAC (at least 64 and at most its usual bitrate) and the rest, at
+least 64, for video. When a budget or cap leaves AAC less than 192 kbps, the
+usual stereo bitrate, a surround source is encoded as stereo. Every automatic
+encode, with an estimate or without, stays within its class's highest menu rung,
+a conversion at the source's own size included, except on the local network with
+no estimate and no cap, where a conversion or burn-in keeps the source's bitrate.
+A transcode also never targets more than the source's own bitrate,
 counted in the output codec (H.264 for a scaled encode, or HEVC for any encode
 when the planner chooses HEVC).
 
 `bandwidth_estimate_kbps` is optional and is the client's belief about its
-link, not a promise. An absent estimate removes the bandwidth term entirely, so
-`auto` plans from the device and the source alone; a client should omit the
+link, not a promise. An absent estimate removes the bandwidth term, so `auto`
+plans from the device and the source alone, except that on `/api/v2` the
+server puts the connection's stored reading in for a `buffering_quality_v1`
+client (see [Buffering quality](#buffering-quality-native-v2)); a client should omit the
 field rather than send a hint it knows is clamped, such as a browser's
 `navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
 can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
@@ -1776,21 +1928,32 @@ can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api
 A transcode is a single HLS rendition, so the player cannot step down on its
 own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
-`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
-re-runs `auto` against the lower estimate. The web player does this after two
-stalls of at least a second within two minutes, or one stall of six seconds.
-Stall time in the first ten seconds of a plan does not count, and buffering
-caused by a seek, pause or source reload is not a stall. It sends 70% of the
-delivered bitrate, so the next stream targets about 56% of the one that
-stalled. It keeps that lower estimate for the next 30 minutes. When the plan
-that follows is no lower, it leaves that plan alone for five minutes rather than
-replan in a loop. On a metered link it uses the estimate only if
-the stall was observed on the same kind of metered link, by the browser's
-connection type and Data Saver setting, since probe results and observations
-from other links do not describe it; back on an unmetered link it ignores a
-limit recorded on a metered one. Buffering while media requests fail (load
-errors, not timeouts) or while the browser is offline is an outage for the
-reconnect path and never counts toward a downshift.
+`bandwidth_estimate_kbps` below the bitrate that stalled, with
+`bandwidth_estimate_source: "observed_rebuffer"`; the planner then re-runs
+`auto` against the lower estimate, and the server records a learned limit
+(see [Buffering quality](#buffering-quality-native-v2)). The
+[buffering-quality design](../design/2026-10-17-buffering-quality.md) defines
+when every client does this: after two stalls of at least a second within two
+minutes, or one stall of six seconds. Stall time in the first ten seconds of a
+plan does not count, and buffering caused by a seek, pause or source reload is
+not a stall. A replacement adopted before the attempt has played is not a
+reload: it is part of the start, under the start's ten seconds. Until a plan of
+the attempt has played, a client lowers only when it measured the plan's media
+arriving more slowly than its delivered bitrate; otherwise the start runs on to
+its deadline and the failure path, so a version that cannot start for another
+reason does not drive Auto and the learned limit down. Clients send
+70% of the delivered bitrate, so the next stream
+targets about 56% of the one that stalled, with the throughput the stalled plan
+measured as `observed_throughput_kbps` when they have it (the server takes the
+lower figure), and repeat that estimate on their own later Auto replans for the
+rest of the playback attempt. When the plan that
+follows is no lower, they leave that plan alone for five minutes rather than
+replan in a loop. Buffering while media requests fail or while the device is
+offline is an outage for the reconnect path and never counts toward a
+downshift, and so does a wait in which no media request has received data for
+4 seconds on progressive delivery, or 15 seconds on HLS, where the server holds
+a segment request silent while it produces the segment. A media request is failing when it errors or cannot connect; a
+request that keeps receiving data is never failing, however slow.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
@@ -1803,7 +1966,7 @@ Audio-only sources publish no rungs on `/api/v2` (a single `original` entry on
 `quality_preference` accepts `auto`, the legacy `original` (aliases `source`,
 `max`), which means `auto`, the
 plain `2160p` / `1080p` / `720p` / `480p` values with their obvious aliases
-(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the compound labels in the table above.
+(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the labels in the table above.
 An unrecognized value normalizes to `auto` and the response carries the
 `quality_preference_normalized` warning rather than an error.
 
@@ -2049,3 +2212,83 @@ Three artifacts, in decreasing order of authority:
 
 A client that decodes the golden fixtures, echoes attempt keys byte-for-byte,
 and round-trips a replan without computing an identity is conforming.
+
+## Buffering quality (native v2)
+
+`buffering_quality_v1` gates three optional start and replan fields. A client
+lists the feature in `client_features` before it sends
+`bandwidth_estimate_source` (`probe` or `observed_rebuffer`, which requires
+`bandwidth_estimate_kbps`), `observed_throughput_kbps` (100 to 1,000,000, only
+with `observed_rebuffer`) or `learned_limit` (`ignore` or `clear`). A request
+without the feature neither records nor applies learned limits. The frozen v1
+bridge does not negotiate the feature and ignores these fields, as it ignores
+any unknown field.
+
+A learned limit is kept for the authenticated account, `X-Silo-Device-Id` and
+connection. A request without a device ID neither records nor applies one. The
+connection is the trusted network-access provider, `local` for a private or
+loopback client, or an HMAC of the public IPv4 address or IPv6 /64 keyed by
+the server secret. Raw public addresses are never stored. Rows are deleted 30
+days after their last update and when the device's last registration on the
+account is deleted, in either user store: forgetting the device and deleting a
+profile check the account's registry after their delete commits.
+
+Only a start or replan that the client sent with
+`bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
+recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
+the plan that kept buffering received, measured as `plan_summary`
+`throughput_kbps`; the server plans with, and records, the lower of it and
+`bandwidth_estimate_kbps`. An estimate without a source, which is how a
+client repeats its kept step-down estimate on later replans, records nothing.
+A seek reanchor reuses the playing recipe and a seek failure recovery replays
+the stored start request; neither records nor clears a limit.
+
+An Auto start or replan without `bandwidth_estimate_kbps` plans with the
+connection's current reading, the one `GET /api/v2/playback/connection`
+reports, as a `probe` estimate, so a client that starts before it has read its
+reading still plans under it. A seek replay keeps the stored request, a
+request with `learned_limit: "ignore"` gets no reading (a Cast start sends
+`ignore` and no estimate, and the sender's reading is not the receiver's
+link), and the reading is never recorded. Auto plans with the lower of the
+request estimate and the unexpired limit, or the limit alone when the request
+has none. Fixed qualities ignore the limit.
+`ignore` plans without the limit, records nothing and leaves the limit
+stored; `clear` deletes it before planning. The 80% margin and the
+administrator and client caps still apply. When any estimate or learned limit
+puts the source over budget and alternate versions are allowed, Auto first
+tries versions of the same edition that fit and play without video encoding,
+those that keep the source's dynamic range first, then the highest bitrate,
+then a transcode; an unchanged source carries `quality_reduction_unavailable`.
+This buffering search runs on a start, a `quality_change` or `output_change`
+replan, and a `failure_recovery` that changes intent: `quality_changed` changes
+the normalized quality or carries `learned_limit: "clear"`;
+`output_route_changed` changes `output_context_id`; or `audio_track_changed`
+or `subtitle_track_changed` changes the corresponding selected track. Explicit
+`track_change` replans, seeks and recoveries without an intent change do not run
+this search. A plan that the stored limit actually lowered adds
+`bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`. The server
+plans the same start or replan again without the limit, and without an
+`observed_rebuffer` estimate the request carries, with the connection's reading
+in its place and the same version search, and keeps the field only when that
+plan sends more, so a version that compatibility or the reading alone picks
+carries no field. A replan that starts from the version playing and stays on it keeps the
+field when the plan it replaces had it.
+
+`playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode`, `buffering_action` and `throughput_kbps`
+to the diagnostics allowlist; the existing `bandwidth_estimate_kbps` key
+reports the requested estimate. `throughput_kbps`, the rate the plan's media
+arrived at, becomes the connection's `playback_sample` when it is higher than
+the kept one or the kept one has outlived the reading lifetime; a **Test
+speed** result (`manual: true`) clears it. Clients send a summary when a plan stops playing, whether it was
+replaced, stopped or failed. A newly inserted summary becomes its connection's
+latest and feeds `silo_playback_stall_ratio{client,delivery}` and
+`silo_playback_buffering_actions_total{mode,action}`; a retried event counts
+once. The delivery is the reported plan's, read from the stored start or replan
+response, not its replacement's; an unresolvable plan reports `unknown`.
+
+The connection endpoints, probe results and the admin view are in the
+[Playback API](../playback-api.md#buffering-quality-native-v2). The
+[buffering-quality design](../design/2026-10-17-buffering-quality.md) and its
+shared conformance vectors define the client controller.

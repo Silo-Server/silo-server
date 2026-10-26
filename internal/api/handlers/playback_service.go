@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 // Playback service seams for the v2 adapter (internal/apiv2/playback.go).
@@ -33,6 +34,7 @@ import (
 // of one v2 playback request. InstallationID is the value the client read
 // from capabilities; a mutation from a different installation is refused.
 type PlaybackCaller struct {
+	ConnectionDeviceID                                    string
 	UserID                                                int
 	ProfileID, InstallationID                             string
 	DeviceID, DeviceName, Platform                        string
@@ -53,6 +55,11 @@ type PlaybackCapabilitiesView struct {
 	ProtocolVersions                []int
 	Features                        []string
 	Deliveries                      []playback.DeliveryV3
+	// The connection speed test's schedule, with connection_speed_v1. A zero
+	// target means the server has no bitrates to set one from.
+	BandwidthProbeTargetKbps    int
+	BandwidthProbeAutomatic     bool
+	BandwidthProbeMaxAgeSeconds int
 }
 
 const playbackCapabilityStateAvailable = "available"
@@ -185,14 +192,18 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
 	view.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3}
-	if h.playbackConfig().TranscodeEnabled {
+	settings := h.playbackConfig()
+	if settings.TranscodeEnabled {
 		view.Deliveries = append(view.Deliveries, playback.DeliveryTranscodeHLSV3)
 	}
+	view.BandwidthProbeAutomatic = !settings.AutomaticBandwidthProbeOff
+	view.BandwidthProbeMaxAgeSeconds = int(settings.BandwidthProbeMaxAge() / time.Second)
+	view.BandwidthProbeTargetKbps = h.bandwidthProbeTargetKbps(ctx)
 	capability, _ := json.Marshal(view) // This view contains only JSON-safe scalar values.
 	digest := sha256.Sum256(capability)
 	view.Revision = hex.EncodeToString(digest[:])
@@ -204,6 +215,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 // handler and never carries credentials, a body stream, or a response writer.
 // nativeAPIV2ContextKey marks a request that arrived through /api/v2.
 type nativeAPIV2ContextKey struct{}
+type playbackConnectionDeviceContextKey struct{}
 
 // WithNativeAPIV2 marks ctx as serving /api/v2. The playback and stream
 // handlers are shared with the frozen /api/v1 routes, and contract additions
@@ -292,6 +304,7 @@ func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.D
 
 func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Request {
 	headers := make(http.Header)
+	ctx = context.WithValue(ctx, playbackConnectionDeviceContextKey{}, caller.ConnectionDeviceID)
 	headers.Set(deviceIDHeader, caller.DeviceID)
 	headers.Set(deviceNameHeader, caller.DeviceName)
 	headers.Set(devicePlatformHeader, caller.Platform)
@@ -728,8 +741,9 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	return withNativeServerFeaturesV3(response), err
 }
 
-// ReportRouteEventV2 is POST /api/v2/playback/route-events. The event is
-// queued and never waits on the store; event_id dedups a retried report.
+// ReportRouteEventV2 is POST /api/v2/playback/route-events. Only the ownership
+// check waits on the store; the event itself is queued, and event_id dedups a
+// retried report.
 func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller PlaybackCaller, command PlaybackRouteEventCommand) error {
 	if err := h.validatePlaybackCaller(ctx, caller); err != nil {
 		return err
@@ -763,7 +777,14 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
+	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
+	if event.Event == playback.RouteEventPlanSummaryV3 {
+		record.ConnectionDeviceID = connectionDeviceV3(caller.ConnectionDeviceID)
+		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
+		record.ReceivedAt = time.Now().UTC()
+		record.SampleLifetime = h.playbackConfig().BandwidthProbeMaxAge()
+	}
+	h.enqueueRouteEventV3(record)
 	return nil
 }
 

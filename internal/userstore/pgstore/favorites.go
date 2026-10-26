@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -168,18 +167,11 @@ func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profi
 		return result, nil
 	}
 
-	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
-	args = append(args, s.userID, profileID)
-	for i, mediaItemID := range mediaItemIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+3)
-		args = append(args, mediaItemID)
-	}
-
+	// One statement shape for every batch size, as ListProgressByMediaItems.
 	rows, err := s.pool.Query(ctx,
 		`SELECT media_item_id FROM user_favorites
-		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])`,
+		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing favorites by media items: %w", err)
@@ -361,18 +353,11 @@ func (s *PostgresUserStore) ListWatchlistByMediaItems(ctx context.Context, profi
 		return result, nil
 	}
 
-	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
-	args = append(args, s.userID, profileID)
-	for i, mediaItemID := range mediaItemIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+3)
-		args = append(args, mediaItemID)
-	}
-
+	// One statement shape for every batch size, as ListProgressByMediaItems.
 	rows, err := s.pool.Query(ctx,
 		`SELECT media_item_id FROM user_watchlist
-		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])`,
+		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing watchlist by media items: %w", err)

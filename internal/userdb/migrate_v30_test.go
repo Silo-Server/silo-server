@@ -55,8 +55,8 @@ func TestMigrateToV30AddsProfilePINRevision(t *testing.T) {
 	if old.PINRevision != 0 {
 		t.Fatalf("migrated PINRevision = %d, want 0", old.PINRevision)
 	}
-	pin := "1234"
-	if err := store.UpdateProfile(ctx, "old", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	pin := "hash-of-1234"
+	if err := store.UpdateProfile(ctx, "old", userstore.UpdateProfileInput{PINHash: &pin}); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
 	if got, _ := store.GetProfile(ctx, "old"); got == nil || got.PINRevision != 1 {

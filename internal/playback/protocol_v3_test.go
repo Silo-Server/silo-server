@@ -25,8 +25,10 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 // /api/v2-only features extend the shared list and never reach /api/v1.
 func TestNativeServerFeaturesV3ExtendTheSharedList(t *testing.T) {
 	shared, native := ServerFeaturesV3(), NativeServerFeaturesV3()
-	if HasFeatureV3(shared, FeatureSubripSidecarV3) || !HasFeatureV3(native, FeatureSubripSidecarV3) {
-		t.Fatalf("subrip_sidecar_v1 must be advertised on /api/v2 only: shared=%v native=%v", shared, native)
+	for _, feature := range []string{FeatureSubripSidecarV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3} {
+		if HasFeatureV3(shared, feature) || !HasFeatureV3(native, feature) {
+			t.Fatalf("%s must be advertised on /api/v2 only: shared=%v native=%v", feature, shared, native)
+		}
 	}
 	for _, feature := range shared {
 		if !HasFeatureV3(native, feature) {
@@ -875,6 +877,133 @@ func TestHLSVideoSampleEntryV3ScopesNativeRecipes(t *testing.T) {
 				t.Fatalf("sample entry = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// An hls delivery that lists hls_copy_mpegts_v1 gets its copy remux packaged
+// as MPEG-TS under a plan identity of its own, so it can never share an fMP4
+// plan's output, attempt key, or frozen recipe. Encoded video is unaffected.
+func TestPlanPlaybackV3PackagesHLSCopyRemuxAsMPEGTSOnRequest(t *testing.T) {
+	dv8 := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1}}}}
+	dvFile := func() *models.MediaFile {
+		file := detailedFixtureFileV3()
+		file.VideoTracks[0].DVProfile = 8
+		file.VideoTracks[0].DVBLCompatID = 1
+		file.VideoTracks[0].DVLevel = 6
+		file.VideoTracks[0].ColorTransfer = "smpte2084"
+		file.VideoTracks[0].VideoRange = "DolbyVision"
+		file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+		return file
+	}
+	sdrFile := func() *models.MediaFile {
+		file := detailedFixtureFileV3()
+		file.Resolution = "1080p"
+		file.VideoTracks[0] = models.VideoTrack{Codec: "hevc", Profile: "Main", Level: 120, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 10_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR", ColorRange: "tv"}
+		return file
+	}
+	request := func(mpegts bool, hlsVideoCodecs ...string) StartRequestV3 {
+		req := validStartRequestV3()
+		req.ClientPlaybackContext.Device.Platform = "roku"
+		req.Capabilities.CodecsVideo = []string{"hevc", "h264", "vp9"}
+		req.Capabilities.VideoDecode = append(hevcMain10DecodeV3(), VideoDecodeCapabilityV3{Codec: "vp9", Profiles: []string{"profile 0"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true})
+		req.Capabilities.VideoDecode[0].Profiles = []string{"main", "main 10"}
+		req.Capabilities.VideoDecode[0].BitDepths = []int{8, 10}
+		req.Capabilities.HDRDetails = dv8
+		req.ClientPlaybackContext.Output.HDRDetails = dv8
+		delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+		delete(req.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.VideoCodecs = hlsVideoCodecs
+		hls.AudioDecodeCodecs = []string{"aac"}
+		hls.HDRDetails = dv8
+		hls.Features = []string{ClientNativeHLSPlaybackV3}
+		if mpegts {
+			hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3)
+		}
+		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		return req
+	}
+	outputContext := request(false).ClientPlaybackContext.Output.OutputContextID
+
+	for _, tc := range []struct {
+		name      string
+		file      *models.MediaFile
+		wantEntry string
+	}{
+		{name: "Dolby Vision Profile 8.1", file: dvFile(), wantEntry: VideoSampleEntryDVH1},
+		{name: "SDR HEVC", file: sdrFile(), wantEntry: VideoSampleEntryHVC1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fmp4 := planFileV3(request(false, "hevc"), tc.file)
+			ts := planFileV3(request(true, "hevc"), tc.file)
+			for _, result := range []PlannerResultV3{fmp4, ts} {
+				if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != codecCopyV3 {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+			}
+			if got := fmp4.Plan.EffectiveRecipe; got.SegmentContainer != "" || got.VideoSampleEntry != tc.wantEntry || PlanCopiesVideoAsMPEGTSV3(*fmp4.Plan) {
+				t.Fatalf("without the feature: segment container %q, sample entry %q", got.SegmentContainer, got.VideoSampleEntry)
+			}
+			if got := ts.Plan.EffectiveRecipe; got.SegmentContainer != SegmentContainerMPEGTSV3 || got.VideoSampleEntry != "" || !PlanCopiesVideoAsMPEGTSV3(*ts.Plan) {
+				t.Fatalf("with the feature: segment container %q, sample entry %q", got.SegmentContainer, got.VideoSampleEntry)
+			}
+			if ts.Plan.Claims.Video != fmp4.Plan.Claims.Video || ts.Plan.EffectiveRecipe.DynamicRange != fmp4.Plan.EffectiveRecipe.DynamicRange {
+				t.Fatalf("MPEG-TS changed the video promise: %+v vs %+v", ts.Plan.Claims.Video, fmp4.Plan.Claims.Video)
+			}
+			if ts.Plan.PlanID == fmp4.Plan.PlanID || ts.Plan.PlanAttemptKey == fmp4.Plan.PlanAttemptKey {
+				t.Fatal("MPEG-TS and fMP4 plans share an identity")
+			}
+			if planAttemptedV3(*ts.Plan, outputContext, []string{fmp4.Plan.PlanAttemptKey}) {
+				t.Fatal("an attempted fMP4 plan counts as the MPEG-TS plan")
+			}
+
+			assertFrozenMPEGTSRecipeV3(t, ts, fmp4)
+		})
+	}
+
+	vp9File := sdrFile()
+	vp9File.VideoTracks[0].Codec, vp9File.VideoTracks[0].Profile, vp9File.VideoTracks[0].Level = "vp9", "Profile 0", 0
+	for _, tc := range []struct {
+		name         string
+		request      StartRequestV3
+		file         *models.MediaFile
+		wantDelivery DeliveryV3
+	}{
+		{name: "encoded video keeps its packaging", request: request(true, "h264"), file: sdrFile(), wantDelivery: DeliveryTranscodeHLSV3},
+		{name: "VP9 copy keeps fMP4", request: request(true, "vp9"), file: vp9File, wantDelivery: DeliveryRemuxHLSV3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := planFileV3(tc.request, tc.file)
+			if result.Plan == nil || result.Plan.Delivery != tc.wantDelivery {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.Plan.EffectiveRecipe.SegmentContainer != "" || FreezeExecutableRecipeV3(result).CopyVideoMPEGTS {
+				t.Fatalf("plan took MPEG-TS copy packaging: %+v", result.Plan.EffectiveRecipe)
+			}
+		})
+	}
+}
+
+// assertFrozenMPEGTSRecipeV3 checks that the executable recipe frozen for an
+// MPEG-TS copy remux records the container and validates only for its plan.
+func assertFrozenMPEGTSRecipeV3(t *testing.T, ts, fmp4 PlannerResultV3) {
+	t.Helper()
+	frozen := FreezeExecutableRecipeV3(ts)
+	if !frozen.CopyVideoMPEGTS || frozen.Version != executableRecipeVersionCopyMPEGTSV3 || !frozen.ValidFor(*ts.Plan) {
+		t.Fatalf("frozen MPEG-TS recipe = %+v", frozen)
+	}
+	relabeled := *ts.Plan
+	relabeled.EffectiveRecipe.SegmentContainer = ""
+	if frozen.ValidFor(relabeled) {
+		t.Fatal("an MPEG-TS recipe validated for an fMP4 plan")
+	}
+	older := frozen
+	older.Version = executableRecipeVersionSubtitleRenditionV3
+	if older.Valid() {
+		t.Fatal("an MPEG-TS recipe validated below its version")
+	}
+	if fmp4Frozen := FreezeExecutableRecipeV3(fmp4); fmp4Frozen.CopyVideoMPEGTS || fmp4Frozen.Version >= executableRecipeVersionCopyMPEGTSV3 {
+		t.Fatalf("frozen fMP4 recipe = %+v", fmp4Frozen)
 	}
 }
 
@@ -2743,7 +2872,7 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 		QualityRung2160pHighV3, QualityRung2160pMediumV3, QualityRung2160pLowV3,
 		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-		"480p",
+		"480p", QualityRung480pLowV3, QualityRung360pV3,
 	}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("labels = %v, want %v", labels, want)
@@ -2827,6 +2956,148 @@ func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *tes
 	}
 }
 
+// A Dolby Vision Profile 7 4K source the client converts to Profile 8.1, under
+// a bandwidth estimate it cannot carry and with 4K transcoding off, played at
+// original quality. With a lower version serving lower qualities it is refused
+// for a reason the alternate-version fallback acts on instead.
+func TestPlanPlaybackV3AutoBandwidthLimitRefusesDV7SourceForLowerVersion(t *testing.T) {
+	file := dv7WithELFixtureV3()
+	hdr := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	request := clientManagedDV7RequestV3(hdr, hdr, hdr,
+		TransformationV3{Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
+	)
+	request.QualityPreference = QualityAutoV3
+	request.BandwidthEstimateKbps = new(4_000)
+	request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, HardwareToneMapEnabled: true, SoftwareToneMapEnabled: true},
+		Registry: NewTransformationRegistryV3(nil),
+	}
+
+	original := PlanPlaybackV3(input)
+	if original.Plan == nil || original.Plan.DecisionReason != "client_dv7_to_dv81" || !hasDegradationWarningV3(original.Plan.DegradationWarnings, "quality_reduction_unavailable") {
+		t.Fatalf("without a lower version = %s, want the source at original quality", ExplainPlannerResultV3(original))
+	}
+
+	input.LowerVersion = &LowerVersionV3{
+		Requested: SourceDescriptorFromFileV3(file, 0),
+		Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 32_000, DynamicRange: DynamicRangeSDRV3},
+	}
+	refused := PlanPlaybackV3(input)
+	if refused.Terminal == nil || (refused.Terminal.Reason != "no_alternate_version" && refused.Terminal.Reason != TerminalHDRTranscodeUnsupportedV3) {
+		t.Fatalf("with a lower version = %s, want a refusal the alternate-version fallback acts on", ExplainPlannerResultV3(refused))
+	}
+}
+
+// A cropped 4K film's 1080p frame fits the class's box at Auto or a plain
+// resolution (1920x696) and keeps the class height at a fixed rung
+// (2978x1080). Either way it is the 1080p class, above a 720p-class lower
+// version, so the 4K source keeps it; 720p goes to the lower version.
+func TestPlanPlaybackV3LowerVersionTakesTranscodeByResolutionClass(t *testing.T) {
+	// A 2.67:1 film's fitted 1080p frame is 1920x720, as tall as the 720p
+	// class.
+	for _, source := range []SourceDescriptorV3{
+		{VideoCodec: "hevc", Width: 3840, Height: 1392, BitrateKbps: 40_000, FrameRate: 24},
+		{VideoCodec: "hevc", Width: 3840, Height: 1440, BitrateKbps: 40_000, FrameRate: 24},
+	} {
+		lower := SourceDescriptorV3{VideoCodec: "h264", Width: 1280, Height: source.Height / 3, BitrateKbps: 4_000, FrameRate: 24}
+		input := PlannerInputV3{
+			Request:      validStartRequestV3(),
+			Settings:     PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+			LowerVersion: &LowerVersionV3{Requested: source, Lower: lower},
+		}
+		for _, tc := range []struct {
+			preference string
+			want       bool
+		}{
+			{"1080p", false},
+			{QualityRung1080pHighV3, false},
+			{"720p", true},
+			{QualityRung720pHighV3, true},
+		} {
+			input.Request.QualityPreference = tc.preference
+			quality := ResolveQualityPolicyV3(input.Request, source)
+			if got := lowerVersionTakesTranscodeV3(input, source, quality); got != tc.want {
+				t.Errorf("%dx%d at %s (%dx%d): lower version takes it = %v, want %v", source.Width, source.Height, tc.preference, quality.Width, quality.Height, got, tc.want)
+			}
+		}
+	}
+}
+
+// A fixed 4K rung stays on the 4K source even when its cropped frame is no
+// taller than the lower version: a 3840x1080 film's 2160p Medium rung keeps
+// its 1080 lines.
+func TestPlanPlaybackV3LowerVersionLeaves4KRungOnCroppedSource(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "hevc", Width: 3840, Height: 1080, BitrateKbps: 40_000, FrameRate: 24}
+	lower := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}
+	input := PlannerInputV3{
+		Request:      validStartRequestV3(),
+		Settings:     PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		LowerVersion: &LowerVersionV3{Requested: source, Lower: lower},
+	}
+	input.Request.QualityPreference = QualityRung2160pMediumV3
+	if quality := ResolveQualityPolicyV3(input.Request, source); lowerVersionTakesTranscodeV3(input, source, quality) {
+		t.Fatalf("2160p Medium (%dx%d) went to the 1080p version", quality.Width, quality.Height)
+	}
+}
+
+// An encode an H.264 decoder holds to 1080p goes to a 1080p lower version
+// even when the quality asked for more: Auto on a 4K HEVC source for a device
+// that decodes only 1080p H.264.
+func TestPlanPlaybackV3LowerVersionTakesH264BoundedEncode(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.Resolution = "2160p"
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "Main", 8
+	file.VideoTracks[0].VideoRange, file.VideoTracks[0].VideoRangeType = "SDR", "SDR"
+	request := validStartRequestV3()
+	request.QualityPreference = QualityAutoV3
+	request.Capabilities.CodecsVideo = []string{"h264"}
+	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000, Hardware: true}}
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		Registry: testTransformationRegistryV3(),
+	}
+
+	alone := PlanPlaybackV3(input)
+	if alone.Plan == nil || alone.Plan.Delivery != DeliveryTranscodeHLSV3 || optionalValueV3(alone.Plan.EffectiveRecipe.Height) != 1080 {
+		t.Fatalf("without a lower version = %s, want a 1080p transcode of the 4K source", ExplainPlannerResultV3(alone))
+	}
+
+	input.LowerVersion = &LowerVersionV3{
+		Requested: SourceDescriptorFromFileV3(file, 0),
+		Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, DynamicRange: DynamicRangeSDRV3},
+	}
+	if refused := PlanPlaybackV3(input); refused.Terminal == nil || refused.Terminal.Reason != "no_alternate_version" {
+		t.Fatalf("with a lower version = %s, want the encode refused for the lower version", ExplainPlannerResultV3(refused))
+	}
+}
+
+// Without an encode toolchain, a quality the lower version serves still goes
+// to it, which can play it at its own smaller size, rather than to a refusal
+// the alternate-version fallback does not act on.
+func TestPlanPlaybackV3LowerVersionTakesQualityWithoutToolchain(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "Main", 8
+	file.VideoTracks[0].VideoRange, file.VideoTracks[0].VideoRangeType = "SDR", "SDR"
+	request := validStartRequestV3()
+	request.QualityPreference = QualityAutoV3
+	request.BandwidthEstimateKbps = new(4_000)
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, PreferLowerVersionTranscode: true},
+		Registry: NewTransformationRegistryV3(nil),
+		LowerVersion: &LowerVersionV3{
+			Requested: SourceDescriptorFromFileV3(file, 0),
+			Lower:     SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 8_000, DynamicRange: DynamicRangeSDRV3},
+		},
+	}
+	if result := PlanPlaybackV3(input); result.Terminal == nil || result.Terminal.Reason != "no_alternate_version" {
+		t.Fatalf("result = %s, want the quality refused for the lower version", ExplainPlannerResultV3(result))
+	}
+}
+
 // A 4K version that may not be transcoded offers the qualities its
 // lower-resolution version serves: that version as it is, then the rungs a
 // transcode of it can reach. Original stays the 4K version.
@@ -2853,7 +3124,7 @@ func TestAvailableQualitiesV3LowerVersionServes4KWithout4KTranscode(t *testing.T
 			QualityOriginalV3, "1080p",
 			QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 			QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-			"480p",
+			"480p", QualityRung480pLowV3, QualityRung360pV3,
 		}
 		if !reflect.DeepEqual(labels(got), want) {
 			t.Fatalf("labels = %v, want %v", labels(got), want)
@@ -2950,7 +3221,7 @@ func TestAvailableQualitiesV3KeepsDirectHDRPlanningCapabilityLazy(t *testing.T) 
 		},
 	}
 	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 80_000, DynamicRange: DynamicRangeHDR10V3}
-	if got := availableQualitiesV3(input, source); len(got) != 11 || got[0].Label != QualityOriginalV3 || got[1].Label != QualityRung2160pHighV3 {
+	if got := availableQualitiesV3(input, source); len(got) != 13 || got[0].Label != QualityOriginalV3 || got[1].Label != QualityRung2160pHighV3 {
 		t.Fatalf("direct HDR qualities = %#v, want original plus compound ladder", got)
 	}
 	if capabilityCalls != 0 {
@@ -2982,7 +3253,7 @@ func TestAvailableQualitiesV3Cropped4KPublishesOnlyUsefulSameClassRungs(t *testi
 		QualityRung2160pMediumV3, QualityRung2160pLowV3,
 		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-		"480p",
+		"480p", QualityRung480pLowV3, QualityRung360pV3,
 	}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("cropped 4K labels = %v, want %v", labels, want)

@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -39,6 +40,13 @@ type candidateMarker struct {
 
 func (m candidateMarker) present() bool {
 	return m.Start != nil && m.End != nil
+}
+
+// providerAbsent reports whether m is an online provider's answer that the
+// file has no segment of the kind: a provider source without bounds.
+func (m candidateMarker) providerAbsent() bool {
+	return m.Start == nil && m.End == nil && m.Source != nil &&
+		(*m.Source == models.MarkerSourcePlugin || *m.Source == models.MarkerSourceOnline)
 }
 
 // marker returns the candidate's stored marker of kind.
@@ -80,12 +88,32 @@ func (c Candidate) effectiveSource(kind markerKind) string {
 }
 
 // hasHigherPriority reports whether the candidate's marker of kind came from
-// a source that outranks source.
+// a source that outranks source. A provider's absent answer counts as its
+// marker, so local analysis leaves the kind alone as it would a provider
+// marker.
 func (c Candidate) hasHigherPriority(kind markerKind, source string) bool {
-	if !c.marker(kind).present() {
+	if m := c.marker(kind); !m.present() && !m.providerAbsent() {
 		return false
 	}
 	return models.MarkerSourcePriority(c.effectiveSource(kind)) > models.MarkerSourcePriority(source)
+}
+
+// yieldsToChapter reports whether the candidate's marker of kind came from a
+// higher-priority source that the marker writer lets the chapter result
+// segment replace: an online provider that rated it below the chapter.
+func (c Candidate) yieldsToChapter(kind markerKind, segment Segment) bool {
+	if !c.hasHigherPriority(kind, models.MarkerSourceScanner) {
+		return false
+	}
+	stored := c.marker(kind)
+	existing := markers.SegmentPayload{Start: stored.Start, End: stored.End, Source: c.effectiveSource(kind), Confidence: stored.Confidence}
+	if stored.Algorithm != nil {
+		existing.Algorithm = *stored.Algorithm
+	}
+	return markers.CanWriteMarkerUpdate(existing, markers.SegmentPayload{
+		Start: &segment.Start, End: &segment.End, Source: models.MarkerSourceScanner,
+		Confidence: &segment.Confidence, Algorithm: segment.Algorithm,
+	})
 }
 
 // ownsMarker reports whether local analysis may write the candidate's marker
