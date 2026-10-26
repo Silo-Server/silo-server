@@ -104,7 +104,7 @@ func TestAttrValueErrorKeepsQuotedURLs(t *testing.T) {
 }
 
 func TestAttrValueErrorMasksQueryAfterQuoteInURL(t *testing.T) {
-	err := fmt.Errorf(`upload: PUT "https://bucket.s3.example.test/it's<1>.webp?X-Amz-Signature=deadbeef": AccessDenied`)
+	err := errors.New(`upload: PUT "https://bucket.s3.example.test/it's<1>.webp?X-Amz-Signature=deadbeef": AccessDenied`)
 	got, _ := attrValue(slog.AnyValue(err)).(string)
 	if strings.Contains(got, "X-Amz-Signature") || strings.Contains(got, "deadbeef") {
 		t.Fatalf("attrValue kept the signature: %s", got)
