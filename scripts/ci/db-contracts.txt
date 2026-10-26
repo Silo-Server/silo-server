@@ -16,6 +16,7 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
+./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls

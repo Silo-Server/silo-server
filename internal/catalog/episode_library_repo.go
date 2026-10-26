@@ -98,6 +98,11 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 	`, folderID).Scan(&insertedSeriesIDs); err != nil {
 			return 0, fmt.Errorf("restoring episode library membership: %w", err)
 		}
+		spannedSeriesIDs, err := InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1", folderID)
+		if err != nil {
+			return 0, err
+		}
+		insertedSeriesIDs = append(insertedSeriesIDs, spannedSeriesIDs...)
 	}
 
 	removed, deletedSeriesIDs, err := deleteStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
@@ -114,16 +119,6 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 	}
 	return removed, nil
 }
-
-// noActiveEpisodeFileSQL holds for a membership el whose episode has no
-// active file in its folder.
-const noActiveEpisodeFileSQL = `NOT EXISTS (
-		SELECT 1
-		FROM media_files mf
-		WHERE mf.media_folder_id = el.media_folder_id
-		  AND mf.episode_id = el.episode_id
-		  AND mf.missing_since IS NULL
-	)`
 
 // deleteStaleEpisodeMemberships removes the folder's memberships whose
 // episode has no active file there, limited to episodeIDs when it is non-nil,
@@ -147,7 +142,7 @@ func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int,
 		       )
 		FROM episode_libraries el
 		LEFT JOIN episodes e ON e.content_id = el.episode_id
-		WHERE `+scope+` AND `+noActiveEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
+		WHERE `+scope+` AND `+NoServingEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
 		return 0, nil, fmt.Errorf("finding stale episode library membership: %w", err)
 	}
 	if len(staleEpisodeIDs) == 0 {
@@ -165,7 +160,7 @@ func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int,
 			DELETE FROM episode_libraries el
 			WHERE el.media_folder_id = $1
 			  AND el.episode_id = ANY($2::text[])
-			  AND `+noActiveEpisodeFileSQL+`
+			  AND `+NoServingEpisodeFileSQL+`
 			RETURNING el.episode_id
 		)
 		SELECT COUNT(*)::int,

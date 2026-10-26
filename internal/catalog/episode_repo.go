@@ -804,16 +804,16 @@ func (r *EpisodeRepository) ListBySeriesAndNumbers(
 }
 
 // HasFilesByIDs reports which of the given episodes are backed by at least one
-// live (non-missing) media file. Episodes absent from the result map have no
-// file — e.g. provider-metadata-only entries for unaired episodes.
+// live (non-missing) media file, including a multi-episode file spanning them.
+// Episodes absent from the result map have no file — e.g.
+// provider-metadata-only entries for unaired episodes.
 func (r *EpisodeRepository) HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT episode_id FROM media_files
-		WHERE episode_id = ANY($1) AND missing_since IS NULL
-		GROUP BY episode_id`
+	query := `SELECT DISTINCT served.episode_id
+		FROM (` + ServedEpisodeFilesSQL + `) served(episode_id, file_id)`
 	rows, err := r.pool.Query(ctx, query, contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("checking episode file presence: %w", err)

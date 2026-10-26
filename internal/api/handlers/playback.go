@@ -1087,6 +1087,9 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist playback stop", "component", "api", "session", session.ID, "error", err)
 	}
+	if err == nil && result.Completed {
+		h.markSpannedEpisodesWatched(ctx, watchSvc, session, file, stoppedAt)
+	}
 	// A history row this stop wrote still counts when a later write failed:
 	// no later stop of a once-recorded play refreshes the profile for it.
 	if (err == nil && !result.AlreadyRecorded) || result.HistoryID != "" {
@@ -1466,6 +1469,45 @@ func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *pl
 	}
 	// Clients often drop the connection right after reporting a stop.
 	h.recordStopHistory(context.WithoutCancel(ctx), session)
+}
+
+// playbackSeasonEpisodeLister lists a season's available episodes. The
+// catalog episode repository behind EpisodeLookup implements it.
+type playbackSeasonEpisodeLister interface {
+	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
+}
+
+// markSpannedEpisodesWatched marks the later episodes of a completed
+// multi-episode file watched. Playback records the file against its first
+// episode only, and each later episode of the range resolves to the same file,
+// so leaving them unwatched would offer the file again as the next episode.
+func (h *PlaybackHandler) markSpannedEpisodesWatched(ctx context.Context, watchSvc *watchstate.Service, session *playback.Session, file *models.MediaFile, watchedAt time.Time) {
+	if file.EpisodeID == "" || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
+		return
+	}
+	lister, ok := h.EpisodeLookup.(playbackSeasonEpisodeLister)
+	if !ok {
+		return
+	}
+	first, err := h.EpisodeLookup.GetByID(ctx, file.EpisodeID)
+	if err != nil || first == nil {
+		return
+	}
+	season, err := lister.ListBySeason(ctx, first.SeriesID, first.SeasonNumber)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to list multi-episode file episodes", "component", "api", "session", session.ID, "error", err)
+		return
+	}
+	var targets []watchstate.LeafWatchTarget
+	for _, episode := range season {
+		if episode.EpisodeNumber > first.EpisodeNumber &&
+			episode.EpisodeNumber >= file.MultiEpisodeStart && episode.EpisodeNumber <= file.MultiEpisodeEnd {
+			targets = append(targets, watchstate.LeafWatchTarget{MediaItemID: episode.ContentID})
+		}
+	}
+	if err := watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, watchedAt); err != nil {
+		slog.ErrorContext(ctx, "failed to mark multi-episode file episodes watched", "component", "api", "session", session.ID, "error", err)
+	}
 }
 
 func playbackProgressTarget(file *models.MediaFile) string {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1439,5 +1440,56 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+type testSeasonEpisodeLookup struct {
+	testEpisodeLookup
+	season []*models.Episode
+}
+
+func (l testSeasonEpisodeLookup) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
+	return l.season, nil
+}
+
+// A completed multi-episode file marks every episode of its range watched, so
+// the next episode offered is not the same file again (issue #739).
+func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "series-1",
+		EpisodeID:         "episode-1",
+		FilePath:          "/media/Show/Season 01/Show - S01E01-E02.mkv",
+		Duration:          3600,
+		MultiEpisodeStart: 1,
+		MultiEpisodeEnd:   2,
+	}
+	episode := func(number int) *models.Episode {
+		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	handler.EpisodeLookup = testSeasonEpisodeLookup{
+		testEpisodeLookup: testEpisodeLookup{episode: episode(1)},
+		season:            []*models.Episode{episode(1), episode(2), episode(3)},
+	}
+
+	handler.persistStopAndHistory(context.Background(), &playback.Session{
+		ID:          "session-1",
+		UserID:      1,
+		ProfileID:   "profile-1",
+		MediaFileID: 42,
+		Position:    3590,
+	})
+
+	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-3"})
+	if err != nil {
+		t.Fatalf("list progress: %v", err)
+	}
+	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-3": false} {
+		if got := progress[id].Completed; got != want {
+			t.Errorf("%s completed = %v, want %v", id, got, want)
+		}
 	}
 }

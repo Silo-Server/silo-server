@@ -207,17 +207,14 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 		`, fileIDs); err != nil {
 			return nil, fmt.Errorf("filesplit: adding target episode library membership: %w", err)
 		}
+		if _, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.id = ANY($1::bigint[])", fileIDs); err != nil {
+			return nil, fmt.Errorf("filesplit: %w", err)
+		}
 		if len(sourceEpisodeIDs) > 0 {
 			if _, err := tx.Exec(ctx, `
-				DELETE FROM episode_libraries source_membership
-				WHERE source_membership.episode_id = ANY($1::text[])
-				  AND NOT EXISTS (
-					SELECT 1
-					FROM media_files remaining
-					WHERE remaining.episode_id = source_membership.episode_id
-					  AND remaining.media_folder_id = source_membership.media_folder_id
-					  AND remaining.missing_since IS NULL
-				  )
+				DELETE FROM episode_libraries el
+				WHERE el.episode_id = ANY($1::text[])
+				  AND `+catalog.NoServingEpisodeFileSQL+`
 			`, sourceEpisodeIDs); err != nil {
 				return nil, fmt.Errorf("filesplit: removing stale source episode library membership: %w", err)
 			}

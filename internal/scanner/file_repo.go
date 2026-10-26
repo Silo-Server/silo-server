@@ -82,6 +82,11 @@ const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
 	video_tracks, audio_tracks, subtitle_tracks, external_subtitles, edition_key`
 
+// mfOverlayFileColumns is overlayFileColumns qualified with the "mf" alias.
+const mfOverlayFileColumns = `mf.content_id, mf.episode_id, mf.media_folder_id, mf.file_path,
+	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
+	mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.edition_key`
+
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
 const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.season_number, mf.episode_number,
@@ -3714,29 +3719,49 @@ func (r *FileRepository) ListOverlayFilesByContentIDs(ctx context.Context, conte
 	return grouped, nil
 }
 
+// servedEpisodeRows reads the served episode ID that prefixes each row of a
+// query joined to catalog.ServedEpisodeFilesSQL, in row order. A later episode
+// of a multi-episode file differs from the file's own episode_id.
+type servedEpisodeRows struct {
+	pgx.Rows
+	episodeIDs []string
+}
+
+func (r *servedEpisodeRows) Scan(dest ...any) error {
+	var episodeID string
+	if err := r.Rows.Scan(append([]any{&episodeID}, dest...)...); err != nil {
+		return err
+	}
+	r.episodeIDs = append(r.episodeIDs, episodeID)
+	return nil
+}
+
 // ListByEpisodeIDs returns media files grouped by episode ID for the given
-// episode IDs, excluding files that are marked missing.
+// episode IDs, excluding files that are marked missing. A multi-episode file
+// is listed under every requested episode it spans.
 func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
 	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
 	if len(episodeIDs) == 0 {
 		return grouped, nil
 	}
 
-	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE episode_id = ANY($1) AND missing_since IS NULL
-		ORDER BY episode_id ASC, id ASC`
+	query := `SELECT served.episode_id, ` + mfFileColumns + `
+		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
+		JOIN media_files mf ON mf.id = served.file_id
+		ORDER BY served.episode_id ASC, mf.id ASC`
 	rows, err := r.pool.Query(ctx, query, episodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by episode_ids: %w", err)
 	}
 	defer rows.Close()
 
-	files, err := scanMediaFiles(rows)
+	served := &servedEpisodeRows{Rows: rows}
+	files, err := scanMediaFiles(served)
 	if err != nil {
 		return nil, err
 	}
-	for _, file := range files {
-		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
+	for i, file := range files {
+		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)
 	}
 	return grouped, nil
 }
@@ -3749,24 +3774,23 @@ func (r *FileRepository) ListOverlayFilesByEpisodeIDs(ctx context.Context, episo
 		return grouped, nil
 	}
 
-	query := `SELECT ` + overlayFileColumns + ` FROM media_files
-		WHERE episode_id = ANY($1) AND missing_since IS NULL
-		ORDER BY episode_id ASC, id ASC`
+	query := `SELECT served.episode_id, ` + mfOverlayFileColumns + `
+		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
+		JOIN media_files mf ON mf.id = served.file_id
+		ORDER BY served.episode_id ASC, mf.id ASC`
 	rows, err := r.pool.Query(ctx, query, episodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("querying overlay files by episode_ids: %w", err)
 	}
 	defer rows.Close()
 
-	files, err := scanOverlayMediaFiles(rows)
+	served := &servedEpisodeRows{Rows: rows}
+	files, err := scanOverlayMediaFiles(served)
 	if err != nil {
 		return nil, err
 	}
-	for _, file := range files {
-		if file.EpisodeID == "" {
-			continue
-		}
-		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
+	for i, file := range files {
+		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)
 	}
 	return grouped, nil
 }
@@ -3921,13 +3945,7 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 			DELETE FROM episode_libraries el
 			WHERE el.media_folder_id = $1
 			  AND el.episode_id = ANY($2::text[])
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM media_files mf
-				WHERE mf.media_folder_id = el.media_folder_id
-				  AND mf.episode_id = el.episode_id
-				  AND mf.missing_since IS NULL
-			  )
+			  AND `+catalog.NoServingEpisodeFileSQL+`
 		`, folderID, oldEpisodeIDs); err != nil {
 			return 0, fmt.Errorf("deleting stale episode library links by path prefix: %w", err)
 		}
@@ -3996,13 +4014,7 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 			DELETE FROM episode_libraries el
 			WHERE el.media_folder_id = $1
 			  AND el.episode_id = $2
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM media_files mf
-				WHERE mf.media_folder_id = el.media_folder_id
-				  AND mf.episode_id = el.episode_id
-				  AND mf.missing_since IS NULL
-			  )
+			  AND `+catalog.NoServingEpisodeFileSQL+`
 		`, folderID, *oldEpisodeID); err != nil {
 			return fmt.Errorf("deleting old episode library link: %w", err)
 		}
@@ -4016,6 +4028,11 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 	`, affectedEpisodeIDs).Scan(&affectedSeriesIDs); err != nil {
 		return fmt.Errorf("collecting affected episode series: %w", err)
 	}
+	spannedSeriesIDs, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.id = $1", fileID)
+	if err != nil {
+		return err
+	}
+	affectedSeriesIDs = append(affectedSeriesIDs, spannedSeriesIDs...)
 	if err := catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, affectedSeriesIDs); err != nil {
 		return err
 	}
@@ -4081,7 +4098,11 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 	`, seriesContentID).Scan(&linked, &addedLinks); err != nil {
 			return err
 		}
-		if !addedLinks {
+		spannedSeriesIDs, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.content_id = $1", seriesContentID)
+		if err != nil {
+			return err
+		}
+		if !addedLinks && len(spannedSeriesIDs) == 0 {
 			return nil
 		}
 		// Genuinely new links move the series' membership denorms ("Latest
@@ -4218,12 +4239,13 @@ func (r *FileRepository) ListBySeriesUnlinked(ctx context.Context, seriesContent
 	return scanMediaFiles(rows)
 }
 
-// GetByEpisodeID returns all media files linked to the given episode ID.
+// GetByEpisodeID returns all media files serving the given episode ID: linked
+// to it, or a multi-episode file spanning it.
 func (r *FileRepository) GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE episode_id = $1 AND missing_since IS NULL
+		WHERE id IN (SELECT served.file_id FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id))
 		ORDER BY id ASC`
-	rows, err := r.pool.Query(ctx, query, episodeID)
+	rows, err := r.pool.Query(ctx, query, []string{episodeID})
 	if err != nil {
 		return nil, fmt.Errorf("querying files by episode_id: %w", err)
 	}
@@ -4244,12 +4266,11 @@ func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episode
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (episode_id) episode_id, duration
-		FROM media_files
-		WHERE episode_id = ANY($1)
-		  AND missing_since IS NULL
-		  AND duration > 0
-		ORDER BY episode_id, id ASC`, episodeIDs)
+		SELECT DISTINCT ON (served.episode_id) served.episode_id, mf.duration
+		FROM (`+catalog.ServedEpisodeFilesSQL+`) served(episode_id, file_id)
+		JOIN media_files mf ON mf.id = served.file_id
+		WHERE mf.duration > 0
+		ORDER BY served.episode_id, mf.id ASC`, episodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("querying first durations by episode ids: %w", err)
 	}
