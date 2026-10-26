@@ -174,7 +174,10 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	for _, stream := range streams {
 		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1")
 	}
-	args = append(args, "-i", inputPath, "-map", "0:t?", "-c", "copy", "-f", "null", "-")
+	// Attachments are dumped while opening the container. Use a synthetic input
+	// for the zero-duration output so FFmpeg exits without waiting for packets
+	// from the media, including sparse or delayed tracks.
+	args = append(args, "-i", inputPath, "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono", "-map", "1:a:0", "-c", "copy", "-t", "0", "-f", "null", "-")
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
