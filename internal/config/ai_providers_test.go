@@ -46,6 +46,13 @@ func TestPlanAIProviderConversionKeepsEachJobOnItsEndpoint(t *testing.T) {
 			speechCustomAdded: true,
 		},
 		{
+			name:      "speech key on the text endpoint",
+			stored:    map[string]string{"ai.api_key": "sk-text", "ai.asr_api_key": "sk-speech"},
+			text:      endpoint{"https://api.openai.com", "sk-text"},
+			speech:    endpoint{"https://api.openai.com", "sk-speech"},
+			providers: 2,
+		},
+		{
 			name: "separate speech endpoint with its own key",
 			stored: map[string]string{
 				"ai.api_key": "sk-text", "ai.asr_base_url": "https://api.groq.com/openai", "ai.asr_api_key": "gsk-speech",

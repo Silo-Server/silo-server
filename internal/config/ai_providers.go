@@ -452,8 +452,9 @@ func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]
 		// turned transcription on against it.
 		if provider.Supports(AICapabilitySpeech) ||
 			(provider.Type == AIProviderCustom && AdminSettingEnabled("subtitle_ai.transcribe_enabled", stored["subtitle_ai.transcribe_enabled"])) {
-			addAIProviderCapability(registry, textID, AICapabilitySpeech)
-			bind(AISpeechProviderSettingKey, textID)
+			// Audio went to the text endpoint with the speech key when one was
+			// saved; with a different key that is a provider of its own.
+			bind(AISpeechProviderSettingKey, adoptAIProvider(registry, textBaseURL, speechKey, AICapabilitySpeech))
 		}
 	}
 }
