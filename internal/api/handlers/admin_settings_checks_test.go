@@ -1195,6 +1195,13 @@ func TestAdminBatchValidatesProviderBindings(t *testing.T) {
 			Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilitySpeech}},
 		config.AIProvider{ID: "chat-only", Type: config.AIProviderCustom, Name: "Chat", BaseURL: "http://llm.lan", Capabilities: []config.AICapability{config.AICapabilityChat}},
 	)
+	// The single-setting write applies the same check.
+	for value, wantErr := range map[string]bool{"router": false, "chat-only": true, "missing": true} {
+		h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{config.AIProvidersSettingKey: registry}}}
+		if _, err := h.UpdateAdminSetting(t.Context(), config.AISpeechProviderSettingKey, value, nil); (err != nil) != wantErr {
+			t.Fatalf("single write of speech provider %q: err = %v, want error %v", value, err, wantErr)
+		}
+	}
 	for _, tc := range []struct {
 		body     string
 		wantCode int

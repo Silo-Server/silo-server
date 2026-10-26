@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3150,7 +3151,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
+			// A provider binding is checked against the registry the dependency
+			// group pulls in, as the batch write does.
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey ||
+				slices.Contains(config.AIProviderBindingKeys(), key) {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
