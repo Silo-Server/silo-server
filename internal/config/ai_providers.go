@@ -428,35 +428,33 @@ func convertLegacyTextAndSpeech(registry *AIProviderRegistry, stored map[string]
 			writes[key] = id
 		}
 	}
-	textBaseURL := firstNonEmpty(stored[legacyAITextURLSetting], stored[legacySubtitleURLSetting])
+	storedTextURL := firstNonEmpty(stored[legacyAITextURLSetting], stored[legacySubtitleURLSetting])
 	textKey := firstNonEmpty(stored[legacyAITextKeySetting], stored[legacySubtitleKeySetting])
-	textID := ""
-	if textBaseURL != "" || textKey != "" {
-		if textBaseURL == "" {
-			textBaseURL = openAIBaseURL
-		}
-		textID = adoptAIProvider(registry, textBaseURL, textKey, AICapabilityChat)
-		bind(AITextProviderSettingKey, textID)
+	// The text endpoint defaulted to OpenAI when none was stored.
+	textBaseURL := firstNonEmpty(storedTextURL, openAIBaseURL)
+	if storedTextURL != "" || textKey != "" {
+		bind(AITextProviderSettingKey, adoptAIProvider(registry, textBaseURL, textKey, AICapabilityChat))
 	}
 
-	// An empty speech base URL sent audio to the text endpoint, and an empty
-	// speech key reused the text key.
+	// Speech resolved its endpoint and key independently of text: an empty
+	// speech base URL sent audio to the text endpoint (its default included),
+	// and an empty speech key reused the text key.
 	speechBaseURL := strings.TrimSpace(stored[legacyAISpeechURLSetting])
 	speechKey := firstNonEmpty(stored[legacyAISpeechKeySetting], textKey)
-	switch {
-	case speechBaseURL != "":
+	if speechBaseURL != "" {
 		bind(AISpeechProviderSettingKey, adoptAIProvider(registry, speechBaseURL, speechKey, AICapabilitySpeech))
-	case textID != "":
-		provider, _ := registry.Find(textID)
-		// A custom text endpoint served speech only if the administrator
-		// turned transcription on against it.
-		if provider.Supports(AICapabilitySpeech) ||
-			(provider.Type == AIProviderCustom && AdminSettingEnabled("subtitle_ai.transcribe_enabled", stored["subtitle_ai.transcribe_enabled"])) {
-			// Audio went to the text endpoint with the speech key when one was
-			// saved; with a different key that is a provider of its own.
-			bind(AISpeechProviderSettingKey, adoptAIProvider(registry, textBaseURL, speechKey, AICapabilitySpeech))
-		}
+		return
 	}
+	if storedTextURL == "" && speechKey == "" {
+		return // Nothing was configured.
+	}
+	// A custom text endpoint served speech only if the administrator turned
+	// transcription on against it.
+	providerType, _ := detectAIProviderType(textBaseURL, speechKey, AICapabilitySpeech)
+	if providerType == AIProviderCustom && !AdminSettingEnabled("subtitle_ai.transcribe_enabled", stored["subtitle_ai.transcribe_enabled"]) {
+		return
+	}
+	bind(AISpeechProviderSettingKey, adoptAIProvider(registry, textBaseURL, speechKey, AICapabilitySpeech))
 }
 
 // adoptAIProvider returns the id of a provider that serves capability at exactly
