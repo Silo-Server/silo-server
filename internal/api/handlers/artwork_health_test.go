@@ -58,6 +58,39 @@ func TestArtworkReadinessRecoversAfterFailedProbeExpires(t *testing.T) {
 	}
 }
 
+// A refresh that outlives a request reports the previous result until the
+// refresh times out, so slow but healthy storage does not read as degraded
+// every time the cache expires, and stuck storage still reads as failed.
+func TestArtworkRefreshReportsPreviousResultUntilItTimesOut(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	calls := 0
+	h := NewReadyHandler(nil, nil, artworkProbeFunc(func(context.Context) error {
+		calls++
+		if calls > 1 {
+			<-release
+		}
+		return nil
+	}))
+	if !h.checkArtwork(t.Context()) {
+		t.Fatal("healthy storage reported failed")
+	}
+	h.artworkMu.Lock()
+	h.artworkChecked = time.Now().Add(-31 * time.Second)
+	h.artworkMu.Unlock()
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	if !h.checkArtwork(expired) {
+		t.Fatal("a refresh in progress hid the previous healthy result")
+	}
+	h.artworkMu.Lock()
+	h.artworkStarted = time.Now().Add(-artworkProbeTimeout)
+	h.artworkMu.Unlock()
+	if h.checkArtwork(expired) {
+		t.Fatal("a refresh stuck past its timeout still reported healthy storage")
+	}
+}
+
 func TestReadinessReportsStorageWithoutGatingOnIt(t *testing.T) {
 	failing := artworkProbeFunc(func(context.Context) error { return errors.New("storage unavailable") })
 	h := NewReadyHandler(pingerFunc(func(context.Context) error { return nil }), nil, failing)

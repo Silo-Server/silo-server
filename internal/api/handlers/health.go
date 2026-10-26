@@ -50,8 +50,13 @@ const (
 	readyStatusShuttingDown = "shutting_down"
 )
 
-// Leave time to deliver an answer to monitors with a two-second timeout.
+// readyProbeTimeout bounds one readiness answer, so a hung dependency yields a
+// 503 or degraded answer within about a second instead of no answer.
 const readyProbeTimeout = time.Second
+
+// artworkProbeTimeout bounds the shared artwork probe that readiness answers
+// wait on.
+const artworkProbeTimeout = 5 * time.Second
 
 // readyStatus represents the JSON response for the readiness endpoint.
 type readyStatus struct {
@@ -102,6 +107,7 @@ type ReadyHandler struct {
 	artworkChecked time.Time
 	artworkOK      bool
 	artworkPending chan struct{}
+	artworkStarted time.Time
 	// shuttingDown reports whether the process has begun shutting down; nil
 	// means it never does as far as readiness is concerned.
 	shuttingDown func() bool
@@ -220,11 +226,12 @@ func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {
 	if pending == nil {
 		pending = make(chan struct{})
 		h.artworkPending = pending
+		h.artworkStarted = time.Now()
 		// The shared result outlives any one monitor's request. Keep only one
 		// probe in flight: a blocked filesystem syscall may ignore its context.
 		probeCtx := context.WithoutCancel(ctx)
 		go func() {
-			probeCtx, cancel := context.WithTimeout(probeCtx, 5*time.Second)
+			probeCtx, cancel := context.WithTimeout(probeCtx, artworkProbeTimeout)
 			defer cancel()
 			ok := h.artwork.Probe(probeCtx) == nil
 			h.artworkMu.Lock()
@@ -238,12 +245,17 @@ func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {
 	h.artworkMu.Unlock()
 	select {
 	case <-pending:
-		h.artworkMu.Lock()
-		defer h.artworkMu.Unlock()
-		return h.artworkOK
 	case <-ctx.Done():
-		return false
 	}
+	h.artworkMu.Lock()
+	defer h.artworkMu.Unlock()
+	if h.artworkPending != pending {
+		return h.artworkOK
+	}
+	// The refresh outlived this request. Until the refresh times out, report
+	// the previous result (false before any probe has finished), so slow but
+	// healthy storage does not read as degraded each time the cache expires.
+	return h.artworkOK && time.Since(h.artworkStarted) < artworkProbeTimeout
 }
 
 // checkPostgres pings the PG pool. Returns false if the pool is nil or
