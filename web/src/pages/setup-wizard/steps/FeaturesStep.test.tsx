@@ -134,7 +134,7 @@ describe("FeaturesStep", () => {
     expect(setValue).toHaveBeenCalledWith("notifications.android_push_delivery_enabled", "false");
   });
 
-  it("stages sharing on when no choice is saved, so continuing saves it", () => {
+  it("stages sharing on when no choice is saved", () => {
     const { setValue } = mockStep();
     render(<FeaturesStep />);
 

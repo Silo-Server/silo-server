@@ -3,8 +3,8 @@ package migrations
 import "testing"
 
 // A server set up before the wizard saved its sharing choice keeps sharing by
-// default. A database with no account yet stays unset, and a saved choice
-// stays as it is.
+// default and keeps a saved choice. A database with no account yet stays
+// unset unless it stores false.
 func TestMarkersShareByDefaultExistingInstallsMigrationPostgres(t *testing.T) {
 	const migration = "20261026133552_markers_share_by_default_existing_installs"
 	for _, tc := range []struct {
