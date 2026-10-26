@@ -515,17 +515,21 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
 
-	// Shared AI endpoint (subtitle translation, metadata translation, Whisper
-	// ASR). The connection settings read ai.* with a fallback to the legacy
-	// subtitle_ai.* rows; the legacy rows are never renamed in SQL because
-	// encrypted values are GCM-bound to their setting key.
+	// Shared AI endpoints (subtitle translation, metadata translation, Whisper
+	// ASR), resolved from the provider each job selects in ai.providers. A
+	// binding to a missing provider leaves that job unconfigured; settings
+	// validation refuses to store one.
+	aiProviders, err := ParseAIProviderRegistry(m[AIProvidersSettingKey])
+	if err != nil {
+		return nil, err
+	}
 	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
-	cfg.AI.BaseURL = stringOr(m, "ai.base_url", stringOr(m, "subtitle_ai.base_url", "https://api.openai.com"))
-	cfg.AI.APIKey = stringOr(m, "ai.api_key", stringOr(m, "subtitle_ai.api_key", ""))
+	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
+	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
 	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
-	cfg.AI.ASRBaseURL = stringOr(m, "ai.asr_base_url", "")
-	cfg.AI.ASRAPIKey = stringOr(m, "ai.asr_api_key", "")
+	cfg.AI.SpeechProviderID = strings.TrimSpace(m[AISpeechProviderSettingKey])
+	cfg.AI.ASRBaseURL, cfg.AI.ASRAPIKey, _ = aiProviders.Resolve(cfg.AI.SpeechProviderID, AICapabilitySpeech)
 	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")
 	aiMaxConcurrent, err := intOr(m, "ai.max_concurrent_jobs", 0)
 	if err != nil {

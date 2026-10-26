@@ -592,6 +592,24 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 	return userstore.NewSettingValuesCleaner(auth.NewUserRepository(pool), stores)
 }
 
+// convertLegacyAIProviders moves AI endpoints saved by older builds into the
+// provider registry, once. Every API node may run it; the settings lock makes
+// the first one do the work and the rest find nothing left to convert. A
+// failure leaves those jobs unconfigured rather than stopping the server.
+func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
+	converted := false
+	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		writes, err := config.PlanAIProviderConversion(current)
+		converted = len(writes) > 0
+		return writes, err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "AI provider conversion failed", "component", "app", "error", err)
+	} else if converted {
+		slog.InfoContext(ctx, "AI endpoints converted to providers", "component", "app")
+	}
+}
+
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
@@ -856,6 +874,7 @@ func main() {
 	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
 		runCredentialBackfills(ctx, pool, dataCipher, settingsRepo)
+		convertLegacyAIProviders(ctx, settingsRepo)
 	}
 	settings, err := settingsRepo.GetAll(ctx)
 	if err != nil {

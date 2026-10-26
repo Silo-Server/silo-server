@@ -52,6 +52,54 @@ prove the key can write documents.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
+## AI providers
+
+An administrator connects each AI provider once, and each AI job selects a
+provider from that list: `ai.text_provider_id` for text translation (used while
+`ai.auth_mode` is `api_key`) and `ai.speech_provider_id` for speech-to-text. The
+model settings (`ai.chat_model`, `ai.asr_model`) are unchanged. A binding must
+name a stored provider that serves the job's capability; settings writes that
+break this rule return `400`. The ChatGPT plan is not a stored provider; it is
+selected with `ai.auth_mode: chatgpt` and serves text only.
+
+The registry is the encrypted, internal setting `ai.providers`. Generic settings
+reads, writes, secret-status lists, revision validators, and connection-check
+drafts exclude it; the operations below are its only administrative boundary.
+`ai.base_url`, `ai.api_key`, `ai.asr_base_url`, `ai.asr_api_key`,
+`subtitle_ai.base_url`, and `subtitle_ai.api_key` are retired: the server no
+longer reads them and rejects writes to them. On first start, a server moves the
+endpoints those keys held into providers and binds each job to the provider that
+serves the endpoint and key it used, then leaves the old rows in place.
+Transcription no longer falls back to the text endpoint.
+
+The following operations require an acting administrator:
+
+- `GET /api/v2/admin/ai/providers` lists providers without keys (`has_api_key`
+  reports a saved key) and the provider `types` that can be connected, with each
+  type's default address, fixed capabilities, and whether it needs a key. A
+  custom type has no fixed capabilities; the administrator declares them.
+  `used_by` lists the jobs sending requests to a provider; the text binding is
+  idle while the ChatGPT plan serves text.
+- `POST /api/v2/admin/ai/providers` connects a provider and returns `201`.
+- `PATCH /api/v2/admin/ai/providers/{id}` edits a provider. Every job using it
+  switches at once. The type is fixed. An omitted `api_key` keeps the stored
+  key and an empty one clears it. A `base_url` on another host needs `api_key`
+  in the same request, so a stored key never follows a provider elsewhere
+  unasked. Removing a capability a job uses returns `409`.
+- `DELETE /api/v2/admin/ai/providers/{id}` discards a provider and its key. A
+  provider a job uses returns `409`; an idle text binding to it is cleared.
+- `POST /api/v2/admin/ai/providers/check` lists a draft provider's models
+  without saving it. With `id` and no `api_key`, the stored key is sent only to
+  the stored address's scheme, host, and port. A provider that does not list
+  models answers `success: true` with no models. Failures return
+  `success: false` with a message that excludes provider text and credentials.
+- `GET /api/v2/admin/ai/providers/{id}/models` lists a stored provider's models.
+  Each model's `kind` (`chat`, `embeddings`, `speech`) comes from the provider
+  where it reports one (Gemini) and from the model name otherwise; clients use
+  it for suggestions and still accept any typed model name.
+
+Model listing never follows redirects, because the request carries the key.
+
 ## AI reasoning and ChatGPT accounts
 
 `ai.auth_mode` selects `api_key` (default) or `chatgpt` for text translation.
@@ -59,7 +107,7 @@ provider error bodies and credentials. Invalid kinds/configuration return `422`.
 uses the model's default. Explicit values come from the model's capability
 response. The server validates known model families against their supported
 levels; an unknown custom model is validated by the provider connection check.
-Text requests read the persisted authentication mode, endpoint, API key, model,
+Text requests read the persisted authentication mode, text provider, model,
 effort, and active registration together at request start.
 
 The following operations require an acting administrator:
@@ -147,8 +195,8 @@ account operations are the only administrative credential boundary. See
 [AI provider authentication](architecture/ai-provider-authentication.md) for
 identity, refresh, and inference invariants.
 
-ChatGPT plan credentials authorize text translation. Speech-to-text continues to
-use the configured Whisper-compatible URL and API key. These operations belong
+ChatGPT plan credentials authorize text translation. Speech-to-text uses the
+provider `ai.speech_provider_id` selects. These operations belong
 to the web administrator UI; Apple, Android, and Jellyfin clients continue to
 consume the existing translated subtitle and metadata contracts and require no
 account or settings changes.

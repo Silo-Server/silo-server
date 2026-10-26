@@ -128,6 +128,7 @@ func TestTranscribeParsesSegmentsAndMultipart(t *testing.T) {
 
 	cfg := chatConfig(srv.URL)
 	cfg.ASRModel = "whisper-test"
+	cfg.ASRBaseURL, cfg.ASRAPIKey = cfg.BaseURL, cfg.APIKey
 	c := NewClient(cfg)
 	tr, err := c.Transcribe(context.Background(), TranscribeRequest{
 		Filename: "chunk.wav", Audio: []byte("RIFFfake"), Language: "ja",
@@ -186,6 +187,7 @@ func transcribeStub(t *testing.T, status int, body string) (*Transcription, erro
 	defer srv.Close()
 	cfg := chatConfig(srv.URL)
 	cfg.ASRModel = "whisper-test"
+	cfg.ASRBaseURL, cfg.ASRAPIKey = cfg.BaseURL, cfg.APIKey
 	return NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
 }
 

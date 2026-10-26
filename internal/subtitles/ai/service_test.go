@@ -128,6 +128,7 @@ func newQuotaTestService(t *testing.T, used, limit int) (*Service, *recordingRep
 	t.Cleanup(cancel)
 	cfg := Config{
 		Configured:            true,
+		SpeechConfigured:      true,
 		TranscribeEnabled:     true,
 		ASRModel:              "whisper-1",
 		TranscribeQuotaJobs:   limit,

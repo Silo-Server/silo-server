@@ -23,9 +23,9 @@ import (
 )
 
 // Config holds the connection settings for the shared OpenAI-compatible
-// endpoints. The ASR fields are optional overrides for operators who run a
-// separate Whisper-compatible server next to their chat endpoint; when empty,
-// transcription uses the chat endpoint's base URL and key.
+// endpoints. Chat and transcription are configured independently, each from
+// the provider its job selects; transcription never falls back to the chat
+// endpoint.
 type Config struct {
 	AuthMode             string
 	ReasoningEffort      string
@@ -41,8 +41,8 @@ type Config struct {
 	APIKey           string // empty for keyless local servers
 	ChatModel        string // chat-completions model used for translation
 
-	ASRBaseURL string // optional; empty = BaseURL
-	ASRAPIKey  string // optional; empty = APIKey
+	ASRBaseURL string // empty when no speech-to-text provider is chosen
+	ASRAPIKey  string // empty for keyless local servers
 	ASRModel   string // audio-transcription model, e.g. "whisper-1"
 }
 
@@ -53,25 +53,11 @@ const chatJSONFormat = "json_object"
 // waiting and retrying the same request cannot recover it.
 var ErrQuotaExhausted = errors.New("AI provider credit or spending limit is exhausted")
 
-func (c Config) asrBaseURL() string {
-	if c.ASRBaseURL != "" {
-		return c.ASRBaseURL
-	}
-	return c.BaseURL
-}
-
-func (c Config) asrAPIKey() string {
-	if c.ASRAPIKey != "" {
-		return c.ASRAPIKey
-	}
-	return c.APIKey
-}
-
 // ChatConfigured reports whether chat completions are minimally configured.
 func (c Config) ChatConfigured() bool { return c.BaseURL != "" && c.ChatModel != "" }
 
 // ASRConfigured reports whether audio transcription is minimally configured.
-func (c Config) ASRConfigured() bool { return c.asrBaseURL() != "" && c.ASRModel != "" }
+func (c Config) ASRConfigured() bool { return c.ASRBaseURL != "" && c.ASRModel != "" }
 
 // Client is a minimal OpenAI-compatible API client with shared retry/backoff
 // conventions (429 with Retry-After, 5xx, transport errors, and gateway "200
