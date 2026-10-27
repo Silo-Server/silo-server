@@ -7,7 +7,9 @@ import {
   enterHistoryEntry,
   isRestorePending,
   recordGridAnchor,
+  recordScroll,
   resetScrollRestoration,
+  savedGridIndex,
 } from "@/lib/scrollRestoration";
 import ItemGrid, { type ItemGridHandle } from "./ItemGrid";
 
@@ -143,6 +145,36 @@ describe("ItemGrid scroll anchoring", () => {
     expect(getByRole("list").querySelector('[data-id="item-160"]')).not.toBeNull();
     act(() => vi.advanceTimersByTime(1000));
     expect(isRestorePending()).toBe(false);
+  });
+
+  it.each([
+    // The viewport sits in the page content after the grid's 200 rows, which
+    // grow to the 340px pitch of the taller cards near the end.
+    { name: "keeps no row anchor below the grid", y: 200 * 340 + 500, expected: undefined },
+    { name: "anchors the row at the top of the viewport", y: 40 * 300 + 7, expected: 80 },
+  ])("$name", ({ y, expected }) => {
+    enterHistoryEntry("list", false);
+    render(<ItemGrid items={items} />);
+    // What the app's scroll manager records on every scroll.
+    const onScroll = () => recordScroll(window.scrollY);
+    window.addEventListener("scroll", onScroll);
+    act(() => scrollTo(y));
+    window.removeEventListener("scroll", onScroll);
+
+    expect(savedGridIndex("list")).toBe(expected);
+  });
+
+  it("anchors a replacement entry while the grid stays put", () => {
+    // A same-URL link replaces the entry without a scroll or a remount.
+    enterHistoryEntry("list", false);
+    render(<ItemGrid items={items} />);
+    act(() => scrollTo(40 * 300 + 7));
+
+    act(() => {
+      enterHistoryEntry("replaced", false);
+    });
+
+    expect(savedGridIndex("replaced")).toBe(80);
   });
 
   describe("restoring a row past the list's current extent", () => {

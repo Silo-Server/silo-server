@@ -127,14 +127,15 @@ function notify() {
  * overwrite the target.
  */
 export function enterHistoryEntry(id: string, restore: boolean): SavedPosition | null {
-  currentId = id;
   const saved = restore ? (store().get(id) ?? null) : null;
   clearTimeout(settleTimer);
   landed = false;
-  if (saved !== pending) {
-    pending = saved;
-    notify();
-  }
+  // A grid that stays mounted across the change, as on a same-URL replace,
+  // has to hear about the new entry to record its anchor there.
+  const changed = id !== currentId || saved !== pending;
+  currentId = id;
+  pending = saved;
+  if (changed) notify();
   return saved;
 }
 

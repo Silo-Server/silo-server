@@ -309,12 +309,24 @@ export default function ItemGrid(props: ItemGridProps) {
   useEffect(() => {
     if (!showsItems || !anchorEl) return;
     const y = window.scrollY;
+    // Past the grid's last row the viewport shows whatever the page puts
+    // after it; the plain scroll position is the one to keep there.
+    if (y >= scrollMargin + rowCount * rowHeight) return;
     const row = Math.max(0, Math.floor((y - scrollMargin) / rowHeight));
     recordGridAnchor(y, {
       index: row * columnCount,
       offset: y - scrollMargin - row * rowHeight,
     });
-  }, [showsItems, anchorEl, scrollOffset, scrollMargin, rowHeight, columnCount, restoreVersion]);
+  }, [
+    showsItems,
+    anchorEl,
+    scrollOffset,
+    scrollMargin,
+    rowCount,
+    rowHeight,
+    columnCount,
+    restoreVersion,
+  ]);
 
   useEffect(() => {
     // The rows on screen before a restore lands are not where the page is
