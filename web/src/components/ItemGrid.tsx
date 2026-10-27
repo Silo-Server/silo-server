@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
   type Ref,
 } from "react";
@@ -16,6 +17,14 @@ import { useGridLayout } from "@/hooks/useGridLayout";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { CARD_TEXT_AREA_HEIGHT, cardGridClasses } from "@/lib/uiCustomization";
+import {
+  awaitingGridRestore,
+  pendingGridRestore,
+  recordGridAnchor,
+  restoreLanded,
+  scrollRestorationVersion,
+  subscribeScrollRestoration,
+} from "@/lib/scrollRestoration";
 
 interface SharedItemGridProps {
   loading?: boolean;
@@ -156,6 +165,29 @@ export default function ItemGrid(props: ItemGridProps) {
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
+  const showsItems = !loading && totalItems > 0;
+  const restoreVersion = useSyncExternalStore(subscribeScrollRestoration, scrollRestorationVersion);
+
+  // Back or Forward to this page: put the saved row back at the top, at the
+  // same depth into it. The restore stays in force until the page settles,
+  // so this re-runs as rows arrive. A row past the current extent goes as far
+  // as the list reaches for now: the list may have shrunk, or its estimated
+  // runway grows toward the row once the rows near its end are reported.
+  useLayoutEffect(() => {
+    const anchor = pendingGridRestore();
+    // Until the wrapper mounts, the scroll margin doesn't yet count the page
+    // content above the grid.
+    if (!anchor || !showsItems || !anchorEl) return;
+    const savedRow = Math.floor(anchor.index / columnCount);
+    const row = Math.min(savedRow, rowCount - 1);
+    // The saved offset was taken at the last mount's measured pitch, which
+    // can be taller than this mount's; past this row it would be the next.
+    const offset = row === savedRow ? Math.min(anchor.offset, rowHeight - 1) : 0;
+    virtualizer.scrollToOffset(virtualizer.options.scrollMargin + row * rowHeight + offset, {
+      behavior: "instant",
+    });
+    restoreLanded();
+  }, [restoreVersion, showsItems, anchorEl, columnCount, rowCount, rowHeight, virtualizer]);
 
   useImperativeHandle(
     gridRef,
@@ -198,7 +230,6 @@ export default function ItemGrid(props: ItemGridProps) {
     onTopRowChange(row * columnCount, (row + 1) * columnCount - 1);
   }, [onTopRowChange, scrollOffset, scrollMargin, rowHeight, columnCount]);
 
-  const showsItems = !loading && totalItems > 0;
   // Static grids rebuild `pages` each render; key on the data behind it.
   const content = hasStaticItems(props) ? props.items : props.pages;
   // Report visible item range to parent for page fetching
@@ -254,11 +285,27 @@ export default function ItemGrid(props: ItemGridProps) {
     virtualizer,
   ]);
 
+  // Record the top row on every scroll, so leaving the page needs no
+  // bookkeeping. Read the window rather than the virtualizer, which still
+  // holds the offset from before a restore that just landed.
   useEffect(() => {
+    if (!showsItems || !anchorEl) return;
+    const y = window.scrollY;
+    const row = Math.max(0, Math.floor((y - scrollMargin) / rowHeight));
+    recordGridAnchor(y, {
+      index: row * columnCount,
+      offset: y - scrollMargin - row * rowHeight,
+    });
+  }, [showsItems, anchorEl, scrollOffset, scrollMargin, rowHeight, columnCount, restoreVersion]);
+
+  useEffect(() => {
+    // The rows on screen before a restore lands are not where the page is
+    // headed; reporting them would fetch the top of the list instead.
+    if (awaitingGridRestore()) return;
     const start = firstRow * columnCount;
     const end = Math.min((lastRow + 1) * columnCount - 1, totalItems - 1);
     onVisibleRangeChange(start, Math.max(end, 0));
-  }, [firstRow, lastRow, columnCount, totalItems, onVisibleRangeChange]);
+  }, [firstRow, lastRow, columnCount, totalItems, onVisibleRangeChange, restoreVersion]);
 
   const getItem = useCallback(
     (globalIndex: number): BrowseItem | undefined => {

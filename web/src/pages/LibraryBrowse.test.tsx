@@ -1,5 +1,6 @@
 import { isValidElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueryDefinition } from "@/api/types";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
@@ -67,14 +68,16 @@ type BrowseProps = ComponentProps<typeof LibraryBrowse>;
 /** Renders a movie library's series browse; `props` override any of it. */
 function renderBrowse(props: Partial<BrowseProps> & Pick<BrowseProps, "queryDefinition">) {
   return renderToStaticMarkup(
-    <LibraryBrowse
-      libraryId={7}
-      libraryType="movie"
-      browseType="series"
-      onBrowseTypeChange={() => {}}
-      onQueryDefinitionChange={() => {}}
-      {...props}
-    />,
+    <MemoryRouter>
+      <LibraryBrowse
+        libraryId={7}
+        libraryType="movie"
+        browseType="series"
+        onBrowseTypeChange={() => {}}
+        onQueryDefinitionChange={() => {}}
+        {...props}
+      />
+    </MemoryRouter>,
   );
 }
 

@@ -59,6 +59,7 @@ import {
   withCatalogRequestPage,
 } from "./catalogSearchParams";
 import type { CatalogSearchState } from "./catalogSearchParams";
+import { useInitialVisibleRange } from "@/hooks/useScrollRestoration";
 
 const REQUEST_SEARCH_DEBOUNCE_MS = 100;
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
@@ -124,12 +125,13 @@ function CatalogResults({
   // Paging the Request to add grid is not a new search: it keeps the library
   // results' loaded range and selection.
   const searchKey = withCatalogRequestPage(searchParams, 1).toString();
+  const initialVisibleRange = useInitialVisibleRange(limit);
   const [visibleRangeState, setVisibleRangeState] = useState<{
     key: string;
     range: [number, number];
   }>({
     key: searchKey,
-    range: [0, limit - 1],
+    range: initialVisibleRange,
   });
   const visibleRange =
     visibleRangeState.key === searchKey

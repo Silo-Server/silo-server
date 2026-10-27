@@ -2,6 +2,11 @@ import { createRef } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowseItem } from "@/api/types";
+import {
+  enterHistoryEntry,
+  isRestorePending,
+  resetScrollRestoration,
+} from "@/lib/scrollRestoration";
 import ItemGrid, { type ItemGridHandle } from "./ItemGrid";
 
 // Keep the real window virtualizer: taller cards must be discovered only
@@ -64,6 +69,7 @@ describe("ItemGrid scroll anchoring", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    resetScrollRestoration();
     scrollTo(0);
   });
 
@@ -113,5 +119,27 @@ describe("ItemGrid scroll anchoring", () => {
     expect(getByRole("list").style.gridAutoRows).toBe("328px");
     expect(window.scrollY).toBe(80 * 340 + 19);
     expect(getByRole("list").querySelector('[data-id="item-160"]')).not.toBeNull();
+  });
+
+  it("returns to the row it left after remounting at the estimated pitch", () => {
+    enterHistoryEntry("list", false);
+    const first = render(<ItemGrid items={items} />);
+    // Taller cards in overscan grow the pitch to 340px; leave 19px into row 80.
+    act(() => scrollTo(24_019));
+    act(() => scrollTo(80 * 340 + 19));
+    first.unmount();
+    scrollTo(0);
+
+    // Back to the list: the new mount starts again from the 300px estimate,
+    // where the same pixel offset would be row 90.
+    enterHistoryEntry("detail", false);
+    enterHistoryEntry("list", true);
+    const { getByRole } = render(<ItemGrid items={items} />);
+
+    expect(getByRole("list").style.gridAutoRows).toBe("328px");
+    expect(window.scrollY).toBe(80 * 340 + 19);
+    expect(getByRole("list").querySelector('[data-id="item-160"]')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(isRestorePending()).toBe(false);
   });
 });
