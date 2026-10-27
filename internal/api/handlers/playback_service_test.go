@@ -68,6 +68,12 @@ func newPlaybackServiceFixture(t *testing.T) *playbackServiceFixture {
 	}
 }
 
+// stopAttemptAs ends a session's attempt row the way a server-side end does.
+func stopAttemptAs(h *PlaybackHandler, sessionID, stopID string) {
+	ctx := context.Background()
+	claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, stopID).finish(ctx, sessionID, "")
+}
+
 func assertPlaybackOperationError(t *testing.T, err error, status int, code string) {
 	t.Helper()
 	var op *PlaybackOperationError
@@ -719,8 +725,8 @@ func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"administrator", func(h *PlaybackHandler, id string) { h.markAttemptStoppedByAdmin(context.Background(), id) }, http.StatusGone, "playback_session_ended"},
-		{"expiry", func(h *PlaybackHandler, id string) { h.markAttemptStoppedServerSide(context.Background(), id) }, http.StatusNotFound, "session_not_found"},
+		{"administrator", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, adminStopID(id)) }, http.StatusGone, "playback_session_ended"},
+		{"expiry", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, expiredStopID(id)) }, http.StatusNotFound, "session_not_found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlaybackServiceFixture(t)
@@ -745,7 +751,7 @@ func TestAdministratorStopKeepsAClientStopReceipt(t *testing.T) {
 	if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID}); err != nil {
 		t.Fatal(err)
 	}
-	f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+	stopAttemptAs(f.handler, f.session.ID, adminStopID(f.session.ID))
 	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
 	if err != nil || record.StopID != stopID {
 		t.Fatalf("record = %+v, %v", record, err)
@@ -788,7 +794,7 @@ func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
 		if err := f.manager.StopSession(f.session.ID); err != nil {
 			t.Fatal(err)
 		}
-		f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+		stopAttemptAs(f.handler, f.session.ID, adminStopID(f.session.ID))
 	}}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
 	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
@@ -829,7 +835,7 @@ func TestStaleCopyExpiryLeavesTheRemoteTransport(t *testing.T) {
 		if stoppedElsewhere {
 			// Another replica recorded the stop without knowing this copy's
 			// transport.
-			f.handler.markAttemptStoppedServerSide(context.Background(), session.ID)
+			stopAttemptAs(f.handler, session.ID, expiredStopID(session.ID))
 		}
 		f.handler.expireSessionCopy(context.Background(), &session)
 		mu.Lock()
@@ -855,4 +861,99 @@ func TestStaleCopyExpiryLeavesTheRemoteTransport(t *testing.T) {
 			t.Fatalf("expiry of a copy stopped on another replica did not stop its remote transport: %v", got)
 		}
 	})
+}
+
+// TestNativeEndWritesOnceWhoeverWinsTheRow covers ends that race on one
+// attempt row: only the end that wins the row and its finalization records
+// the play, so the loser adds no watch-history or admin row, and an end on a
+// replica without the live copy still records the play.
+func TestNativeEndWritesOnceWhoeverWinsTheRow(t *testing.T) {
+	clientStopMidway := func(f *playbackServiceFixture) func() {
+		return func() {
+			if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name       string
+		end        func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
+		wantReason PlaybackEndReason
+	}{{
+		name: "expiry loses to a stop that lands after its checks",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			// The reaper already removed this copy.
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.PlanStoreV3 = &stopAfterReadsPlanStoreV3{MemoryPlanStoreV3: memory, after: 2, stop: clientStopMidway(f)}
+			f.handler.expireSessionCopy(context.Background(), f.session)
+		},
+		wantReason: PlaybackEndStopped,
+	}, {
+		name: "abort loses to a client stop",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			f.handler.PlanStoreV3 = &stopAfterReadsPlanStoreV3{MemoryPlanStoreV3: memory, stop: clientStopMidway(f)}
+			if err := f.handler.abortPlaybackSession(context.Background(), f.session); err != nil {
+				t.Fatal(err)
+			}
+		},
+		wantReason: PlaybackEndStopped,
+	}, {
+		name: "terminate on a replica without the copy",
+		end: func(f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+		},
+		wantReason: PlaybackEndTerminated,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			admin := &recordingPlaybackAdminStore{}
+			userStore := newPlaybackTestStore(t)
+			f.handler.AdminStore = admin
+			f.handler.StoreProvider = testUserStoreProvider{store: userStore}
+			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+			if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+				t.Fatal(err)
+			}
+			memory := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+			tc.end(f, memory)
+
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.wantReason || admin.history[0].WatchedSeconds != 900 {
+				t.Fatalf("admin history = %+v, want one %s row at 900", admin.history, tc.wantReason)
+			}
+			history, err := userStore.ListHistory(t.Context(), "profile-1", 10, 0)
+			if err != nil || len(history) != 1 {
+				t.Fatalf("watch history = %+v, %v; want one row", history, err)
+			}
+			record, err := memory.GetAttempt(context.Background(), f.session.ID)
+			if err != nil || record.StoppedAt == nil {
+				t.Fatalf("attempt = %+v, %v; want it stopped", record, err)
+			}
+		})
+	}
+}
+
+// stopAfterReadsPlanStoreV3 lands another stop once the attempt has been
+// read `after` times, between an end's checks and its claim.
+type stopAfterReadsPlanStoreV3 struct {
+	*playback.MemoryPlanStoreV3
+	after int
+	reads int
+	stop  func()
+}
+
+func (s *stopAfterReadsPlanStoreV3) GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error) {
+	if s.reads == s.after {
+		s.reads++
+		s.stop()
+	} else {
+		s.reads++
+	}
+	return s.MemoryPlanStoreV3.GetAttempt(ctx, sessionID)
 }

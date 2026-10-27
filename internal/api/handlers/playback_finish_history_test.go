@@ -463,6 +463,12 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, legacy, account, started, started.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	// An expiring stale copy reads the recorded end to stay out of it.
+	for id, want := range map[string]PlaybackEndReason{stalled: PlaybackEndStopped, legacy: "", "missing-" + suffix: ""} {
+		if got, err := store.HistoryEndReason(ctx, id); err != nil || got != want {
+			t.Errorf("HistoryEndReason(%s) = %q, %v; want %q", id, got, err, want)
+		}
+	}
 
 	admin := &AdminHandler{pool: pool}
 	list := func(after, before time.Time) []AdminPlaybackHistoryRow {
@@ -719,5 +725,39 @@ func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
 	h.recordAdminStopHistory(context.Background(), &session, PlaybackEndExpired)
 	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].WatchedSeconds != 900 {
 		t.Fatalf("admin history = %+v, want one expired row without an item or duration", admin.history)
+	}
+}
+
+// endedAdminStore is the admin log that also answers which end it recorded.
+type endedAdminStore struct {
+	recordingPlaybackAdminStore
+}
+
+func (s *endedAdminStore) HistoryEndReason(_ context.Context, sessionID string) (PlaybackEndReason, error) {
+	for _, entry := range s.history {
+		if entry.SessionID == sessionID && entry.EndReason != "" {
+			return entry.EndReason, nil
+		}
+	}
+	return "", nil
+}
+
+// TestStaleJellyfinCopyKeepsAnotherReplicasEnd covers a Jellyfin play stopped
+// on one replica while another still holds an older copy: when that copy
+// expires, it records nothing over the stop.
+func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	admin := &endedAdminStore{}
+	stopped := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	stale := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	session := compatFinishSession()
+	stopped.holdCopy(t, session, 3500)
+	staleCopy := stale.holdCopy(t, session, 1800)
+	if err := stopped.mgr.FinishSession(context.Background(), session.ID); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+	stale.handler.expireSessionCopy(context.Background(), staleCopy)
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndStopped {
+		t.Fatalf("admin history = %+v, want only the stop", admin.history)
 	}
 }

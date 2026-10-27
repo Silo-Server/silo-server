@@ -81,6 +81,27 @@ func (h *PlaybackHandler) endPlaybackSessionAuthority(ctx context.Context, sessi
 	return session, nil
 }
 
+// dropLiveSessionByID removes this replica's copy of a session whose end
+// another caller owns: the live authority and the transport go, but no
+// history or provider event is written for it.
+func (h *PlaybackHandler) dropLiveSessionByID(ctx context.Context, sessionID string) error {
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil {
+		return err
+	}
+	unlock := h.tm.LockSessionLifecycle(session.ID)
+	defer unlock()
+	current, err := h.endPlaybackSessionAuthority(ctx, session, true)
+	if err != nil {
+		return err
+	}
+	h.cancelPlaybackStartSideEffectsV3(ctx, current.ID)
+	h.cleanupStoppedSessionTransport(ctx, current)
+	h.deleteSessionRecipeV3(ctx, current.ID)
+	h.syncSessionsNow(ctx, "stop")
+	return nil
+}
+
 func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string, reason PlaybackEndReason) error {
 	if h == nil || sessionID == "" {
 		return playback.ErrSessionNotFound
@@ -196,9 +217,10 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {
 		return err
 	}
-	h.finalizeSessionAbort(ctx, session, true, "abort")
-	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
-	h.forgetProgressSideEffectLock(session.ID)
+	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
+	defer h.forgetProgressSideEffectLock(session.ID)
+	h.finalizeSessionAbort(ctx, session, true, "abort", claim)
+	claim.finish(ctx, session.ID, "")
 	return nil
 }
 

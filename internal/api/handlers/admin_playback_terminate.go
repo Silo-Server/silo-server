@@ -83,21 +83,16 @@ func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTer
 	unlock := h.terminateLock(in.SessionID)
 	defer unlock()
 
-	// 1. Stop the session (user-initiated: the recipe card is deleted, the
-	// stop/history writer runs) and deny its tokens everywhere. The attempt
-	// row is stopped too, under the administrator stop id, so progress and
-	// replan after a terminate answer 410 and a start replay reports
-	// session_expired on every replica, not just the one that held the live
-	// session.
-	if err := h.playback.stopPlaybackSessionByID(ctx, in.SessionID, PlaybackEndTerminated); err != nil {
-		if !errors.Is(err, playback.ErrSessionNotFound) || !h.playback.attemptLive(ctx, in.SessionID) {
-			return AdminTerminateView{}, err
-		}
-		// No live copy here, but the attempt row is live: another replica
-		// holds the session. Revoke durably; that replica's copy is reaped
-		// by the deny marker and the stopped row.
+	// 1. End the session and deny its tokens everywhere. The attempt row is
+	// stopped under the administrator stop id first, so progress and replan
+	// after a terminate answer 410 and a start replay reports
+	// session_expired on every replica. The play is recorded from this
+	// replica's copy, or from the attempt row when another replica holds the
+	// copy; that replica's copy is then reaped by the deny marker and the
+	// stopped row.
+	if err := h.playback.endSessionAsAdmin(ctx, in.SessionID); err != nil {
+		return AdminTerminateView{}, err
 	}
-	h.playback.markAttemptStoppedByAdmin(ctx, in.SessionID)
 	view.AuthorityRevoked = true
 	// The session is gone on this replica; its sequenced command ledger
 	// goes with it (a later command finds no session and answers 404).

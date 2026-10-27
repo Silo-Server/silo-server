@@ -320,8 +320,13 @@ stop call allows up to 30 seconds for pending progress, then a separate
 expires. A page reload discards this in-memory retry state.
 
 A session that expires or is aborted server-side is stopped under a
-server-minted `stop_id` (UUID v5 of the session id), so a later client stop
-replays and a start replay reports `session_expired`.
+server-minted `stop_id` (a UUID v5 of the session id, one for each of expiry
+and abort), so a later client stop replays and a start replay reports
+`session_expired`. Every way a session ends, on any API server, stops the row
+and claims the receipt's finalization before it writes watch history, provider
+events or the admin log; an end that loses that race writes none of them and
+only releases what its own server holds. The admin log records the reason of
+the stop that won the row.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a

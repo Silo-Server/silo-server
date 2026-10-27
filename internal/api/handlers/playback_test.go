@@ -819,12 +819,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 
 // Expiry and abort retire the session id, so their pause tells providers the
 // session ended. A session that keeps no progress is not scrobbled on abort.
-// A Jellyfin play's upstream session can be revived under the same id, and
-// jellycompat sends that play's own stop, so its expiry stays a plain pause.
+// A Jellyfin play's own stop still reaches providers from its client's
+// Stopped report after the expiry, so its expiry stays a plain pause.
 func TestRetiredSessionsReportEndedPause(t *testing.T) {
-	expire := func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }
+	expire := func(h *PlaybackHandler, s *playback.Session) {
+		h.finalizeSessionStopWithResult(context.Background(), s, false, "", PlaybackEndExpired)
+	}
 	abort := func(h *PlaybackHandler, s *playback.Session) {
-		h.finalizeSessionAbort(context.Background(), s, false, "")
+		h.finalizeSessionAbort(context.Background(), s, false, "", nativeEndClaim{owned: true})
 	}
 	tests := []struct {
 		name               string

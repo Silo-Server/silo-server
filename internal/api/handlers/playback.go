@@ -1248,16 +1248,6 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 	h.finalizeSessionStopWithResult(ctx, session, syncNow, syncReason, reason)
 }
 
-// finalizeExpiredSession finalizes a session the liveness reaper expired. The
-// reaper then marks its attempt stopped, so a client starts a new session
-// rather than resuming this one, and watch providers that mirror live
-// sessions hear this one ended. A Jellyfin play's upstream session is the
-// exception: its client's Stopped report still finds the play after the
-// expiry and sends that play's own stop, so its expiry stays a plain pause.
-func (h *PlaybackHandler) finalizeExpiredSession(ctx context.Context, session *playback.Session) {
-	h.finalizeSessionStopWithResult(ctx, session, false, "", PlaybackEndExpired)
-}
-
 // finalizeSessionStopWithResult is finalizeSessionStop reporting the history
 // writer's result, which the v2 stop receipt carries. reason is why the
 // attempt ended; a system teardown the client can rebuild under the same id
@@ -1397,7 +1387,10 @@ func (h *PlaybackHandler) scrobbleAbortedSession(ctx context.Context, session *p
 	}
 }
 
-func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *playback.Session, syncNow bool, syncReason string) {
+// finalizeSessionAbort tears down an aborted session. Its watch-provider
+// event and admin history row are written only when claim owns the end:
+// another stop that already won the attempt row records the play itself.
+func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, claim nativeEndClaim) {
 	if h == nil || session == nil || session.ID == "" {
 		return
 	}
@@ -1406,10 +1399,13 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
-	h.scrobbleAbortedSession(ctx, session)
-	// An abort writes no watch history, but the play happened: the admin log
-	// records it as aborted, unless it is a Jellyfin copy that never saw it.
-	h.recordStopHistory(ctx, session, PlaybackEndAborted)
+	if claim.owned {
+		h.scrobbleAbortedSession(ctx, session)
+		// An abort writes no watch history, but the play happened: the admin
+		// log records it as aborted, unless it is a Jellyfin copy that never
+		// saw it.
+		h.recordStopHistory(ctx, session, claim.reason(session.ID, PlaybackEndAborted))
+	}
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
@@ -1473,13 +1469,48 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 		h.tm.CloseTranscodeSession(session.ID, "")
 		return
 	}
-	// Expiry is a liveness reap, not a user stop, but it ends the attempt
-	// all the same (below), so nothing can reconstruct the session afterwards.
-	h.finalizeExpiredSession(ctx, session)
-	// The attempt is over: mark its row stopped under a server-minted stop
-	// id so a start replay reports session_expired on every replica, and
-	// deny its tokens so no replica serves it again.
-	h.markAttemptStoppedServerSide(ctx, session.ID)
+	if session.IsJellyfinCompat && h.playEndedElsewhere(ctx, session.ID) {
+		// A Jellyfin play has no attempt row; its history row says another
+		// replica already ended it (a stop, a method switch), so this copy
+		// must not record a later expiry over that end.
+		slog.InfoContext(ctx, "dropped stale local playback session copy", "session", session.ID, "playback_session_id", session.ID)
+		h.closeTranscodeForSession(session)
+		return
+	}
+	// Expiry is a liveness reap, not a user stop, but it ends the attempt all
+	// the same: the row is stopped under a server-minted stop id first, so a
+	// start replay reports session_expired on every replica and no replica
+	// serves or reconstructs the session again. A stop that won the row
+	// before this expiry owns the play's history instead.
+	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, expiredStopID(session.ID))
+	defer h.forgetProgressSideEffectLock(session.ID)
+	if !claim.owned {
+		slog.InfoContext(ctx, "dropped stale local playback session copy", "session", session.ID, "playback_session_id", session.ID)
+		h.closeTranscodeForSession(session)
+		return
+	}
+	result := h.finalizeSessionStopWithResult(ctx, session, false, "", claim.reason(session.ID, PlaybackEndExpired))
+	claim.finish(ctx, session.ID, result.HistoryID)
+}
+
+// historyEndReader reads the end reason the admin log recorded for a session.
+type historyEndReader interface {
+	HistoryEndReason(ctx context.Context, sessionID string) (PlaybackEndReason, error)
+}
+
+// playEndedElsewhere reports whether the admin log already holds an end for
+// the session. A failed read reports false: the expiry then records as before.
+func (h *PlaybackHandler) playEndedElsewhere(ctx context.Context, sessionID string) bool {
+	reader, ok := h.AdminStore.(historyEndReader)
+	if !ok {
+		return false
+	}
+	reason, err := reader.HistoryEndReason(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to read a session's recorded end", "component", "api", "session", sessionID, "error", err)
+		return false
+	}
+	return reason != ""
 }
 
 // handleFinishedSession records a play that another playback frontend ended
