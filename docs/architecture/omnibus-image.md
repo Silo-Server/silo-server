@@ -43,7 +43,9 @@ order:
 3. `init-config` lays out `/config`, decides which bundled services run, and
    exports the connection settings Silo reads for them: `DATABASE_URL`,
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
-   `REDIS_URL` turns the matching bundled service off.
+   `REDIS_URL` turns the matching bundled service off. With the bundled
+   PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
+   a deployment's own database keeps Silo's default, tuning off.
 4. `init-postgres` creates the cluster on first start; `svc-postgres` runs it;
    `init-postgres-db` creates the `silo` database. `svc-redis` and
    `svc-meilisearch` start alongside. A service that is off reports ready and
