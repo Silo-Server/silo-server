@@ -729,7 +729,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 	tests := []struct {
 		name               string
 		position           float64
-		userInitiated      bool
+		reason             PlaybackEndReason
 		disablePersistence bool
 		wantPauseCalls     int
 		wantStopCalls      int
@@ -738,7 +738,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		{
 			name:              "user exit stops below-resume-threshold scrobble",
 			position:          120,
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 120,
 		},
@@ -756,14 +756,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		},
 		{
 			name:              "user exit at zero still stops scrobble",
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 0,
 		},
 		{
 			name:               "disabled persistence does not scrobble",
 			position:           120,
-			userInitiated:      true,
+			reason:             PlaybackEndStopped,
 			disablePersistence: true,
 		},
 	}
@@ -790,7 +790,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.userInitiated)
+			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)

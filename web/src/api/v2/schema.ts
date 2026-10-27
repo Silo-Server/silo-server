@@ -3409,6 +3409,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/playback-history/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read which playback history filters and entry fields this server supports. */
+    get: operations["getAdminPlaybackHistoryCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/playback-routing/capabilities": {
     parameters: {
       query?: never;
@@ -17015,6 +17032,34 @@ export interface components {
        */
       sequence: number;
     };
+    AdminPlaybackHistoryCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      available: boolean;
+      /** @description Entries carry client_name and client_version */
+      client_identity: boolean;
+      /** @description Entries carry client_ip */
+      client_ip: boolean;
+      /** @description Entries carry device_id and device_platform */
+      device_identity: boolean;
+      /** @description Entries carry end_reason */
+      end_reason: boolean;
+      /** @description Values end_reason may take */
+      end_reason_values: string[];
+      /** @description The list accepts ended_before */
+      ended_before: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Entries carry video_decision and audio_decision */
+      stream_decisions: boolean;
+      /** @description Entries carry measured, start_position_seconds, paused_seconds, measured_since and measured_until */
+      watch_measurement: boolean;
+    };
     AdminPlaybackHistoryCollection: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminPlaybackHistoryEntry"][];
@@ -17022,12 +17067,32 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     AdminPlaybackHistoryEntry: {
+      /**
+       * @description How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown
+       * @enum {string|null}
+       */
+      audio_decision: "direct" | "remux" | "transcode" | null;
+      /** @description Viewer's last address on the playback session; null when none was recorded. Rows recorded by older servers may hold the address of the request that ended the attempt */
+      client_ip: string | null;
+      /** @description App name the client reported; null when unknown */
+      client_name: string | null;
+      /** @description App version the client reported; null when unknown */
+      client_version: string | null;
       completed: boolean;
+      /** @description Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown */
+      device_id: string | null;
+      /** @description Platform the client declared in X-Silo-Device-Platform when playback started, never derived from the user agent. Null when unknown, and for a Jellyfin play */
+      device_platform: string | null;
       /**
        * Format: double
        * @description Media duration when known
        */
       duration_seconds: number | null;
+      /**
+       * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, or aborted by the server. Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
+       * @enum {string|null}
+       */
+      end_reason: "stopped" | "terminated" | "expired" | "aborted" | null;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -17038,6 +17103,18 @@ export interface components {
        * @description Episode number; null when not an episode
        */
       episode_number: number | null;
+      /** @description Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one */
+      measured: boolean;
+      /**
+       * Format: date-time
+       * @description First progress report behind the measurement
+       */
+      measured_since: string | null;
+      /**
+       * Format: date-time
+       * @description Last progress report behind the measurement
+       */
+      measured_until: string | null;
       /**
        * @description Opaque identifier
        * @example 1
@@ -17049,6 +17126,11 @@ export interface components {
       media_title: string;
       /** @description episode, or the catalog item type; empty when unknown */
       media_type: string;
+      /**
+       * Format: double
+       * @description Seconds the play spent paused between progress reports
+       */
+      paused_seconds: number | null;
       play_method: string;
       /**
        * Format: double
@@ -17068,6 +17150,11 @@ export interface components {
       /** @description Playback session identifier; unique per attempt */
       session_id: string;
       /**
+       * Format: double
+       * @description First position, in seconds, the measurement saw: where the play began or resumed
+       */
+      start_position_seconds: number | null;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -17079,6 +17166,11 @@ export interface components {
       user_id: string;
       /** @description Empty when the account no longer exists */
       username: string;
+      /**
+       * @description How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown
+       * @enum {string|null}
+       */
+      video_decision: "direct" | "remux" | "transcode" | null;
       /**
        * Format: double
        * @description Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time
@@ -17127,6 +17219,10 @@ export interface components {
       client_user_agent?: string;
       client_version?: string;
       content_id?: string;
+      /** @description Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared. */
+      device_id?: string;
+      /** @description Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play. */
+      device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
       episode_name?: string;
@@ -17243,6 +17339,8 @@ export interface components {
       available: boolean;
       client_build: boolean;
       client_channel: boolean;
+      /** @description Rows may carry device_id and device_platform */
+      device_identity: boolean;
       effective_play_method: boolean;
       effective_play_method_values: string[];
       is_jellyfin_client: boolean;
@@ -63984,8 +64082,10 @@ export interface operations {
         completed?: "all" | "true" | "false";
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Only attempts that ended at or after this instant */
+        /** @description Only attempts that ended at or after this instant (inclusive) */
         ended_after?: string;
+        /** @description Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice */
+        ended_before?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only attempts of this catalog item */
@@ -64054,6 +64154,138 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminPlaybackHistoryCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlaybackHistoryCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {

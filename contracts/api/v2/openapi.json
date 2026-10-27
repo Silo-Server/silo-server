@@ -11790,6 +11790,82 @@
         ],
         "type": "object"
       },
+      "AdminPlaybackHistoryCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "client_identity": {
+            "description": "Entries carry client_name and client_version",
+            "type": "boolean"
+          },
+          "client_ip": {
+            "description": "Entries carry client_ip",
+            "type": "boolean"
+          },
+          "device_identity": {
+            "description": "Entries carry device_id and device_platform",
+            "type": "boolean"
+          },
+          "end_reason": {
+            "description": "Entries carry end_reason",
+            "type": "boolean"
+          },
+          "end_reason_values": {
+            "description": "Values end_reason may take",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ended_before": {
+            "description": "The list accepts ended_before",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "stream_decisions": {
+            "description": "Entries carry video_decision and audio_decision",
+            "type": "boolean"
+          },
+          "watch_measurement": {
+            "description": "Entries carry measured, start_position_seconds, paused_seconds, measured_since and measured_until",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "ended_before",
+          "watch_measurement",
+          "client_ip",
+          "device_identity",
+          "client_identity",
+          "stream_decisions",
+          "end_reason",
+          "end_reason_values",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "AdminPlaybackHistoryCollection": {
         "additionalProperties": false,
         "properties": {
@@ -11813,14 +11889,74 @@
       "AdminPlaybackHistoryEntry": {
         "additionalProperties": false,
         "properties": {
+          "audio_decision": {
+            "description": "How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown",
+            "enum": [
+              "direct",
+              "remux",
+              "transcode"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_ip": {
+            "description": "Viewer's last address on the playback session; null when none was recorded. Rows recorded by older servers may hold the address of the request that ended the attempt",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_name": {
+            "description": "App name the client reported; null when unknown",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_version": {
+            "description": "App version the client reported; null when unknown",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "completed": {
             "type": "boolean"
+          },
+          "device_id": {
+            "description": "Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "device_platform": {
+            "description": "Platform the client declared in X-Silo-Device-Platform when playback started, never derived from the user agent. Null when unknown, and for a Jellyfin play",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "duration_seconds": {
             "description": "Media duration when known",
             "format": "double",
             "type": [
               "number",
+              "null"
+            ]
+          },
+          "end_reason": {
+            "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, or aborted by the server. Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
+            "enum": [
+              "stopped",
+              "terminated",
+              "expired",
+              "aborted"
+            ],
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -11836,6 +11972,30 @@
             "format": "int64",
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "measured": {
+            "description": "Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one",
+            "type": "boolean"
+          },
+          "measured_since": {
+            "description": "First progress report behind the measurement",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "measured_until": {
+            "description": "Last progress report behind the measurement",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -11858,6 +12018,14 @@
           "media_type": {
             "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
+          },
+          "paused_seconds": {
+            "description": "Seconds the play spent paused between progress reports",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "play_method": {
             "type": "string"
@@ -11893,6 +12061,14 @@
             "description": "Playback session identifier; unique per attempt",
             "type": "string"
           },
+          "start_position_seconds": {
+            "description": "First position, in seconds, the measurement saw: where the play began or resumed",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "started_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -11911,6 +12087,18 @@
           "username": {
             "description": "Empty when the account no longer exists",
             "type": "string"
+          },
+          "video_decision": {
+            "description": "How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown",
+            "enum": [
+              "direct",
+              "remux",
+              "transcode"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "watched_seconds": {
             "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
@@ -11937,7 +12125,20 @@
           "played_seconds",
           "series_title",
           "season_number",
-          "episode_number"
+          "episode_number",
+          "measured",
+          "start_position_seconds",
+          "paused_seconds",
+          "measured_since",
+          "measured_until",
+          "client_ip",
+          "device_id",
+          "device_platform",
+          "client_name",
+          "client_version",
+          "video_decision",
+          "audio_decision",
+          "end_reason"
         ],
         "type": "object"
       },
@@ -12071,6 +12272,14 @@
             "type": "string"
           },
           "content_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "description": "Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared.",
+            "type": "string"
+          },
+          "device_platform": {
+            "description": "Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play.",
             "type": "string"
           },
           "effective_play_method": {
@@ -12361,6 +12570,10 @@
           "client_channel": {
             "type": "boolean"
           },
+          "device_identity": {
+            "description": "Rows may carry device_id and device_platform",
+            "type": "boolean"
+          },
           "effective_play_method": {
             "type": "boolean"
           },
@@ -12448,6 +12661,7 @@
           "node_routing",
           "output_format",
           "source_video_height",
+          "device_identity",
           "revision",
           "state",
           "allowed"
@@ -97635,12 +97849,23 @@
             }
           },
           {
-            "description": "Only attempts that ended at or after this instant",
+            "description": "Only attempts that ended at or after this instant (inclusive)",
             "explode": false,
             "in": "query",
             "name": "ended_after",
             "schema": {
-              "description": "Only attempts that ended at or after this instant",
+              "description": "Only attempts that ended at or after this instant (inclusive)",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice",
+            "explode": false,
+            "in": "query",
+            "name": "ended_before",
+            "schema": {
+              "description": "Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice",
               "format": "date-time",
               "type": "string"
             }
@@ -97759,6 +97984,205 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/playback-history/capabilities": {
+      "get": {
+        "operationId": "getAdminPlaybackHistoryCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPlaybackHistoryCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read which playback history filters and entry fields this server supports.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
       }
     },
     "/api/v2/admin/playback-routing/capabilities": {

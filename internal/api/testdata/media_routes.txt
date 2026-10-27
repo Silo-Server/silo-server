@@ -251,6 +251,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
@@ -1551,6 +1552,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media

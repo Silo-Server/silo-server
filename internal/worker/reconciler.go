@@ -33,6 +33,8 @@ type SessionSync struct {
 	ClientBuild          string
 	ClientChannel        string
 	ClientUserAgent      string
+	DeviceID             string
+	DevicePlatform       string
 	AudioTrackIndex      int
 	TranscodeAudio       bool
 	StreamBitrateKbps    int
@@ -204,8 +206,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_workload, routing_execution, routing_execution_node_id, routing_execution_node_url,
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
-				 output_container, output_protocol, stream_location)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
+				 output_container, output_protocol, stream_location, device_id, device_platform)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -247,6 +249,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				output_container    = EXCLUDED.output_container,
 				output_protocol     = EXCLUDED.output_protocol,
 				stream_location     = EXCLUDED.stream_location,
+				device_id           = EXCLUDED.device_id,
+				device_platform     = EXCLUDED.device_platform,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
@@ -260,7 +264,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			nullableString(s.RoutingWorkload), nullableString(s.RoutingExecution), nullableInt(s.RoutingExecutionNodeID), nullableString(s.RoutingExecutionNodeURL),
 			nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
 			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
-			nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation)
+			nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation,
+			nullableString(s.DeviceID), nullableString(s.DevicePlatform))
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -359,7 +364,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			routing_network_provider,
 			COALESCE(output_container, ''),
 			COALESCE(output_protocol, ''),
-			COALESCE(stream_location, '')
+			COALESCE(stream_location, ''),
+			COALESCE(device_id, ''),
+			COALESCE(device_platform, '')
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -414,6 +421,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.OutputContainer,
 			&s.OutputProtocol,
 			&s.StreamLocation,
+			&s.DeviceID,
+			&s.DevicePlatform,
 		); err != nil {
 			return nil, err
 		}
@@ -460,6 +469,8 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].ClientBuild != right[i].ClientBuild ||
 			left[i].ClientChannel != right[i].ClientChannel ||
 			left[i].ClientUserAgent != right[i].ClientUserAgent ||
+			left[i].DeviceID != right[i].DeviceID ||
+			left[i].DevicePlatform != right[i].DevicePlatform ||
 			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
 			left[i].TranscodeAudio != right[i].TranscodeAudio ||
 			left[i].StreamBitrateKbps != right[i].StreamBitrateKbps ||

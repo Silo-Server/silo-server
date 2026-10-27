@@ -17,28 +17,28 @@ type playbackCommandRecord struct {
 	Name      playback.CommandName
 }
 
-// stopPlaybackSession stops a session. userInitiated must be true only for a
-// genuine user/admin stop (the recipe card is then deleted); false for system
-// teardown such as an ffmpeg-exit cleanup, where the card is kept so the client
-// can reconstruct.
-func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, userInitiated bool) error {
-	_, err := h.stopPlaybackSessionWithResult(ctx, session, userInitiated)
+// stopPlaybackSession stops a session. reason is PlaybackEndStopped or
+// PlaybackEndTerminated only for a genuine user/admin stop (the recipe card is
+// then deleted); empty for system teardown such as an ffmpeg-exit cleanup,
+// where the card is kept so the client can reconstruct.
+func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
+	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
 	return err
 }
 
 // stopPlaybackSessionWithResult is stopPlaybackSession reporting the history
 // writer's result, which the v2 stop receipt carries.
-func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, userInitiated bool) (watchstate.PlaybackStopResult, error) {
+func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason) (watchstate.PlaybackStopResult, error) {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}, playback.ErrSessionNotFound
 	}
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	defer unlock()
-	current, err := h.endPlaybackSessionAuthority(ctx, session, userInitiated)
+	current, err := h.endPlaybackSessionAuthority(ctx, session, reason.userInitiated())
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
 	}
-	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", userInitiated, false), nil
+	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", reason), nil
 }
 
 // endPlaybackSessionAuthority ends the live session and revokes its streams
@@ -81,7 +81,7 @@ func (h *PlaybackHandler) endPlaybackSessionAuthority(ctx context.Context, sessi
 	return session, nil
 }
 
-func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string, userInitiated bool) error {
+func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string, reason PlaybackEndReason) error {
 	if h == nil || sessionID == "" {
 		return playback.ErrSessionNotFound
 	}
@@ -89,16 +89,17 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 	if err != nil {
 		return err
 	}
-	return h.stopPlaybackSession(ctx, session, userInitiated)
+	return h.stopPlaybackSession(ctx, session, reason)
 }
 
 // recordRealtimeStoppedSession shares native history finalization with the
-// client's HTTP stop. Authority is already removed, so the client may have
-// finalized from the attempt row while this provider work was queued.
+// client's HTTP stop for a player-confirmed administrator stop or terminate.
+// Authority is already removed, so the client may have finalized from the
+// attempt row while this provider work was queued.
 func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
 	result := h.realtimeStopHistory(ctx, session)
-	h.recordAdminStopHistory(ctx, session)
-	h.notifyStoppedSession(ctx, session, result, true, false)
+	h.recordAdminStopHistory(ctx, session, PlaybackEndTerminated)
+	h.notifyStoppedSession(ctx, session, result, PlaybackEndTerminated)
 }
 
 func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) watchstate.PlaybackStopResult {
@@ -246,7 +247,7 @@ func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID s
 	if c == nil {
 		return playback.ErrSessionNotFound
 	}
-	return c.playback.stopPlaybackSessionByID(ctx, sessionID, false)
+	return c.playback.stopPlaybackSessionByID(ctx, sessionID, "")
 }
 
 func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {

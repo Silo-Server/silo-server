@@ -2512,13 +2512,14 @@ func (h *PlaybackHandler) refreshPlaySession(current *PlaybackSession) *Playback
 
 // withNegotiatedClientInfo names the client from its PlaybackInfo request when
 // the stream request didn't send a MediaBrowser header, so the native session
-// isn't labeled from the User-Agent alone.
+// isn't labeled from the User-Agent alone. The device is the DeviceId that
+// request carried; Jellyfin declares no platform.
 func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession) context.Context {
 	info := playback.ClientInfoFromContext(ctx)
-	if info.Name != "" || playSession.ClientName == "" {
-		return ctx
+	if info.Name == "" && playSession.ClientName != "" {
+		info.Name, info.Version = playSession.ClientName, playSession.ClientVersion
 	}
-	info.Name, info.Version = playSession.ClientName, playSession.ClientVersion
+	info.DeviceID = playSession.ClientDeviceID
 	return playback.WithClientInfo(ctx, info)
 }
 

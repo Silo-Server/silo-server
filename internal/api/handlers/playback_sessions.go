@@ -55,12 +55,16 @@ type playbackSessionRow struct {
 	ClientLabel          string    `json:"client_label,omitempty"`
 	ClientLabelFull      string    `json:"client_label_full,omitempty"`
 	ClientUserAgent      string    `json:"client_user_agent,omitempty"`
-	AudioTrackIndex      int       `json:"audio_track_index"`
-	TranscodeAudio       bool      `json:"transcode_audio"`
-	StreamBitrateKbps    *int      `json:"stream_bitrate_kbps"`
-	TranscodeNodeURL     string    `json:"-"`
-	TargetResolution     string    `json:"target_resolution,omitempty"`
-	TargetVideoCodec     string    `json:"target_video_codec,omitempty"`
+	// DeviceID and DevicePlatform are native-only: the frozen v1 projection
+	// does not carry them.
+	DeviceID          string `json:"-"`
+	DevicePlatform    string `json:"-"`
+	AudioTrackIndex   int    `json:"audio_track_index"`
+	TranscodeAudio    bool   `json:"transcode_audio"`
+	StreamBitrateKbps *int   `json:"stream_bitrate_kbps"`
+	TranscodeNodeURL  string `json:"-"`
+	TargetResolution  string `json:"target_resolution,omitempty"`
+	TargetVideoCodec  string `json:"target_video_codec,omitempty"`
 	// OutputContainer and OutputProtocol are the serving transport's reported
 	// format. They are native-only: the frozen bridge payload omits them.
 	OutputContainer  string `json:"-"`
@@ -328,7 +332,9 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			s.routing_network_provider,
 			COALESCE(s.output_container, ''),
 			COALESCE(s.output_protocol, ''),
-			COALESCE(s.stream_location, '')
+			COALESCE(s.stream_location, ''),
+			COALESCE(s.device_id, ''),
+			COALESCE(s.device_platform, '')
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -400,6 +406,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
+			&s.DeviceID, &s.DevicePlatform,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}

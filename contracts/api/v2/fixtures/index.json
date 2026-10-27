@@ -6453,6 +6453,28 @@
       "body_file": "get_admin_item_trickplay_ok.json"
     },
     {
+      "name": "get_admin_playback_history_capabilities_ok",
+      "operation_id": "getAdminPlaybackHistoryCapabilities",
+      "scenario": "Administrator playback history capabilities name the window filter and the entry fields the server records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/playback-history/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"ddc2e6033573d20dc51d151fee9491d0a0eb9ed81a150ca7521ec6fd1eeff6ef\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",
+      "body_file": "get_admin_playback_history_capabilities_ok.json"
+    },
+    {
       "name": "get_admin_section_ok",
       "operation_id": "getAdminSection",
       "scenario": "The canonical administrator section editor returns its recipe configuration and a strong validator.",
