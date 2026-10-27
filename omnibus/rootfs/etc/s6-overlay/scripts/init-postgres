@@ -19,6 +19,11 @@ if [[ -L "$PGDATA" || -L "$PGDATA/PG_VERSION" ]]; then
   exit 1
 fi
 
+if [[ -s "$PGDATA/PG_VERSION" && ! -f "$PGDATA/PG_VERSION" ]]; then
+  echo "$PGDATA/PG_VERSION is not a regular file" >&2
+  exit 1
+fi
+
 if [[ -s "$PGDATA/PG_VERSION" ]]; then
   # Read as root, before any ownership changes: a cluster another image wrote
   # can belong to another uid, and a refused one is left as it was. Only a
@@ -39,8 +44,14 @@ MSG
   fi
   own_tree postgres postgres "$PGDATA"
   s6-setuidgid postgres chmod 0700 "$PGDATA"
-  # Nothing else runs PostgreSQL in this container, so a pid file here is
-  # always left over from an unclean stop.
+  # A pid file left by an unclean stop can name a PID this container now uses
+  # for something else, which PostgreSQL would take for a live server. While
+  # nothing holds PG_LOCK no server is using this data directory anywhere, so
+  # the file is stale; while something does, leave it and refuse.
+  if ! s6-setuidgid postgres flock -n "$PG_LOCK" true; then
+    echo "another PostgreSQL server is using $PGDATA; is a second container using this /config?" >&2
+    exit 1
+  fi
   s6-setuidgid postgres rm -f "$PGDATA/postmaster.pid"
 else
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
@@ -57,7 +68,7 @@ fi
 # The image's settings live in conf.d. A data directory this image did not
 # create, such as one moved from another PostgreSQL container, lacks the line
 # that loads them.
-if ! grep -q "^include_dir = 'conf.d'" "$PGDATA/postgresql.conf"; then
+if ! s6-setuidgid postgres grep -q "^include_dir = 'conf.d'" "$PGDATA/postgresql.conf"; then
   printf "\ninclude_dir = 'conf.d'\n" | append_as postgres "$PGDATA/postgresql.conf"
 fi
 

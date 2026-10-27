@@ -10,14 +10,38 @@ source /etc/silo-omnibus/lib.sh
 # scripts and drops privileges per service, needs to read it.
 chmod 0700 "$CONTAINER_ENV"
 
+# trusted_source PATH: whether root may read PATH as a secret. It must resolve
+# to a root-owned regular file in directories only root can change: a service
+# account that can replace the file, or a link on the way to it, could
+# otherwise point root at SECRET_KEY and have it exported under another name.
+# Docker and Compose secrets under /run/secrets, and Kubernetes secret volumes,
+# qualify.
+trusted_source() {
+  local real dir
+  real="$(realpath -e -- "$1" 2>/dev/null)" || return 1
+  [[ -f "$real" && "$(stat -c '%u' "$real")" == 0 ]] || return 1
+  case "$real" in
+    /config/* | "$CONTAINER_ENV"/* | "$STATE_DIR"/*) return 1 ;;
+  esac
+  dir="${real%/*}"
+  while [[ -n "$dir" ]]; do
+    [[ "$(stat -c '%u' "$dir")" == 0 ]] || return 1
+    # Not writable by group or others, unless sticky: there only an entry's
+    # owner, root here, can replace it.
+    [[ -z "$(find "$dir" -maxdepth 0 -perm /022 ! -perm -1000)" ]] || return 1
+    dir="${dir%/*}"
+  done
+  printf '%s' "$real"
+}
+
 for f in "$CONTAINER_ENV"/FILE__*; do
   [[ -e "$f" ]] || continue
   name="${f##*/FILE__}"
   path="$(<"$f")"
-  if [[ -f "$path" ]]; then
-    printf '%s' "$(<"$path")" > "$CONTAINER_ENV/$name"
+  if real="$(trusted_source "$path")"; then
+    printf '%s' "$(<"$real")" > "$CONTAINER_ENV/$name"
     log "loaded $name from $path"
   else
-    warn "FILE__$name points at $path, which is not a readable file"
+    warn "FILE__$name points at $path, which is not a regular file in directories only root can change; $name is not set from it"
   fi
 done

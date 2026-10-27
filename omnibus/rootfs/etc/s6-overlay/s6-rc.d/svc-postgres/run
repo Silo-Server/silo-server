@@ -8,5 +8,12 @@ if ! enabled postgres; then
   exec sleep infinity
 fi
 export HOME=/config/postgres
+# The server inherits the descriptor holding PG_LOCK and keeps it until it and
+# every backend exit, so a second container on this /config cannot start one.
+# shellcheck disable=SC2016 # expanded by the inner shell
 exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
-  s6-setuidgid postgres postgres -D /config/postgres/data
+  s6-setuidgid postgres bash -c 'exec 9>>"$1" && flock -n 9 || {
+      echo "another PostgreSQL server holds $1; is a second container using this /config?" >&2
+      exit 1
+    }
+    exec postgres -D /config/postgres/data' _ "$PG_LOCK"

@@ -6,6 +6,9 @@ set -euo pipefail
 # shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
 source /etc/silo-omnibus/lib.sh
 
+# Start from nothing: a restart of this container keeps /run, and a flag left
+# from the last start (such as node access) must not outlive its setting.
+rm -rf "$STATE_DIR"
 install -d -m 0755 "$STATE_DIR"
 
 # One directory per service, each owned by that service's account. /config

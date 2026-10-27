@@ -61,13 +61,20 @@ exec_clean() {
   exec env -i "${keep[@]}" "$@"
 }
 
+# PG_LOCK is held, as a flock(2) lock, by the PostgreSQL server for its whole
+# life. postmaster.pid only guards against servers in one PID namespace; a
+# second container on the same /config sees a stale-looking pid file and would
+# start a second server on the same data directory.
+# shellcheck disable=SC2034 # used by init-postgres and svc-postgres
+PG_LOCK=/config/postgres/server.lock
+
 # silo_port: the port Silo listens on. Silo reads /config/silo/.env without
 # overriding variables already set, so PORT from the container wins, then a
 # PORT line in that file, then Silo's default.
 silo_port() {
   local port="${PORT:-}"
   if [[ -z "$port" && -f /config/silo/.env ]]; then
-    port="$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?PORT[[:space:]]*=[[:space:]]*['\"]?([0-9]+)['\"]?.*/\\2/p" /config/silo/.env | tail -n 1)"
+    port="$(s6-setuidgid silo sed -nE "s/^[[:space:]]*(export[[:space:]]+)?PORT[[:space:]]*=[[:space:]]*['\"]?([0-9]+)['\"]?.*/\\2/p" /config/silo/.env | tail -n 1)"
   fi
   printf '%s' "${port:-8080}"
 }

@@ -11,7 +11,9 @@ export HOME=/config/redis
 # A redis.conf in /config/redis replaces the persistence and logging defaults
 # below. The listener stays on the command line, which overrides the file,
 # because the readiness check and Silo's REDIS_URL both use it.
-config=(--save 60 1000 --appendonly no --logfile '' --loglevel notice)
+# The append-only file keeps playback revocations across a crash: a snapshot
+# alone can restore a session older than its revocation.
+config=(--save 60 1000 --appendonly yes --appendfsync everysec --logfile '' --loglevel notice)
 [[ -f /config/redis/redis.conf ]] && config=(/config/redis/redis.conf)
 exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
   s6-setuidgid redis redis-server "${config[@]}" \

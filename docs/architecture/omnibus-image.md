@@ -37,7 +37,11 @@ Two versions are load-bearing for existing installs:
 The s6-rc services under `omnibus/rootfs/etc/s6-overlay/s6-rc.d` start in this
 order:
 
-1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`.
+1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`. The path
+   must resolve to a root-owned regular file in directories only root can
+   change (sticky directories count), and outside `/config`; otherwise a
+   service account could point it at `SECRET_KEY` and have root export that
+   under another name. Docker secrets and Kubernetes secret volumes qualify.
 2. `init-adduser` maps the `silo` account onto `PUID` and `PGID` and adds it to
    the groups of any passed-in GPU devices. A device owned by group 0 is
    skipped, so Silo, which never runs as root here, cannot open it. Unprivileged
@@ -62,6 +66,15 @@ s6 stops services in reverse order, so Silo drains before PostgreSQL's fast
 shutdown. `svc-silo` and `svc-postgres` have no stop timeout of their own; the
 container's stop timeout bounds them.
 
+`init-config` empties `/run/silo-omnibus` on every start, so no flag from a
+previous start of the same container outlives its setting. The PostgreSQL
+server holds a `flock(2)` lock on `/config/postgres/server.lock` for its life.
+`postmaster.pid` only guards servers in one PID namespace, so `init-postgres`
+deletes a left-over pid file only while nothing holds that lock, and a second
+container started on the same `/config` refuses to start PostgreSQL. Bundled
+Redis keeps an append-only file (`appendfsync everysec`): a snapshot alone can
+restore a playback session older than its revocation.
+
 ## Accounts and data
 
 | Service | Account | uid:gid | Data |
@@ -76,9 +89,11 @@ a valid owner across image updates. The init scripts run as root, and a service
 account can plant a symlink anywhere in its own directory, so they never write,
 chown, or chmod inside one as root: `/config` itself stays root's and holds the
 image's markers, and files in a service directory are written as its account
-(`write_as` in `lib.sh`). The `silo` role is the cluster superuser and can run
-programs as the `postgres` account, so this matters for `/config/postgres` as
-much as for `/config/silo`. `init-config` hands `/config/silo` to the
+(`write_as` in `lib.sh`), and read as its account too. Readiness checks run as
+the service's account, since s6 starts them as root with `HOME` in the service
+directory, where a `.curlrc` or similar file could direct a root process. The
+`silo` role is the cluster superuser and can run programs as the `postgres`
+account, so this matters for `/config/postgres` as much as for `/config/silo`. `init-config` hands `/config/silo` to the
 `silo` account with a full walk only when its ids differ from the ones recorded
 in `/config/.silo-owner` by the last walk, or when an entry in the top
 two levels is owned wrong; local artwork can hold millions of files. Deleting
