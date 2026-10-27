@@ -175,12 +175,29 @@ func TestPlanAIProviderConversionKeepsAdministratorBindings(t *testing.T) {
 // An endpoint the registry refuses is reported by setting name, so startup can
 // tell the administrator which job to set up again.
 func TestPlanAIProviderConversionReportsRefusedEndpoints(t *testing.T) {
-	_, unconverted, err := PlanAIProviderConversion(map[string]string{
-		"ai.base_url": "https://user:secret@proxy.example.test/v1", "subtitle_ai.transcribe_enabled": "true",
-		"ai.asr_base_url": "http://speaches:8000",
-	})
-	if err != nil || len(unconverted) != 1 || unconverted[0] != "ai.base_url" {
-		t.Fatalf("unconverted = %v, %v; want [ai.base_url]", unconverted, err)
+	const refused = "https://user:secret@proxy.example.test/v1"
+	for _, tc := range []struct {
+		name   string
+		stored map[string]string
+		want   string
+	}{
+		{
+			name:   "text endpoint",
+			stored: map[string]string{"ai.base_url": refused, "subtitle_ai.transcribe_enabled": "true", "ai.asr_base_url": "http://speaches:8000"},
+			want:   "ai.base_url",
+		},
+		{
+			name:   "subtitle endpoint that text and speech fell back to",
+			stored: map[string]string{"subtitle_ai.base_url": refused, "subtitle_ai.transcribe_enabled": "true"},
+			want:   "subtitle_ai.base_url",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, unconverted, err := PlanAIProviderConversion(tc.stored)
+			if err != nil || len(unconverted) != 1 || unconverted[0] != tc.want {
+				t.Fatalf("unconverted = %v, %v; want [%s]", unconverted, err, tc.want)
+			}
+		})
 	}
 }
 

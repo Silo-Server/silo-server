@@ -461,11 +461,16 @@ func PlanAIProviderConversion(stored map[string]string) (writes map[string]strin
 func convertLegacyTextAndSpeech(c *aiConversion) {
 	stored := c.stored
 	storedTextURL := firstNonEmpty(stored[legacyAITextURLSetting], stored[legacySubtitleURLSetting])
+	// A refused URL is reported under the setting that supplied it.
+	textURLSetting := legacyAITextURLSetting
+	if stored[legacyAITextURLSetting] == "" && stored[legacySubtitleURLSetting] != "" {
+		textURLSetting = legacySubtitleURLSetting
+	}
 	textKey := firstNonEmpty(stored[legacyAITextKeySetting], stored[legacySubtitleKeySetting])
 	// The text endpoint defaulted to OpenAI when none was stored.
 	textBaseURL := strings.TrimRight(firstNonEmpty(storedTextURL, openAIBaseURL), "/")
 	if storedTextURL != "" || textKey != "" {
-		c.bind(AITextProviderSettingKey, c.adopt(legacyAITextURLSetting, textBaseURL, textKey, AICapabilityChat))
+		c.bind(AITextProviderSettingKey, c.adopt(textURLSetting, textBaseURL, textKey, AICapabilityChat))
 	}
 
 	// Speech resolved its endpoint and key independently of text: an empty
@@ -486,7 +491,7 @@ func convertLegacyTextAndSpeech(c *aiConversion) {
 	if providerType == AIProviderCustom && !AdminSettingEnabled("subtitle_ai.transcribe_enabled", stored["subtitle_ai.transcribe_enabled"]) {
 		return
 	}
-	c.bind(AISpeechProviderSettingKey, c.adopt(legacyAITextURLSetting, textBaseURL, speechKey, AICapabilitySpeech))
+	c.bind(AISpeechProviderSettingKey, c.adopt(textURLSetting, textBaseURL, speechKey, AICapabilitySpeech))
 }
 
 // adoptAIProvider returns the id of a provider that serves capability at exactly
