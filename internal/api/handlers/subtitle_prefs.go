@@ -7,9 +7,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -63,44 +60,6 @@ type subtitlePrefResponse struct {
 }
 
 // --- Handler methods ---
-
-// HandleGetSubtitlePref handles GET /subtitle-prefs/{series_id}.
-func (h *SubtitlePrefHandler) HandleGetSubtitlePref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	pref, err := h.GetSubtitlePreference(r.Context(), userID, profileID, seriesID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, toSubtitlePrefResponse(pref))
-}
-
-// GetSubtitlePreference reads the legacy preference used by v1. A missing
-// series preference returns a 404 APIError.
-func (h *SubtitlePrefHandler) GetSubtitlePreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.SubtitlePreference, error) {
-	var none userstore.SubtitlePreference
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	pref, err := store.GetSubtitlePreference(ctx, profileID, seriesID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
-	}
-	if pref == nil {
-		return none, apiError(http.StatusNotFound, "not_found", "Subtitle preference not found")
-	}
-	return *pref, nil
-}
 
 // GetSubtitlePreferenceCanonical keeps the legacy track identity and overlays
 // canonical series language, mode, and forced-subtitle settings for v2. Absent
@@ -166,57 +125,6 @@ func (h *SubtitlePrefHandler) GetSubtitlePreferenceCanonical(ctx context.Context
 		return userstore.SubtitlePreference{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get subtitle preference")
 	}
 	return pref, nil
-}
-
-// HandleSetSubtitlePref handles PUT /subtitle-prefs/{series_id}.
-func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	var req setSubtitlePrefRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	pref := userstore.SubtitlePreference{
-		ProfileID:            profileID,
-		SeriesID:             seriesID,
-		SubtitleLanguage:     req.SubtitleLanguage,
-		SubtitleTrackIndex:   req.SubtitleTrackIndex,
-		ExternalSubtitlePath: req.ExternalSubtitlePath,
-		SubtitleMode:         req.SubtitleMode,
-		TrackSignature:       req.TrackSignature,
-	}
-	if req.ShowForcedSubtitles != nil {
-		pref.ShowForcedSubtitles = *req.ShowForcedSubtitles
-		pref.HasShowForcedSubtitles = true
-	}
-
-	if err := h.SetSubtitlePreference(r.Context(), userID, pref); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// SetSubtitlePreference is the write behind v1 PUT /subtitle-prefs/{series_id}:
-// the legacy row and the canonical profile_series rows commit together, and
-// a user_settings.changed event follows each canonical row that moved. The
-// row is replaced whole, except that a preference without a forced-subtitle
-// override (!HasShowForcedSubtitles) keeps the override the legacy row
-// already stores, so a client updating only the track selection does not
-// silently reset it. A failure is an *APIError; a value the canonical
-// contract refuses is a 400 bad_request.
-func (h *SubtitlePrefHandler) SetSubtitlePreference(ctx context.Context, userID int, pref userstore.SubtitlePreference) error {
-	return h.setSubtitlePreference(ctx, userID, pref, false)
 }
 
 // SetSubtitlePreferenceCanonical is the write behind v2
@@ -302,25 +210,6 @@ func (h *SubtitlePrefHandler) setSubtitlePreference(ctx context.Context, userID 
 	return nil
 }
 
-// HandleDeleteSubtitlePref handles DELETE /subtitle-prefs/{series_id}.
-func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	if err := h.DeleteSubtitlePreference(r.Context(), userID, profileID, seriesID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // DeleteSubtitlePreference is the delete v1 DELETE /subtitle-prefs/{series_id}
 // and v2 deleteSubtitlePreference share. Deleting a preference that does not
 // exist succeeds. A failure is an *APIError.
@@ -392,20 +281,3 @@ func (h *SubtitlePrefHandler) applySeriesSubtitleSync(
 }
 
 // --- Helpers ---
-
-func toSubtitlePrefResponse(p userstore.SubtitlePreference) subtitlePrefResponse {
-	resp := subtitlePrefResponse{
-		ProfileID:            p.ProfileID,
-		SeriesID:             p.SeriesID,
-		SubtitleLanguage:     p.SubtitleLanguage,
-		SubtitleTrackIndex:   p.SubtitleTrackIndex,
-		ExternalSubtitlePath: p.ExternalSubtitlePath,
-		SubtitleMode:         p.SubtitleMode,
-		TrackSignature:       p.TrackSignature,
-		UpdatedAt:            p.UpdatedAt,
-	}
-	if p.HasShowForcedSubtitles {
-		resp.ShowForcedSubtitles = boolPtr(p.ShowForcedSubtitles)
-	}
-	return resp
-}

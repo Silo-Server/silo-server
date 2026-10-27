@@ -5,16 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -99,100 +95,56 @@ func assertAPIKeyMetadataJSON(t *testing.T, raw []byte, secret string) {
 	}
 }
 
-func TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret(t *testing.T) {
+// TestAPIKeyEditorNeverReturnsStoredSecret: every read and edit the key
+// services answer, including a stale edit's current state, carries the safe
+// prefix and never the bearer, and editing leaves the key usable.
+func TestAPIKeyEditorNeverReturnsStoredSecret(t *testing.T) {
 	repo := apiKeyPrivacyRepository(t)
 	key, err := repo.Create(t.Context(), 7, "Automation", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := NewAPIKeyHandler(repo)
-	for name, serve := range map[string]http.HandlerFunc{"personal": handler.HandleListAPIKeys, "admin-user": handler.HandleAdminListUserAPIKeys, "admin-all": handler.HandleAdminListAllAPIKeys} {
-		t.Run(name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys", nil)
-			ctx := apimw.SetClaims(request.Context(), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess})
-			route := chi.NewRouteContext()
-			route.URLParams.Add("userId", "7")
-			ctx = context.WithValue(ctx, chi.RouteCtxKey, route)
-			response := httptest.NewRecorder()
-			serve(response, request.WithContext(ctx))
-			if response.Code != http.StatusOK {
-				t.Fatalf("status=%d %s", response.Code, response.Body.String())
-			}
-			assertAPIKeyMetadataJSON(t, response.Body.Bytes(), key.Key)
-		})
+	requireSafe := func(name string, value any) {
+		t.Helper()
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run(name, func(t *testing.T) { assertAPIKeyMetadataJSON(t, raw, key.Key) })
 	}
+
+	personal, _, err := handler.ListPersonalAPIKeysPage(t.Context(), 7, nil, 10)
+	if err != nil || len(personal) != 1 {
+		t.Fatalf("personal page = %d: %v", len(personal), err)
+	}
+	requireSafe("personal list", personal)
 	metadata, err := handler.GetAdminAPIKey(t.Context(), key.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertAPIKeyMetadataJSON(t, raw, key.Key)
-	if strings.Contains(string(raw), "last_used_at") || strings.Contains(string(raw), "username") {
+	requireSafe("admin editor", metadata)
+	if raw, _ := json.Marshal(metadata); strings.Contains(string(raw), "last_used_at") || strings.Contains(string(raw), "username") {
 		t.Fatal("volatile usage/display field in canonical editor")
 	}
 	rows, more, err := handler.ListAdminAPIKeysPage(t.Context(), nil, 1)
 	if err != nil || more || len(rows) != 1 {
 		t.Fatalf("page=%d more=%v %v", len(rows), more, err)
 	}
-	raw, err = json.Marshal(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertAPIKeyMetadataJSON(t, raw, key.Key)
+	requireSafe("admin list", rows)
 	updated, err := handler.UpdateAdminAPIKeyTier(t.Context(), key.ID, "elevated", auth.APIKeyPrecondition{Revision: metadata.Revision})
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err = json.Marshal(updated)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertAPIKeyMetadataJSON(t, raw, key.Key)
+	requireSafe("tier update", updated)
 	_, err = handler.UpdateAdminAPIKeyTier(t.Context(), key.ID, "standard", auth.APIKeyPrecondition{Revision: metadata.Revision})
 	conflict, ok := errors.AsType[*auth.APIKeyRevisionConflict](err)
 	if !ok || conflict.Current.Revision != updated.Revision {
 		t.Fatalf("stale editor did not return current metadata: %v", err)
 	}
-	raw, err = json.Marshal(apiKeyConfigurationOf(conflict.Current))
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertAPIKeyMetadataJSON(t, raw, key.Key)
+	requireSafe("stale edit", apiKeyConfigurationOf(conflict.Current))
 	valid, err := repo.GetByKey(t.Context(), key.Key)
 	if err != nil || valid.ID != key.ID || valid.Key != "" || valid.RateTier != "elevated" {
 		t.Fatal("existing key authentication changed", err)
-	}
-}
-
-func TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse(t *testing.T) {
-	repo := apiKeyPrivacyRepository(t)
-	handler := NewAPIKeyHandler(repo)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys", strings.NewReader(`{"label":"new"}`))
-	request = request.WithContext(apimw.SetClaims(request.Context(), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess}))
-	response := httptest.NewRecorder()
-	handler.HandleAdminCreateAPIKey(response, request)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status=%d %s", response.Code, response.Body.String())
-	}
-	var created apiKeyResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(created.Key, "sa_") || len(created.Key) != 67 {
-		t.Fatal("creation did not return generated secret")
-	}
-	key, err := repo.GetByKey(t.Context(), created.Key)
-	if err != nil || key.ID != created.ID {
-		t.Fatal("new secret is unusable", err)
-	}
-	rows, err := repo.ListAll(t.Context())
-	if err != nil || len(rows) != 1 {
-		t.Fatal("list", err)
-	}
-	if rows[0].KeyPrefix != created.Key[:11] {
-		t.Fatal("metadata prefix changed")
 	}
 }

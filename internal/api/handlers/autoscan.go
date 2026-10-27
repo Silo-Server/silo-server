@@ -2,16 +2,11 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -128,59 +123,12 @@ func settingsResponse(s autoscan.Settings) autoscanSettingsResponse {
 	}
 }
 
-func (h *AutoscanHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.ReadAdminAutoscanSettings(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, settings)
-}
-
 func (h *AutoscanHandler) ReadAdminAutoscanSettings(ctx context.Context) (AdminAutoscanSettingsView, error) {
 	settings, err := h.repo.GetSettings(ctx)
 	if err != nil {
 		return AdminAutoscanSettingsView{}, err
 	}
 	return settingsResponse(settings), nil
-}
-
-func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
-	var req autoscanSettingsResponse
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.DefaultPollIntervalSeconds <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "default_poll_interval_seconds must be greater than 0")
-		return
-	}
-	if req.DebounceSeconds < 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "debounce_seconds must be 0 or greater")
-		return
-	}
-	updated, err := h.repo.UpdateSettings(r.Context(), autoscan.Settings{
-		Enabled:                    req.Enabled,
-		DefaultPollIntervalSeconds: req.DefaultPollIntervalSeconds,
-		DebounceSeconds:            req.DebounceSeconds,
-	})
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	// Reschedule the poll task so a changed default_poll_interval_seconds takes
-	// effect immediately rather than only after a restart. Optional: skip when no
-	// task manager is wired (e.g. tests). A reschedule failure is non-fatal — the
-	// new interval is persisted and will apply on the next restart regardless.
-	if h.triggers != nil {
-		intervalMs := int64(updated.DefaultPollIntervalSeconds) * 1000
-		if terr := h.triggers.UpdateTriggers(autoscanPollTaskKey, []taskmanager.TriggerConfig{
-			{Type: taskmanager.TriggerTypeInterval, IntervalMs: intervalMs},
-		}); terr != nil {
-			slog.WarnContext(r.Context(), "autoscan: reschedule poll task failed", "component", "api", "err", terr)
-		}
-	}
-	writeJSON(w, http.StatusOK, settingsResponse(updated))
 }
 
 // --- Connections ---
@@ -256,17 +204,6 @@ func normalizeRequestIntegrationID(ref *string) *string {
 	return &trimmed
 }
 
-func (h *AutoscanHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
-	out, err := h.ReadAdminAutoscanConnections(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Connections []AdminAutoscanConnectionView `json:"connections"`
-	}{out})
-}
-
 // ReadAdminAutoscanConnections returns configured connections without resolving credentials.
 func (h *AutoscanHandler) ReadAdminAutoscanConnections(ctx context.Context) ([]AdminAutoscanConnectionView, error) {
 	conns, err := h.repo.ListConnections(ctx)
@@ -278,73 +215,6 @@ func (h *AutoscanHandler) ReadAdminAutoscanConnections(ctx context.Context) ([]A
 		out = append(out, connectionResponse(c))
 	}
 	return out, nil
-}
-
-func (h *AutoscanHandler) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
-	var in autoscanConnectionInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if strings.TrimSpace(in.Name) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
-		return
-	}
-	if err := validateConnectionInput(in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	created, err := h.repo.CreateConnection(r.Context(), autoscan.Connection{
-		Name:                 strings.TrimSpace(in.Name),
-		Kind:                 strings.TrimSpace(in.Kind),
-		BaseURL:              strings.TrimSpace(in.BaseURL),
-		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
-		RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID),
-	})
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, connectionResponse(created))
-}
-
-func (h *AutoscanHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	var in autoscanConnectionInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if strings.TrimSpace(in.Name) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
-		return
-	}
-	if err := validateConnectionInput(in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	updated, err := h.repo.UpdateConnection(r.Context(), autoscan.Connection{
-		ID:                   id,
-		Name:                 strings.TrimSpace(in.Name),
-		Kind:                 strings.TrimSpace(in.Kind),
-		BaseURL:              strings.TrimSpace(in.BaseURL),
-		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
-		RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID),
-	})
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, connectionResponse(updated))
-}
-
-func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	if err := h.repo.DeleteConnection(r.Context(), id); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Sources ---
@@ -449,17 +319,6 @@ func (h *AutoscanHandler) sourceResponseWithWebhook(ctx context.Context, s autos
 	return resp
 }
 
-func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.ReadAdminAutoscanSources(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Sources []AdminAutoscanSourceView `json:"sources"`
-	}{sources})
-}
-
 // ReadAdminAutoscanSources reuses the batched endpoint query and existing token reveal.
 func (h *AutoscanHandler) ReadAdminAutoscanSources(ctx context.Context) ([]AdminAutoscanSourceView, error) {
 	// Sources are operator-created (no auto-seed): just list what exists. Use
@@ -499,29 +358,6 @@ type autoscanScanSourcePluginResponse struct {
 	DisplayName  string                        `json:"display_name"`
 	Description  string                        `json:"description,omitempty"`
 	Descriptor   autoscan.ScanSourceDescriptor `json:"descriptor"`
-}
-
-// HandleListAvailableScanSources returns every installed scan_source capability
-// an operator can create a source against (the Add-source picker list).
-func (h *AutoscanHandler) HandleListAvailableScanSources(w http.ResponseWriter, r *http.Request) {
-	available, err := h.svc.ListAvailableScanSources(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	out := make([]autoscanScanSourcePluginResponse, 0, len(available))
-	for _, a := range available {
-		out = append(out, autoscanScanSourcePluginResponse{
-			PluginID:     a.PluginID,
-			CapabilityID: a.CapabilityID,
-			DisplayName:  a.DisplayName,
-			Description:  a.Description,
-			Descriptor:   a.Descriptor,
-		})
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Plugins []autoscanScanSourcePluginResponse `json:"plugins"`
-	}{Plugins: out})
 }
 
 // --- Create source ---
@@ -582,81 +418,6 @@ func validateWebhookProvider(config map[string]string) error {
 		return nil
 	}
 	return fmt.Errorf("source_config.webhook_provider must be auto, sonarr, or radarr")
-}
-
-// HandleCreateSource creates a new source bound to an installed scan_source
-// capability. Many sources may share one capability (e.g. one Sonarr plugin
-// fronting several arr servers, one source per connection). The capability must
-// currently be installed; enabling requires a bound connection.
-func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Request) {
-	var in autoscanCreateSourceInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	capID := strings.TrimSpace(in.CapabilityID)
-	pluginID := strings.TrimSpace(in.PluginID)
-	if pluginID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "plugin_id is required")
-		return
-	}
-	if capID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "capability_id is required")
-		return
-	}
-	if in.PollIntervalSeconds != nil && *in.PollIntervalSeconds <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_seconds must be greater than 0 when set")
-		return
-	}
-	if err := validatePathRewrites(in.PathRewrites); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	deliveryMode, err := resolveDeliveryMode(in.DeliveryMode, pluginID, capID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	sourceConfig := normalizeSourceConfig(in.SourceConfig)
-	if deliveryMode == autoscan.DeliveryModeWebhook {
-		if err := validateWebhookProvider(sourceConfig); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		if provider, ok := sourceConfig["webhook_provider"]; ok {
-			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
-		}
-	}
-	// Validate the (plugin_id, capability_id) is a currently-installed
-	// scan_source capability — a source may only be created against an installed
-	// plugin capability. The built-in webhook identity passes because the
-	// composite lister always supplies it.
-	available, err := h.svc.ListAvailableScanSources(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	if !scanSourceInstalled(available, pluginID, capID) {
-		writeError(w, http.StatusBadRequest, "bad_request", "plugin_id + capability_id is not a currently-installed scan_source capability")
-		return
-	}
-	connArg := normalizeConnectionID(in.ConnectionID)
-	created, err := h.repo.CreateSource(r.Context(), autoscan.Source{
-		PluginID:            pluginID,
-		CapabilityID:        capID,
-		ConnectionID:        connArg,
-		Enabled:             in.Enabled,
-		DeliveryMode:        deliveryMode,
-		PollIntervalSeconds: in.PollIntervalSeconds,
-		PathRewrites:        normalizePathRewrites(in.PathRewrites),
-		SourceConfig:        sourceConfig,
-		Label:               autoscan.NormalizeSourceLabel(in.Label),
-	})
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, sourceResponse(created))
 }
 
 // scanSourceInstalled reports whether (pluginID, capabilityID) is in the
@@ -728,69 +489,6 @@ func normalizeSourceConfig(config map[string]string) map[string]string {
 	return out
 }
 
-func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	var in autoscanSourceInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if in.PollIntervalSeconds != nil && *in.PollIntervalSeconds <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_seconds must be greater than 0 when set")
-		return
-	}
-	if err := validatePathRewrites(in.PathRewrites); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	// Delivery mode is validated against the existing row's immutable identity:
-	// an empty input keeps the stored mode.
-	existing, err := h.repo.GetSource(r.Context(), id)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	requestedMode := in.DeliveryMode
-	if strings.TrimSpace(requestedMode) == "" {
-		requestedMode = existing.DeliveryMode
-	}
-	deliveryMode, err := resolveDeliveryMode(requestedMode, existing.PluginID, existing.CapabilityID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	sourceConfig := normalizeSourceConfig(in.SourceConfig)
-	if deliveryMode == autoscan.DeliveryModeWebhook {
-		if err := validateWebhookProvider(sourceConfig); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		if provider, ok := sourceConfig["webhook_provider"]; ok {
-			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
-		}
-	}
-	// connection_id is a full-state field: nil means unbind, a UUID string
-	// means bind. A whitespace-only string is normalised to nil (unbound).
-	connArg := normalizeConnectionID(in.ConnectionID)
-	// Update by id; identity (plugin_id, capability_id) is immutable and
-	// preserved by the repo. A missing source maps to 404.
-	updated, err := h.repo.UpdateSource(r.Context(), autoscan.Source{
-		ID:                  id,
-		ConnectionID:        connArg,
-		Enabled:             in.Enabled,
-		DeliveryMode:        deliveryMode,
-		PollIntervalSeconds: in.PollIntervalSeconds,
-		PathRewrites:        normalizePathRewrites(in.PathRewrites),
-		SourceConfig:        sourceConfig,
-		Label:               autoscan.NormalizeSourceLabel(in.Label),
-	})
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, h.sourceResponseWithWebhook(r.Context(), updated))
-}
-
 // normalizeConnectionID maps a full-state connection_id input to a stored value:
 // a nil pointer or a whitespace-only string means unbound (nil); a non-empty
 // trimmed UUID binds to that connection.
@@ -803,18 +501,6 @@ func normalizeConnectionID(in *string) *string {
 		return nil
 	}
 	return &trimmed
-}
-
-// HandleDeleteSource removes a source row. This is the operator's escape hatch
-// for an orphaned source (one whose scan_source plugin was uninstalled or no
-// longer resolves cleanly). An unknown id maps to 404 via autoscan.ErrNotFound.
-func (h *AutoscanHandler) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	if err := h.repo.DeleteSource(r.Context(), id); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Test connection ---
@@ -840,81 +526,9 @@ type autoscanTestConnectionResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// HandleTestConnection probes an arr connection's /api/v3/system/status.
-func (h *AutoscanHandler) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
-	var in autoscanTestConnectionInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	var (
-		result autoscan.ConnectionTestResult
-		err    error
-	)
-	if in.ConnectionID != nil && strings.TrimSpace(*in.ConnectionID) != "" {
-		result, err = h.svc.TestConnectionByID(r.Context(), strings.TrimSpace(*in.ConnectionID))
-	} else {
-		// Ad-hoc connection: must carry own base_url or a linked integration,
-		// same invariant as create/update.
-		conn := autoscan.Connection{
-			BaseURL:              strings.TrimSpace(in.BaseURL),
-			APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
-			RequestIntegrationID: in.RequestIntegrationID,
-		}
-		hasOwn := conn.BaseURL != ""
-		hasLink := conn.RequestIntegrationID != nil && strings.TrimSpace(*conn.RequestIntegrationID) != ""
-		if !hasOwn && !hasLink {
-			writeError(w, http.StatusBadRequest, "bad_request", "connection requires connection_id, base_url, or request_integration_id")
-			return
-		}
-		result, err = h.svc.TestConnection(r.Context(), conn)
-	}
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, autoscanTestConnectionResponse{
-		OK:      result.OK,
-		Version: result.Version,
-		Error:   result.Err,
-	})
-}
-
 // --- Rewrite suggestions (sync from arr) ---
 
-// HandleRewriteSuggestions proposes path rewrites for a source by matching its
-// bound connection's arr root folders against Silo's media folders. The
-// operator applies chosen suggestions via the normal source PUT (path_rewrites).
-func (h *AutoscanHandler) HandleRewriteSuggestions(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	suggestions, err := h.svc.SuggestRewrites(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, autoscan.ErrNoConnection) {
-			writeError(w, http.StatusBadRequest, "bad_request", "source has no bound connection; bind one before syncing rewrites")
-			return
-		}
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, suggestions)
-}
-
 // --- Trigger ---
-
-func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
-	// Run the poll detached: don't block the request on a full cycle, and don't
-	// tie the poll to the request context (which is cancelled once we respond).
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if err := h.svc.PollOnce(ctx); err != nil {
-			slog.WarnContext(ctx, "autoscan: manual poll failed", "component", "api", "err", err)
-		}
-	}()
-	writeJSON(w, http.StatusAccepted, struct {
-		Status string `json:"status"`
-	}{Status: "ok"})
-}
 
 // --- Events ---
 
@@ -959,97 +573,6 @@ type autoscanEventsResponse struct {
 	Offset int                     `json:"offset"`
 }
 
-func eventResponse(event autoscan.EventWithRuns) autoscanEventResponse {
-	runs := make([]autoscanEventScanRunResponse, 0, len(event.Runs))
-	for _, run := range event.Runs {
-		runs = append(runs, autoscanEventScanRunResponse{
-			ID:           run.ID,
-			LibraryID:    run.MediaFolderID,
-			Mode:         run.Mode,
-			Path:         run.Path,
-			Trigger:      run.Trigger,
-			Status:       run.Status,
-			RequestedAt:  run.RequestedAt,
-			StartedAt:    run.StartedAt,
-			CompletedAt:  run.CompletedAt,
-			ErrorMessage: run.ErrorMessage,
-		})
-	}
-	e := event.Event
-	return autoscanEventResponse{
-		ID:              e.ID,
-		SourceID:        e.SourceID,
-		PluginID:        e.PluginID,
-		CapabilityID:    e.CapabilityID,
-		StartedAt:       e.StartedAt,
-		CompletedAt:     e.CompletedAt,
-		DurationMS:      e.DurationMS,
-		Status:          string(e.Status),
-		DeliveryMode:    e.DeliveryMode,
-		ProviderEvent:   e.ProviderEventType,
-		ChangesReturned: e.ChangesReturned,
-		ChangesResolved: e.ChangesResolved,
-		TargetsClaimed:  e.TargetsClaimed,
-		ScansCreated:    e.ScansCreated,
-		ScansReused:     e.ScansReused,
-		ScansSuppressed: e.ScansSuppressed,
-		ErrorMessage:    e.ErrorMessage,
-		ScanRuns:        runs,
-	}
-}
-
-func (h *AutoscanHandler) HandleListEvents(w http.ResponseWriter, r *http.Request) {
-	filter := autoscan.EventListFilter{
-		SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")),
-		Status:   autoscan.EventStatus(strings.TrimSpace(r.URL.Query().Get("status"))),
-		Search:   strings.TrimSpace(r.URL.Query().Get("q")),
-		Limit:    50,
-	}
-	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
-		limit, err := strconv.Atoi(rawLimit)
-		if err != nil || limit < 1 {
-			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
-			return
-		}
-		filter.Limit = limit
-	}
-	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
-		offset, err := strconv.Atoi(rawOffset)
-		if err != nil || offset < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
-			return
-		}
-		filter.Offset = offset
-	}
-	switch filter.Status {
-	case "", autoscan.EventStatusRunning, autoscan.EventStatusSuccess, autoscan.EventStatusError, autoscan.EventStatusUnresolved:
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "status must be running, success, error, or unresolved")
-		return
-	}
-
-	events, err := h.repo.ListEvents(r.Context(), filter)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	total, err := h.repo.CountEvents(r.Context(), filter)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	out := make([]autoscanEventResponse, 0, len(events))
-	for _, event := range events {
-		out = append(out, eventResponse(event))
-	}
-	writeJSON(w, http.StatusOK, autoscanEventsResponse{
-		Events: out,
-		Total:  total,
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
-	})
-}
-
 type autoscanScanResponse struct {
 	ID               string     `json:"id"`
 	LibraryID        int        `json:"library_id"`
@@ -1074,78 +597,6 @@ type autoscanScansResponse struct {
 	Total  int                    `json:"total"`
 	Limit  int                    `json:"limit"`
 	Offset int                    `json:"offset"`
-}
-
-func autoscanScanRunResponse(scan autoscan.ScanWithEvent) autoscanScanResponse {
-	return autoscanScanResponse{
-		ID:               scan.ID,
-		LibraryID:        scan.MediaFolderID,
-		Mode:             scan.Mode,
-		Path:             scan.Path,
-		Trigger:          scan.Trigger,
-		Status:           scan.Status,
-		ErrorMessage:     scan.ErrorMessage,
-		RequestedAt:      scan.RequestedAt,
-		StartedAt:        scan.StartedAt,
-		CompletedAt:      scan.CompletedAt,
-		AutoscanEventID:  scan.AutoscanEventID,
-		SourceID:         scan.SourceID,
-		PluginID:         scan.PluginID,
-		CapabilityID:     scan.CapabilityID,
-		EventStatus:      string(scan.EventStatus),
-		EventCompletedAt: scan.EventCompletedAt,
-	}
-}
-
-func (h *AutoscanHandler) HandleListScans(w http.ResponseWriter, r *http.Request) {
-	filter := autoscan.ScanListFilter{
-		Status: strings.TrimSpace(r.URL.Query().Get("status")),
-		Search: strings.TrimSpace(r.URL.Query().Get("q")),
-		Limit:  50,
-	}
-	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
-		limit, err := strconv.Atoi(rawLimit)
-		if err != nil || limit < 1 {
-			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
-			return
-		}
-		filter.Limit = limit
-	}
-	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
-		offset, err := strconv.Atoi(rawOffset)
-		if err != nil || offset < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
-			return
-		}
-		filter.Offset = offset
-	}
-	switch filter.Status {
-	case "", "accepted", "running", "completed", "failed", "cancelled":
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "status must be accepted, running, completed, failed, or cancelled")
-		return
-	}
-
-	scans, err := h.repo.ListAutoscanScans(r.Context(), filter)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	total, err := h.repo.CountAutoscanScans(r.Context(), filter)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	out := make([]autoscanScanResponse, 0, len(scans))
-	for _, scan := range scans {
-		out = append(out, autoscanScanRunResponse(scan))
-	}
-	writeJSON(w, http.StatusOK, autoscanScansResponse{
-		Scans:  out,
-		Total:  total,
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
-	})
 }
 
 // --- Status ---
@@ -1182,15 +633,6 @@ type AdminAutoscanStatusView struct {
 	AcceptedScans int                           `json:"accepted_scans"`
 	RunningScans  int                           `json:"running_scans"`
 	LatestEventAt *time.Time                    `json:"latest_event_at,omitempty"`
-}
-
-func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	status, err := h.ReadAdminAutoscanStatus(r.Context())
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, status)
 }
 
 // ReadAdminAutoscanStatus retains the existing sequential queue/source observations.
@@ -1259,19 +701,6 @@ func (h *AutoscanHandler) ReadAdminAutoscanStatus(ctx context.Context) (AdminAut
 		RunningScans:  queue.Running,
 		LatestEventAt: latestEventAt,
 	}, nil
-}
-
-// writeAutoscanError maps autoscan repository/service errors to HTTP status
-// codes: a missing connection or source maps to 404, everything else to 500.
-func writeAutoscanError(w http.ResponseWriter, err error) {
-	if err == nil {
-		return
-	}
-	if errors.Is(err, autoscan.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "Autoscan resource not found")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Autoscan operation failed")
 }
 
 // ReadAdminAutoscanAvailableSources reuses discovery without reading source secrets or invoking a provider.

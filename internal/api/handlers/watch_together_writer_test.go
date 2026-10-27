@@ -124,17 +124,6 @@ func TestWatchTogetherMemberStatusIsV2Only(t *testing.T) {
 			}
 		}
 	}
-	t.Run("v1 HTTP", func(t *testing.T) {
-		response, err := new(WatchTogetherHandler).buildRoomResponse(ctx, snapshot, 7, "host")
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := json.Marshal(response)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertStatus(t, data, false)
-	})
 	t.Run("v2 adapter snapshot", func(t *testing.T) {
 		response, err := new(WatchTogetherHandler).buildRoomResponse(ctx, snapshot, 7, "host")
 		if err != nil {

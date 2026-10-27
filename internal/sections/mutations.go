@@ -298,14 +298,6 @@ func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.C
 		return r.deleteGeneratedTemplateBundleFeaturedSections(ctx, bundleID, libraryIDs)
 	})
 }
-func (r *Repository) Reorder(ctx context.Context, entries []ReorderEntry) error {
-	ids := make([]string, 0, len(entries))
-	for _, e := range entries {
-		ids = append(ids, e.ID)
-	}
-	m := sectionMutation{where: "id=ANY($1)", args: []any{ids}}
-	return r.mutate(ctx, m, func(ctx context.Context) error { return r.reorder(ctx, entries) })
-}
 func (r *Repository) ReorderScopeIfRevision(ctx context.Context, scope string, library *int, ids []string, expected int64) error {
 	m := scopeMutation(scope, library)
 	m.expected = &expected

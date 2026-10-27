@@ -2,17 +2,13 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -24,7 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -157,39 +152,6 @@ type checkNodeResult struct {
 	CapabilitiesHash string `json:"capabilities_hash,omitempty"`
 }
 
-// HandleListNodes handles GET /admin/nodes.
-//
-// The stored rows are served as they are: physical_gpu_keys is derived by the
-// node store when a row is scanned, so the same identities the planner routes
-// on are the ones an operator sees. The one thing added is the hash each node
-// advertised on its last health check, which lives only in the pools — see
-// overlayAdvertisedHashes.
-func (h *NodeHandler) HandleListNodes(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.ReadAdminNodes(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "listing nodes", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list nodes")
-		return
-	}
-	v1 := make([]*nodepool.Node, len(nodes))
-	for i, n := range nodes {
-		v1[i] = v1Node(n)
-	}
-	writeJSON(w, http.StatusOK, v1)
-}
-
-// v1Node returns a copy of n without the fields added after /api/v1 froze.
-// Only /api/v2 reads and writes the prepared-download storage overrides.
-func v1Node(n *nodepool.Node) *nodepool.Node {
-	if n == nil {
-		return nil
-	}
-	c := *n
-	c.DownloadArtifactDirOverride = nil
-	c.DownloadArtifactMaxBytesOverride = nil
-	return &c
-}
-
 // overlayAdvertisedHashes copies each node's last advertised capability hash
 // from the pools onto the rows this endpoint serves.
 //
@@ -219,137 +181,6 @@ func (h *NodeHandler) overlayAdvertisedHashes(nodes []*nodepool.Node) {
 			n.AdvertisedCapabilitiesHash = advertised[n.ID]
 		}
 	}
-}
-
-// HandleCreateNode handles POST /admin/nodes.
-func (h *NodeHandler) HandleCreateNode(w http.ResponseWriter, r *http.Request) {
-	var input nodepool.CreateNodeInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	node, err := h.repo.Create(r.Context(), input)
-	if err != nil {
-		// Validation errors from CreateNodeInput.Validate() are treated as 400.
-		if !errors.Is(err, nodepool.ErrNodeNotFound) {
-			// Check if it's a validation error (non-sentinel, non-wrapped).
-			// The repository calls input.Validate() which returns plain errors.
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		slog.ErrorContext(r.Context(), "creating node", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create node")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, v1Node(node))
-	h.reloadPools(r.Context())
-}
-
-// HandleUpdateNode handles PUT /admin/nodes/{id}.
-func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid node ID")
-		return
-	}
-
-	var input nodepool.UpdateNodeInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	// The storage overrides are v2-only; v1 ignores them as it always has.
-	input.DownloadArtifactDirOverride, input.DownloadArtifactMaxBytesOverride = nil, nil
-
-	// Read the row before the write so the nudge below can tell a real policy
-	// change from a resubmit: the admin form posts every field on each save, so
-	// a field being present says nothing about it moving.
-	//
-	// The URL counts for the same reason the overrides do. A partial PUT that
-	// carries only a new url still repoints the row's existing overrides at a
-	// different worker, and without the old row to compare against
-	// nodePolicyTargetChanged has nothing to see — the replacement would keep
-	// running on what it inherited until its own 60s poll.
-	var previous *nodepool.Node
-	if input.URL != nil || input.HWAccelOverride != nil || input.HWDeviceOverride != nil {
-		previous, _ = h.repo.GetByID(r.Context(), id)
-	}
-
-	node, err := h.repo.Update(r.Context(), id, input)
-	if err != nil {
-		if errors.Is(err, nodepool.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Node not found")
-			return
-		}
-		if errors.Is(err, nodepool.ErrInvalidNodeInput) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		slog.ErrorContext(r.Context(), "updating node", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update node")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, v1Node(node))
-	// Order matters: the node has to adopt its policy before this server starts
-	// dispatching under it. reloadPools publishes the updated row, and
-	// EffectiveHWAccel then names its backend on every start request; the node
-	// itself only re-reads its row on the config watcher's 60s poll. Without the
-	// nudge, an operator switching both overlays at once (QSV on a render node
-	// to NVENC on a CUDA index, say) — or repointing the row at a worker that
-	// has been running on what it inherited — gets up to a minute of requests
-	// pairing one side's backend with the other side's device.
-	// Off the request goroutine, not merely detached from its context.
-	//
-	// writeJSON above does not end the response — the handler returning does —
-	// so anything after it is latency the operator waits through. The node nudge
-	// alone is bounded at ten seconds against a worker that may be unreachable,
-	// which is long enough for the admin form to sit in "Saving..." and time out
-	// after a database write that already succeeded. The row is committed at
-	// this point; none of what follows can change the answer already written, so
-	// none of it belongs in front of the client.
-	policyChanged := nodePolicyTargetChanged(previous, node)
-	ctx := context.WithoutCancel(r.Context())
-	go func() {
-		if policyChanged {
-			if !h.reloadNodeConfig(ctx, node) {
-				// The node did not confirm. Its backend now comes from this
-				// server's pool while its device still comes from its own
-				// configuration, so until its poll catches up (within 60s) a
-				// start request can pair the new backend with the old device
-				// and fail.
-				//
-				// The policy is published anyway. Withholding it would leave an
-				// override an operator has saved and can see stored never
-				// reaching dispatch at all — nothing else re-reads the column —
-				// which is a silent permanent misconfiguration rather than a
-				// loud, bounded, self-healing one. Closing the window properly
-				// means sending the effective device alongside the backend so
-				// both come from one source; that is a change to the node start
-				// contract, not something to slip into a policy edit.
-				slog.WarnContext(ctx, "node has not adopted its new acceleration policy yet; transcodes dispatched to it may fail until its next config poll",
-					"component", "api", "node_id", node.ID, "name", node.Name)
-			}
-			// And drop what this server believes the node can do. The v3
-			// planning cache holds the tone-map executors and transformation
-			// inventory the *old* backend advertised, and it stays valid for
-			// its own TTL — so without this a session started in the next
-			// minute is planned against the previous backend's filters and then
-			// rejected by the worker that has already moved on. Dropped before
-			// the pool reload, for the same reason the worker is nudged first:
-			// nothing should dispatch under the new policy while stale
-			// capabilities are still readable.
-			if h.invalidateCapabilityCache != nil {
-				h.invalidateCapabilityCache(node.URL)
-			}
-		}
-		h.reloadPools(ctx)
-		if h.afterNodeUpdate != nil {
-			h.afterNodeUpdate()
-		}
-	}()
 }
 
 // nodePolicyTargetChanged reports whether this update changed which effective
@@ -443,52 +274,6 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 // trip to a node that is up.
 const nodeConfigReloadTimeout = 10 * time.Second
 
-// HandleDeleteNode handles DELETE /admin/nodes/{id}.
-func (h *NodeHandler) HandleDeleteNode(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid node ID")
-		return
-	}
-
-	err = h.repo.Delete(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, nodepool.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Node not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "deleting node", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete node")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	h.reloadPools(r.Context())
-}
-
-// HandleCheckNode handles POST /admin/nodes/{id}/check.
-func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid node ID")
-		return
-	}
-
-	node, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, nodepool.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Node not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching node for check", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch node")
-		return
-	}
-
-	result := h.checkNodeView(r.Context(), node)
-	writeJSON(w, http.StatusOK, checkNodeResult{Healthy: result.Healthy, ActiveJobs: result.ActiveJobs, EgressKbps: result.EgressKbps, CapabilitiesHash: result.CapabilitiesHash})
-}
-
 // applyHealthToPools publishes one check's result to whichever pool holds the
 // node, so an operator-triggered check lands everywhere the sweep's would.
 //
@@ -506,109 +291,6 @@ func (h *NodeHandler) applyHealthToPools(node *nodepool.Node, report nodepool.He
 			h.transcodePool.ApplyHealthReport(node.ID, node.URL, report, checkedAt)
 		}
 	}
-}
-
-// HandleForceReloadNodes handles POST /admin/nodes/force-reload — sends a
-// force-reload signal to every enabled node in parallel.
-func (h *NodeHandler) HandleForceReloadNodes(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	allNodes, err := h.repo.List(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	var nodes []*nodepool.Node
-	for _, n := range allNodes {
-		if n.Enabled {
-			nodes = append(nodes, n)
-		}
-	}
-
-	results := make([]ForceReloadResult, len(nodes))
-	var wg sync.WaitGroup
-	for i, n := range nodes {
-		wg.Add(1)
-		go func(idx int, node *nodepool.Node) {
-			defer wg.Done()
-			result := ForceReloadResult{NodeID: node.ID, NodeName: node.Name}
-			client := &http.Client{Timeout: 10 * time.Second}
-			req, err := h.forceReloadRequest(ctx, node)
-			if err != nil {
-				result.Status = "error"
-				result.Error = err.Error()
-				results[idx] = result
-				return
-			}
-			resp, err := telemetry.DoTrustedNode(client, req, "reload")
-			if err != nil {
-				result.Status = "error"
-				result.Error = err.Error()
-				results[idx] = result
-				return
-			}
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
-				result.Status = "ok"
-			} else {
-				result.Status = "error"
-				result.Error = fmt.Sprintf("unexpected status %d", resp.StatusCode)
-			}
-			results[idx] = result
-		}(i, n)
-	}
-	wg.Wait()
-
-	type forceReloadResponse struct {
-		Results []ForceReloadResult `json:"results"`
-	}
-	writeJSON(w, http.StatusOK, forceReloadResponse{Results: results})
-}
-
-// HandleForceReloadNode handles POST /admin/nodes/{id}/force-reload — sends a
-// force-reload signal to a single node identified by its ID.
-func (h *NodeHandler) HandleForceReloadNode(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "node ID must be an integer")
-		return
-	}
-
-	node, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "node not found")
-		return
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := h.forceReloadRequest(r.Context(), node)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-
-	resp, err := telemetry.DoTrustedNode(client, req, "reload")
-	if err != nil {
-		type forceReloadResponse struct {
-			Results []ForceReloadResult `json:"results"`
-		}
-		writeJSON(w, http.StatusOK, forceReloadResponse{Results: []ForceReloadResult{{
-			NodeID: node.ID, NodeName: node.Name,
-			Status: "error", Error: err.Error(),
-		}}})
-		return
-	}
-	resp.Body.Close()
-
-	status := "ok"
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		status = "error"
-	}
-	type forceReloadResponse struct {
-		Results []ForceReloadResult `json:"results"`
-	}
-	writeJSON(w, http.StatusOK, forceReloadResponse{Results: []ForceReloadResult{{
-		NodeID: node.ID, NodeName: node.Name, Status: status,
-	}}})
 }
 
 // ReprobeNodeResult is the JSON response for an operator-triggered capability
@@ -719,51 +401,6 @@ func (h *NodeHandler) extendReprobeWriteDeadline(
 	}
 }
 
-// HandleReprobeNode handles POST /admin/nodes/{id}/reprobe — asks one node to
-// discard its cached hardware-probe verdicts and re-verify against live
-// hardware, then stores the resulting inventory immediately.
-//
-// This is the operator's answer to hardware that stopped working underneath a
-// running node. A node caches a successful probe for its whole process lifetime
-// (re-verifying per request would put ffmpeg execs on the playback path), so a
-// GPU that has since been removed, or whose driver was replaced, keeps reading
-// "verified" until the node restarts. Nothing about that is visible in a health
-// check, because the node is perfectly healthy either way. The opposite
-// direction self-heals: a failed GPU probe is retried after a short negative
-// TTL, so a repaired driver reaches the list on the next capability snapshot
-// without this action.
-//
-// A node that is transcoding refuses: the probe smoke-encodes on the GPU, and a
-// busy encoder would report working hardware as failed.
-//
-// Both halves matter: the node recomputes, and this server then refetches and
-// persists the report so the admin list, the pools, and the planner's GPU
-// identities agree with it without waiting up to a sweep interval. The refresh
-// reuses the health checker's own machinery, so drift detection and persistence
-// have exactly one implementation.
-func (h *NodeHandler) HandleReprobeNode(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid node ID")
-		return
-	}
-
-	node, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, nodepool.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Node not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching node for re-probe", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch node")
-		return
-	}
-
-	h.extendReprobeWriteDeadline(w, r, node, h.nodeReprobeTimeout(node))
-
-	writeJSON(w, http.StatusOK, h.reprobeNodeView(r.Context(), node))
-}
-
 // nodeReprobeResponse is the node's own answer to /admin/reprobe-capabilities.
 type nodeReprobeResponse struct {
 	Resolved       string `json:"resolved"`
@@ -823,60 +460,6 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 // strings; the bound is only there because a node is a worker that may run on
 // remote hardware.
 const maxNodeReprobeResponseBytes = 8 << 10
-
-// HandleListSessions handles GET /admin/nodes/sessions — lists active playback
-// sessions from Redis, optionally filtered by node_id query parameter.
-func (h *NodeHandler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
-	if h.redisClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "redis_unavailable", "Redis not configured")
-		return
-	}
-
-	ctx := r.Context()
-	pattern := "silo:sessions:*"
-
-	if nodeIDStr := r.URL.Query().Get("node_id"); nodeIDStr != "" {
-		nodeID, err := strconv.Atoi(nodeIDStr)
-		if err == nil {
-			node, err := h.repo.GetByID(ctx, nodeID)
-			if err == nil {
-				hashBytes := sha256.Sum256([]byte(node.URL))
-				nodeHash := hex.EncodeToString(hashBytes[:4])
-				pattern = "silo:sessions:" + nodeHash + ":*"
-			}
-		}
-	}
-
-	var sessions []json.RawMessage
-	var cursor uint64
-	for {
-		keys, next, err := h.redisClient.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "redis_error", err.Error())
-			return
-		}
-		for _, key := range keys {
-			val, err := h.redisClient.Get(ctx, key).Result()
-			if err != nil {
-				continue
-			}
-			sessions = append(sessions, json.RawMessage(val))
-		}
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-
-	if sessions == nil {
-		sessions = []json.RawMessage{}
-	}
-
-	type sessionsResponse struct {
-		Sessions []json.RawMessage `json:"sessions"`
-	}
-	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: sessions})
-}
 
 // nodePostCommitTimeout bounds work that runs after the response is written and
 // therefore no longer has a client waiting on it.

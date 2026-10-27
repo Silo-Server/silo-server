@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -162,46 +159,6 @@ func TestPlaybackActivityBucketSeconds(t *testing.T) {
 				t.Fatalf("playbackActivityTruncField(%d) = %q, want %q", got, trunc, tt.wantTrunc)
 			}
 		})
-	}
-}
-
-func TestHandleGetPlaybackActivityEmptyWindowSerializesArrays(t *testing.T) {
-	t.Parallel()
-
-	source := &stubPlaybackActivitySource{activity: &AdminPlaybackActivity{
-		Hours:         24,
-		BucketSeconds: adminPlaybackActivityHourSeconds,
-		Buckets:       []AdminPlaybackActivityBucket{},
-	}}
-	handler := &AdminHandler{PlaybackActivitySource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body struct {
-		Hours         int               `json:"hours"`
-		BucketSeconds int               `json:"bucket_seconds"`
-		Buckets       []json.RawMessage `json:"buckets"`
-		Reliability   struct {
-			CompletionRate float64 `json:"completion_rate"`
-		} `json:"reliability"`
-		ProfilesActive24h int64 `json:"profiles_active_24h"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Buckets == nil {
-		t.Fatal("buckets decoded as null; a data-free server must send []")
-	}
-	if len(body.Buckets) != 0 || body.ProfilesActive24h != 0 || body.Reliability.CompletionRate != 0 {
-		t.Fatalf("unexpected body: %+v", body)
-	}
-	// The client zero-fills from bucket_seconds, so it has to survive
-	// serialization even on a server with nothing to report.
-	if body.BucketSeconds != adminPlaybackActivityHourSeconds {
-		t.Fatalf("bucket_seconds = %d, want %d", body.BucketSeconds, adminPlaybackActivityHourSeconds)
 	}
 }
 

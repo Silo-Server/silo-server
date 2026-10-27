@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -38,16 +36,6 @@ type jellyfinCompatWebInstallRequest struct {
 	SourceURL string `json:"source_url,omitempty"`
 }
 
-// HandleGetJellyfinCompatStatus handles GET /admin/jellyfin-compat/status.
-func (h *AdminHandler) HandleGetJellyfinCompatStatus(w http.ResponseWriter, r *http.Request) {
-	status, err := h.ReadAdminJellyfinCompatStatus(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, status)
-}
-
 // ReadAdminJellyfinCompatStatus observes the existing local installation state.
 func (h *AdminHandler) ReadAdminJellyfinCompatStatus(ctx context.Context) (jellycompat.WebComponentStatus, error) {
 	if h.SettingsRepo == nil {
@@ -58,47 +46,6 @@ func (h *AdminHandler) ReadAdminJellyfinCompatStatus(ctx context.Context) (jelly
 		return jellycompat.WebComponentStatus{}, apiError(500, "internal_error", "Failed to load settings")
 	}
 	return jellycompat.WebComponentStatusForConfig(h.Config, settings), nil
-}
-
-// HandleUpdateJellyfinCompatSettings handles PATCH /admin/jellyfin-compat/settings.
-func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
-	var req jellyfinCompatSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	var stored map[string]string
-	if req.WebDir != nil && (req.WebInstallDir == nil || strings.TrimSpace(*req.WebInstallDir) == "") {
-		var ok bool
-		stored, ok = h.jellyfinCompatSettings(w, r)
-		if !ok {
-			return
-		}
-	}
-	updates, err := jellyfinCompatSettingUpdates(req, stored)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	for key, value := range updates {
-		if err := h.SettingsRepo.Set(r.Context(), key, value); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
-			return
-		}
-		h.publishSettingChanged(r, key, value)
-	}
-	if jellyfinCompatSettingsRequireRestart(updates) {
-		h.markServerRestartRequired("jellyfin_compat")
-	}
-	settings, ok := h.jellyfinCompatSettings(w, r)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, jellycompat.WebComponentStatusForConfig(h.Config, settings))
 }
 
 func jellyfinCompatSettingUpdates(req AdminJellyfinCompatSettingsPatch, settings map[string]string) (map[string]string, error) {
@@ -186,53 +133,6 @@ func jellyfinCompatSettingsRequireRestart(updates map[string]string) bool {
 		}
 	}
 	return false
-}
-
-// HandleInstallJellyfinCompatWeb handles POST /admin/jellyfin-compat/web/install.
-func (h *AdminHandler) HandleInstallJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	h.installJellyfinCompatWeb(w, r)
-}
-
-// HandleUpdateJellyfinCompatWeb handles POST /admin/jellyfin-compat/web/update.
-func (h *AdminHandler) HandleUpdateJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	h.installJellyfinCompatWeb(w, r)
-}
-
-// HandleRemoveJellyfinCompatWeb handles POST /admin/jellyfin-compat/web/remove.
-func (h *AdminHandler) HandleRemoveJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	status, err := h.StartAdminJellyfinCompatWebRemove(r.Context())
-	if err != nil {
-		writeJellyfinCompatWebStartError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, status)
-}
-
-func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	var req jellyfinCompatWebInstallRequest
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-			return
-		}
-	}
-	status, err := h.StartAdminJellyfinCompatWebInstall(r.Context(), req)
-	if err != nil {
-		writeJellyfinCompatWebStartError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, status)
-}
-
-// writeJellyfinCompatWebStartError keeps the frozen bridge answers: the seam's
-// own decisions arrive as *APIError, installer refusals as jellycompat errors.
-func writeJellyfinCompatWebStartError(w http.ResponseWriter, err error) {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-		return
-	}
-	writeJellyfinCompatOperationError(w, err)
 }
 
 // AdminJellyfinWebInstallRequest pins the Jellyfin Web release to install. An
@@ -375,28 +275,11 @@ func (h *AdminHandler) publishJellyfinCompatWebOperationProgress(op jellycompat.
 	)
 }
 
-func (h *AdminHandler) jellyfinCompatSettings(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return nil, false
-	}
-	settings, err := h.SettingsRepo.GetAll(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load settings")
-		return nil, false
-	}
-	return settings, true
-}
-
 func setOptionalString(updates map[string]string, key string, value *string) {
 	if value == nil {
 		return
 	}
 	updates[key] = strings.TrimSpace(*value)
-}
-
-func (h *AdminHandler) publishSettingChanged(r *http.Request, key, value string) {
-	h.publishSettingChangedContext(r.Context(), key, value)
 }
 
 func (h *AdminHandler) publishSettingChangedContext(ctx context.Context, key, value string) {
@@ -406,16 +289,5 @@ func (h *AdminHandler) publishSettingChangedContext(ctx context.Context, key, va
 	}
 	if h.OnServerSettingUpdated != nil {
 		h.OnServerSettingUpdated(ctx, key, value)
-	}
-}
-
-func writeJellyfinCompatOperationError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, jellycompat.ErrWebComponentOperationActive):
-		writeError(w, http.StatusConflict, "operation_active", "A Jellyfin Web operation is already running")
-	case errors.Is(err, jellycompat.ErrWebInstallerUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "installer_unavailable", err.Error())
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 	}
 }

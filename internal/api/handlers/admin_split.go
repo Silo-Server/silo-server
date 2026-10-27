@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -128,75 +126,6 @@ type itemFileResponse struct {
 	ObservedRootPath string `json:"observed_root_path"`
 	SeasonNumber     int    `json:"season_number,omitempty"`
 	EpisodeNumber    int    `json:"episode_number,omitempty"`
-}
-
-// HandleListItemFiles handles GET /admin/items/{id}/files. It backs the split
-// dialog: the raw media_files rows of an item, grouped client-side by folder.
-func (h *AdminSplitHandler) HandleListItemFiles(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	if _, err := h.items.GetByID(r.Context(), contentID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-	files, err := h.loadItemFiles(r.Context(), contentID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "admin split: listing item files", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item files")
-		return
-	}
-	resp := make([]itemFileResponse, 0, len(files))
-	for _, f := range files {
-		resp = append(resp, itemFileResponse{
-			ID:               f.ID,
-			LibraryID:        f.MediaFolderID,
-			FilePath:         f.FilePath,
-			ObservedRootPath: f.ObservedRootPath,
-			SeasonNumber:     f.SeasonNumber,
-			EpisodeNumber:    f.EpisodeNumber,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": resp})
-}
-
-// HandleSplitItem handles POST /admin/items/{id}/split.
-func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Request) {
-	sourceID := chi.URLParam(r, "id")
-	if sourceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	var req splitItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	out, err := h.SplitAdminItem(r.Context(), sourceID, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, withoutForeignHistory(r.Context(), out))
-}
-
-// withoutForeignHistory drops the ambiguous-history samples, which name other
-// accounts' profiles and watch times, unless the caller is the acting admin.
-// The v1 route also admits delegated metadata curators (v2 split is
-// admin-only); they keep the counts. An undecidable caller gets no samples.
-func withoutForeignHistory(ctx context.Context, out AdminSplitResult) AdminSplitResult {
-	if out.Reattribution == nil || len(out.Reattribution.AmbiguousHistory) == 0 {
-		return out
-	}
-	if acting, err := middleware.ActingAdmin(ctx); err == nil && acting {
-		return out
-	}
-	report := *out.Reattribution
-	report.AmbiguousHistory = nil
-	out.Reattribution = &report
-	return out
 }
 
 type AdminSplitRequest = splitItemRequest
@@ -360,29 +289,6 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 	}, nil
 }
 
-// HandleMergeItem handles POST /admin/items/{id}/merge.
-func (h *AdminSplitHandler) HandleMergeItem(w http.ResponseWriter, r *http.Request) {
-	sourceID := chi.URLParam(r, "id")
-	if sourceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	if h.merger == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Merge is not available")
-		return
-	}
-	var req mergeItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	out, err := h.MergeAdminItem(r.Context(), sourceID, req.Into)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"merged_into": out})
-}
 func (h *AdminSplitHandler) MergeAdminItem(ctx context.Context, sourceID, into string) (string, error) {
 	if h == nil || h.merger == nil {
 		return "", apiError(http.StatusInternalServerError, "internal_error", "Merge is not available")

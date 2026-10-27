@@ -20,7 +20,7 @@ func (s observingSaveAttemptV3) SaveAttempt(ctx context.Context, record playback
 	return s.save(ctx, record)
 }
 
-func TestStartPlaybackV3PersistsBeforeTransportPublication(t *testing.T) {
+func TestStartPlaybackV2PersistsBeforeTransportPublication(t *testing.T) {
 	for _, shutdown := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save failure", true: "shutdown after save"}[shutdown], func(t *testing.T) {
 			file := v3HandlerFixtureFile(t)
@@ -51,7 +51,7 @@ func TestStartPlaybackV3PersistsBeforeTransportPublication(t *testing.T) {
 			}}
 			request := func() *httptest.ResponseRecorder {
 				rr := httptest.NewRecorder()
-				handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+				serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 				return rr
 			}
 			rr := request()

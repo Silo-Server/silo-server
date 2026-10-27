@@ -9,15 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -106,39 +103,6 @@ func NewEbookReaderHandler(authorizer *MediaFileAuthorizer) *EbookReaderHandler 
 	return &EbookReaderHandler{FileAuthorizer: authorizer}
 }
 
-// HandleReadFile serves an ebook file inline with byte-range support.
-func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Request) {
-	if apimw.GetUserID(r.Context()) == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h == nil || h.FileAuthorizer == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader is not configured")
-		return
-	}
-
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	fileID, err := strconv.Atoi(chi.URLParam(r, "file_id"))
-	if contentID == "" || err != nil || fileID <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id and file_id are required")
-		return
-	}
-
-	file, err := h.ResolveReaderFile(r.Context(), contentID, fileID, requestAccessFilter(r))
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-
-	if err := h.ServeReaderFile(w, r, file); err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve ebook file")
-	}
-}
-
 // Request body caps for the ebook reader write endpoints. Progress payloads
 // are tiny; reader config and annotations can carry user text and metadata
 // but should never approach these limits.
@@ -182,241 +146,12 @@ type ebookReaderAnnotationPatchRequest struct {
 	Metadata     json.RawMessage `json:"metadata"`
 }
 
-func (h *EbookReaderHandler) HandleGetProgress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h == nil || h.ProgressStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader progress is not configured")
-		return
-	}
-
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
-		return
-	}
-	progress, err := h.ReaderProgress(r.Context(), userID, profileID, contentID, requestAccessFilter(r))
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	if progress == nil {
-		writeJSON(w, http.StatusOK, map[string]any{})
-		return
-	}
-	writeJSON(w, http.StatusOK, progress)
-}
-
-func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h == nil || h.ProgressStore == nil || h.FileAuthorizer == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader progress is not configured")
-		return
-	}
-
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
-		return
-	}
-
-	var req ebookReaderProgressRequest
-	if !decodeLimitedJSONBody(w, r, ebookReaderProgressMaxBodySize, &req, false) {
-		return
-	}
-	req.Location = strings.TrimSpace(req.Location)
-	if req.FileID <= 0 || req.Location == "" || req.Progress < 0 || req.Progress > 1 {
-		writeError(w, http.StatusBadRequest, "bad_request", "file_id, location, and progress are required")
-		return
-	}
-
-	progress, err := h.SaveReaderProgress(r.Context(), EbookReaderProgress{
-		UserID: userID, ProfileID: profileID, ContentID: contentID,
-		FileID: req.FileID, Location: req.Location, Progress: req.Progress,
-	}, requestAccessFilter(r))
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, progress)
-}
-
-func (h *EbookReaderHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h == nil || h.ConfigStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader config is not configured")
-		return
-	}
-
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
-		return
-	}
-	config, err := h.ReaderConfig(r.Context(), userID, profileID, contentID, requestAccessFilter(r))
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	if config == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"config": map[string]any{}})
-		return
-	}
-	writeJSON(w, http.StatusOK, config)
-}
-
-func (h *EbookReaderHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h == nil || h.ConfigStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader config is not configured")
-		return
-	}
-
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
-		return
-	}
-
-	var req ebookReaderConfigRequest
-	if !decodeLimitedJSONBody(w, r, ebookReaderConfigMaxBodySize, &req, false) {
-		return
-	}
-	if !jsonObject(req.Config) {
-		writeError(w, http.StatusBadRequest, "bad_request", "config must be a JSON object")
-		return
-	}
-	config, err := h.SaveReaderConfig(r.Context(), EbookReaderConfig{
-		UserID: userID, ProfileID: profileID, ContentID: contentID, Config: req.Config,
-	}, requestAccessFilter(r), nil)
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, config)
-}
-
 func jsonObject(raw json.RawMessage) bool {
 	if len(raw) == 0 {
 		return false
 	}
 	var value map[string]any
 	return json.Unmarshal(raw, &value) == nil && value != nil
-}
-
-func (h *EbookReaderHandler) HandleListAnnotations(w http.ResponseWriter, r *http.Request) {
-	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
-	if !ok {
-		return
-	}
-	items, err := h.AnnotationStore.List(r.Context(), userID, profileID, contentID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook annotations")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (h *EbookReaderHandler) HandleCreateAnnotation(w http.ResponseWriter, r *http.Request) {
-	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
-	if !ok {
-		return
-	}
-	var req ebookReaderAnnotationRequest
-	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
-		return
-	}
-	annotation, _, err := h.createReaderAnnotation(r.Context(), userID, profileID, contentID, "", req)
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, annotation)
-}
-
-func (h *EbookReaderHandler) HandleUpdateAnnotation(w http.ResponseWriter, r *http.Request) {
-	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
-	if !ok {
-		return
-	}
-	annotationID := strings.TrimSpace(chi.URLParam(r, "annotation_id"))
-	if annotationID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "annotation_id is required")
-		return
-	}
-	var req ebookReaderAnnotationPatchRequest
-	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
-		return
-	}
-	updated, err := h.patchReaderAnnotation(r.Context(), userID, profileID, contentID, annotationID, req, nil)
-	if errors.Is(err, ErrEbookAnnotationNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "Ebook annotation not found")
-		return
-	}
-	if err != nil {
-		h.writeReadError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, updated)
-}
-
-func (h *EbookReaderHandler) HandleDeleteAnnotation(w http.ResponseWriter, r *http.Request) {
-	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
-	if !ok {
-		return
-	}
-	annotationID := strings.TrimSpace(chi.URLParam(r, "annotation_id"))
-	if annotationID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "annotation_id is required")
-		return
-	}
-	if err := h.AnnotationStore.Delete(r.Context(), userID, profileID, contentID, annotationID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete ebook annotation")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *EbookReaderHandler) annotationRequestScope(w http.ResponseWriter, r *http.Request) (int, string, string, bool) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return 0, "", "", false
-	}
-	if h == nil || h.AnnotationStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook annotations are not configured")
-		return 0, "", "", false
-	}
-	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
-		return 0, "", "", false
-	}
-	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
-		h.writeReadError(w, err)
-		return 0, "", "", false
-	}
-	return userID, profileID, contentID, true
 }
 
 // validateEbookReaderAnnotation enforces the annotation invariants shared by
@@ -509,19 +244,6 @@ func mergeEbookReaderAnnotationPatch(
 		return EbookReaderAnnotation{}, err
 	}
 	return merged, nil
-}
-
-func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
-	if apiErr, ok := errors.AsType[*APIError](err); ok {
-		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-		return
-	}
-	switch {
-	case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
-	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize ebook file")
-	}
 }
 
 func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.MediaFile) error {

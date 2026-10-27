@@ -3,11 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http/httptest"
-	"strings"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -71,25 +67,17 @@ func (f *curationImageService) ApplyLocalItemImage(context.Context, metadata.App
 func (f *curationImageService) ApplyUploadedItemImage(context.Context, metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
 	return nil, errors.New("no uploads")
 }
-func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
+
+// An episode takes its image as a still for its own season and episode, and
+// an administrator may apply an image from the local network.
+func TestAdminApplyEpisodeImageTargetsTheEpisode(t *testing.T) {
 	svc := &curationImageService{fail: true}
 	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil)
-	router := chi.NewRouter()
-	router.Get("/{id}/images", h.HandleGetItemImages)
-	router.Post("/{id}/images/apply", h.HandleApplyItemImage)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest("GET", "/series/images", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"original_url":"source"`) {
-		t.Fatalf("bridge %d %s", rec.Code, rec.Body)
-	}
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest("POST", "/series/images/apply", strings.NewReader(`{"original_url":"source","type":"still"}`)))
-	if rec.Code != 400 || svc.calls != 0 || !strings.Contains(rec.Body.String(), `"error":"unsupported_image_type"`) {
-		t.Fatalf("preflight %d %s", rec.Code, rec.Body)
-	}
 	_, err := h.ApplyAdminItemImage(t.Context(), "episode", AdminItemImageRequest{OriginalURL: "source", Type: "poster", ProviderID: "tmdb"})
-	if err == nil || svc.calls != 1 || svc.request.ImageType != metadata.ImageStill || svc.request.SeasonNumber == nil || *svc.request.SeasonNumber != 0 || svc.request.EpisodeNumber == nil || *svc.request.EpisodeNumber != 2 {
-		t.Fatalf("episode %v %+v", err, svc.request)
+	if err == nil || svc.calls != 1 || svc.request.ImageType != metadata.ImageStill ||
+		svc.request.SeasonNumber == nil || *svc.request.SeasonNumber != 0 ||
+		svc.request.EpisodeNumber == nil || *svc.request.EpisodeNumber != 2 {
+		t.Fatalf("episode apply %v %+v", err, svc.request)
 	}
 	if !svc.private {
 		t.Fatal("admin apply did not allow a local network image source")

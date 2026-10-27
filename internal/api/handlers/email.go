@@ -2,10 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/mail"
 	"time"
 
 	silomail "github.com/Silo-Server/silo-server/internal/mail"
@@ -33,39 +29,6 @@ type emailTestResponse struct {
 	OK         bool   `json:"ok"`
 	DurationMS int64  `json:"duration_ms"`
 	Message    string `json:"message,omitempty"`
-}
-
-// HandleTest handles POST /admin/email/test: synchronously sends a test
-// message so admins can verify SMTP settings before any feature depends on
-// them.
-func (h *EmailHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.sender == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Email is not available")
-		return
-	}
-	var req emailTestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if _, err := mail.ParseAddress(req.To); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "A valid recipient address is required")
-		return
-	}
-
-	duration, err := h.sendTestEmail(r.Context(), req.To)
-	response := emailTestResponse{
-		OK:         err == nil,
-		DurationMS: duration,
-	}
-	switch {
-	case err == nil:
-	case errors.Is(err, silomail.ErrNotConfigured):
-		response.Message = "Email is not configured. Set the SMTP host, from address, and enable email first."
-	default:
-		response.Message = err.Error()
-	}
-	writeJSON(w, http.StatusOK, response)
 }
 
 // sendTestEmail constructs and dispatches the same message for both transports.
