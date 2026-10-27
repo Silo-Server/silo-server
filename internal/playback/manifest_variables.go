@@ -32,6 +32,27 @@ const manifestParamVariablePrefix = "silo_"
 // EXT-X-DEFINE.
 const manifestVariableMinVersion = 8
 
+// maxManifestQueryBytes bounds the request query a playlist repeats on its
+// URIs. A client without EXT-X-DEFINE gets the query on every URI of FFmpeg's
+// real playlist, up to maxSyntheticManifestSegments of them, so an unbounded
+// query multiplies into gigabytes. The largest real query, a stream token
+// carrying a PATH_MAX media path plus an account token, is about 7 KB.
+const maxManifestQueryBytes = 16 * 1024
+
+// manifestQueryEscaper percent-encodes the characters an EXT-X-DEFINE value
+// (a quoted-string) cannot hold, so substitution applies to any query. Real
+// queries never contain them, and the encoding keeps the decoded parameters.
+var manifestQueryEscaper = strings.NewReplacer(`"`, "%22", "\r", "%0D", "\n", "%0A")
+
+// manifestQuery returns rawQuery in the form a playlist's URIs repeat, or
+// ErrManifestQueryTooLong.
+func manifestQuery(rawQuery string) (string, error) {
+	if len(rawQuery) > maxManifestQueryBytes {
+		return "", ErrManifestQueryTooLong
+	}
+	return manifestQueryEscaper.Replace(rawQuery), nil
+}
+
 // minRewrittenURISavings is the per-URI saving below which a playlist the
 // server rewrites (FFmpeg's real playlist, a relayed node playlist) keeps the
 // literal form. Only a credential-sized value (a signed stream token or an
