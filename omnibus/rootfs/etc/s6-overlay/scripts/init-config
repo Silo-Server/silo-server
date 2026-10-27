@@ -51,7 +51,8 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   # since Silo shares the container with it. A database of the deployment's
   # own keeps Silo's default, which leaves it alone.
   [[ -n "${POSTGRES_TUNE:-}${SILO_POSTGRES_TUNE:-}" ]] || export_env POSTGRES_TUNE auto
-  [[ -n "${POSTGRES_TUNE_MEMORY_BUDGET_PERCENT:-}" ]] || export_env POSTGRES_TUNE_MEMORY_BUDGET_PERCENT 50
+  [[ -n "${POSTGRES_TUNE_MEMORY_BUDGET_PERCENT:-}${SILO_POSTGRES_TUNE_MEMORY_BUDGET_PERCENT:-}" ]] ||
+    export_env POSTGRES_TUNE_MEMORY_BUDGET_PERCENT 50
 else
   # Not the URL itself: it can carry a password.
   postgres_state="external"
