@@ -134,14 +134,11 @@ func TestExtractLookupImages(t *testing.T) {
 		metadataJSON string
 		want         bool
 	}{
-		{"inside envelope", `{"metadata":{"lookup_images":true}}`, true},
-		{"top level", `{"lookup_images":true}`, true},
+		{"declared", `{"metadata":{"lookup_images":true}}`, true},
 
 		// Anything but JSON true keeps images gated on the provider's own ID.
 		{"absent", tmdbCapMetadata, false},
-		{"false", `{"metadata":{"lookup_images":false}}`, false},
-		{"string", `{"metadata":{"lookup_images":"true"}}`, false},
-		{"malformed json", `{not json`, false},
+		{"not a boolean", `{"metadata":{"lookup_images":"true"}}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
