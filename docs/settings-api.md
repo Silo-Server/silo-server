@@ -1010,7 +1010,7 @@ PUT /api/v1/admin/users/42/settings/values/ui.card_presentation?scope=profile_cl
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
-{"value":{"poster_size":"large","caption":"artwork"}}
+{"value":{"poster_size":"large","caption":"title_metadata"}}
 ```
 
 The five accepted `client_family` values are also returned by the capability

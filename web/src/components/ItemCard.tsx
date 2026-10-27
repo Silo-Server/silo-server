@@ -15,7 +15,6 @@ import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
-import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
@@ -204,9 +203,6 @@ export default function ItemCard({
       : itemHref;
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
-  const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -313,26 +309,22 @@ export default function ItemCard({
           itemTitle={displayTitle}
         />
       </div>
-      {showCaption ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
-            {displayTitle}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+          {displayTitle}
+        </ViewTransitionLink>
+        {episodeLabels?.episodeTitle ? (
+          <ViewTransitionLink
+            to={itemHref}
+            className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
+          >
+            {episodeLabels.episodeTitle}
           </ViewTransitionLink>
-          {showMetadata && episodeLabels?.episodeTitle ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
-            >
-              {episodeLabels.episodeTitle}
-            </ViewTransitionLink>
-          ) : null}
-          {showMetadata ? (
-            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
-              <SortMeta item={item} sortField={sortField} />
-            </ViewTransitionLink>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+        <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
+          <SortMeta item={item} sortField={sortField} />
+        </ViewTransitionLink>
+      </div>
     </div>
   );
 }
