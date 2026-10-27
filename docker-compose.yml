@@ -1,91 +1,62 @@
+# Silo in one container. The omnibus image runs Silo with a bundled
+# PostgreSQL, and starts the bundled Redis and Meilisearch when ENABLE_REDIS
+# or ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
+# docs/architecture/omnibus-image.md describes the image.
+#
+# For hardware transcoding, layer docker-compose.vaapi.yml or
+# docker-compose.nvidia.yml on this file (COMPOSE_FILE in .env.example). For
+# proxy or transcode nodes on other hosts, layer docker-compose.node-access.yml
+# here and run docker-compose.node.yml on each node's host.
+
+# The services that keep the names of the multi-container stack's PostgreSQL,
+# Redis, and Meilisearch; see the note under services.
+x-bridge: &bridge
+  image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
+  entrypoint: ["true"]
+  restart: "no"
+  network_mode: none
+  healthcheck:
+    disable: true
+  # The image declares /config a volume; this keeps Docker from creating an
+  # empty one for each of these containers.
+  tmpfs: /config
+
 services:
-  postgres:
-    image: pgvector/pgvector:pg18
-    restart: unless-stopped
-    shm_size: ${POSTGRES_SHM_SIZE:-8gb}
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-silo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
-      POSTGRES_DB: ${POSTGRES_DB:-silo}
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - ${SILO_DATA_ROOT:-/opt/silo}/postgres:/var/lib/postgresql
-    command: ["postgres", "-c", "listen_addresses=*"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  redis:
-    image: redis:alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
-    volumes:
-      - ${SILO_DATA_ROOT:-/opt/silo}/redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  meilisearch:
-    # Pinned: Meilisearch will not open data written by another version.
-    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.54.0}
-    restart: unless-stopped
-    profiles: [search]
-    entrypoint:
-      - /bin/sh
-      - -euc
-      - |
-        if [ -z "$${MEILI_MASTER_KEY:-}" ]; then
-          echo "MEILI_MASTER_KEY is required when enabling the search profile" >&2
-          exit 1
-        fi
-        exec /bin/meilisearch
-    environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
-      MEILI_UPGRADE_DB: ${MEILI_UPGRADE_DB:-false}
-    ports:
-      - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
-    volumes:
-      - ${SILO_DATA_ROOT:-/opt/silo}/meilisearch:/meili_data
-
   silo:
-    image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
-    # (default 5s), then finishes in-flight requests. Docker kills a container
-    # 10s after asking it to stop, which would cut that short. A single server
-    # with no load balancer in front can set SILO_SHUTDOWN_DELAY=0.
+    # (default 5s), then finishes in-flight requests, and PostgreSQL shuts
+    # down after it. Docker kills a container 10s after asking it to stop,
+    # which would cut that short.
     stop_grace_period: 2m
     environment:
-      MODE: integrated
       # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
       # are host-side published-port overrides.
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
+      # The account that runs Silo, owns /config/silo, and reads the media.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
       # Master key for at-rest credential encryption. Required — the server
       # refuses to start without it. Generate with: openssl rand -base64 48
       # Back it up SEPARATELY from your database dumps; losing it makes encrypted
       # secrets unrecoverable. See docs/architecture/secret-encryption.md.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
-      POSTGRES_TUNE: ${POSTGRES_TUNE:-auto}
+      # Both are off by default. Set to "true" to start the bundled service.
+      ENABLE_REDIS: ${ENABLE_REDIS:-false}
+      ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
     ports:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
     volumes:
+      # Silo's state, the PostgreSQL cluster, and the Redis and Meilisearch data.
+      - ${SILO_DATA_ROOT:-/opt/silo}/config:/config
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-      - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
-      - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
-      - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
+      # Transcode segments, kept out of /config so a backup of it stays small.
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       # Prepared downloads. With "Prepared file directory" (download.artifact_dir)
       # blank, Silo keeps them beside the transcode directory, not inside it, so
@@ -109,89 +80,41 @@ services:
       - /proc/loadavg:/host/proc/loadavg:ro
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_completed_successfully
       redis:
-        condition: service_healthy
+        condition: service_completed_successfully
+      meilisearch:
+        condition: service_completed_successfully
     env_file:
       - path: .env
         required: false
-  # Optional distributed-mode example. Most single-host installs should
-  # just use the integrated service above.
-  # silo-proxy:
-  #   image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
-  #   restart: unless-stopped
-  #   profiles: [proxy]
-  #   # Lets the proxy finish in-flight requests on stop instead of being
-  #   # killed after Docker's default 10s.
-  #   stop_grace_period: 2m
-  #   environment:
-  #     MODE: proxy
-  #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
-  #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
-  #     REDIS_URL: redis://redis:6379
-  #     # Network access provider plugins run on proxies too. The proxy keeps
-  #     # its own copies, rehydrated from the database, under this dir; it
-  #     # does not need the primary node's plugin volume.
-  #     SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
-  #     PORT: "8080"
-  #   ports:
-  #     - "${PROXY_PORT:-8083}:8080"
-  #   volumes:
-  #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/proxy-plugins:/var/lib/silo/plugins
-  #     # See the note on the integrated service above: a node reports its own
-  #     # CPU, load, and memory rather than the physical machine's only with
-  #     # these mounted, and the Nodes page reads exactly what the node reports.
-  #     - /proc/meminfo:/host/proc/meminfo:ro
-  #     - /proc/stat:/host/proc/stat:ro
-  #     - /proc/loadavg:/host/proc/loadavg:ro
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   env_file:
-  #     - path: .env
-  #       required: false
 
-  # Optional distributed-mode example. Most single-host installs should
-  # just use the integrated service above.
-  # silo-transcode:
-  #   image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
-  #   restart: unless-stopped
-  #   profiles: [transcode]
-  #   # On stop the node drains: it takes no new work and lets its sessions
-  #   # finish for up to SILO_NODE_DRAIN_TIMEOUT (default 10m, 0 turns it off).
-  #   # Docker kills a container 10s after asking it to stop, so the grace
-  #   # period must cover the drain plus a minute for the shutdown after it.
-  #   stop_grace_period: 11m
-  #   environment:
-  #     MODE: transcode
-  #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
-  #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
-  #     REDIS_URL: redis://redis:6379
-  #     SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
-  #     PORT: "8080"
-  #   ports:
-  #     - "${TRANSCODE_PORT:-8082}:8080"
-  #   volumes:
-  #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
-  #     # See the note on the integrated service above: a node reports its own
-  #     # CPU, load, and memory rather than the physical machine's only with
-  #     # these mounted, and the Nodes page reads exactly what the node reports.
-  #     - /proc/meminfo:/host/proc/meminfo:ro
-  #     - /proc/stat:/host/proc/stat:ro
-  #     - /proc/loadavg:/host/proc/loadavg:ro
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   env_file:
-  #     - path: .env
-  #       required: false
+  # Earlier versions of this file ran PostgreSQL, Redis, and Meilisearch as
+  # services of their own. These three keep those names, so `docker compose up`
+  # replaces the old containers, which stops them, before Silo starts. Each
+  # exits at once. The postgres service first copies an earlier install into
+  # the layout above and leaves the old directories as they were; see "Moving
+  # from the multi-container stack" in docs/architecture/omnibus-image.md.
+  postgres:
+    <<: *bridge
+    entrypoint: ["/etc/silo-omnibus/migrate-compose-stack"]
+    environment:
+      SILO_DATA_ROOT: ${SILO_DATA_ROOT:-/opt/silo}
+      PUID: ${PUID:-1000}
+      # The names the earlier stack created its database and superuser with.
+      POSTGRES_USER: ${POSTGRES_USER:-silo}
+      POSTGRES_DB: ${POSTGRES_DB:-silo}
+      # Settings from .env that meant something else to the earlier stack.
+      # The migration refuses ones that would now point Silo at a removed
+      # service, a different image, or an empty database.
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_URL: ${REDIS_URL:-}
+      SILO_MEILISEARCH_URL: ${SILO_MEILISEARCH_URL:-}
+      SILO_IMAGE: ${SILO_IMAGE:-}
+      SILO_OMNIBUS_IMAGE: ${SILO_OMNIBUS_IMAGE:-}
+      POSTGRES_PASSWORD_SET: ${POSTGRES_PASSWORD:+set}
+      ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
+    volumes:
+      - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
+  redis: *bridge
+  meilisearch: *bridge

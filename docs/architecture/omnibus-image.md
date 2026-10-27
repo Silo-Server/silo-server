@@ -5,7 +5,7 @@ and Meilisearch, in one container supervised by
 [s6-overlay](https://github.com/just-containers/s6-overlay). It serves
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
-[Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.omnibus.yml` runs a
+[Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
 main server and `docker-compose.node.yml` a node.
 
 ## Build
@@ -204,3 +204,91 @@ Reusing `POSTGRES_PASSWORD` means a main server moved from that stack keeps the
 `DATABASE_URL` its nodes already have, as long as that stack ran with the
 default `POSTGRES_USER=silo`; nodes that sign in as another user are refused
 until their `DATABASE_URL` names `silo`. Their `REDIS_URL` gains the password.
+
+## Moving from the multi-container stack
+
+Before the omnibus image, `docker-compose.yml` ran PostgreSQL
+(`pgvector/pgvector:pg18`), Redis, and Meilisearch as services of their own,
+with data in `SILO_DATA_ROOT/postgres`, `redis`, and `meilisearch`, and Silo's
+state in `plugins`, `artwork`, and `compat`. The current file keeps services
+named `postgres`, `redis`, and `meilisearch`, so `docker compose up` replaces the
+old containers, which stops them, and Silo waits for all three to exit
+successfully. `redis` and `meilisearch` exit at once. `postgres` runs
+`/etc/silo-omnibus/migrate-compose-stack` with `SILO_DATA_ROOT` mounted at
+`/silo-data`, which works within that one mount so it can hard-link:
+
+- Silo's three directories are hard-linked into `config/silo`, or copied when
+  hard links fail across file systems. This happens with an external
+  `DATABASE_URL` too. Silo replaces files rather than rewriting them, so the
+  earlier stack keeps its own copy of any file Silo changes afterwards;
+  ownership is shared between the two, which the root-run earlier image
+  ignores.
+- The cluster in `postgres/18/docker` is copied to `config/postgres/data`. A
+  temporary server on a private socket creates the `silo` superuser role if
+  `POSTGRES_USER` named another, and renames `POSTGRES_DB` to `silo`.
+  `init-postgres` then replaces the copy's `pg_hba.conf`, which trusted every
+  local connection, on its first start, and `init-postgres-db` rebuilds the
+  collation-dependent indexes, since the copy was built under glibc 2.36.
+- Redis and Meilisearch data stay behind. Redis holds nothing a single node
+  cannot rebuild, and Silo builds a new index when `ENABLE_MEILISEARCH` is
+  turned on. A search provider the admin UI pointed at the old `meilisearch`
+  service goes back to `postgres` in the copy, unless `ENABLE_MEILISEARCH` is
+  on, in which case `init-config` hands Silo the bundled instance.
+
+It does nothing when the omnibus install already has a database of its own,
+and refuses, before anything is moved into place, when:
+
+- A pinned `SILO_IMAGE` (other than `latest` or `latest-omnibus`) is set
+  without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
+  `latest-omnibus` past the pin.
+- An earlier install is here and `.env` holds a `DATABASE_URL` or `REDIS_URL`
+  naming the old services or `localhost` (the old file overrode them for Silo,
+  and this one passes `.env` through), or a `SILO_MEILISEARCH_URL` naming the
+  old `meilisearch` service (Silo applies it on every start, and the image keeps
+  it even with its own Meilisearch on).
+- None of the earlier stack's data is here but `.env` sets `POSTGRES_PASSWORD`
+  (without node access) or `SILO_IMAGE`, which only it used: its data is in
+  named volumes or other paths, and starting would make an empty server
+  beside it.
+- The earlier install's directories exist without a cluster and `DATABASE_URL`
+  is unset.
+- The old cluster's `PG_VERSION` is a link or holds no version number, it has
+  a `postmaster.pid` (a server may still have it open), was written by another
+  PostgreSQL major version, or keeps its WAL or a tablespace outside the data
+  directory.
+- There is no room for the copy plus 2 GiB, or, once copied, for rebuilding
+  its largest collation-dependent index twice over (the index and its WAL) plus
+  1 GiB.
+- The copy has enabled proxy or transcode nodes and node access is off: they
+  reached the old services on published ports.
+
+How it stays safe to repeat and to roll back:
+
+- It never changes the old directories' contents, so the earlier Compose file
+  still starts on them. Deleting them is the administrator's job.
+- The database copy and Silo's directories are one generation, built under
+  staging names that no later run promotes. Moving them into place happens
+  under `/config/.compose-migration-pending`; a run that finds it sets aside
+  whatever was already moved (`.<name>.before-<time>`) and starts over, since
+  the old install may have changed since. A failure removes everything staged.
+- The copy's `pg_hba.conf` is removed and rewritten as `postgres`, never written
+  through, and its `PG_VERSION` is read without following a link, since files in
+  a cluster from another container can be links.
+- `/config/.compose-cluster-copied`, written last, records the source cluster's
+  system identifier and latest checkpoint location (`pg_controldata`), or
+  `none` when Silo's database is elsewhere. Any later start of the old cluster,
+  even a clean start and stop, changes the checkpoint, so the script refuses to
+  go on once the earlier Compose file has been used since the copy: starting on
+  the copy would drop what it wrote. It checks the same before moving a copy
+  into place.
+- A run with nothing to move prints nothing.
+
+Overrides of the old `postgres`, `redis`, or `meilisearch` services in a
+`docker-compose.override.yml` merge into these one-shot services and can break
+them (an `image` there has no migration script). Compose cannot check that
+before replacing the old containers, so the failure is loud: the `postgres`
+service exits non-zero and Silo does not start. Such overrides have to go
+before the update.
+
+Remove the three bridge services, and this script, once installs of the
+multi-container stack no longer need an upgrade path.

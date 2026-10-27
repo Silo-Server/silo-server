@@ -15,7 +15,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
       POSTGRES_DB: ${POSTGRES_DB:-silo}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - silo-dev-postgres:/var/lib/postgresql
     command: ["postgres", "-c", "listen_addresses=*"]
@@ -29,7 +29,7 @@ services:
     image: redis:alpine
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - silo-dev-redis:/data
     healthcheck:
