@@ -239,3 +239,91 @@ func waitForLockWaiter(t *testing.T, pool *pgxpool.Pool, pid uint32) uint32 {
 	t.Fatalf("no session waited on %d", pid)
 	return 0
 }
+
+// A season or episode the refresh's write would insert can be created and
+// published by another writer before the write reaches it. The write then
+// updates a row it never locked, and must still see the images lock that
+// writer committed.
+func TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB(t *testing.T) {
+	f := newArtworkLockFixture(t, "artwork-lock-created")
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		create string
+		write  func() error
+		shown  func() (string, error)
+	}{
+		{
+			name: "season",
+			create: `INSERT INTO seasons (content_id, series_id, season_number, poster_path, poster_source_path, poster_thumbhash)
+				VALUES ($1 || '-s2', $1, 2, $2, '', '')`,
+			write: func() error {
+				return f.seasons.BulkUpsert(ctx, []*models.Season{{SeriesID: f.seriesID, SeasonNumber: 2, PosterPath: f.path("refresh-season")}})
+			},
+			shown: func() (string, error) {
+				s, err := f.seasons.GetBySeriesAndNumber(ctx, f.seriesID, 2)
+				if err != nil {
+					return "", err
+				}
+				return s.PosterPath, nil
+			},
+		},
+		{
+			name: "episode",
+			create: `INSERT INTO episodes (content_id, series_id, season_number, episode_number, still_path, still_source_path, still_thumbhash)
+				VALUES ($1 || '-s1e2', $1, 1, 2, $2, '', '')`,
+			write: func() error {
+				return f.episodes.BulkUpsert(ctx, f.seriesID, []*models.Episode{{SeriesID: f.seriesID, SeasonNumber: 1, EpisodeNumber: 2, StillPath: f.path("refresh-still")}})
+			},
+			shown: func() (string, error) {
+				e, err := f.episodes.GetBySeriesAndNumber(ctx, f.seriesID, 1, 2)
+				if err != nil {
+					return "", err
+				}
+				return e.StillPath, nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := f.pool.Exec(ctx, `UPDATE media_items SET locked_fields = '{}' WHERE content_id = $1`, f.seriesID); err != nil {
+				t.Fatal(err)
+			}
+			// The other writer creates the row and publishes its artwork in
+			// one transaction, so the refresh's lock query cannot see the row
+			// and its insert waits on it.
+			other, err := f.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = other.Rollback(ctx) }()
+			picked := f.path("picked-" + tc.name)
+			if _, err := other.Exec(ctx, tc.create, f.seriesID, picked); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := other.Exec(ctx, `UPDATE media_items SET locked_fields = ARRAY[$2::int] WHERE content_id = $1`, f.seriesID, fieldImagesLocked); err != nil {
+				t.Fatal(err)
+			}
+			var otherPID uint32
+			if err := other.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&otherPID); err != nil {
+				t.Fatal(err)
+			}
+
+			written := make(chan error, 1)
+			go func() { written <- tc.write() }()
+			waitForLockWaiter(t, f.pool, otherPID)
+			if err := other.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-written; err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			got, err := tc.shown()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != picked {
+				t.Fatalf("%s artwork = %q, want the published %q", tc.name, got, picked)
+			}
+		})
+	}
+}

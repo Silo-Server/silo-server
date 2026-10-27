@@ -145,30 +145,37 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id`
+		RETURNING content_id, xmax = 0`
 
 	var storedContentID string
-	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
-		if err := lockArtworkRowsForUpsert(ctx, tx, `
-			SELECT 1 FROM seasons WHERE series_id = $1 AND season_number = $2 FOR NO KEY UPDATE`,
-			s.SeriesID, s.SeasonNumber); err != nil {
-			return err
-		}
-		return tx.QueryRow(ctx, query,
-			s.ContentID,
-			s.SeriesID,
-			s.SeasonNumber,
-			s.Title,
-			s.DefaultMetadataLanguage,
-			s.Overview,
-			s.AirDate,
-			s.PosterPath,
-			s.PosterSourcePath,
-			s.PosterThumbhash,
-			s.MetadataS3Path,
-			s.MetadataEtag,
-			s.MetadataSource,
-		).Scan(&storedContentID)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT content_id FROM seasons WHERE series_id = $1 AND season_number = $2 FOR NO KEY UPDATE`,
+				s.SeriesID, s.SeasonNumber)
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			if err := tx.QueryRow(ctx, query,
+				s.ContentID,
+				s.SeriesID,
+				s.SeasonNumber,
+				s.Title,
+				s.DefaultMetadataLanguage,
+				s.Overview,
+				s.AirDate,
+				s.PosterPath,
+				s.PosterSourcePath,
+				s.PosterThumbhash,
+				s.MetadataS3Path,
+				s.MetadataEtag,
+				s.MetadataSource,
+			).Scan(&storedContentID, &inserted); err != nil {
+				return err
+			}
+			return checkArtworkRowLocked(locked, storedContentID, inserted)
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("upserting season: %w", err)
@@ -244,39 +251,46 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id, season_number`
+		RETURNING content_id, season_number, xmax = 0`
 
 	// Build a map to write back content IDs by season number.
 	returnedIDs := make(map[int32]string, len(seasons))
-	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
-		if err := lockArtworkRowsForUpsert(ctx, tx, `
-			SELECT 1 FROM seasons
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT seasons.content_id FROM seasons
 			JOIN UNNEST($1::text[], $2::int[]) AS target(series_id, season_number) USING (series_id, season_number)
 			ORDER BY seasons.content_id
-			FOR NO KEY UPDATE OF seasons`, seriesIDs, seasonNums); err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, query,
-			contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
-			airDates, posterPaths, posterSourcePaths, posterThumbs,
-			metaS3Paths, metaEtags, metaSources,
-		)
-		if err != nil {
-			return fmt.Errorf("bulk upserting seasons: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var cid string
-			var sn int32
-			if err := rows.Scan(&cid, &sn); err != nil {
-				return fmt.Errorf("scanning bulk upsert season result: %w", err)
+			FOR NO KEY UPDATE OF seasons`, seriesIDs, seasonNums)
+			if err != nil {
+				return err
 			}
-			returnedIDs[sn] = cid
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterating bulk upsert season results: %w", err)
-		}
-		return nil
+			rows, err := tx.Query(ctx, query,
+				contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
+				airDates, posterPaths, posterSourcePaths, posterThumbs,
+				metaS3Paths, metaEtags, metaSources,
+			)
+			if err != nil {
+				return fmt.Errorf("bulk upserting seasons: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var cid string
+				var sn int32
+				var inserted bool
+				if err := rows.Scan(&cid, &sn, &inserted); err != nil {
+					return fmt.Errorf("scanning bulk upsert season result: %w", err)
+				}
+				if err := checkArtworkRowLocked(locked, cid, inserted); err != nil {
+					return err
+				}
+				returnedIDs[sn] = cid
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterating bulk upsert season results: %w", err)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return err

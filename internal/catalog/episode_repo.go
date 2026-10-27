@@ -428,39 +428,46 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id`
+		RETURNING content_id, xmax = 0`
 
 	var storedContentID string
-	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
-		if err := lockArtworkRowsForUpsert(ctx, tx, `
-			SELECT 1 FROM episodes
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT content_id FROM episodes
 			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
-			FOR NO KEY UPDATE`, ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber); err != nil {
-			return err
-		}
-		return tx.QueryRow(ctx, query,
-			ep.ContentID,
-			ep.SeriesID,
-			seasonID,
-			ep.SeasonNumber,
-			ep.EpisodeNumber,
-			ep.Title,
-			ep.DefaultMetadataLanguage,
-			ep.Overview,
-			ep.AirDate,
-			ep.Runtime,
-			ep.RatingIMDB,
-			ep.RatingTMDB,
-			ep.ImdbID,
-			ep.TmdbID,
-			ep.TvdbID,
-			ep.StillPath,
-			ep.StillSourcePath,
-			ep.StillThumbhash,
-			ep.MetadataS3Path,
-			ep.MetadataEtag,
-			ep.MetadataSource,
-		).Scan(&storedContentID)
+			FOR NO KEY UPDATE`, ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			if err := tx.QueryRow(ctx, query,
+				ep.ContentID,
+				ep.SeriesID,
+				seasonID,
+				ep.SeasonNumber,
+				ep.EpisodeNumber,
+				ep.Title,
+				ep.DefaultMetadataLanguage,
+				ep.Overview,
+				ep.AirDate,
+				ep.Runtime,
+				ep.RatingIMDB,
+				ep.RatingTMDB,
+				ep.ImdbID,
+				ep.TmdbID,
+				ep.TvdbID,
+				ep.StillPath,
+				ep.StillSourcePath,
+				ep.StillThumbhash,
+				ep.MetadataS3Path,
+				ep.MetadataEtag,
+				ep.MetadataSource,
+			).Scan(&storedContentID, &inserted); err != nil {
+				return err
+			}
+			return checkArtworkRowLocked(locked, storedContentID, inserted)
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("upserting episode: %w", err)
@@ -502,6 +509,13 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		}
 	}
 
+	return retryArtworkUpsert(func() error { return r.bulkUpsertOnce(ctx, seriesID, episodes) })
+}
+
+// bulkUpsertOnce runs one BulkUpsert transaction.
+//
+//nolint:funlen // BulkUpsert's transaction body, moved as is so retryArtworkUpsert can rerun it
+func (r *EpisodeRepository) bulkUpsertOnce(ctx context.Context, seriesID string, episodes []*models.Episode) error {
 	tx, err := r.pool.BeginTx(ctx, artworkUpsertTxOptions)
 	if err != nil {
 		return fmt.Errorf("begin bulk episode upsert: %w", err)
@@ -531,28 +545,28 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	// before the INSERT (PostgreSQL data-modifying CTEs share the same snapshot).
 	if len(imdbIDs) > 0 {
 		clearQuery := `
-			UPDATE episodes SET
-				imdb_id = CASE WHEN imdb_id <> '' AND imdb_id = ANY($2::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $2::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.imdb_id
-					) THEN '' ELSE imdb_id END,
-				tmdb_id = CASE WHEN tmdb_id <> '' AND tmdb_id = ANY($3::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $3::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tmdb_id
-					) THEN '' ELSE tmdb_id END,
-				tvdb_id = CASE WHEN tvdb_id <> '' AND tvdb_id = ANY($4::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $4::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tvdb_id
-					) THEN '' ELSE tvdb_id END
-			WHERE series_id = $1
-			  AND (
-				(imdb_id <> '' AND imdb_id = ANY($2::text[]))
-				OR (tmdb_id <> '' AND tmdb_id = ANY($3::text[]))
-				OR (tvdb_id <> '' AND tvdb_id = ANY($4::text[]))
-			  )`
+		UPDATE episodes SET
+			imdb_id = CASE WHEN imdb_id <> '' AND imdb_id = ANY($2::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $2::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.imdb_id
+				) THEN '' ELSE imdb_id END,
+			tmdb_id = CASE WHEN tmdb_id <> '' AND tmdb_id = ANY($3::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $3::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tmdb_id
+				) THEN '' ELSE tmdb_id END,
+			tvdb_id = CASE WHEN tvdb_id <> '' AND tvdb_id = ANY($4::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $4::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tvdb_id
+				) THEN '' ELSE tvdb_id END
+		WHERE series_id = $1
+		  AND (
+			(imdb_id <> '' AND imdb_id = ANY($2::text[]))
+			OR (tmdb_id <> '' AND tmdb_id = ANY($3::text[]))
+			OR (tvdb_id <> '' AND tvdb_id = ANY($4::text[]))
+		  )`
 		if _, err := tx.Exec(ctx, clearQuery,
 			seriesID, imdbIDs, tmdbIDs, tvdbIDs, ownerSNs, ownerENs,
 		); err != nil {
@@ -610,47 +624,48 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	}
 
 	query := `
-		INSERT INTO episodes (
-			content_id, series_id, season_id, season_number, episode_number,
-			title, default_metadata_language, overview, air_date, runtime,
-			rating_imdb, rating_tmdb,
-			imdb_id, tmdb_id, tvdb_id,
-			still_path, still_source_path, still_thumbhash,
-			metadata_s3_path, metadata_etag, metadata_source
-		)
-		SELECT * FROM UNNEST(
-			$1::text[], $2::text[], $3::text[], $4::int[], $5::int[],
-			$6::text[], $7::text[], $8::text[], $9::date[], $10::int[],
-			$11::float8[], $12::float8[],
-			$13::text[], $14::text[], $15::text[],
-			$16::text[], $17::text[], $18::text[],
-			$19::text[], $20::text[], $21::text[]
-		)
-		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
-			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
-			runtime = EXCLUDED.runtime,
-			rating_imdb = EXCLUDED.rating_imdb,
-			rating_tmdb = EXCLUDED.rating_tmdb,
-			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
-			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
-			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
-			` + episodeArtworkAssignments + `,
-			metadata_s3_path = EXCLUDED.metadata_s3_path,
-			metadata_etag = EXCLUDED.metadata_etag,
-			metadata_source = EXCLUDED.metadata_source,
-			updated_at = NOW()
-		RETURNING content_id, season_number, episode_number`
+	INSERT INTO episodes (
+		content_id, series_id, season_id, season_number, episode_number,
+		title, default_metadata_language, overview, air_date, runtime,
+		rating_imdb, rating_tmdb,
+		imdb_id, tmdb_id, tvdb_id,
+		still_path, still_source_path, still_thumbhash,
+		metadata_s3_path, metadata_etag, metadata_source
+	)
+	SELECT * FROM UNNEST(
+		$1::text[], $2::text[], $3::text[], $4::int[], $5::int[],
+		$6::text[], $7::text[], $8::text[], $9::date[], $10::int[],
+		$11::float8[], $12::float8[],
+		$13::text[], $14::text[], $15::text[],
+		$16::text[], $17::text[], $18::text[],
+		$19::text[], $20::text[], $21::text[]
+	)
+	ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
+		season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
+		title = EXCLUDED.title,
+		default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
+		overview = EXCLUDED.overview,
+		air_date = EXCLUDED.air_date,
+		runtime = EXCLUDED.runtime,
+		rating_imdb = EXCLUDED.rating_imdb,
+		rating_tmdb = EXCLUDED.rating_tmdb,
+		imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
+		tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
+		tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
+		` + episodeArtworkAssignments + `,
+		metadata_s3_path = EXCLUDED.metadata_s3_path,
+		metadata_etag = EXCLUDED.metadata_etag,
+		metadata_source = EXCLUDED.metadata_source,
+		updated_at = NOW()
+	RETURNING content_id, season_number, episode_number, xmax = 0`
 
-	if err := lockArtworkRowsForUpsert(ctx, tx, `
-		SELECT 1 FROM episodes
-		JOIN UNNEST($2::int[], $3::int[]) AS target(season_number, episode_number) USING (season_number, episode_number)
-		WHERE episodes.series_id = $1
-		ORDER BY episodes.content_id
-		FOR NO KEY UPDATE OF episodes`, seriesID, seasonNums, episodeNums); err != nil {
+	locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+	SELECT episodes.content_id FROM episodes
+	JOIN UNNEST($2::int[], $3::int[]) AS target(season_number, episode_number) USING (season_number, episode_number)
+	WHERE episodes.series_id = $1
+	ORDER BY episodes.content_id
+	FOR NO KEY UPDATE OF episodes`, seriesID, seasonNums, episodeNums)
+	if err != nil {
 		return err
 	}
 	rows, err := tx.Query(ctx, query,
@@ -673,9 +688,14 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	for rows.Next() {
 		var cid string
 		var sn, en int32
-		if err := rows.Scan(&cid, &sn, &en); err != nil {
+		var inserted bool
+		if err := rows.Scan(&cid, &sn, &en, &inserted); err != nil {
 			rows.Close()
 			return fmt.Errorf("scanning bulk upsert episode result: %w", err)
+		}
+		if err := checkArtworkRowLocked(locked, cid, inserted); err != nil {
+			rows.Close()
+			return err
 		}
 		returnedIDs[epKey{sn, en}] = cid
 	}
