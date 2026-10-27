@@ -107,7 +107,10 @@ Open <http://localhost:8090> and complete onboarding.
 
 For a single container instead, `docker compose -f docker-compose.omnibus.yml
 up -d` runs the omnibus image, which bundles PostgreSQL and can start Redis and
-Meilisearch too. It reads the same `.env`.
+Meilisearch too. It reads the same `.env`. The image keeps any
+`SILO_SEARCH_PROVIDER`, `SILO_MEILISEARCH_URL`, or `SILO_MEILISEARCH_API_KEY`
+set there, so remove the ones that point at a separate Meilisearch service to
+use the bundled one.
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
@@ -117,7 +120,7 @@ transcode nodes, PostgreSQL tuning, backups, and updates.
 ## Builds and releases
 
 Until the first release, default-branch images carry an ordered `build-N` tag
-and a short commit SHA alongside `latest`. Build numbers order published images;
+and the full commit SHA alongside `latest`. Build numbers order published images;
 they are not release versions. [Release versioning](docs/release-versioning.md)
 defines each tag and the SemVer contract.
 
