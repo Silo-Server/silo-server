@@ -20,7 +20,12 @@ import {
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
 function catalogQueryFingerprint(state: CatalogSearchState): string {
-  return JSON.stringify([state.query_definition, state.sort_from_server, state.explicit_sort]);
+  return JSON.stringify([
+    state.query_definition,
+    state.sort_from_server,
+    state.explicit_sort,
+    state.group ?? null,
+  ]);
 }
 
 function catalogParamsForKey(
@@ -97,6 +102,7 @@ export async function fetchCatalogPage(
     order: (params.get("order") as "asc" | "desc" | null) ?? undefined,
     q: params.get("q") ?? undefined,
     query_limit: params.has("query_limit") ? Number(params.get("query_limit")) : undefined,
+    group: state.group,
     limit,
     skip_total: includeTotal ? undefined : true,
     cursor: nextCursor || snapshot,
@@ -593,6 +599,7 @@ export async function fetchCatalogLetters(
       match: state.query_definition.match,
       groups: state.query_definition.groups,
       order: order === "desc" ? "desc" : "asc",
+      group: state.group,
     },
     signal: options?.signal ?? undefined,
   });

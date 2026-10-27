@@ -444,6 +444,7 @@ func (r *CatalogResolver) previewQuerySource(ctx context.Context, req CatalogReq
 		}
 		pager := r.queryExecutorForScope(req.Query.MediaScope, &snapshot)
 		pager.GroupByWork = req.GroupByWork
+		pager.BoxSetCollections = req.BoxSetCollections
 		if req.SnapshotAt != nil {
 			// The client pins this snapshot for the whole browse, so its
 			// later jumps reuse the anchors.

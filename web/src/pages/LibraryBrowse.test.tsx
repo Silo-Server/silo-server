@@ -233,6 +233,35 @@ describe("LibraryBrowse", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it.each([
+    [true, "box_set"],
+    [false, undefined],
+  ])("with box sets %s asks the browse and letters for group %s", (boxSetsEnabled, group) => {
+    renderToStaticMarkup(
+      <LibraryBrowse
+        libraryId={3}
+        libraryType="movies"
+        boxSetsEnabled={boxSetsEnabled}
+        browseType="series"
+        queryDefinition={{
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "title", order: "asc" },
+        }}
+        onBrowseTypeChange={() => {}}
+        onQueryDefinitionChange={() => {}}
+      />,
+    );
+
+    const lastCall = <T,>(mock: { mock: { calls: unknown[][] } }) =>
+      mock.mock.calls[mock.mock.calls.length - 1]![0] as T;
+    expect(lastCall<CatalogSearchState>(mocks.useCatalogWindow).group).toBe(group);
+    if (group) {
+      expect(lastCall<CatalogSearchState>(mocks.useCatalogLetters).group).toBe(group);
+    }
+  });
+
   it("normalizes video-only sorts away through the shared ebook relevance scope", () => {
     renderBrowse({ libraryId: 11, libraryType: "ebooks", queryDefinition: lastAiredFirst() });
 

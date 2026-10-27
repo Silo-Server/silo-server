@@ -330,6 +330,10 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		// sidecar again, or the extra stills task take the frame again.
 		{name: "extra stills", table: "media_extras", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", clearSet: `still_path = '', still_source = '', still_thumbhash = '', still_retry_after = NULL, updated_at = NOW()`},
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
+		// Movie box set artwork; a reset row is served from TMDB until the box
+		// set sync caches it again.
+		{name: "box set posters", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: `poster_path = '', poster_thumbhash = '', updated_at = NOW()`},
+		{name: "box set backdrops", table: "tmdb_movie_collections", keyCols: []artworkSweepKey{int64SweepKey("tmdb_collection_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: `backdrop_path = '', backdrop_thumbhash = '', updated_at = NOW()`},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
 		// to the generated collage (collections) or the default tile (library

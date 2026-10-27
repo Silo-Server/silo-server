@@ -812,10 +812,29 @@ export interface BrowseItemSortMetrics {
   series_name?: string;
 }
 
+/**
+ * A movie box set: the movies TMDB lists in one collection that a viewer can
+ * see in one library. `id` is the TMDB collection ID.
+ */
+export interface BoxSetSummary {
+  id: string;
+  library_id: string;
+  title: string;
+  overview?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
+  movie_count: number;
+  played_count: number;
+  first_year?: number;
+  last_year?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "box_set";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -856,6 +875,8 @@ export interface BrowseItem {
   // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
+  /** Set on a box set card (type box_set) of a group=box_set browse. */
+  box_set?: BoxSetSummary;
 }
 
 export interface BrowseResponse {
@@ -3426,6 +3447,12 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
+  /** Browse movies of one TMDB collection as a box set. Absent from servers without box sets. */
+  box_sets_enabled?: boolean;
+  /** The fewest of a collection's movies that form a box set. */
+  box_set_min_movies?: number;
+  /** List matching box sets in search. */
+  box_sets_in_search?: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
   /**
@@ -3573,6 +3600,10 @@ export interface CreateLibraryRequest {
   intro_detection_enabled?: boolean;
   /** Sent only when it changes, so a server without seek previews never sees it. */
   trickplay_enabled?: boolean;
+  /** The box set settings are sent only when they change, like trickplay_enabled. */
+  box_sets_enabled?: boolean;
+  box_set_min_movies?: number;
+  box_sets_in_search?: boolean;
   trailer_kinds?: string[];
   /** Omitted on create means on. */
   realtime_monitoring?: boolean;
@@ -4433,6 +4464,8 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
+  /** The library browses a TMDB collection's movies as one box set; browse it with group=box_set. */
+  box_sets_enabled?: boolean;
 }
 
 // Sections
