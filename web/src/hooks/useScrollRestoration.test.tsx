@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useNavigate } from "react-router";
+import { createBrowserRouter, MemoryRouter, RouterProvider, useNavigate } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useScrollRestoration } from "./useScrollRestoration";
@@ -81,7 +81,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete (window as { scrollY?: number }).scrollY;
   delete (window as { innerHeight?: number }).innerHeight;
-  delete (window as { scrollHeight?: number }).scrollHeight;
+  window.history.replaceState(null, "", "/");
 });
 
 describe("useScrollRestoration", () => {
@@ -106,6 +106,7 @@ describe("useScrollRestoration", () => {
     // until its rows load.
     scrollHeight = 800;
     fireEvent.click(screen.getByRole("button", { name: "back" }));
+    runNextFrame();
     expect(scrollY).toBe(0);
 
     scrollHeight = 5_000;
@@ -134,6 +135,30 @@ describe("useScrollRestoration", () => {
     scrollHeight = 5_000;
     runNextFrame();
     expect(scrollY).toBe(400);
+  });
+
+  it("leaves the browser's jump to an in-page anchor alone", async () => {
+    // A data router's first entry and an entry a plain `#anchor` link creates
+    // both carry React Router's key "default".
+    window.history.replaceState(null, "", "/library");
+    const router = createBrowserRouter([{ path: "*", element: <Harness /> }]);
+    render(<RouterProvider router={router} />);
+    act(() => setScrollY(3_000));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "open item" }));
+    });
+    act(() => setScrollY(200));
+
+    // What the browser does for a skip link: a new entry with no state, the
+    // jump to the anchor, then popstate.
+    await act(async () => {
+      window.history.pushState(null, "", "/item/1#main-content");
+      setScrollY(40);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+
+    expect(frames.size).toBe(0);
+    expect(scrollY).toBe(40);
   });
 
   it("stops restoring once the reader takes over", () => {

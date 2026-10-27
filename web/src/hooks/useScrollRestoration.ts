@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { useLocation, useNavigationType } from "react-router";
+import { useLocation, useNavigationType, type Location } from "react-router";
 
 /**
  * How long a restore waits without the document growing before giving up. A
@@ -8,6 +8,19 @@ import { useLocation, useNavigationType } from "react-router";
  * the document is tall enough for the remembered offset.
  */
 const RESTORE_IDLE_MS = 2_000;
+
+/**
+ * The key an entry's offset is stored under. React Router gives the session's
+ * first entry and every entry a plain `#anchor` link creates (the skip link,
+ * an in-page link) the same key, "default", so those carry their URL as well:
+ * otherwise following an anchor restores the first entry's offset over the
+ * browser's jump to it.
+ */
+function entryKey(location: Location): string {
+  return location.key === "default"
+    ? `default:${location.pathname}${location.search}${location.hash}`
+    : location.key;
+}
 
 interface PendingRestore {
   key: string;
@@ -39,8 +52,9 @@ interface PendingRestore {
 export function useScrollRestoration(): void {
   const location = useLocation();
   const navigationType = useNavigationType();
+  const key = entryKey(location);
   const positions = useRef(new Map<string, number>());
-  const activeKey = useRef(location.key);
+  const activeKey = useRef(key);
   const previousPathname = useRef<string | null>(null);
   const pending = useRef<PendingRestore | null>(null);
   const stopWatchingForInput = useRef<(() => void) | null>(null);
@@ -112,7 +126,9 @@ export function useScrollRestoration(): void {
       // Wait one frame: a virtualized list mounts its own virtualizer in a
       // layout effect after this one and writes its cached offset back to the
       // window, which would undo an earlier restore. Animation frames run
-      // before paint, so the first painted frame is already the restored one.
+      // before paint, so when the page is already tall enough the first
+      // painted frame is the restored one; a list that still has to grow
+      // shows each step on the way down.
       restore.frame = window.requestAnimationFrame(step);
     },
     [clearInputListeners],
@@ -151,16 +167,16 @@ export function useScrollRestoration(): void {
 
   useLayoutEffect(() => {
     const pathnameChanged = previousPathname.current !== location.pathname;
-    activeKey.current = location.key;
+    activeKey.current = key;
     previousPathname.current = location.pathname;
 
     if (navigationType === "POP") {
       cancelPendingRestore();
-      const saved = positions.current.get(location.key);
+      const saved = positions.current.get(key);
       if (saved !== undefined) {
-        startRestore(location.key, saved);
+        startRestore(key, saved);
       } else if (pathnameChanged) {
-        positions.current.set(location.key, 0);
+        positions.current.set(key, 0);
         window.scrollTo(0, 0);
       }
       return;
@@ -169,7 +185,7 @@ export function useScrollRestoration(): void {
     if (pathnameChanged) {
       // A new destination opens at the top, as it always has.
       cancelPendingRestore();
-      positions.current.set(location.key, 0);
+      positions.current.set(key, 0);
       window.scrollTo(0, 0);
       return;
     }
@@ -180,10 +196,10 @@ export function useScrollRestoration(): void {
     if (navigationType === "REPLACE") {
       const restore = pending.current;
       if (restore) {
-        positions.current.set(location.key, restore.top);
-        restore.key = location.key;
+        positions.current.set(key, restore.top);
+        restore.key = key;
       } else {
-        positions.current.set(location.key, window.scrollY);
+        positions.current.set(key, window.scrollY);
       }
       return;
     }
@@ -192,6 +208,6 @@ export function useScrollRestoration(): void {
     // same screen. It keeps the reader's offset, as it always has, but an
     // in-flight restore belongs to the entry behind it.
     cancelPendingRestore();
-    positions.current.set(location.key, window.scrollY);
-  }, [location.key, location.pathname, navigationType, cancelPendingRestore, startRestore]);
+    positions.current.set(key, window.scrollY);
+  }, [key, location.pathname, navigationType, cancelPendingRestore, startRestore]);
 }
