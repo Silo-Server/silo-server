@@ -17,3 +17,27 @@ if [[ "$(psql_silo -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'si
   log "creating the silo database"
   psql_silo -d postgres -c 'CREATE DATABASE silo'
 fi
+
+# Each database records the C library collation version it was created under.
+# Another version, from an image on a newer Debian release or from a cluster
+# the Compose stack's PostgreSQL image created, can sort text differently, and
+# an index built in the old order can miss rows. Rebuild the indexes that sort
+# by it, then record the new version, before Silo connects. template0 records
+# none: a database created from it takes the library's version then.
+changed="$(psql_silo -d postgres -c 'SELECT datname, datallowconn FROM pg_database
+  WHERE datcollversion <> pg_database_collation_actual_version(oid)')"
+while IFS='|' read -r db connectable; do
+  [[ -n "$db" ]] || continue
+  if [[ "$connectable" == t ]]; then
+    log "the C library collation version changed; rebuilding the text indexes in database $db"
+    psql_silo -d "$db" <<'SQL'
+SELECT DISTINCT format('REINDEX INDEX %s', s.indexrelid::regclass)
+FROM (SELECT indexrelid, indcollation[k] AS coll
+      FROM pg_index, generate_subscripts(indcollation, 1) AS k) s
+JOIN pg_collation c ON c.oid = s.coll
+WHERE c.collprovider IN ('d', 'c') AND c.collname NOT IN ('C', 'POSIX')
+\gexec
+SQL
+  fi
+  psql_silo -d postgres -v name="$db" <<<'ALTER DATABASE :"name" REFRESH COLLATION VERSION'
+done <<<"$changed"
