@@ -1213,9 +1213,10 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 }
 
 // ServeFile serves a download's file. Managed entries (device header present)
-// authorize on (user, profile, device) and re-check per-profile content access
-// before serving; ephemeral rows keep today's queued→downloading→completed
-// behavior. The ephemeral path never serves a managed row, and vice versa.
+// authorize on (user, profile, device); ephemeral rows authorize on the
+// account and keep the queued→downloading→completed lifecycle. Both re-check
+// the requesting profile's content access before serving. The ephemeral path
+// never serves a managed row, and vice versa.
 func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	if deviceID != "" {
 		target, err := s.ResolveManagedFile(ctx, userID, profileID, deviceID, downloadID, filter)
@@ -1237,6 +1238,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	if dl.UserID != userID || dl.IsManaged() {
 		return ErrNotFound // don't reveal existence; ephemeral path never serves managed rows
+	}
+	// Account-level rows are shared by every profile on the account, so the
+	// requesting profile's content scope (library and maturity) must admit
+	// the item before any status change or bytes.
+	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
+		return err
 	}
 	if dl.Status == StatusCancelled || dl.Status == StatusFailed {
 		return fmt.Errorf("download is %s: %w", dl.Status, ErrDownloadNotActive)

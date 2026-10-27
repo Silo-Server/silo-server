@@ -322,6 +322,7 @@
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
 
 # Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair
 # discovery rows rank by in step with the 'tmdb' source.
