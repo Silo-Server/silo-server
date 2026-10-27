@@ -11894,7 +11894,8 @@
             "enum": [
               "direct",
               "remux",
-              "transcode"
+              "transcode",
+              null
             ],
             "type": [
               "string",
@@ -11953,7 +11954,8 @@
               "stopped",
               "terminated",
               "expired",
-              "aborted"
+              "aborted",
+              null
             ],
             "type": [
               "string",
@@ -12093,7 +12095,8 @@
             "enum": [
               "direct",
               "remux",
-              "transcode"
+              "transcode",
+              null
             ],
             "type": [
               "string",

@@ -2528,9 +2528,13 @@ func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession)
 // direct/remux fallback cards built from scratch) carry none; the current
 // compat request identifies the client, so the reconstructed session keeps its
 // label and JF pill. A card minted from the User-Agent alone, by a binary that
-// didn't yet name the client from PlaybackInfo, still takes the name.
+// didn't yet name the client from PlaybackInfo, still takes the name. A card
+// without a device takes the play's negotiated DeviceId.
 func fillReconstructedClientInfo(card *playback.RecipeCard, info playback.ClientInfo) {
 	card.IsJellyfinCompat = info.IsCompat
+	if card.DeviceID == "" {
+		card.DeviceID = info.DeviceID
+	}
 	if card.ClientName == "" && card.ClientUserAgent == "" {
 		card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
 	} else if card.ClientName == "" && info.Name != "" {

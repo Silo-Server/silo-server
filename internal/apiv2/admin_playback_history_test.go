@@ -41,7 +41,8 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), WatchedSeconds: 3600, DurationSeconds: &duration, Completed: true,
 		PlayedSeconds: &played, Measured: true, StartPositionSeconds: &start, PausedSeconds: &paused,
 		MeasuredSince: &since, MeasuredUntil: &until, ClientIP: &ip, DeviceID: &device, DevicePlatform: &platform,
-		VideoDecision: &decision, AudioDecision: &decision, EndReason: &reason,
+		// audio_decision stays null, as on a row recorded before decisions were.
+		VideoDecision: &decision, EndReason: &reason,
 	}}
 	if f.episode {
 		season, episode := 2, 4
