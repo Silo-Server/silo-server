@@ -64,14 +64,15 @@ func (o *ItemChangeOutbox) Claim(ctx context.Context, limit int, interval, reten
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// The row lock serializes servers; one that waited re-reads drained_at
-	// and finds the interval not yet over.
+	// The row lock serializes servers. drained_at is stamped just before
+	// commit, so one that waited re-reads it and finds the interval not yet
+	// over, however long the claim it waited for took.
 	var gated bool
 	err = tx.QueryRow(ctx, `
-		UPDATE catalog_item_change_drain SET drained_at = now()
-		WHERE drained_at <= now() - $1::interval
+		SELECT true FROM catalog_item_change_drain
+		WHERE drained_at <= clock_timestamp() - $1::interval
 			AND EXISTS (SELECT 1 FROM catalog_item_change_events)
-		RETURNING true`, interval).Scan(&gated)
+		FOR UPDATE`, interval).Scan(&gated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -101,6 +102,9 @@ func (o *ItemChangeOutbox) Claim(ctx context.Context, limit int, interval, reten
 		claimed = append(claimed, row)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("claiming catalog item changes: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE catalog_item_change_drain SET drained_at = clock_timestamp()`); err != nil {
 		return nil, false, fmt.Errorf("claiming catalog item changes: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -153,21 +153,27 @@ listing (`listAdminCatalogItems`, see
 | --- | --- |
 | `added` | The item gained a membership in `library_id` |
 | `removed` | The item lost its membership in `library_id` |
-| `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), or changed what the listing shows (path, size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
+| `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), moved or renamed on disk, or changed what the listing shows (size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
 
 ```json
 {"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
 ```
 
-`content_id` names a movie, series or episode; books, podcasts and their
-episodes produce none of these. Changes are per library: an item in two
+`content_id` names a movie, series or episode. Books, podcasts and their
+episodes produce none of these, except when one is deleted outright and its type
+can no longer be checked; the listing never returns those ids. Changes are per
+library: an item in two
 libraries that leaves one gets `removed` for that library and stays in the
 listing with the other in `library_ids`. A content ID change is `removed` for
 the old ID and `added` for the new one. The events carry ids only. A consumer
 fetches the named items with the listing's `content_ids` filter (up to 200 per
 request) and treats an id the listing no longer returns as gone. Turning a
 library off or on sends no per-item changes; it changes `library_ids` and which
-items the listing returns, so re-list after a `catalog.library.changed`.
+items the listing returns, so re-list after a `catalog.library.changed`. Metadata
+edits arrive as `metadata_updated`, which names the item but not what changed. A
+few repairs send nothing, such as merging duplicate series, which moves their
+episodes to the surviving series; a mirror that must not drift re-lists
+periodically.
 
 Database triggers record these changes from every code path that writes library
 memberships or files, so a rescan that rewrites rows without changing what they

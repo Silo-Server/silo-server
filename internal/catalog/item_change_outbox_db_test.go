@@ -124,6 +124,20 @@ func TestCatalogItemChangeOutboxDB(t *testing.T) {
 	}
 	drained("after the interval", "removed "+at("s", tv))
 
+	// One claim publishes at most limit keys, the bound on what a connection
+	// buffers per drain, and reports that more are waiting.
+	for i := range 5 {
+		exec(`INSERT INTO catalog_item_change_events (content_id,library_id,change) VALUES ($1,$2,'added')`, fmt.Sprintf("%scap%d", p, i), movies)
+	}
+	changes, more, err := outbox.Claim(ctx, 2, 0, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) > 2 || !more {
+		t.Errorf("a claim of 2 returned %d changes, more=%v", len(changes), more)
+	}
+	drainItemChanges(t, outbox, p)
+
 	// Changes older than the retention are dropped unpublished.
 	exec(`INSERT INTO catalog_item_change_events (content_id,library_id,change,created_at) VALUES ($1,$2,'added',now() - interval '2 days')`, p+"old", movies)
 	drained("retention")

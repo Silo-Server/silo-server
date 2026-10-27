@@ -98,7 +98,8 @@ To keep a mirror current between full passes, subscribe to the `catalog` channel
 of the v2 events socket. Administrators receive `catalog.item.changed` with
 `change` `added`, `removed` or `files_changed`, carrying ids only (see
 [realtime-api.md](realtime-api.md#catalog-item-changes)); fetch the named items
-with `content_ids`, and drop any the listing no longer returns.
+with `content_ids`, and drop any the listing no longer returns. Fetch on
+`metadata_updated` too: titles, years and provider ids change through it.
 
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
 `item_listing_max_content_ids`, and `item_change_events`, true when the socket
