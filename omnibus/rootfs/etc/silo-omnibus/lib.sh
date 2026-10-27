@@ -52,3 +52,14 @@ exec_clean() {
   fi
   exec env -i "${keep[@]}" "$@"
 }
+
+# silo_port: the port Silo listens on. Silo reads /config/silo/.env without
+# overriding variables already set, so PORT from the container wins, then a
+# PORT line in that file, then Silo's default.
+silo_port() {
+  local port="${PORT:-}"
+  if [[ -z "$port" && -f /config/silo/.env ]]; then
+    port="$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?PORT[[:space:]]*=[[:space:]]*['\"]?([0-9]+)['\"]?.*/\\2/p" /config/silo/.env | tail -n 1)"
+  fi
+  printf '%s' "${port:-8080}"
+}

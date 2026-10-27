@@ -11,7 +11,8 @@ set -euo pipefail
 source /etc/silo-omnibus/lib.sh
 
 if [[ -e "$STATE_DIR/search-marker.retire" ]]; then
-  until curl -fs -m 2 -o /dev/null "http://127.0.0.1:${PORT:-8080}/api/v1/health"; do
+  port="$(silo_port)"
+  until curl -fs -m 2 -o /dev/null "http://127.0.0.1:$port/api/v1/health"; do
     sleep 2
   done
   rm -f "$SEARCH_MARKER" "$STATE_DIR/search-marker.retire"
