@@ -24,6 +24,7 @@ func TestSanitizersMaskSignedTokenPathSegments(t *testing.T) {
 		{"wrapped url error", SanitizeURLError(fmt.Errorf("probe %s: %w", "http://node.example/stream/direct/"+token, &url.Error{Op: "Get", URL: "http://node.example/stream/direct/" + token, Err: errors.New("EOF")})).Error(),
 			`probe http://node.example/stream/direct/[REDACTED]: Get "http://node.example/stream/direct/[REDACTED]": EOF`},
 		{"request url", SanitizeRequestURL("/stream/transcode/" + token + "/master.m3u8?Static=true"), "/stream/transcode/[REDACTED]/master.m3u8?Static=true"},
+		{"percent-encoded token", SanitizeURL("http://node.example/downloads/file/%65" + token[1:]), "http://node.example/downloads/file/[REDACTED]"},
 		{"json", string(SanitizeJSON([]byte(`{"DirectStreamUrl":"https://node.example/stream/direct/` + token + `"}`))), `"https://node.example/stream/direct/[REDACTED]"`},
 		{"ordinary segment", SanitizeURL("http://node.example/media/eyJane.mkv"), "http://node.example/media/eyJane.mkv"},
 	} {

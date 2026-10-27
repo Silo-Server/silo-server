@@ -30,15 +30,20 @@ func URLMayHoldCredential(raw string) bool {
 
 // redactTokenSegments replaces every slash-delimited segment of escaped that
 // holds a signed token with Placeholder and reports whether it found one.
-// escaped is an escaped path, or a URL with no query or fragment.
+// escaped is an escaped path, or a URL with no query or fragment. Segments are
+// matched unescaped, so percent-encoding a token's characters does not hide it.
 func redactTokenSegments(escaped string) (string, bool) {
-	if !strings.Contains(escaped, "eyJ") {
+	if !strings.Contains(escaped, "eyJ") && !strings.Contains(escaped, "%") {
 		return escaped, false
 	}
 	segments := strings.Split(escaped, "/")
 	found := false
 	for i, segment := range segments {
-		if tokenSegment.MatchString(segment) {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			decoded = segment
+		}
+		if tokenSegment.MatchString(decoded) {
 			segments[i] = Placeholder
 			found = true
 		}
