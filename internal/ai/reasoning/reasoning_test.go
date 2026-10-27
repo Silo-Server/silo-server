@@ -37,6 +37,54 @@ func TestProModelCapabilitiesAndValidation(t *testing.T) {
 	}
 }
 
+func TestThirdPartyModelCapabilities(t *testing.T) {
+	for _, test := range []struct {
+		model  string
+		levels []string
+	}{
+		{"grok-4", []string{"low", "medium", "high"}},
+		{"grok-4.5", []string{"low", "medium", "high", "xhigh"}},
+		{"grok-4.6", []string{"low", "medium", "high", "xhigh"}},
+		{"openai/Grok-4.5", []string{"low", "medium", "high", "xhigh"}},
+		{"deepseek-v4.1-flash", []string{"low", "high", "max"}},
+		{"deepseek/deepseek-chat", []string{"low", "high", "max"}},
+		{"llama-3.3-70b", Levels},
+	} {
+		t.Run(test.model, func(t *testing.T) {
+			if levels := ForModel(test.model); !slices.Equal(levels, test.levels) {
+				t.Fatalf("ForModel(%q) = %v, want %v", test.model, levels, test.levels)
+			}
+			for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+				accepted := Validate(test.model, effort) == nil
+				if want := slices.Contains(test.levels, effort); accepted != want {
+					t.Errorf("Validate(%q, %q) accepted = %t, want %t", test.model, effort, accepted, want)
+				}
+			}
+		})
+	}
+}
+
+func TestOmitTemperature(t *testing.T) {
+	for _, test := range []struct {
+		model  string
+		effort string
+		want   bool
+	}{
+		{"gpt-5", "", true},
+		{"openai/o3", "", true},
+		{"grok-4.5", "", false},
+		{"deepseek-v4.1-flash", "", false},
+		{"deepseek/deepseek-chat", "", false},
+		{"grok-4.5", "low", true},
+		{"llama-3.3-70b", "", false},
+		{"llama-3.3-70b", "high", true},
+	} {
+		if got := OmitTemperature(test.model, test.effort); got != test.want {
+			t.Errorf("OmitTemperature(%q, %q) = %t, want %t", test.model, test.effort, got, test.want)
+		}
+	}
+}
+
 func TestChatModelCapabilitiesAndValidation(t *testing.T) {
 	for _, model := range []string{
 		"chat-latest",
