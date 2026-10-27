@@ -25,7 +25,6 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBirthDate, computeAge } from "@/lib/date";
 import { getInitials } from "@/lib/text";
-import { useInitialVisibleRange } from "@/hooks/useScrollRestoration";
 
 type TypeFilter = "all" | "movie" | "series";
 
@@ -95,8 +94,7 @@ export default function PersonDetail() {
   );
 
   const limit = 60;
-  const initialVisibleRange = useInitialVisibleRange(limit);
-  const [visibleRange, setVisibleRange] = useState<[number, number]>(initialVisibleRange);
+  const [visibleRange, setVisibleRange] = useState<[number, number]>([0, limit - 1]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const handleVisibleRangeChange = useCallback((start: number, end: number) => {
     clearTimeout(debounceRef.current);
@@ -249,6 +247,7 @@ export default function PersonDetail() {
 
         <ItemGrid
           totalItems={catalogQuery.data?.totalItems ?? 0}
+          knownItems={catalogQuery.data?.knownItems}
           pages={catalogQuery.data?.pages ?? new Map()}
           pageSize={limit}
           loading={catalogQuery.isLoading}

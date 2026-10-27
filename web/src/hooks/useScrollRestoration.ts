@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useLocation, useNavigationType } from "react-router";
 
 import {
@@ -9,7 +9,6 @@ import {
   recordScroll,
   relayoutRestore,
   restoreLanded,
-  savedGridIndex,
 } from "@/lib/scrollRestoration";
 
 /** How long a page may take to grow tall enough for its saved position. */
@@ -97,19 +96,4 @@ export function useScrollRestoration(): void {
       observer.disconnect();
     };
   }, [location, navigationType]);
-}
-
-/**
- * The visible range a windowed grid page starts with: the range around the
- * item it is about to restore to on Back or Forward, so that window is fetched
- * first instead of growing the list toward it from the top.
- */
-export function useInitialVisibleRange(limit: number): [number, number] {
-  const location = useLocation();
-  const navigationType = useNavigationType();
-  const [range] = useState<[number, number]>(() => {
-    const index = navigationType === "POP" ? savedGridIndex(historyEntryId(location)) : undefined;
-    return index === undefined ? [0, limit - 1] : [index, index + limit - 1];
-  });
-  return range;
 }

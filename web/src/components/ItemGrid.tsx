@@ -68,6 +68,11 @@ function stickyHeaderInset(): number {
 
 interface WindowedItemGridProps extends SharedItemGridProps {
   totalItems: number;
+  /**
+   * Items known to exist. Below `totalItems` while the total is an estimated
+   * runway past the last loaded page; defaults to `totalItems`, an exact total.
+   */
+  knownItems?: number;
   pages: Map<number, BrowseItem[]>;
   pageSize: number;
   onVisibleRangeChange: (startIndex: number, endIndex: number) => void;
@@ -77,6 +82,7 @@ interface WindowedItemGridProps extends SharedItemGridProps {
 interface StaticItemGridProps extends SharedItemGridProps {
   items: BrowseItem[];
   totalItems?: never;
+  knownItems?: never;
   pages?: never;
   pageSize?: never;
   onVisibleRangeChange?: never;
@@ -169,14 +175,13 @@ export default function ItemGrid(props: ItemGridProps) {
   const restoreVersion = useSyncExternalStore(subscribeScrollRestoration, scrollRestorationVersion);
 
   // A row past the current extent may still be on its way: an estimated
-  // total only reaches it once the page holding it loads, and the page starts
-  // its visible range there so that page is the one being fetched. Once that
-  // page is in, the list ended sooner than it did when the row was saved.
+  // total only reaches it once the page holding it loads. Once the total is
+  // final, or that page is in, the list ended sooner than when it was saved.
   const restoreAnchor = pendingGridRestore();
-  const restorePageLoaded =
-    !restoreAnchor ||
-    hasStaticItems(props) ||
-    pages.has(Math.floor(restoreAnchor.index / pageSize));
+  const extentFinal =
+    hasStaticItems(props) || (props.knownItems ?? props.totalItems) >= props.totalItems;
+  const restoreRowSettled =
+    !restoreAnchor || extentFinal || pages.has(Math.floor(restoreAnchor.index / pageSize));
 
   // Back or Forward to this page: put the saved row back at the top, at the
   // same depth into it. The restore stays in force until the page settles,
@@ -187,7 +192,7 @@ export default function ItemGrid(props: ItemGridProps) {
     // content above the grid.
     if (!anchor || !showsItems || !anchorEl) return;
     const savedRow = Math.floor(anchor.index / columnCount);
-    if (savedRow >= rowCount && !restorePageLoaded) return;
+    if (savedRow >= rowCount && !restoreRowSettled) return;
     const row = Math.min(savedRow, rowCount - 1);
     // The saved offset was taken at the last mount's measured pitch, which
     // can be taller than this mount's; past this row it would be the next.
@@ -198,7 +203,7 @@ export default function ItemGrid(props: ItemGridProps) {
     restoreLanded();
   }, [
     restoreVersion,
-    restorePageLoaded,
+    restoreRowSettled,
     showsItems,
     anchorEl,
     columnCount,
@@ -329,13 +334,18 @@ export default function ItemGrid(props: ItemGridProps) {
   ]);
 
   useEffect(() => {
-    // The rows on screen before a restore lands are not where the page is
-    // headed; reporting them would fetch the top of the list instead.
-    if (awaitingGridRestore()) return;
+    // Until a restore lands, the rows on screen are not where the page is
+    // headed. Ask for the saved row's window instead, so that page is the one
+    // fetched, whatever range the page last asked for.
+    const anchor = awaitingGridRestore() ? pendingGridRestore() : undefined;
+    if (anchor) {
+      onVisibleRangeChange(anchor.index, anchor.index + pageSize - 1);
+      return;
+    }
     const start = firstRow * columnCount;
     const end = Math.min((lastRow + 1) * columnCount - 1, totalItems - 1);
     onVisibleRangeChange(start, Math.max(end, 0));
-  }, [firstRow, lastRow, columnCount, totalItems, onVisibleRangeChange, restoreVersion]);
+  }, [firstRow, lastRow, columnCount, totalItems, pageSize, onVisibleRangeChange, restoreVersion]);
 
   const getItem = useCallback(
     (globalIndex: number): BrowseItem | undefined => {

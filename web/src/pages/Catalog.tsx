@@ -59,7 +59,6 @@ import {
   withCatalogRequestPage,
 } from "./catalogSearchParams";
 import type { CatalogSearchState } from "./catalogSearchParams";
-import { useInitialVisibleRange } from "@/hooks/useScrollRestoration";
 
 const REQUEST_SEARCH_DEBOUNCE_MS = 100;
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
@@ -125,13 +124,12 @@ function CatalogResults({
   // Paging the Request to add grid is not a new search: it keeps the library
   // results' loaded range and selection.
   const searchKey = withCatalogRequestPage(searchParams, 1).toString();
-  const initialVisibleRange = useInitialVisibleRange(limit);
   const [visibleRangeState, setVisibleRangeState] = useState<{
     key: string;
     range: [number, number];
   }>({
     key: searchKey,
-    range: initialVisibleRange,
+    range: [0, limit - 1],
   });
   const visibleRange =
     visibleRangeState.key === searchKey
@@ -640,6 +638,7 @@ function CatalogResults({
           ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
             <ItemGrid
               totalItems={catalogQuery.data?.totalItems ?? 0}
+              knownItems={catalogQuery.data?.knownItems}
               pages={catalogQuery.data?.pages ?? new Map()}
               pageSize={limit}
               loading={catalogQuery.isLoading}

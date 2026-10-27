@@ -178,27 +178,31 @@ describe("ItemGrid scroll anchoring", () => {
   });
 
   describe("restoring a row past the list's current extent", () => {
-    // Row 150, 19px in; the list's estimated total first covers rows 0-99.
+    // Row 150, 19px in; the list's total first covers rows 0-99.
     function returnToRow150() {
       enterHistoryEntry("list", false);
       recordGridAnchor(150 * 340 + 19, { index: 300, offset: 19 });
       enterHistoryEntry("detail", false);
       enterHistoryEntry("list", true);
     }
-    const props = { pageSize: 100, onVisibleRangeChange: vi.fn() };
     const firstPage = new Map([[0, items.slice(0, 100)]]);
 
-    it("waits for the page that holds the row", () => {
+    it("asks for the row's page and waits for it while the total is estimated", () => {
       returnToRow150();
-      const { rerender } = render(<ItemGrid {...props} totalItems={200} pages={firstPage} />);
+      const onVisibleRangeChange = vi.fn();
+      const props = { pageSize: 100, onVisibleRangeChange };
+      const { rerender } = render(
+        <ItemGrid {...props} totalItems={200} knownItems={100} pages={firstPage} />,
+      );
 
       expect(awaitingGridRestore()).toBe(true);
-      expect(props.onVisibleRangeChange).not.toHaveBeenCalled();
+      expect(onVisibleRangeChange).toHaveBeenLastCalledWith(300, 399);
 
       rerender(
         <ItemGrid
           {...props}
-          totalItems={400}
+          totalItems={500}
+          knownItems={400}
           pages={new Map([...firstPage, [3, items.slice(300, 400)]])}
         />,
       );
@@ -207,11 +211,24 @@ describe("ItemGrid scroll anchoring", () => {
       expect(window.scrollY).toBe(150 * 340 + 19);
     });
 
-    it("stops at the end once that page shows the list got shorter", () => {
+    it.each([
+      {
+        name: "the row's page came back empty",
+        knownItems: 100,
+        pages: new Map([...firstPage, [3, []]]),
+      },
+      { name: "the exact total ends before it", knownItems: undefined, pages: firstPage },
+    ])("stops at the end once $name", ({ knownItems, pages }) => {
       returnToRow150();
-      const { rerender } = render(<ItemGrid {...props} totalItems={200} pages={firstPage} />);
-
-      rerender(<ItemGrid {...props} totalItems={200} pages={new Map([...firstPage, [3, []]])} />);
+      render(
+        <ItemGrid
+          pageSize={100}
+          onVisibleRangeChange={vi.fn()}
+          totalItems={200}
+          knownItems={knownItems}
+          pages={pages}
+        />,
+      );
 
       expect(awaitingGridRestore()).toBe(false);
       expect(window.scrollY).toBe(99 * 300);

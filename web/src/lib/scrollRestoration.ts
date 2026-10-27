@@ -181,7 +181,7 @@ export function finishRestore() {
   notify();
 }
 
-/** The first item of the top row saved for an entry about to be restored. */
+/** The first item of the top row saved for an entry, if a grid recorded one. */
 export function savedGridIndex(id: string): number | undefined {
   return store().get(id)?.grid?.index;
 }

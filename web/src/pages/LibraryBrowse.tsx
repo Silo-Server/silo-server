@@ -33,7 +33,6 @@ import {
   type AudiobookBrowseAxis,
   type LibraryBrowseType,
 } from "./libraryPageSearchParams";
-import { useInitialVisibleRange } from "@/hooks/useScrollRestoration";
 
 interface LibraryBrowseProps {
   libraryId: number;
@@ -159,14 +158,13 @@ export default function LibraryBrowse({
   });
   const showMediaScopeSelector = libraryType === "mixed";
   const filtersKey = JSON.stringify(scopedQueryDefinition);
-  const initialVisibleRange = useInitialVisibleRange(limit);
 
   const [visibleRangeState, setVisibleRangeState] = useState<{
     key: string;
     range: [number, number];
   }>({
     key: filtersKey,
-    range: initialVisibleRange,
+    range: [0, limit - 1],
   });
   const visibleRange =
     visibleRangeState.key === filtersKey
@@ -403,6 +401,8 @@ export default function LibraryBrowse({
           <ItemGrid
             gridRef={gridRef}
             totalItems={gridTotalItems}
+            // The letter index's total is exact.
+            knownItems={showLetterBar ? gridTotalItems : catalogQuery.data?.knownItems}
             pages={pages}
             pageSize={limit}
             libraryId={libraryId}
