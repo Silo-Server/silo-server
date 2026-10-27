@@ -69,6 +69,9 @@ export default function SearchSettings() {
   const providerEnv = envVar(PROVIDER_KEY);
   const urlEnv = envVar(MEILI_URL_KEY);
   const apiKeyEnv = envVar(MEILI_API_KEY);
+  // Without the protected-credential status the page cannot tell which of
+  // these fields the environment sets, so they wait for a reload.
+  const connectionUnknown = form.sensitiveStatusError;
   const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   // Staged Meilisearch edits stay reachable after switching the provider back,
@@ -133,9 +136,17 @@ export default function SearchSettings() {
               { value: "meilisearch", label: "Meilisearch" },
             ]}
             status={meiliEnabled && !searchStatus?.degraded ? <SearchStatusSummary /> : undefined}
-            disabled={providerEnv != null}
+            disabled={providerEnv != null || connectionUnknown}
             restartRequired={restartKeys.has(PROVIDER_KEY)}
           />
+          {connectionUnknown && (
+            <div className="py-3.5">
+              <SettingFieldStatus tone="warn">
+                Protected credential status could not be loaded. Reload this page to edit the search
+                engine and the Meilisearch connection.
+              </SettingFieldStatus>
+            </div>
+          )}
           {meiliEnabled && searchStatus?.degraded && (
             <div className="py-3.5">
               <SettingFieldStatus tone="warn">
@@ -168,7 +179,7 @@ export default function SearchSettings() {
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint="http://localhost:7700"
-                disabled={!meiliEnabled || urlEnv != null}
+                disabled={!meiliEnabled || urlEnv != null || connectionUnknown}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}
               />
               <SecretField
@@ -186,7 +197,7 @@ export default function SearchSettings() {
                     ? `Managed by ${apiKeyEnv}.`
                     : "Master key, or one that can read and write the index."
                 }
-                disabled={!meiliEnabled || apiKeyEnv != null}
+                disabled={!meiliEnabled || apiKeyEnv != null || connectionUnknown}
                 restartRequired={restartKeys.has(MEILI_API_KEY)}
               />
               <ConnectionCheckAction
