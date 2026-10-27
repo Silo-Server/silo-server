@@ -92,7 +92,7 @@ const RECOMMENDATIONS_SECTIONS: RecSectionDef[] = [
 ];
 
 const EMBEDDING_LOCK_NOTE =
-  "Switching to a provider at another address, or to another model, requires resetting embeddings, which deletes them all.";
+  "Switching to another model requires resetting embeddings, which deletes them all. Another provider serving the same model applies after a restart.";
 
 export function buildRecommendationSections(): RecSectionDef[] {
   return RECOMMENDATIONS_SECTIONS;

@@ -73,9 +73,10 @@ fails with a message asking for one.
 The first stored vector writes the embedding lock (base URL, model, source and
 storage dimensions) in `server_settings`. Every later vector must come from the
 locked model with the locked dimensions. The lock belongs to the model, not the
-provider: the same model through another provider or address is accepted, and a
-vendor prefix is ignored, so `google/gemini-embedding-001` through OpenRouter
-matches a `gemini-embedding-001` lock. Vectors from such a provider are stored
+provider: the same model through another provider or address is accepted, and
+so is the same name behind a vendor prefix, so `google/gemini-embedding-001`
+through OpenRouter matches a `gemini-embedding-001` lock. Two different prefixes
+(`team-a/embed`, `team-b/embed`) name different models. Vectors from such a provider are stored
 under the lock's model name. The recorded base URL is informational.
 
 - A vector is checked before the lock is read or written: an empty vector or

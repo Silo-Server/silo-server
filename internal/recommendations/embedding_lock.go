@@ -41,15 +41,17 @@ func ParseEmbeddingLock(raw string) (*EmbeddingLock, error) {
 	return &lock, nil
 }
 
-// SameEmbeddingModel reports whether two model names name one model. A
-// gateway such as OpenRouter prefixes the vendor (google/gemini-embedding-001),
-// and the same model returns the same vectors whichever provider serves it.
+// SameEmbeddingModel reports whether two model names name one model: they are
+// equal, or one is the other behind a vendor prefix, the way a gateway such as
+// OpenRouter names it (google/gemini-embedding-001). The same model returns the
+// same vectors whichever provider serves it. Two different prefixes name
+// different models.
 func SameEmbeddingModel(a, b string) bool {
-	bare := func(model string) string {
-		model = strings.TrimSpace(model)
-		return model[strings.LastIndex(model, "/")+1:]
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
 	}
-	return bare(a) == bare(b)
+	return a == b || strings.HasSuffix(a, "/"+b) || strings.HasSuffix(b, "/"+a)
 }
 
 // ValidateConfig ensures the lock accepts the configured model. The embedding

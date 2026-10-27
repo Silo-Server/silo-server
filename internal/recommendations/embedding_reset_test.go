@@ -169,6 +169,8 @@ func TestDescribeEmbeddingLockConflict(t *testing.T) {
 		{"matching, dimensions unknown", lock, lock.BaseURL, "model-a", 0, ""},
 		{"other base URL", lock, "http://other", "model-a", 768, ""},
 		{"vendor-prefixed model", lock, "http://other", "google/model-a", 768, ""},
+		{"another vendor's model of the same name", EmbeddingLock{Model: "team-a/m", SourceDimensions: 768, StorageDimensions: CanonicalEmbeddingDimensions},
+			"http://other", "team-b/m", 768, `model "team-a/m", not "team-b/m"`},
 		{"no provider chosen", lock, "", "", 0, `No embedding provider is chosen. Choose a provider that serves "model-a"`},
 		{"other model", lock, lock.BaseURL, "model-b", 768, `model "model-a", not "model-b"`},
 		{"other dimensions", lock, lock.BaseURL, "model-a", 1024, "768-dimension vectors, but the model now returns 1024"},
