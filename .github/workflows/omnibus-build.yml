@@ -79,6 +79,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
             org.opencontainers.image.version=${{ inputs.image_version }}-omnibus
 
+      # No layer cache: every layer sits on this commit's regular image, so a
+      # cached layer could never match, and rebuilding is what keeps the
+      # PostgreSQL and Redis packages current.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -89,8 +92,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SILO_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:${{ inputs.base_tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-omnibus-${{ env.PLATFORM_PAIR }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-omnibus-${{ env.PLATFORM_PAIR }},mode=max,image-manifest=true,oci-mediatypes=true
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -102,7 +103,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: digests-omnibus-${{ env.PLATFORM_PAIR }}
+          name: omnibus-digests-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1

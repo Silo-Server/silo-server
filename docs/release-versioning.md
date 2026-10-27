@@ -54,6 +54,10 @@ tags that identify the same multi-platform image:
 | `latest` | Mutable pointer updated by successful default-branch publications. |
 | Short commit SHA | Exact source identity for the build. |
 
+The omnibus image, which bundles PostgreSQL, Redis, and Meilisearch, is
+published from the same build under each of these tags with an `-omnibus`
+suffix, such as `latest-omnibus`.
+
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a `build-N`, commit-SHA tag, or image digest when a
 deployment must not move with `latest`. Versioned container tags are not

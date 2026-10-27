@@ -20,8 +20,6 @@ This folder is for people and coding agents changing the server:
   [release-versioning.md](release-versioning.md) are project policy.
 - [update-to-1.0.md](update-to-1.0.md) is the draft procedure for updating an
   alpha server to 1.0. It moves to the manual when 1.0 ships.
-- [omnibus-image.md](omnibus-image.md) describes the single-container image
-  that bundles PostgreSQL, and optionally Redis and Meilisearch, with Silo.
 
 [DEVELOPMENT.md](../DEVELOPMENT.md) covers building and testing, and
 [CONTRIBUTING.md](../CONTRIBUTING.md) covers pull requests.

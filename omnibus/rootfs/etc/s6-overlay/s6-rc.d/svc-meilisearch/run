@@ -15,7 +15,10 @@ export HOME=/config/meilisearch
 : "${MEILI_HTTP_ADDR:=127.0.0.1:7700}"
 : "${MEILI_ENV:=production}"
 : "${MEILI_NO_ANALYTICS:=true}"
+# Meilisearch logs every request at INFO, and Silo polls it, which would bury
+# Silo's own lines in the shared container log.
+: "${MEILI_LOG_LEVEL:=WARN}"
 MEILI_MASTER_KEY="$(<"$STATE_DIR/meili-master-key")"
-export MEILI_DB_PATH MEILI_DUMP_DIR MEILI_SNAPSHOT_DIR MEILI_HTTP_ADDR MEILI_ENV MEILI_NO_ANALYTICS MEILI_MASTER_KEY
+export MEILI_DB_PATH MEILI_DUMP_DIR MEILI_SNAPSHOT_DIR MEILI_HTTP_ADDR MEILI_ENV MEILI_NO_ANALYTICS MEILI_LOG_LEVEL MEILI_MASTER_KEY
 exec s6-notifyoncheck -d -n 0 -w 1000 \
   s6-setuidgid meilisearch meilisearch

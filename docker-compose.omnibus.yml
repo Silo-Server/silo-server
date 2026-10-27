@@ -1,9 +1,11 @@
 # Single-container deployment with the omnibus image: Silo and PostgreSQL in
-# one container, with Redis and Meilisearch available on request. See
-# docs/omnibus-image.md. Use this file on its own, not layered on
-# docker-compose.yml:
+# one container, with Redis and Meilisearch available on request. Use this file
+# on its own, not layered on docker-compose.yml:
 #
 #   docker compose -f docker-compose.omnibus.yml up -d
+#
+# It reads the same optional .env as docker-compose.yml.
+# docs/architecture/omnibus-image.md describes how the image works.
 services:
   silo:
     image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
@@ -12,6 +14,11 @@ services:
     # it. Docker's default 10s would cut that short.
     stop_grace_period: 2m
     environment:
+      # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
+      # are host-side published-port overrides.
+      PORT: "8080"
+      JF_PORT: "8096"
+      ABS_PORT: "13378"
       # The account that runs Silo and owns /config/silo and the media reads.
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
@@ -27,12 +34,15 @@ services:
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
     volumes:
-      - ${SILO_CONFIG_ROOT:-/opt/silo/config}:/config
+      # Silo's state, the PostgreSQL cluster, and the Redis and Meilisearch data.
+      - ${SILO_DATA_ROOT:-/opt/silo}/config:/config
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-      # Transcode segments and prepared downloads. Optional; without these
-      # mounts they live in the container's /tmp and vanish on recreation.
-      - ${SILO_CONFIG_ROOT:-/opt/silo/config}/transcode:/tmp/silo-transcode
-      - ${SILO_CONFIG_ROOT:-/opt/silo/config}/download-artifacts:/tmp/silo-download-artifacts
+      # Transcode segments and prepared downloads, kept out of /config so a
+      # backup of it stays small. Without these mounts they live in the
+      # container's /tmp and vanish on recreation.
+      - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+      - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
+      - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
       # Only load-bearing when the Docker host is itself an LXC container; see
       # the note in docker-compose.yml. Harmless elsewhere.
       - /proc/meminfo:/host/proc/meminfo:ro

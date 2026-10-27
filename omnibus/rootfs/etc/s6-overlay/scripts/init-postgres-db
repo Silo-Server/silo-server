@@ -1,6 +1,7 @@
 #!/command/with-contenv bash
 # shellcheck shell=bash
-# Create the silo database and the extensions Silo's migrations expect.
+# Create the silo database. Silo's migrations create the extensions they
+# need, as they do in the Compose stack; the silo role is the superuser.
 set -euo pipefail
 # shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
 source /etc/silo-omnibus/lib.sh
@@ -16,4 +17,3 @@ if [[ "$(psql_silo -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'si
   log "creating the silo database"
   psql_silo -d postgres -c 'CREATE DATABASE silo'
 fi
-psql_silo -d silo -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS citext;'

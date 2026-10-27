@@ -41,7 +41,10 @@ else
 fi
 
 # Meilisearch: off by default. The master key is generated once and kept in
-# /config/meilisearch/master-key unless MEILI_MASTER_KEY is provided.
+# /config/meilisearch/master-key unless MEILI_MASTER_KEY is provided. Silo
+# connects to it through SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and
+# SILO_MEILISEARCH_API_KEY; a value the deployment sets itself wins.
+search_marker=/config/meilisearch/silo-search-provider
 if truthy "${ENABLE_MEILISEARCH:-false}"; then
   : > "$STATE_DIR/meilisearch.enabled"
   key_file=/config/meilisearch/master-key
@@ -56,8 +59,21 @@ if truthy "${ENABLE_MEILISEARCH:-false}"; then
     log "generated a Meilisearch master key at $key_file"
   fi
   (umask 077 && printf '%s' "$key" > "$STATE_DIR/meili-master-key")
+  if [[ -z "${SILO_SEARCH_PROVIDER:-}" ]]; then
+    export_env SILO_SEARCH_PROVIDER meilisearch
+    : > "$search_marker"
+  fi
+  [[ -n "${SILO_MEILISEARCH_URL:-}" ]] || export_env SILO_MEILISEARCH_URL "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}"
+  [[ -n "${SILO_MEILISEARCH_API_KEY:-}" ]] || export_env SILO_MEILISEARCH_API_KEY "$key"
   meilisearch_state="bundled"
 else
+  # Turning the bundle off moves search back to PostgreSQL on the next start,
+  # once. The marker says this image chose Meilisearch, so a provider set any
+  # other way is left alone, and after this start the admin UI can change it.
+  if [[ -e "$search_marker" && -z "${SILO_SEARCH_PROVIDER:-}" ]]; then
+    export_env SILO_SEARCH_PROVIDER postgres
+    rm -f "$search_marker"
+  fi
   meilisearch_state="off"
 fi
 
