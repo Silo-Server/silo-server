@@ -44,6 +44,17 @@ for dev in /dev/dri/* /dev/nvidia*; do
   usermod -aG "$group" silo
 done
 
+# Silo reads the media as this account; the Compose stack's image ran it as
+# root. Check the media root and the folders in it, which is where a library
+# that only another account can read shows up.
+media="${MEDIA_CONTAINER_ROOT:-/mnt/media}"
+if [[ -d "$media" ]]; then
+  unreadable="$(s6-setuidgid silo find "$media" -maxdepth 1 \( ! -readable -o -type d ! -executable \) -print -quit 2>/dev/null || true)"
+  if [[ -n "$unreadable" ]]; then
+    warn "uid $PUID cannot read $unreadable; set PUID and PGID to an account that can read the media"
+  fi
+fi
+
 cat <<BANNER
 ───────────────────────────────────────
 Silo omnibus
