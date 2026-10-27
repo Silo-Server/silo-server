@@ -327,13 +327,19 @@ type RecommendationsConfig struct {
 // transcription (operators often run a dedicated Whisper server). Settings
 // load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
 type AIConfig struct {
-	AuthMode          string `yaml:"-"`
-	ReasoningEffort   string `yaml:"-"`
-	BaseURL           string `yaml:"-"`
-	APIKey            string `yaml:"-"`
-	ChatModel         string `yaml:"-"`
-	ASRBaseURL        string `yaml:"-"` // empty = BaseURL
-	ASRAPIKey         string `yaml:"-"` // empty = APIKey
+	AuthMode        string `yaml:"-"`
+	ReasoningEffort string `yaml:"-"`
+	// TextProviderID selects the API-key text provider in ai.providers;
+	// BaseURL and APIKey are its resolved chat endpoint and key.
+	TextProviderID string `yaml:"-"`
+	BaseURL        string `yaml:"-"`
+	APIKey         string `yaml:"-"`
+	ChatModel      string `yaml:"-"`
+	// SpeechProviderID selects the speech-to-text provider; ASRBaseURL and
+	// ASRAPIKey are its resolved endpoint and key, empty when none is chosen.
+	SpeechProviderID  string `yaml:"-"`
+	ASRBaseURL        string `yaml:"-"`
+	ASRAPIKey         string `yaml:"-"`
 	ASRModel          string `yaml:"-"`
 	MaxConcurrentJobs int    `yaml:"-"` // one shared bound across all AI job services
 }

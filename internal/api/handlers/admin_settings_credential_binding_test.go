@@ -98,8 +98,6 @@ func TestConnectionCheckAuthorityEquivalence(t *testing.T) {
 
 func TestConnectionCheckDefaultPortsRetainSavedCredentials(t *testing.T) {
 	for _, tc := range []struct{ kind, urlKey, keyKey string }{
-		{"ai_chat", "ai.base_url", "ai.api_key"},
-		{"ai_transcription", "ai.asr_base_url", "ai.asr_api_key"},
 		{"recommendations_embedding", "recommendations.embedding_base_url", "recommendations.embedding_auth_token"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {

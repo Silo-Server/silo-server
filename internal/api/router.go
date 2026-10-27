@@ -2756,6 +2756,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
+		v2deps.AdminAIProviders = adminHandler
 		adminHandler.ChatGPT = chatGPT
 	}
 	if chatGPT != nil {
@@ -5276,7 +5277,8 @@ func llmConfigFromServer(cfg *config.Config) llm.Config {
 // effectiveSubtitleAIConfig derives the subtitle AI service config from the server config.
 func effectiveSubtitleAIConfig(cfg *config.Config) subtitleai.Config {
 	return subtitleai.Config{
-		Configured:            cfg.AI.BaseURL != "",
+		Configured:            cfg.AI.BaseURL != "" || cfg.AI.AuthMode == llm.AuthModeChatGPT,
+		SpeechConfigured:      cfg.AI.ASRBaseURL != "",
 		TranslateEnabled:      cfg.SubtitleAI.Enabled,
 		TranscribeEnabled:     cfg.SubtitleAI.TranscribeEnabled,
 		ChatModel:             cfg.AI.ChatModel,
@@ -5324,7 +5326,7 @@ func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, 
 func metadataAIConfigFromServer(cfg *config.Config) metadatatranslation.Config {
 	return metadatatranslation.Config{
 		Enabled:    cfg.MetadataAI.Enabled,
-		Configured: cfg.AI.BaseURL != "",
+		Configured: cfg.AI.BaseURL != "" || cfg.AI.AuthMode == llm.AuthModeChatGPT,
 		ChatModel:  cfg.AI.ChatModel,
 		OnView:     cfg.MetadataAI.OnView,
 	}
