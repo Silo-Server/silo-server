@@ -1966,8 +1966,10 @@ It is not the playback device the v2 `X-Device-ID` header names. The platform is
 only what the client declared; the server never derives one from the user agent.
 A Jellyfin play carries the `DeviceId` of its MediaBrowser authorization and no
 platform; an Audiobookshelf play carries neither. A session rebuilt after a
-restart keeps its device. The fields are absent when the client declared none,
-and the frozen v1 row never carries them.
+restart from the server's recovery card keeps its device; one rebuilt from a
+stream token comes back without it, as it does without its client name. The
+fields are absent when the client declared none, and the frozen v1 row never
+carries them.
 
 `GET /api/v2/admin/node-sessions` returns `{items, page, undecodable}` using the
 owning node-session reader. Optional positive string `node_id` filters by the
