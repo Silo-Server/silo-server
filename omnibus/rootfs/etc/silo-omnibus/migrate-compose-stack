@@ -142,6 +142,11 @@ if [[ -n "${REDIS_URL:-}" ]]; then
       fail "REDIS_URL in .env points at the earlier stack's Redis; remove it, and set ENABLE_REDIS=true if this server needs Redis" ;;
   esac
 fi
+# Silo applies these on every start, over the stored settings, and the image
+# keeps a URL set here even with its own Meilisearch on.
+if [[ "$(url_host "${SILO_MEILISEARCH_URL:-}")" == meilisearch ]]; then
+  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+fi
 
 source_cluster=""
 if [[ -n "${DATABASE_URL:-}" ]]; then
