@@ -13,8 +13,16 @@ func TestPreferUnconvertedAudioTrackV3FollowsThePlanner(t *testing.T) {
 		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
 		{Language: "en", Codec: "eac3", Channels: 6, Layout: "5.1(side)"},
 	}
+	stereoAACV3 := func(r StartRequestV3) StartRequestV3 {
+		for class, delivery := range r.ClientPlaybackContext.Deliveries {
+			delivery.MaxChannelsByCodec = map[string]int{"aac": 2}
+			r.ClientPlaybackContext.Deliveries[class] = delivery
+		}
+		return r
+	}
 	for _, test := range []struct {
 		name    string
+		tracks  []models.AudioTrack
 		request func(StartRequestV3) StartRequestV3
 		want    int
 	}{
@@ -36,9 +44,28 @@ func TestPreferUnconvertedAudioTrackV3FollowsThePlanner(t *testing.T) {
 			},
 			want: 0,
 		},
+		{
+			// A device that decodes AAC only in stereo: multichannel AAC is
+			// converted like TrueHD, while stereo AAC is copied and keeps
+			// every channel the conversion would.
+			name:    "a codec ceiling counts as a conversion",
+			tracks:  []models.AudioTrack{tracks[0], {Language: "en", Codec: "aac", Channels: 6, Layout: "5.1"}},
+			request: stereoAACV3,
+			want:    0,
+		},
+		{
+			name:    "a codec ceiling sets the conversion's channels",
+			tracks:  []models.AudioTrack{tracks[0], {Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"}},
+			request: stereoAACV3,
+			want:    1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "ac3", "eac3"}, 0)
+			fileTracks := tracks
+			if test.tracks != nil {
+				fileTracks = test.tracks
+			}
+			file, request := androidMedia3FFmpegFixtureV3("tv", fileTracks, []string{"aac", "ac3", "eac3"}, 0)
 			request = test.request(request)
 			outcome := func(index int) StartAudioOutcomeV3 {
 				return StartAudioOutcomeFromResultV3(PlanPlaybackV3(PlannerInputV3{

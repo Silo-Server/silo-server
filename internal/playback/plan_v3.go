@@ -609,8 +609,8 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// A source with more channels than the delivery's ceiling cannot be
 		// copied there even when the codec is supported. Adapt only the audio
 		// so the video stays a copy instead of falling through to a transcode.
-		progressiveChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels)
-		hlsChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels)
+		progressiveChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, source.AudioChannels)
+		hlsChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, source.AudioChannels)
 		progressiveCodecAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
 		hlsCodecAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 			deliverySupportsAudioClaimV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, audioClaims, audioOK)
@@ -1175,11 +1175,11 @@ func aacOutputChannelsV3(request StartRequestV3, deliveryClass string, sourceCha
 	} else if preserveSurround && sourceChannels >= 6 {
 		channels = 6
 	}
-	capability, ok := request.ClientPlaybackContext.Deliveries[deliveryClass]
-	if !ok || capability.MaxChannels == nil || *capability.MaxChannels <= 0 || channels <= *capability.MaxChannels {
+	ceiling := deliveryChannelCeilingV3(request, deliveryClass, audioCodecAACV3)
+	if ceiling <= 0 || channels <= ceiling {
 		return channels
 	}
-	if *capability.MaxChannels == 1 {
+	if ceiling == 1 {
 		return 1
 	}
 	return 2
@@ -2479,13 +2479,30 @@ func deliverySupportsAudioClaimV3(request StartRequestV3, deliveryClass, codec s
 	return containsFoldV3(supportedCodecs, codec)
 }
 
-// deliveryExceedsMaxChannelsV3 reports whether an audio stream with the given
-// channel count exceeds the delivery's max_channels ceiling. Planning and the
-// finished-plan check in deliverySupportsPlanV3 share it; a ceiling of zero or
-// less means unset, matching aacOutputChannelsV3.
-func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass string, channels int) bool {
+// deliveryExceedsMaxChannelsV3 reports whether an audio stream in codec with
+// the given channel count exceeds the delivery's ceiling for that codec.
+// Planning and the finished-plan check in deliverySupportsPlanV3 share it.
+func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass, codec string, channels int) bool {
+	ceiling := deliveryChannelCeilingV3(request, deliveryClass, codec)
+	return ceiling > 0 && channels > ceiling
+}
+
+// deliveryChannelCeilingV3 is the lower of the delivery's max_channels and its
+// max_channels_by_codec entry for codec, ignoring a value of zero or less. Zero
+// means no ceiling.
+func deliveryChannelCeilingV3(request StartRequestV3, deliveryClass, codec string) int {
 	capability, ok := request.ClientPlaybackContext.Deliveries[deliveryClass]
-	return ok && capability.MaxChannels != nil && *capability.MaxChannels > 0 && channels > *capability.MaxChannels
+	if !ok {
+		return 0
+	}
+	ceiling := 0
+	if capability.MaxChannels != nil && *capability.MaxChannels > 0 {
+		ceiling = *capability.MaxChannels
+	}
+	if byCodec := capability.MaxChannelsByCodec[normalizeCodecV3(codec)]; byCodec > 0 && (ceiling == 0 || byCodec < ceiling) {
+		ceiling = byCodec
+	}
+	return ceiling
 }
 
 // audioRemuxFitsServerCapV3 reports whether a video-copy remux that converts
@@ -2538,7 +2555,7 @@ func deliverySupportsPlanV3(request StartRequestV3, deliveryClass string, plan P
 			}
 		}
 	}
-	if plan.EffectiveRecipe.AudioChannels != nil && deliveryExceedsMaxChannelsV3(request, deliveryClass, *plan.EffectiveRecipe.AudioChannels) {
+	if plan.EffectiveRecipe.AudioChannels != nil && deliveryExceedsMaxChannelsV3(request, deliveryClass, plan.EffectiveRecipe.AudioCodec, *plan.EffectiveRecipe.AudioChannels) {
 		return false
 	}
 	clientManagedOriginalRange := deliveryClass == DeliveryClassOriginalHTTPV3 &&
