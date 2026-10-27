@@ -33,6 +33,12 @@ POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
 POST /api/v2/admin/ai/chatgpt/login	non-media
 POST /api/v2/admin/ai/chatgpt/login/complete	non-media
 GET /api/v2/admin/ai/chatgpt/models	non-media
+GET /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers/check	non-media
+DELETE /api/v2/admin/ai/providers/{id}	non-media
+PATCH /api/v2/admin/ai/providers/{id}	non-media
+GET /api/v2/admin/ai/providers/{id}/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media
@@ -1327,6 +1333,12 @@ POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
 POST /api/v2/admin/ai/chatgpt/login	non-media
 POST /api/v2/admin/ai/chatgpt/login/complete	non-media
 GET /api/v2/admin/ai/chatgpt/models	non-media
+GET /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers	non-media
+POST /api/v2/admin/ai/providers/check	non-media
+DELETE /api/v2/admin/ai/providers/{id}	non-media
+PATCH /api/v2/admin/ai/providers/{id}	non-media
+GET /api/v2/admin/ai/providers/{id}/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media

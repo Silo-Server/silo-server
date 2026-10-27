@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 23,
+  "revision": 24,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1385,9 +1385,9 @@
       "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Media cards",
-      "description": "Poster size and caption detail used by media cards.",
+      "description": "Poster size used by media cards.",
       "recommended_control": "panel",
-      "notes": "Semantic presets roam between like devices without forcing identical pixel dimensions across platforms. A profile fallback can opt into one presentation everywhere; family and exact-device values remain more specific."
+      "notes": "Semantic presets roam between like devices without forcing identical pixel dimensions across platforms. A profile fallback can opt into one presentation everywhere; family and exact-device values remain more specific. Revision 24 retires the caption choice: people hid titles and could no longer tell what a card was, so every card shows its title and details. caption stays required and keeps all three members so older clients can still write it, current clients send title_metadata and ignore the stored member, a migration rewrote stored values to title_metadata, and clients no longer offer it."
     },
     {
       "key": "ui.sidebar_pins",

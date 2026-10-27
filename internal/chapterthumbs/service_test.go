@@ -335,6 +335,47 @@ func TestProcessPriorityRequestSelectsNearestChaptersAndRequeuesRemainder(t *tes
 	}
 }
 
+func TestProcessRequestRecordsUploadFailureAndChapterRetry(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fileRepo := &testFileRepo{file: &models.MediaFile{
+		ID: 42, MediaFolderID: 9,
+		Chapters: []models.MediaChapter{{Index: 0, StartSeconds: 0, EndSeconds: 10}},
+	}}
+	uploads := 0
+	service := &Service{
+		fileRepo:   fileRepo,
+		folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+		clock:      func() time.Time { return now },
+		extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+			return []byte("frame"), "", nil
+		},
+		uploadChapterThumbnailFunc: func(context.Context, int, int, []byte) (string, string, error) {
+			uploads++
+			return "", "", errors.New("S3 PutObject: AccessDenied")
+		},
+	}
+
+	for range 2 {
+		requeue, err := service.processRequest(t.Context(), ChapterThumbnailRequest{FileID: 42}, false)
+		if err != nil || requeue {
+			t.Fatalf("processRequest() = %v, %v, want false, nil", requeue, err)
+		}
+	}
+	chapter := fileRepo.file.Chapters[0]
+	if chapter.ThumbnailLastError != "chapter_upload_failed: S3 PutObject: AccessDenied" {
+		t.Fatalf("ThumbnailLastError = %q", chapter.ThumbnailLastError)
+	}
+	if chapter.ThumbnailRetryAfter == nil || !chapter.ThumbnailRetryAfter.Equal(now.Add(chapterThumbnailRetrySchedule[0])) {
+		t.Fatalf("ThumbnailRetryAfter = %v", chapter.ThumbnailRetryAfter)
+	}
+	if uploads != 1 || fileRepo.updateCalls != 1 {
+		t.Fatalf("uploads = %d, updates = %d, want one each during cooldown", uploads, fileRepo.updateCalls)
+	}
+	if fileRepo.file.ChapterThumbnailFailureCount != 0 || fileRepo.file.ChapterThumbnailRetryAfter != nil {
+		t.Fatal("upload failure unexpectedly applied file-wide cooldown")
+	}
+}
+
 func TestProcessRequestSetsProbeFailureCooldown(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	fileRepo := &testFileRepo{

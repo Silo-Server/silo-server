@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const (
@@ -98,7 +99,7 @@ func resolveCopySeekAnchor(
 	segmentDuration int,
 ) (float64, int, error) {
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := fspath.CommandContext(ctx, ffmpegPath,
 		"-v", "error",
 		"-fflags", "+genpts+fastseek",
 		"-analyzeduration", "3000000",

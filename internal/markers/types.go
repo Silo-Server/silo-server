@@ -27,8 +27,9 @@ const (
 	SettingDetectIntros  = "markers.detect_intros"
 	SettingDetectCredits = "markers.detect_credits"
 	// SettingShareByDefault lets a provider whose manifest declares
-	// default_contribute_enabled start with contribution on. An unset value
-	// means enabled.
+	// default_contribute_enabled start with contribution on. Only an explicit
+	// true does: the setup wizard saves the admin's choice, and a new server
+	// that skipped it shares nothing by default.
 	SettingShareByDefault = "markers.share_by_default"
 )
 
@@ -578,9 +579,9 @@ func DetectionToggleEnabled(raw string) bool {
 }
 
 // ShareByDefaultEnabled reads a markers.share_by_default value. Only an
-// explicit false turns it off.
+// explicit true turns it on.
 func ShareByDefaultEnabled(raw string) bool {
-	return strings.ToLower(strings.TrimSpace(raw)) != settingDisabled
+	return strings.ToLower(strings.TrimSpace(raw)) == settingEnabled
 }
 
 func NormalizeSetting(key, value string) (string, error) {

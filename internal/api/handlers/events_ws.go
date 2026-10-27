@@ -97,7 +97,7 @@ type EventsHandler struct {
 // authority, including the current role of its account;
 // auth.SessionRepository implements it.
 type sessionRoleChecker interface {
-	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string, userID int) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // SetSessionRoles makes the v1 events socket recheck its login session. The
@@ -288,7 +288,7 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 // failed acting-admin decision counts as lost, so a connection holding the
 // administrator channels fails closed like the HTTP routes and reconnects.
 func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
-	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID)
+	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID, claims.UserID)
 	// A remote-playback handoff never holds a v1 socket.
 	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
 		return true

@@ -6,6 +6,8 @@ import (
 	"hash/fnv"
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const ContentGroupKeyVersion = 1
@@ -102,6 +104,7 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 	if group.ContentGroupKey == "" {
 		group.ContentGroupKey = isolatedGroupKey(group.BaseType, group.ObservedRootPath, cleanFilePath)
 	}
+	group.BaseTitle = fspath.Display(group.BaseTitle)
 
 	return group
 }

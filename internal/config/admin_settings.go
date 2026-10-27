@@ -351,7 +351,9 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
-	"markers.share_by_default":             "true",
+	// Unset until the admin saves the setup wizard's sharing choice; a
+	// migration stored true on servers set up before the wizard saved it.
+	"markers.share_by_default": "",
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
@@ -402,8 +404,6 @@ var adminSettingDefaults = map[string]string{
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
-	"recommendations.embedding_base_url":         "http://ollama:11434",
-	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
 	"recommendations.taste_profiles_cron":        "0 4 * * *",
 	"recommendations.cowatch_cron":               "30 4 * * *",
@@ -411,7 +411,6 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
 
-	"ai.base_url":                         "https://api.openai.com",
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
 	"ai.chat_model":                       "gpt-4o-mini",
@@ -545,8 +544,6 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_key_prefix", "s3.operational_key_prefix"},
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
-	{"ai.base_url", "subtitle_ai.base_url"}, //nolint:goconst // Explicit compatibility pair.
-	{"ai.api_key", "subtitle_ai.api_key"},   //nolint:goconst // Explicit compatibility pair.
 	{"ai.chat_model", "subtitle_ai.chat_model"},
 }
 
@@ -849,7 +846,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
-		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+		return normalizeAdminEnum(key, value, "api_key", aiAuthModeChatGPT)
 	case "ai.reasoning_effort":
 		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 	case "subtitle_ai.transcribe_quota_period":
@@ -874,8 +871,16 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
-	case "ai.base_url", "ai.asr_base_url", "recommendations.embedding_base_url",
-		"server.public_url", "jellyfin_compat.public_url",
+	case legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; connect the provider in AI Services", key)
+	case legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting, legacyOpenAIEmbeddingModel,
+		legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; choose the embedding provider on Recommendations", key)
+	case AITextProviderSettingKey, AISpeechProviderSettingKey, EmbeddingProviderSettingKey:
+		return value, nil
+
+	case "server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
@@ -983,6 +988,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 
 	effective := EffectiveAdminSettings(values)
 	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
+		return err
+	}
+	if err := ValidateAIProviderBindings(effective); err != nil {
 		return err
 	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {

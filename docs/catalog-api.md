@@ -4,6 +4,13 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## Recommendation limits
+
+`GET /api/v2/recommendations/because-watched/{item_id}` accepts `limit` from
+1 to 50 (default 20). The v1 bridge route clamps positive limits above 50
+to 50 and keeps its existing default of 50 for missing or invalid values.
+The shared service caps the limit before the engine expands its candidate queries.
+
 ## Section browsing
 
 Catalog reads with `source=section` resolve the row on the acting profile's
@@ -357,6 +364,13 @@ device, so a device-scoped override wins over the profile value. Without the
 header they resolve the profile's preferences alone. Clients that set
 device overrides should send the header so the detail page matches what playback
 picks.
+
+`effective_audio_track_index` does not know the playing device's capabilities.
+A playback start that names no audio track can play another track in the same
+language when the plan for this one converts its audio and the plan for that
+one does not
+(see "Omission is a request" in `docs/architecture/playback-protocol-v3.md`).
+The plan's `selected_tracks` names the track that plays.
 
 ## Episode files
 

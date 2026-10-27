@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -379,11 +380,20 @@ func newStreamTelemetryViewCache(registry *streamtelemetry.Registry) *streamtele
 	return streamtelemetry.NewViewCache(registry, registry.ViewTTL(), slog.Default())
 }
 
-func resolvePluginCacheDir() string {
+// resolvePluginCacheDir returns the plugin cache root. The default sits in the
+// shared temp dir, where another local account could create it first and plant
+// plugin binaries, so it must be a private directory this user owns. A dir set
+// with SILO_PLUGIN_CACHE_DIR is the operator's to secure: container bind
+// mounts there are often owned by another uid on the host.
+func resolvePluginCacheDir() (string, error) {
 	if v := strings.TrimSpace(os.Getenv("SILO_PLUGIN_CACHE_DIR")); v != "" {
-		return v
+		return v, nil
 	}
-	return filepath.Join(os.TempDir(), "silo-plugins")
+	dir := filepath.Join(os.TempDir(), "silo-plugins")
+	if err := plugins.EnsurePrivateCacheRoot(dir); err != nil {
+		return "", fmt.Errorf("%w; set SILO_PLUGIN_CACHE_DIR to a directory only the Silo user can write", err)
+	}
+	return dir, nil
 }
 
 func buildBaseHandler(format string, level slog.Leveler, otelHandler slog.Handler) slog.Handler {
@@ -592,6 +602,32 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 	return userstore.NewSettingValuesCleaner(auth.NewUserRepository(pool), stores)
 }
 
+// convertLegacyAIProviders moves AI endpoints saved by older builds into the
+// provider registry, once. Every API node may run it; the settings lock makes
+// the first one do the work and the rest find nothing left to convert. A
+// failure leaves those jobs unconfigured rather than stopping the server.
+func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
+	converted := false
+	var unconverted []string
+	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		writes, refused, err := config.PlanAIProviderConversion(current)
+		converted, unconverted = len(writes) > 0, refused
+		return writes, err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "AI provider conversion failed", "component", "app", "error", err)
+		return
+	}
+	if converted {
+		slog.InfoContext(ctx, "AI endpoints converted to providers", "component", "app")
+	}
+	if len(unconverted) > 0 {
+		// Only setting names: the refused URLs can carry credentials.
+		slog.WarnContext(ctx, "AI endpoints not converted: provider addresses cannot carry credentials or a query; connect these providers again in AI Services",
+			"component", "app", "settings", unconverted)
+	}
+}
+
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
@@ -681,6 +717,7 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 	cfg.Server.Mode = bc.Mode
 	cfg.Database.URL = bc.DatabaseURL
 	cfg.JellyfinCompat.Listen = bc.JFListen
+	cfg.AudiobookshelfCompat = cfg.AudiobookshelfCompat.WithBootstrapListen(bc.ABSListen)
 	cfg.Redis = cfg.Redis.WithBootstrapURL(bc.RedisURL)
 }
 
@@ -856,6 +893,7 @@ func main() {
 	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
 		runCredentialBackfills(ctx, pool, dataCipher, settingsRepo)
+		convertLegacyAIProviders(ctx, settingsRepo)
 	}
 	settings, err := settingsRepo.GetAll(ctx)
 	if err != nil {
@@ -882,6 +920,21 @@ func main() {
 				settings, _ = settingsRepo.GetAll(ctx)
 			}
 		}
+	}
+
+	// SILO_SEARCH_PROVIDER and the Meilisearch variables win over the stored
+	// search settings. They are stored so the admin UI shows the values in
+	// effect. Only API servers build search, so only they read them.
+	var searchEnv map[string]string
+	if isPrimaryNode {
+		searchEnv, err = catalog.SearchSettingsFromEnv(os.Getenv)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+		if err := catalog.StoreSearchSettings(ctx, settingsRepo, settings, searchEnv); err != nil {
+			log.Fatalf("storing search settings from the environment: %v", err)
+		}
+		maps.Copy(settings, searchEnv)
 	}
 
 	// Step 5: Auto-generate secrets
@@ -1050,8 +1103,11 @@ func main() {
 	// each event reaches plugins once however many nodes receive it.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
-		if event.Type == cache.EventScanComplete {
+		switch event.Type {
+		case cache.EventScanComplete:
 			sections.InvalidateResolvedListCache()
+		case cache.EventCatalogItemChanged:
+			sections.EvictResolvedListItems(event.Payload)
 		}
 	}); err != nil {
 		slog.Warn("subscribe section cache invalidation failed", "error", err)
@@ -1157,7 +1213,11 @@ func main() {
 			srv.SetStreamTelemetry(streamTelemetryRegistry)
 			// Network access providers run on this proxy too, one instance per
 			// node with its own overlay identity; see newProxyPluginHost.
-			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
+			pluginCacheDir, cacheDirErr := resolvePluginCacheDir()
+			if cacheDirErr != nil {
+				log.Fatalf("plugin cache: %v", cacheDirErr)
+			}
+			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, pluginCacheDir)
 			srv.SetIngressTokens(proxyPlugins.broker.Registry)
 			srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
 			srv.SetNetworkAccessProviderHost(proxyPlugins.service)
@@ -1239,6 +1299,7 @@ func main() {
 		Mode:        bc.Mode,
 		DatabaseURL: bc.DatabaseURL,
 		JFListen:    bc.JFListen,
+		ABSListen:   bc.ABSListen,
 		RedisURL:    bc.RedisURL,
 	})
 	configWatcher.OnLoad(normalizeLoadedConfig)
@@ -1270,6 +1331,10 @@ func main() {
 		}
 		bootstrapSensitiveConfigured[clientip.SettingTrustedProxies] = true
 		bootstrapSensitiveValues[clientip.SettingTrustedProxies] = normalizedTrustedProxies
+	}
+	for key, value := range searchEnv {
+		bootstrapSensitiveConfigured[key] = true
+		bootstrapSensitiveValues[key] = value
 	}
 
 	// Shared Redis client for components needing raw Redis beyond the event
@@ -1648,7 +1713,10 @@ func main() {
 	deps.NetworkAccess = networkAccess
 	deps.LocalTLSPin = lanTLS.Pin()
 	if deps.DB != nil {
-		pluginCacheDir := resolvePluginCacheDir()
+		pluginCacheDir, cacheDirErr := resolvePluginCacheDir()
+		if cacheDirErr != nil {
+			log.Fatalf("plugin cache: %v", cacheDirErr)
+		}
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
 		installationStore := plugins.NewInstallationStore(deps.DB)
 		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher)
@@ -2781,6 +2849,11 @@ func main() {
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
+		// A rotated embedding provider key applies at once; a new endpoint
+		// or model waits for the restart that rebuilds the engine.
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			recEngine.ApplyEmbeddingCredential(updated.Recommendations)
+		})
 
 		var err error
 		recWorker, err = recommendations.NewWorker(

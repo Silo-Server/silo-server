@@ -9,9 +9,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
+func suggestionReceiptPG(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	pool := selectionPG(t)
 	_, err := pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY);INSERT INTO users VALUES(1),(2);
  CREATE TABLE watch_together_suggestions(id text PRIMARY KEY,room_id text,suggester_user_id integer,suggester_profile_id text,content_id text,content_type text,title text,subtitle text,poster_url text,note text,vote_count integer,created_at timestamptz);
@@ -26,6 +29,27 @@ func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
 	if _, err = pool.Exec(t.Context(), strings.Split(string(migration), "-- +goose Down")[0]); err != nil {
 		t.Fatal(err)
 	}
+	return pool
+}
+
+// waitForLockWaiters returns once n of the test schema's connections are
+// blocked on a lock.
+func waitForLockWaiters(ctx context.Context, t *testing.T, pool *pgxpool.Pool, n int) {
+	t.Helper()
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name=current_setting('application_name') AND wait_event_type='Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= n {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
+	pool := suggestionReceiptPG(t)
 	repo := NewSuggestionRepository(pool)
 	original := Suggestion{ID: "request", RoomID: "room", SuggesterUserID: 1, SuggesterProfileID: "profile", ContentID: "movie", ContentType: "movie", Title: "Title", Note: "Note", CreatedAt: time.Now().UTC()}
 	var wg sync.WaitGroup
@@ -68,10 +92,11 @@ func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
 			t.Fatalf("changed request: %v", err)
 		}
 	}
-	if _, err = pool.Exec(t.Context(), `DELETE FROM watch_together_suggestions WHERE id='request'`); err != nil {
+	if _, err := pool.Exec(t.Context(), `DELETE FROM watch_together_suggestions WHERE id='request'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = repo.CreateSuggestionOnce(t.Context(), original); !errors.Is(err, ErrSuggestionIdentityConflict) {
+	_, _, err := repo.CreateSuggestionOnce(t.Context(), original)
+	if !errors.Is(err, ErrSuggestionIdentityConflict) {
 		t.Fatalf("resurrection: %v", err)
 	}
 	var suggestions, receipts int
@@ -107,16 +132,7 @@ func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
 	go func() { _, _, err := repo.CreateSuggestionOnce(t.Context(), blockedInput); done <- err }()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	for {
-		var blocked bool
-		if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=current_setting('application_name') AND wait_event_type='Lock')`).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		}
-		if blocked {
-			break
-		}
-		runtime.Gosched()
-	}
+	waitForLockWaiters(ctx, t, pool, 1)
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -132,4 +148,67 @@ func TestSuggestionReceiptNoResurrectionPG(t *testing.T) {
 		t.Fatalf("closed receipt: %d %v", receipts, err)
 	}
 
+}
+
+// Another API server's create holds the room lock while it adds the last
+// allowed row; both create paths must wait for it and then refuse.
+func TestSuggestionRoomLimitPG(t *testing.T) {
+	pool := suggestionReceiptPG(t)
+	repo := NewSuggestionRepository(pool)
+	base := Suggestion{RoomID: "room", SuggesterUserID: 2, SuggesterProfileID: "guest", ContentID: "movie", ContentType: "movie", Title: "Title", CreatedAt: time.Now().UTC()}
+	kept := base
+	kept.ID = "kept"
+	if _, created, err := repo.CreateSuggestionOnce(t.Context(), kept); err != nil || !created {
+		t.Fatalf("kept: %v %v", created, err)
+	}
+	const seed = `INSERT INTO watch_together_suggestions(id,room_id,suggester_user_id,suggester_profile_id,content_id,content_type,title,subtitle,poster_url,note,vote_count,created_at)
+ SELECT $2::text||n,'room',1,'host','movie','movie','Title','','','',0,now() FROM generate_series(1,$1) n`
+	if _, err := pool.Exec(t.Context(), seed, maxRoomSuggestions-2, "seed-"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	if _, err = tx.Exec(t.Context(), `SELECT id FROM watch_together_rooms WHERE id='room' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), seed, 1, "last-"); err != nil {
+		t.Fatal(err)
+	}
+	legacy, once := base, base
+	legacy.ID, once.ID = "legacy", "once"
+	refused := make(chan error, 2)
+	go func() { _, err := repo.CreateSuggestion(t.Context(), legacy); refused <- err }()
+	go func() { _, _, err := repo.CreateSuggestionOnce(t.Context(), once); refused <- err }()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	waitForLockWaiters(ctx, t, pool, 2)
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case err := <-refused:
+			if !errors.Is(err, ErrSuggestionLimitReached) {
+				t.Fatalf("create in a full room: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	var suggestions, receipts int
+	if err = pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM watch_together_suggestions WHERE room_id='room'),(SELECT count(*) FROM watch_together_suggestion_receipts)`).Scan(&suggestions, &receipts); err != nil || suggestions != maxRoomSuggestions || receipts != 1 {
+		t.Fatalf("rows %d receipts %d %v", suggestions, receipts, err)
+	}
+	if _, created, err := repo.CreateSuggestionOnce(t.Context(), kept); err != nil || created {
+		t.Fatalf("replay in a full room: %v %v", created, err)
+	}
+	if _, err = pool.Exec(t.Context(), `DELETE FROM watch_together_suggestions WHERE id='last-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := repo.CreateSuggestionOnce(t.Context(), once); err != nil || !created {
+		t.Fatalf("refused identity after a removal: %v %v", created, err)
+	}
 }

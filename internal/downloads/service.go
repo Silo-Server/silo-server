@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -1212,9 +1213,10 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 }
 
 // ServeFile serves a download's file. Managed entries (device header present)
-// authorize on (user, profile, device) and re-check per-profile content access
-// before serving; ephemeral rows keep today's queued→downloading→completed
-// behavior. The ephemeral path never serves a managed row, and vice versa.
+// authorize on (user, profile, device); ephemeral rows authorize on the
+// account and keep the queued→downloading→completed lifecycle. Both re-check
+// the requesting profile's content access before serving. The ephemeral path
+// never serves a managed row, and vice versa.
 func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	if deviceID != "" {
 		target, err := s.ResolveManagedFile(ctx, userID, profileID, deviceID, downloadID, filter)
@@ -1236,6 +1238,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	if dl.UserID != userID || dl.IsManaged() {
 		return ErrNotFound // don't reveal existence; ephemeral path never serves managed rows
+	}
+	// Account-level rows are shared by every profile on the account, so the
+	// requesting profile's content scope (library and maturity) must admit
+	// the item before any status change or bytes.
+	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
+		return err
 	}
 	if dl.Status == StatusCancelled || dl.Status == StatusFailed {
 		return fmt.Errorf("download is %s: %w", dl.Status, ErrDownloadNotActive)
@@ -1510,7 +1518,7 @@ func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 }
 
 func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, userID int) error {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return catalog.ErrItemNotFound
@@ -1613,7 +1621,7 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 // use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
 // as raw UTF-8 in filename, which clients may misread.
 func attachmentDisposition(path string) string {
-	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(filepath.Base(path))})
+	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(fspath.Display(filepath.Base(path)))})
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {

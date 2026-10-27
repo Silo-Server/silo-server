@@ -65,6 +65,28 @@ vi.mock("@/hooks/queries/admin/recommendations", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/admin/aiProviders", () => ({
+  useAIProviders: () => ({
+    isLoading: false,
+    data: {
+      providers: [
+        {
+          id: "box",
+          type: "custom",
+          name: "Embedding box",
+          base_url: "http://localhost:9999",
+          has_api_key: true,
+          capabilities: ["embeddings"],
+          used_by: ["embeddings"],
+        },
+      ],
+      types: [],
+    },
+  }),
+  useAIProviderModels: () => ({ data: { success: true, message: "", models: [] } }),
+  useRefreshAIProviders: () => vi.fn(),
+}));
+
 import AdminRecommendations from "./AdminRecommendations";
 
 function idleJob(count: number) {
@@ -133,14 +155,12 @@ describe("AdminRecommendations", () => {
     mocks.useAdminServerSettings.mockReturnValue({
       data: {
         "recommendations.enabled": "true",
-        "recommendations.embedding_base_url": "http://localhost:9999",
+        "recommendations.embedding_provider_id": "box",
         "recommendations.embedding_model": "custom-model",
       },
       isLoading: false,
     });
-    mocks.useAdminSensitiveStatus.mockReturnValue({
-      data: { configured: ["recommendations.embedding_auth_token"] },
-    });
+    mocks.useAdminSensitiveStatus.mockReturnValue({ data: { configured: [] } });
     mocks.useRecommendationsStatus.mockReturnValue({ data: undefined });
     mocks.checkConnectionMutateAsync.mockResolvedValue({
       success: true,
@@ -162,44 +182,13 @@ describe("AdminRecommendations", () => {
     });
   }
 
-  it("applies a provider preset to the embedding settings", async () => {
-    mocks.updateMutateAsync.mockResolvedValueOnce({
-      values: {
-        "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com/canonical",
-        "recommendations.embedding_model": "canonical-gemini-model",
-      },
-      restart_required: true,
-    });
-    await render();
-
-    await click(findButton(container, "Gemini"));
-
-    expect(mocks.updateMutateAsync).toHaveBeenCalledOnce();
-    expect(mocks.updateMutateAsync).toHaveBeenCalledWith({
-      "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com",
-      "recommendations.embedding_model": "gemini-embedding-001",
-    });
-
-    const baseUrlInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_base_url"]',
-    );
-    const modelInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_model"]',
-    );
-
-    expect(baseUrlInput?.value).toBe("https://generativelanguage.googleapis.com/canonical");
-    expect(modelInput?.value).toBe("canonical-gemini-model");
-  });
-
   it("checks the current unsaved embedding draft", async () => {
     await render();
 
-    const tokenInput = container.querySelector<HTMLInputElement>(
-      'input[id="recommendations.embedding_auth_token"]',
-    );
-    expect(tokenInput).toBeTruthy();
+    const modelInput = container.querySelector<HTMLInputElement>("input[list]");
+    expect(modelInput?.value).toBe("custom-model");
 
-    await changeInput(tokenInput, "draft-token");
+    await changeInput(modelInput, "draft-model");
 
     await click(findButton(container, "Check Connection"));
 
@@ -208,11 +197,10 @@ describe("AdminRecommendations", () => {
       body: {
         values: {
           "recommendations.enabled": "true",
-          "recommendations.embedding_base_url": "http://localhost:9999",
-          "recommendations.embedding_model": "custom-model",
-          "recommendations.embedding_auth_token": "draft-token",
+          "recommendations.embedding_provider_id": "box",
+          "recommendations.embedding_model": "draft-model",
         },
-        dirty_keys: ["recommendations.embedding_auth_token"],
+        dirty_keys: ["recommendations.embedding_model"],
       },
     });
   });

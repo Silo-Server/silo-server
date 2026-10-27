@@ -21,16 +21,26 @@ const mocks = vi.hoisted(() => ({
   player: { props: null as WatchPageProps | null },
   // One object for every render, as the query cache would return.
   episode: {
-    data: {
-      content_id: "episode-1",
-      title: "Episode 1",
-      series_id: "series-1",
-      season_number: 1,
-      episode_number: 1,
-    },
+    data: {} as Record<string, unknown>,
     error: null,
   },
 }));
+
+const EPISODE = {
+  content_id: "episode-1",
+  type: "episode",
+  title: "Episode 1",
+  series_id: "series-1",
+  season_number: 1,
+  episode_number: 1,
+};
+// A series-owned extra carries the series' id, as the server sends it.
+const SERIES_TRAILER = {
+  content_id: "trailer-1",
+  type: "extra",
+  title: "Trailer",
+  series_id: "series-1",
+};
 
 vi.mock("@/hooks/useViewTransition", () => ({
   useViewTransitionNavigate: () => mocks.navigate,
@@ -117,6 +127,7 @@ describe("WatchPlaybackHost end of an episode", () => {
   beforeEach(() => {
     mocks.navigate.mockReset();
     mocks.player.props = null;
+    mocks.episode.data = EPISODE;
   });
   afterEach(cleanup);
 
@@ -149,5 +160,32 @@ describe("WatchPlaybackHost end of an episode", () => {
       "/rooms/room-1?room_token=proof",
       expect.objectContaining({ replace: true }),
     );
+  });
+});
+
+describe("WatchPlaybackHost end of a series extra", () => {
+  beforeEach(() => {
+    mocks.navigate.mockReset();
+    mocks.player.props = null;
+    mocks.episode.data = SERIES_TRAILER;
+  });
+  afterEach(cleanup);
+
+  // A direct watch link has no return location; the extra has no detail page
+  // of its own, so it falls back to its series.
+  it.each([
+    ["where it was started", "/search?q=trailer", "/search?q=trailer"],
+    ["its series without a return location", undefined, "/item/series-1"],
+  ])("plays to the end without post-roll and returns to %s", async (_, returnHref, expected) => {
+    const trailer = await renderEpisode({ contentId: "trailer-1", returnHref });
+
+    trailer.nearEnd();
+    expect(trailer.controller().state.mode).toBe("foreground");
+    expect(screen.queryByTestId("post-roll")).toBeNull();
+
+    act(() => trailer.player().onEnded?.());
+
+    expect(trailer.controller().state.mode).not.toBe("post-roll");
+    expect(mocks.navigate).toHaveBeenCalledWith(expected, { up: true });
   });
 });

@@ -1104,6 +1104,7 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 		name         string
 		prepare      bool
 		catalogPaths bool
+		artifactDir  string // relative to the transcode root; empty keeps the default
 		body         any
 	}{
 		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
@@ -1114,6 +1115,27 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
 			TargetCodecVideo: "copy",
 		}},
+		{name: "start with session id outside the transcode root", body: TranscodeStartRequest{
+			SessionID: "../sibling", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the transcode root", body: TranscodeStartRequest{
+			SessionID: ".", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store", body: TranscodeStartRequest{
+			SessionID: downloadprepare.ArtifactDirectoryName, InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store in another case", body: TranscodeStartRequest{
+			SessionID: "Download-Artifacts", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming a configured prepared-download store", artifactDir: "prepared/store",
+			body: TranscodeStartRequest{
+				SessionID: "prepared", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+			}},
 		{name: "start with unapproved input path", catalogPaths: true,
 			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
 		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
@@ -1129,6 +1151,9 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			server := newTestServer(t)
 			if test.catalogPaths {
 				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			if test.artifactDir != "" {
+				server.artifactRoot = filepath.Join(server.transcodeDir, test.artifactDir)
 			}
 			post := postStartRequest
 			if test.prepare {
@@ -2740,6 +2765,26 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 	}
 	if _, ok := s.lastAccess["ghost-1"]; ok {
 		t.Fatal("touch recorded access for an unregistered session")
+	}
+}
+
+func TestSpawnReconstructRejectsSessionIDOutsideTranscodeRoot(t *testing.T) {
+	server := newTestServer(t)
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+logPath+"\nexit 1\n")
+
+	const sessionID = ".."
+	card := *nativeTransportCard(sessionID, sessionID)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if session != nil {
+		_ = session.Close()
+		t.Fatal("reconstruct registered a session outside the transcode root")
+	}
+	if err != nil {
+		t.Fatalf("spawnReconstruct err = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("ffmpeg ran for a rejected session id (stat err %v)", statErr)
 	}
 }
 

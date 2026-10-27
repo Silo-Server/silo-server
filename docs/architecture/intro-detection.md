@@ -51,13 +51,21 @@ for a single item does not take the lock.
    seconds to 3 minutes.
    A file's intro is the median of the pair results that agree with its
    most-confirmed one (`chromaprint:v4`).
-3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
-   of a Chromaprint intro, the start moves to the end of that dialogue
-   (`chromaprint:dialogue:v4`).
+
+Earlier versions moved a Chromaprint start past subtitle cues in its first
+15 seconds (`chromaprint:dialogue:v4`). Most such cues belonged to the opening
+itself: song lyrics, often in a translated or karaoke subtitle, title-sequence
+narration, or caption credits. The start moved a median 13 to 15 seconds later
+and agreed with TheIntroDB and Plex markers far less often. Moving it only past
+cues that overlap the start, or begin within half a second after it, still
+agreed with TheIntroDB less often than the unrefined start, so
+`chromaprint:v4` no longer uses subtitles, and re-analysis replaces
+`chromaprint:dialogue:v4` markers under the same-version rule in
+`markers.CanWriteMarkerUpdate`.
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
-intro chapters move both boundaries back.
+intro chapters move both boundaries later.
 
 Every ffmpeg attempt that detection makes (fingerprints, tail passes, and
 silence detection) has a deadline of two minutes plus the running time of
@@ -292,7 +300,7 @@ percentile of its 10th-percentile luma, capped at 30:
 - **Black:** the same background without text.
 - **Card:** a flat background at least 24 levels above black, with text at
   least 60 levels from it and moderate saturation.
-- **Mostly black:** passes every lettered test except coverage, with 70 to 85
+- **Mostly black:** passes every lettered test except coverage and contrast, with 70 to 85
   percent below luma 32. Dense columns of names and logos on black look like
   this.
 - Anything else is story.
@@ -334,8 +342,8 @@ These rules were validated on frame-checked episodes and movies from several
 series; every start they placed early was checked against frames and cut no
 story.
 
-Automatic contribution to online providers shares detected credits as it does
-intros, when they meet the provider's minimum confidence. At the default 0.95,
+Automatic contribution to online providers shares detected episode credits as
+it does intros, when they meet the provider's minimum confidence. At the default 0.95,
 that is chapter credits and season-agreed audio credits that video moved.
 
 Credits versions and caches:
@@ -421,8 +429,7 @@ below the movie's credits chapter, which re-detection replaces
 The scheduled run analyzes movies after episodes, under the same cluster
 lock and ffmpeg limit. It lists movies whose movie tail is not stored for the
 file as it is now (complete, unusable, or failed on this server and still
-backing off), never-analyzed files first, then the newest; files retried
-after a failure come last. Once a movie's tail is stored, the run does not
+backing off), newest first; files retried after a failure come last. Once a movie's tail is stored, the run does not
 look at it again until the file changes; admin refresh and playback place its
 credits again from the stored tail. As for episodes, a tail ruled out by probe
 metadata (no video, or an all-intra codec) is decided on every analysis and
@@ -446,8 +453,9 @@ playback priority. Admin refresh of a movie analyzes each of its files.
 
 Providers with contribution enabled receive this server's markers through
 `markers.ContributionService`: a manual save sends the saved kinds at once,
-and the daily task sends scanner intros and credits at or above each
-provider's minimum confidence to providers with automatic sharing on. Online
+and the daily "Share detected markers" task (`contribute_markers`) sends the
+scanner intros and credits of episodes, not specials or movies, at or above
+each provider's minimum confidence to providers with automatic sharing on. Online
 and plugin markers are never sent, so a provider's data does not reach
 another provider through this server. Automated "nothing found" results are
 never sent either: a detector that finds nothing is no evidence of absence.
@@ -494,7 +502,7 @@ must hash exactly as `newContributionRow` does; the database contract tests
 queries offer a marker again when it no longer matches its active claim.
 
 A save's background contribution tries each provider once and never waits,
-and stops at a rate limit like any run. At a provider that supports amend,
+and stops at the first rate limit. At a provider that supports amend,
 the daily task sends what it did not: a skip behind another submission in
 flight, a rate limit or other retryable error, or a run lost when its server
 stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
@@ -567,3 +575,18 @@ the answer. Report the share of files whose start and end both fall within one
 and three seconds of the chapter bounds, and the median and 90th percentile
 error per boundary. Evaluate a matcher change this way before changing
 constants.
+
+TheIntroDB's markers are a second reference. Look up a sample of episodes with
+the plugin's own client, so the request matches what the server sends, and
+compare them with a replay over cached fingerprints rather than stored
+markers, which a provider marker replaces. Count only answers for a release
+within two seconds of the file's duration, since other releases shift the
+timings, and report entries with a confidence of at least 0.5 and two or more
+submissions apart: single submissions are often wrong, and TheIntroDB credits
+include anime openings, which `CheckCreditsPlacement` rejects. On 162 such
+entries, almost all anime with chapter-snapped starts, intros without subtitle
+refinement had both boundaries within three seconds for 93 percent of files.
+Plex's own markers for the same media files are a third reference, with
+different coverage: on 13,211
+replayed files from a mostly non-anime library, 69 percent were within three
+seconds and 90 percent within five; Plex intros end about 1.7 seconds earlier.

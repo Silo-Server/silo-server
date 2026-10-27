@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 23;
+export const SETTINGS_REVISION = 24;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -1358,7 +1358,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
     defaultValue: { poster_size: "standard", caption: "title_metadata" },
     label: "Media cards",
-    description: "Poster size and caption detail used by media cards.",
+    description: "Poster size used by media cards.",
     category: "appearance",
     control: "panel",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],

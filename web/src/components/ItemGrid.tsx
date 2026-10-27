@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useGridLayout } from "@/hooks/useGridLayout";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { cardGridClasses, cardTextAreaHeight } from "@/lib/uiCustomization";
+import { CARD_TEXT_AREA_HEIGHT, cardGridClasses } from "@/lib/uiCustomization";
 
 interface SharedItemGridProps {
   loading?: boolean;
@@ -104,7 +104,7 @@ export default function ItemGrid(props: ItemGridProps) {
   const onVisibleRangeChange = hasStaticItems(props) ? () => undefined : props.onVisibleRangeChange;
   const { containerRef, layout } = useGridLayout({
     gap: gridGap,
-    textAreaHeight: cardTextAreaHeight(cardPresentation.caption),
+    textAreaHeight: CARD_TEXT_AREA_HEIGHT,
     layoutKey: cardPresentation.poster_size,
   });
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null);

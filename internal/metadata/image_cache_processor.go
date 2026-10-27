@@ -20,6 +20,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1204,14 +1206,14 @@ func closeLibraryRoots(opened []openedLibraryRoot) {
 // matching root failed to open, or a directory could not be stat'ed, so
 // nothing is known about confinement.
 func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
-	current, err := os.Stat(resolvedRoot)
+	current, err := fspath.Stat(resolvedRoot)
 	if err != nil {
 		return nil, err
 	}
 	var failure error
 	for _, root := range opened {
 		if root.handle == nil {
-			if info, err := os.Stat(root.path); err == nil && os.SameFile(info, current) && failure == nil {
+			if info, err := fspath.Stat(root.path); err == nil && fspath.SameFile(info, current) && failure == nil {
 				failure = root.err
 			}
 			continue
@@ -1221,7 +1223,7 @@ func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.
 			failure = cmp.Or(failure, err)
 			continue
 		}
-		if os.SameFile(info, current) {
+		if fspath.SameFile(info, current) {
 			return root.handle, nil
 		}
 	}
@@ -1269,12 +1271,12 @@ func localImageOutsideRootsError(path string) error {
 // surfaces as fs.ErrNotExist for the caller to treat as a stable "missing"
 // failure via the reader; any other resolution failure fails closed.
 func localImagePathResolvedWithinRoots(path string, roots []string) (string, string, error) {
-	resolvedPath, err := filepath.EvalSymlinks(path)
+	resolvedPath, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", "", err
 	}
 	for _, root := range roots {
-		resolvedRoot, err := filepath.EvalSymlinks(strings.TrimSpace(root))
+		resolvedRoot, err := fspath.EvalSymlinks(strings.TrimSpace(root))
 		if err != nil {
 			continue
 		}
@@ -1327,7 +1329,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 			return fmt.Errorf("local image read failed: %w", err)
 		}
 	}
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1340,7 +1342,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	// Open through the root handle: it refuses any path that leaves the root,
 	// including through a directory swapped for a symlink after resolution,
 	// so confinement holds at the open itself.
-	file, err := root.Open(rel)
+	file, err := root.Open(fspath.Decode(rel))
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1351,7 +1353,7 @@ func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) 
 	}
 	// Reject unless the opened handle is the exact file the Lstat above
 	// inspected, so a leaf swapped between the two cannot be read instead.
-	if !os.SameFile(info, stat) {
+	if !fspath.SameFile(info, stat) {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
 	if !stat.Mode().IsRegular() {

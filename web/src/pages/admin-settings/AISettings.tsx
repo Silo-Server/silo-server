@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { AudioLines, CircleAlert, Languages } from "lucide-react";
+import { AudioLines, Languages, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 
@@ -8,12 +8,16 @@ import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { LimitField } from "@/components/settings/LimitField";
 import { ProviderTile, ProviderTileGrid } from "@/components/settings/ProviderTile";
 import type { ProviderTileState } from "@/components/settings/ProviderTile";
-import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import {
+  useAIProviders,
+  useRefreshAIProviders,
+  type AIProvider,
+} from "@/hooks/queries/admin/aiProviders";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -21,6 +25,8 @@ import { QUOTA_PERIODS, QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 import { cn } from "@/lib/utils";
 import { SaveBar } from "@/components/SaveBar";
 
+import { providerOptions } from "@/lib/aiProviders";
+import { AIProvidersList, ModelField } from "./AIProviders";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import {
@@ -35,39 +41,19 @@ import { ChatGPTConnection } from "./ChatGPTConnection";
 // ---------------------------------------------------------------------------
 
 const TEXT_AI_KEYS = [
-  "ai.base_url",
+  "ai.text_provider_id",
   "ai.chat_model",
-  "ai.api_key",
   "ai.auth_mode",
   "ai.reasoning_effort",
 ] as const;
+const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
+/** Shown here, chosen on Recommendations next to the embedding lock. */
+const EMBEDDING_KEYS = ["recommendations.embedding_provider_id", "recommendations.embedding_model"];
 /**
- * What the transcription connection check has to send: the speech endpoint
- * plus the text endpoint it falls back to when no ASR base URL is set.
+ * Pre-`ai.*` keys still read as a fallback, so a server configured before the
+ * rename keeps its model and job limit until the modern key is saved.
  */
-const SPEECH_AI_KEYS = [
-  "ai.base_url",
-  "ai.api_key",
-  "ai.asr_base_url",
-  "ai.asr_model",
-  "ai.asr_api_key",
-] as const;
-/**
- * The keys the speech tile actually renders. Only these decide whether it is
- * held open by a staged edit — the shared text keys are edited in the text
- * tile, so counting them here would expand both tiles at once.
- */
-const SPEECH_ONLY_KEYS = ["ai.asr_base_url", "ai.asr_model", "ai.asr_api_key"] as const;
-/**
- * Pre-`ai.*` keys. They are still read as a fallback so a server that was
- * configured before the rename keeps working until the modern key is saved.
- */
-const LEGACY_AI_KEYS = [
-  "subtitle_ai.base_url",
-  "subtitle_ai.api_key",
-  "subtitle_ai.chat_model",
-  "subtitle_ai.max_concurrent_jobs",
-] as const;
+const LEGACY_AI_KEYS = ["subtitle_ai.chat_model", "subtitle_ai.max_concurrent_jobs"] as const;
 
 const AI_FEATURE_KEYS = [
   "subtitle_ai.enabled",
@@ -89,90 +75,24 @@ const KEYS: string[] = Array.from(
   new Set([
     ...TEXT_AI_KEYS,
     ...SPEECH_AI_KEYS,
+    ...EMBEDDING_KEYS,
     ...LEGACY_AI_KEYS,
     ...AI_FEATURE_KEYS,
     ...AI_ADVANCED_KEYS,
   ]),
 );
 
+/** The text provider select's value for the ChatGPT plan. */
+const CHATGPT_PROVIDER = "chatgpt";
+/**
+ * A provider select's value for no provider. Choosing it releases the
+ * provider, so it can be removed once no job uses it.
+ */
+const NO_PROVIDER = "none";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const TRANSCRIPTION_PRESETS = [
-  {
-    id: "self-hosted",
-    label: "Self-hosted",
-    description:
-      "Speaches or faster-whisper on your network. Replace the hostname with one reachable from the Silo container.",
-    baseUrl: "http://speaches:8000",
-    model: "deepdml/faster-whisper-large-v3-turbo-ct2",
-  },
-  {
-    id: "groq-turbo",
-    label: "Groq - fast",
-    description: "Hosted whisper-large-v3-turbo. Requires a Groq API key.",
-    baseUrl: "https://api.groq.com/openai",
-    model: "whisper-large-v3-turbo",
-  },
-  {
-    id: "groq-accurate",
-    label: "Groq - accurate",
-    description: "Hosted whisper-large-v3. Requires a Groq API key.",
-    baseUrl: "https://api.groq.com/openai",
-    model: "whisper-large-v3",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    description: "Hosted whisper-1. The transcription key can inherit the Text AI key.",
-    baseUrl: "https://api.openai.com",
-    model: "whisper-1",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    description:
-      "Whisper Large V3 Turbo with timestamps. Requires an OpenRouter API key. Test the model before enabling transcription.",
-    baseUrl: "https://openrouter.ai/api/v1",
-    model: "openai/whisper-large-v3-turbo",
-  },
-] as const;
-
-/**
- * Hosted providers that reject a request without a key, matched by host
- * suffix like the server's own hosted-provider list (strictHostedASRHosts in
- * internal/ai/llm/transcribe.go), so an Azure resource subdomain counts too.
- */
-const KEY_REQUIRED_HOSTS = [
-  "api.openai.com",
-  "openai.azure.com",
-  "api.groq.com",
-  "api.mistral.ai",
-  "openrouter.ai",
-];
-
-/**
- * Whether an endpoint can be ready without an API key. The server sends no
- * Authorization header when the key is empty, which is how a local provider
- * (Ollama, Speaches) runs, so a missing key only disqualifies the hosted
- * providers Silo knows require one. Treating the default OpenAI endpoint as
- * ready is how a fresh install read "Configured".
- */
-function keylessEndpoint(rawURL: string): boolean {
-  const host = hostLabel(rawURL).toLowerCase().replace(/:\d+$/, "");
-  return !KEY_REQUIRED_HOSTS.some((hosted) => host === hosted || host.endsWith(`.${hosted}`));
-}
-
-function hostLabel(rawURL: string): string {
-  const trimmed = rawURL.trim();
-  if (!trimmed) return "";
-  try {
-    return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).host;
-  } catch {
-    return trimmed;
-  }
-}
 
 function parseStrictInteger(rawValue: string): number | null {
   const trimmed = rawValue.trim();
@@ -297,25 +217,21 @@ function PendingSaveNote({ dirty }: { dirty: boolean }) {
 
 function TextModelTile({
   authMode,
+  providerID,
+  providers,
   reasoningEffort,
   reasoningLevels,
   reasoningAttention,
   chatGPTSupported,
-  baseURL,
   chatModel,
-  apiKeyValue,
-  apiKeyConfigured,
-  apiKeyCleared,
   ready,
-  missingAPIKey,
   canTest,
   dirty,
   restartKeys,
   onChange,
-  onReset,
+  onProviderChange,
   onConnectionConfirmed,
   onSettingsTransitionStarted,
-  onClearApiKey,
   onTest,
   isTesting,
   test,
@@ -324,6 +240,8 @@ function TextModelTile({
   onCollapse,
 }: {
   authMode: string;
+  providerID: string;
+  providers: AIProvider[];
   reasoningEffort: string;
   reasoningLevels: string[];
   /**
@@ -332,22 +250,15 @@ function TextModelTile({
    */
   reasoningAttention: boolean;
   chatGPTSupported: boolean;
-  baseURL: string;
   chatModel: string;
-  apiKeyValue: string;
-  apiKeyConfigured: boolean;
-  apiKeyCleared: boolean;
   ready: boolean;
-  /** Endpoint and model are set, and only the API key is missing. */
-  missingAPIKey: boolean;
   canTest: boolean;
   dirty: boolean;
   restartKeys: RestartKeyMatcher;
   onChange: (key: string, value: string) => void;
-  onReset: (key: string) => void;
+  onProviderChange: (value: string) => void;
   onConnectionConfirmed: () => void;
   onSettingsTransitionStarted: ReturnType<typeof useSettingsForm>["beginSettingsTransition"];
-  onClearApiKey: () => void;
   onTest: () => void;
   isTesting: boolean;
   test: AITestState | undefined;
@@ -363,6 +274,9 @@ function TextModelTile({
       : ready
         ? "connected"
         : "not_connected";
+  const chatGPT = authMode === CHATGPT_PROVIDER;
+  const provider = providers.find((candidate) => candidate.id === providerID);
+  const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
 
   return (
     <ProviderTile
@@ -377,27 +291,33 @@ function TextModelTile({
           : failed
             ? test.message
             : ready
-              ? `${chatModel} · ${authMode === "chatgpt" ? "ChatGPT plan" : hostLabel(baseURL)}`
-              : authMode === "chatgpt"
+              ? `${chatModel} · ${chatGPT ? "ChatGPT plan" : (provider?.name ?? "")}`
+              : chatGPT
                 ? "Connect an account and choose a model"
-                : missingAPIKey
-                  ? "API key required"
-                  : "Base URL and model required"
+                : "Choose a provider and a model"
       }
       expanded={expanded}
-      primaryAction={{ label: ready ? "Manage" : "Connect", onClick: onExpand }}
+      primaryAction={{ label: ready ? "Manage" : "Set up", onClick: onExpand }}
     >
       <SettingField
-        label="Authentication"
+        label="Provider"
         type="select"
-        value={authMode}
-        onChange={(next) => onChange("ai.auth_mode", next)}
+        value={selected || NO_PROVIDER}
+        onChange={onProviderChange}
+        description={
+          providers.some((candidate) => candidate.capabilities.includes("chat"))
+            ? undefined
+            : "Add a provider that serves chat under Providers, or use a ChatGPT plan."
+        }
         options={[
-          { value: "api_key", label: "API key or local provider" },
-          { value: "chatgpt", label: "ChatGPT plan", disabled: !chatGPTSupported },
+          { value: NO_PROVIDER, label: "None" },
+          ...(chatGPTSupported || chatGPT
+            ? [{ value: CHATGPT_PROVIDER, label: "ChatGPT plan", disabled: !chatGPTSupported }]
+            : []),
+          ...providerOptions(providers, "chat", providerID),
         ]}
       />
-      {authMode === "chatgpt" ? (
+      {chatGPT ? (
         <ChatGPTConnection
           model={chatModel}
           onModelChange={(next) => onChange("ai.chat_model", next)}
@@ -405,40 +325,14 @@ function TextModelTile({
           onSettingsTransitionStarted={onSettingsTransitionStarted}
         />
       ) : (
-        <>
-          <p className="text-muted-foreground mb-1 text-xs">
-            Any chat endpoint that speaks the OpenAI API.
-          </p>
-          <SettingField
-            label="Base URL"
-            value={baseURL}
-            onChange={(next) => onChange("ai.base_url", next)}
-            hint="https://api.openai.com"
-            restartRequired={restartKeys.has("ai.base_url")}
-          />
-          <SettingField
-            label="Model"
-            value={chatModel}
-            onChange={(next) => onChange("ai.chat_model", next)}
-            hint="gpt-4o-mini, gemini-flash-latest, llama3.1"
-            restartRequired={restartKeys.has("ai.chat_model")}
-          />
-          <SecretField
-            label="API key"
-            value={apiKeyValue}
-            configured={apiKeyConfigured}
-            onChange={(next) => onChange("ai.api_key", next)}
-            // Without this, "Keep saved value" would stage an empty string and the
-            // next save would erase the stored key.
-            onKeep={() => onReset("ai.api_key")}
-            // A local endpoint that needs no key has to be able to get back to
-            // having none, and nothing else on this page erases one.
-            onClear={onClearApiKey}
-            cleared={apiKeyCleared}
-            hint="Empty for a local endpoint that needs none."
-            restartRequired={restartKeys.has("ai.api_key")}
-          />
-        </>
+        <ModelField
+          label="Model"
+          providerID={provider ? providerID : ""}
+          kind="chat"
+          value={chatModel}
+          onChange={(next) => onChange("ai.chat_model", next)}
+          placeholder="gpt-4o-mini, gemini-2.5-flash, llama3.1"
+        />
       )}
       <AdvancedSection id="ai.text-model" count={1} forceOpen={reasoningAttention}>
         <SettingField
@@ -447,6 +341,7 @@ function TextModelTile({
           value={reasoningEffort || "default"}
           description="Higher effort can improve complex translations and use more time and tokens."
           onChange={(next) => onChange("ai.reasoning_effort", next === "default" ? "" : next)}
+          restartRequired={restartKeys.has("ai.reasoning_effort")}
           options={[
             { value: "default", label: "Provider default" },
             ...reasoningLevels.map((level) => ({
@@ -486,19 +381,12 @@ function TextModelTile({
 }
 
 function SpeechModelTile({
-  chatGPTPlan,
-  asrBaseURL,
+  providerID,
+  providers,
   asrModel,
-  apiKeyValue,
-  apiKeyConfigured,
-  apiKeyCleared,
-  usesTextEndpoint,
   ready,
   dirty,
-  restartKeys,
   onChange,
-  onReset,
-  onClearApiKey,
   onTest,
   isTesting,
   test,
@@ -506,19 +394,12 @@ function SpeechModelTile({
   onExpand,
   onCollapse,
 }: {
-  chatGPTPlan: boolean;
-  asrBaseURL: string;
+  providerID: string;
+  providers: AIProvider[];
   asrModel: string;
-  apiKeyValue: string;
-  apiKeyConfigured: boolean;
-  apiKeyCleared: boolean;
-  usesTextEndpoint: boolean;
   ready: boolean;
   dirty: boolean;
-  restartKeys: RestartKeyMatcher;
   onChange: (key: string, value: string) => void;
-  onReset: (key: string) => void;
-  onClearApiKey: () => void;
   onTest: () => void;
   isTesting: boolean;
   test: AITestState | undefined;
@@ -527,20 +408,12 @@ function SpeechModelTile({
   onCollapse: () => void;
 }) {
   const failed = test != null && !test.ok;
-  const statePill = test?.ok
-    ? "Verified"
-    : usesTextEndpoint
-      ? chatGPTPlan
-        ? "API endpoint"
-        : "Shared endpoint"
-      : ready
-        ? "Configured"
-        : undefined;
+  const provider = providers.find((candidate) => candidate.id === providerID);
   const state: ProviderTileState = expanded
     ? "editing"
     : failed
       ? "error"
-      : ready && !usesTextEndpoint
+      : ready
         ? "connected"
         : "not_connected";
 
@@ -550,81 +423,41 @@ function SpeechModelTile({
       tagline="Writes subtitles from an audio track"
       logo={<AudioLines className="text-muted-foreground size-4" aria-hidden="true" />}
       state={state}
-      statePill={expanded ? undefined : statePill}
+      statePill={!expanded && ready && !test?.ok ? "Configured" : undefined}
       meta={
         expanded
           ? undefined
           : failed
             ? test.message
-            : asrBaseURL.trim() !== ""
-              ? `${asrModel} · ${hostLabel(asrBaseURL)}`
-              : undefined
+            : ready
+              ? `${asrModel} · ${provider?.name ?? ""}`
+              : "Choose a provider and a model"
       }
       expanded={expanded}
-      primaryAction={{ label: ready ? "Manage" : "Connect", onClick: onExpand }}
+      primaryAction={{ label: ready ? "Manage" : "Set up", onClick: onExpand }}
     >
-      <p className="text-muted-foreground mb-1 text-xs">
-        A Whisper-compatible endpoint that returns timestamps.
-      </p>
-      <div className="flex flex-wrap gap-2 py-2">
-        {TRANSCRIPTION_PRESETS.map((preset) => {
-          const active = asrBaseURL === preset.baseUrl && asrModel === preset.model;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              title={preset.description}
-              aria-pressed={active}
-              onClick={() => {
-                onChange("ai.asr_base_url", preset.baseUrl);
-                onChange("ai.asr_model", preset.model);
-              }}
-              className={cn(
-                "border-border hover:bg-accent rounded-md border px-3 py-1.5 text-xs transition-colors",
-                active && "border-primary bg-primary/5 text-primary",
-              )}
-            >
-              {preset.label}
-            </button>
-          );
-        })}
-      </div>
       <SettingField
-        label="Base URL"
-        value={asrBaseURL}
-        onChange={(next) => onChange("ai.asr_base_url", next)}
-        hint="http://speaches:8000 or https://api.groq.com/openai"
-        restartRequired={restartKeys.has("ai.asr_base_url")}
+        label="Provider"
+        type="select"
+        value={providerID || NO_PROVIDER}
+        onChange={(next) => onChange("ai.speech_provider_id", next === NO_PROVIDER ? "" : next)}
+        description={
+          providers.some((candidate) => candidate.capabilities.includes("speech"))
+            ? "A Whisper-compatible endpoint that returns timestamps."
+            : "Add a provider that serves speech under Providers. ChatGPT plans do not include it."
+        }
+        options={[
+          { value: NO_PROVIDER, label: "None" },
+          ...providerOptions(providers, "speech", providerID),
+        ]}
       />
-      {usesTextEndpoint && (
-        <div className="my-2 flex gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed">
-          <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-          <span>
-            {chatGPTPlan
-              ? "Empty uses the saved API provider URL. ChatGPT plan access does not include transcription."
-              : "Empty sends audio to the text endpoint, which may not transcribe. Test it first."}
-          </span>
-        </div>
-      )}
-      <SettingField
+      <ModelField
         label="Model"
+        providerID={provider ? providerID : ""}
+        kind="speech"
         value={asrModel}
         onChange={(next) => onChange("ai.asr_model", next)}
-        hint="whisper-large-v3-turbo or whisper-1"
-        restartRequired={restartKeys.has("ai.asr_model")}
-      />
-      <SecretField
-        label="API key"
-        value={apiKeyValue}
-        configured={apiKeyConfigured}
-        onChange={(next) => onChange("ai.asr_api_key", next)}
-        onKeep={() => onReset("ai.asr_api_key")}
-        // Empty is a real configuration here, not just "unset": it is how the
-        // speech endpoint goes back to borrowing the text model's key.
-        onClear={onClearApiKey}
-        cleared={apiKeyCleared}
-        hint={chatGPTPlan ? "Empty reuses the saved API key." : "Empty reuses the text model key."}
-        restartRequired={restartKeys.has("ai.asr_api_key")}
+        placeholder="whisper-large-v3-turbo or whisper-1"
       />
       <ModelPanelActions
         testLabel="Test speech-to-text"
@@ -636,12 +469,68 @@ function SpeechModelTile({
         canCollapse={!dirty}
         test={test}
       />
-      <p className="text-muted-foreground mt-2 text-xs">
-        Use a host the Silo container can reach;<code className="mx-1">localhost</code>is Silo
-        itself.
-      </p>
       <PendingSaveNote dirty={dirty} />
     </ProviderTile>
+  );
+}
+
+/**
+ * Recommendation embeddings as a read-only row. Changing the provider or model
+ * can require resetting every stored embedding, so the choice is made on
+ * Recommendations, beside the embedding lock and the reset.
+ */
+function EmbeddingsSummaryRow({ provider, model }: { provider?: AIProvider; model: string }) {
+  const ready = provider !== undefined && model.trim() !== "";
+  return (
+    <ProviderTile
+      name="Embeddings"
+      tagline="Recommendations and semantic search"
+      logo={<Sparkles className="text-muted-foreground size-4" aria-hidden="true" />}
+      state={ready ? "connected" : "not_connected"}
+      statePill={ready ? "Configured" : undefined}
+      meta={
+        ready ? `${model} · ${provider.name}` : "Choose a provider and a model on Recommendations"
+      }
+      headerActions={
+        <Button asChild type="button" size="sm" variant="outline">
+          <Link to="/admin/recommendations">Manage</Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/**
+ * The ChatGPT plan as a provider row. Its sign-in lives with the text model,
+ * the only job a plan can serve, so Manage opens that tile.
+ */
+function ChatGPTProviderRow({
+  email,
+  inUse,
+  onManage,
+}: {
+  email: string | undefined;
+  inUse: boolean;
+  onManage: () => void;
+}) {
+  let statePill: string | undefined;
+  if (inUse) statePill = email ? "In use" : "Sign-in needed";
+  else if (email) statePill = "Idle";
+  return (
+    <ProviderTile
+      name="ChatGPT plan"
+      monogram="GP"
+      monogramClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+      tagline={email ? `Signed in as ${email}` : "Sign in with a ChatGPT account"}
+      meta={
+        inUse
+          ? "Used by Text model. Plans serve chat only, not speech or embeddings."
+          : "Plans serve chat only, not speech or embeddings."
+      }
+      state={inUse && email ? "connected" : "not_connected"}
+      statePill={statePill}
+      primaryAction={{ label: email ? "Manage" : "Connect", onClick: onManage }}
+    />
   );
 }
 
@@ -664,7 +553,10 @@ export default function AISettings() {
   const currentModel = configuredChatModel || "gpt-4o-mini";
   const capabilityModel = useDebounce(currentModel, 300);
   const capabilities = useAdminAICapabilities(capabilityModel);
-  const connection = useChatGPTStatus(false, authMode === "chatgpt");
+  const chatGPTSupported = capabilities.data?.chatgpt_sign_in === true;
+  const providerList = useAIProviders();
+  const refreshProviders = useRefreshAIProviders();
+  const connection = useChatGPTStatus(false, authMode === "chatgpt" || chatGPTSupported);
   const authenticatedAccount = connection.data?.accounts.find(
     (account) =>
       account.client_id === connection.data?.active_client_id &&
@@ -676,7 +568,7 @@ export default function AISettings() {
     authenticatedAccount?.client_id ?? "",
     authMode === "chatgpt" && !!authenticatedAccount,
   );
-  if (form.isLoading) {
+  if (form.isLoading || providerList.isLoading) {
     return (
       <div className="max-w-5xl space-y-6" role="status" aria-label="Loading AI Services settings">
         <Skeleton className="h-9 w-48" />
@@ -694,49 +586,25 @@ export default function AISettings() {
   const effectiveValue = (key: string, legacyKey: string, fallback: string) =>
     value(key, value(legacyKey, fallback));
 
-  const textBaseURL = effectiveValue(
-    "ai.base_url",
-    "subtitle_ai.base_url",
-    "https://api.openai.com",
-  );
+  const providers = providerList.data?.providers ?? [];
+  const providerTypes = providerList.data?.types ?? [];
   const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-4o-mini");
-  const asrBaseURL = value("ai.asr_base_url");
+  const textProviderID = value("ai.text_provider_id");
+  const speechProviderID = value("ai.speech_provider_id");
   const asrModel = value("ai.asr_model", "whisper-1");
-  // A key counts once it is saved (and no clear is staged) or typed in. The
-  // legacy key still serves an upgraded server until the modern one is saved.
-  const textAPIKeyConfigured =
-    form.sensitiveConfigured.includes("ai.api_key") ||
-    form.sensitiveConfigured.includes("subtitle_ai.api_key");
-  const textHasAPIKey =
-    value("ai.api_key").trim() !== "" ||
-    (textAPIKeyConfigured && !form.isClearStaged("ai.api_key"));
-  const textEndpointSet = textBaseURL.trim() !== "" && chatModel.trim() !== "";
-  const textMissingAPIKey = textEndpointSet && !textHasAPIKey && !keylessEndpoint(textBaseURL);
-  // Defaults alone (the OpenAI endpoint and gpt-4o-mini, no key) are not a
-  // configured provider: every request would fail at the provider.
+  const serves = (id: string, capability: AIProvider["capabilities"][number]) =>
+    providers.some((provider) => provider.id === id && provider.capabilities.includes(capability));
   const textReady =
     authMode === "chatgpt"
       ? authenticatedAccount?.connected === true &&
         !!chatGPTModels.data?.models.some((model) => model.id === chatModel)
-      : textEndpointSet && !textMissingAPIKey;
+      : serves(textProviderID, "chat") && chatModel.trim() !== "";
   const textCanTest =
     textReady ||
     (authMode === "chatgpt" &&
       authenticatedAccount?.usage_limited === true &&
       configuredChatModel.trim() !== "");
-  const speechUsesTextEndpoint = asrBaseURL.trim() === "";
-  // Speech borrows the text endpoint and the text key when its own are empty,
-  // as the server does (`internal/ai/llm/client.go`).
-  const speechBaseURL = speechUsesTextEndpoint ? textBaseURL : asrBaseURL;
-  const speechHasAPIKey =
-    value("ai.asr_api_key").trim() !== "" ||
-    (form.sensitiveConfigured.includes("ai.asr_api_key") &&
-      !form.isClearStaged("ai.asr_api_key")) ||
-    textHasAPIKey;
-  const speechReady =
-    speechBaseURL.trim() !== "" &&
-    asrModel.trim() !== "" &&
-    (speechHasAPIKey || keylessEndpoint(speechBaseURL));
+  const speechReady = serves(speechProviderID, "speech") && asrModel.trim() !== "";
   const subtitleTranslateEnabled = value("subtitle_ai.enabled", "false") === "true";
   const transcribeEnabled = value("subtitle_ai.transcribe_enabled", "false") === "true";
   const descriptionEnabled = value("metadata_ai.enabled", "false") === "true";
@@ -751,7 +619,7 @@ export default function AISettings() {
     !!capabilities.data &&
     !capabilities.data.reasoning_levels.includes(reasoningEffort);
   const textDirty = TEXT_AI_KEYS.some((key) => form.isDirty(key));
-  const speechDirty = SPEECH_ONLY_KEYS.some((key) => form.isDirty(key));
+  const speechDirty = SPEECH_AI_KEYS.some((key) => form.isDirty(key));
   const advancedChangedCount = AI_ADVANCED_KEYS.filter((key) => form.isDirty(key)).length;
 
   function setValue(key: string, nextValue: string) {
@@ -762,6 +630,24 @@ export default function AISettings() {
     if (SPEECH_AI_KEYS.includes(key as (typeof SPEECH_AI_KEYS)[number])) {
       setSpeechResult(undefined);
     }
+  }
+
+  // The ChatGPT plan is chosen by authentication mode; any other choice is an
+  // API-key provider. The provider id is kept while the plan serves text, so
+  // switching back restores it.
+  function selectTextProvider(next: string) {
+    if (next === CHATGPT_PROVIDER) {
+      setValue("ai.auth_mode", "chatgpt");
+      return;
+    }
+    setValue("ai.auth_mode", "api_key");
+    setValue("ai.text_provider_id", next === NO_PROVIDER ? "" : next);
+  }
+
+  // The plan's sign-in lives in the text model tile, the only job it serves.
+  function openChatGPTSetup() {
+    if (authMode !== "chatgpt") selectTextProvider(CHATGPT_PROVIDER);
+    setExpandedTile("text");
   }
 
   async function checkTextConnection() {
@@ -827,17 +713,20 @@ export default function AISettings() {
       effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
     );
 
+    // None releases the text provider; it saves while nothing translates.
+    const textCleared = authMode !== "chatgpt" && textProviderID === "";
+    const textFeaturesOn = subtitleTranslateEnabled || descriptionEnabled;
     const requiresTextConnection =
-      textDirty ||
+      (textDirty && (!textCleared || textFeaturesOn)) ||
       (form.isDirty("subtitle_ai.enabled") && subtitleTranslateEnabled) ||
       (form.isDirty("metadata_ai.enabled") && descriptionEnabled);
     if (requiresTextConnection && !textReady) {
       toast.error(
         authMode === "chatgpt"
           ? "Connect a ChatGPT account and choose an available text model."
-          : textMissingAPIKey
-            ? "Add an API key for the text model, or point it at an endpoint that needs none."
-            : "Text AI base URL and chat model are required.",
+          : textCleared && textDirty
+            ? "Turn off subtitle and description translation before removing the text provider."
+            : "Choose a text provider and a model.",
       );
       return;
     }
@@ -866,6 +755,8 @@ export default function AISettings() {
       return;
     }
     await form.save();
+    // A job's provider choice changes which providers report it in use.
+    void refreshProviders();
   }
 
   function discard() {
@@ -878,42 +769,51 @@ export default function AISettings() {
     <div className="space-y-5">
       <SettingsPageHeader title="AI Services" />
 
-      {authMode === "chatgpt" ? (
-        <p className="text-muted-foreground text-xs">
-          Your ChatGPT plan covers text translation. Speech-to-text uses the speech provider’s API
-          key or local endpoint.
-        </p>
-      ) : null}
+      <p className="text-muted-foreground text-xs">
+        Connect each AI provider once. Text, speech-to-text, and recommendation embeddings each
+        choose a provider and a model from this list.
+      </p>
+      <FieldGroup label="Providers">
+        <div className="py-3.5">
+          <ProviderTileGrid>
+            <AIProvidersList
+              providers={providers}
+              types={providerTypes}
+              onChooseChatGPT={chatGPTSupported ? openChatGPTSetup : undefined}
+              leading={
+                chatGPTSupported || authMode === "chatgpt" ? (
+                  <ChatGPTProviderRow
+                    email={authenticatedAccount?.email}
+                    inUse={authMode === "chatgpt"}
+                    onManage={openChatGPTSetup}
+                  />
+                ) : null
+              }
+            />
+          </ProviderTileGrid>
+        </div>
+      </FieldGroup>
+
       <FieldGroup label="Models">
         <div className="py-3.5">
           <ProviderTileGrid>
             <TextModelTile
               authMode={authMode}
+              providerID={textProviderID}
+              providers={providers}
               reasoningEffort={reasoningEffort}
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
               reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
-              chatGPTSupported={capabilities.data?.chatgpt_sign_in === true}
-              baseURL={textBaseURL}
+              chatGPTSupported={chatGPTSupported}
               chatModel={chatModel}
-              apiKeyValue={value("ai.api_key")}
-              apiKeyConfigured={textAPIKeyConfigured}
-              apiKeyCleared={form.isClearStaged("ai.api_key")}
               ready={textReady}
-              missingAPIKey={authMode !== "chatgpt" && textMissingAPIKey}
               canTest={textCanTest}
               dirty={textDirty}
               restartKeys={restartKeys}
               onChange={setValue}
-              onReset={form.resetValue}
+              onProviderChange={selectTextProvider}
               onConnectionConfirmed={() => void form.retryLoad()}
               onSettingsTransitionStarted={form.beginSettingsTransition}
-              // The legacy key goes with it: an empty `ai.api_key` falls back
-              // to `subtitle_ai.api_key`, so clearing only the modern one would
-              // leave the old secret in force on an upgraded server.
-              onClearApiKey={() => {
-                setValue("ai.api_key", "");
-                setValue("subtitle_ai.api_key", "");
-              }}
               onTest={() => void checkTextConnection()}
               isTesting={textCheck.isPending}
               test={textResult}
@@ -924,25 +824,26 @@ export default function AISettings() {
               onCollapse={() => setExpandedTile(null)}
             />
             <SpeechModelTile
-              chatGPTPlan={authMode === "chatgpt"}
-              asrBaseURL={asrBaseURL}
+              providerID={speechProviderID}
+              providers={providers}
               asrModel={asrModel}
-              apiKeyValue={value("ai.asr_api_key")}
-              apiKeyConfigured={form.sensitiveConfigured.includes("ai.asr_api_key")}
-              apiKeyCleared={form.isClearStaged("ai.asr_api_key")}
-              usesTextEndpoint={speechUsesTextEndpoint}
               ready={speechReady}
               dirty={speechDirty}
-              restartKeys={restartKeys}
               onChange={setValue}
-              onReset={form.resetValue}
-              onClearApiKey={() => setValue("ai.asr_api_key", "")}
               onTest={() => void checkSpeechConnection()}
               isTesting={speechCheck.isPending}
               test={speechResult}
               expanded={expandedTile === "speech" || speechDirty}
               onExpand={() => setExpandedTile("speech")}
               onCollapse={() => setExpandedTile(null)}
+            />
+            <EmbeddingsSummaryRow
+              provider={providers.find(
+                (provider) =>
+                  provider.id === value("recommendations.embedding_provider_id") &&
+                  provider.capabilities.includes("embeddings"),
+              )}
+              model={value("recommendations.embedding_model")}
             />
           </ProviderTileGrid>
         </div>
@@ -1092,16 +993,6 @@ export default function AISettings() {
           </TuningScope>
         </AdvancedSection>
       </FieldGroup>
-
-      <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-        Recommendation embeddings use their own models.
-        <Link
-          to="/admin/recommendations"
-          className="text-primary inline-flex shrink-0 items-center gap-1 font-medium hover:underline"
-        >
-          Open Recommendations
-        </Link>
-      </p>
 
       <SaveBar
         dirtyCount={form.dirtyCount}

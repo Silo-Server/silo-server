@@ -18,15 +18,14 @@ import (
 // needs a rank in markers.scannerAlgorithmPriority above the one it replaces,
 // or re-analysis cannot overwrite markers the old version wrote.
 const (
-	AlgorithmVersion             = 1
-	AnalysisBehaviorVersion      = 4
-	ChapterAlgorithm             = "chapter:v1"
-	ChapterSilenceAlgorithm      = "chapter:silence:v2"
-	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v4"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v4" //nolint:misspell // Persisted algorithm identifier.
-	ChromaprintFormat            = "chromaprint:raw:uint32le"
-	DefaultPointHopSeconds       = 0.123
+	AlgorithmVersion            = 1
+	AnalysisBehaviorVersion     = 5
+	ChapterAlgorithm            = "chapter:v1"
+	ChapterSilenceAlgorithm     = "chapter:silence:v2"
+	EpisodeVersionCopyAlgorithm = "episode-version-copy:v1"
+	ChromaprintAlgorithm        = "chromaprint:v4"
+	ChromaprintFormat           = "chromaprint:raw:uint32le"
+	DefaultPointHopSeconds      = 0.123
 
 	// Credits algorithm identifiers. Credits season comparisons are keyed by
 	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
@@ -38,35 +37,27 @@ const (
 	CreditsAudioVideoAlgorithm  = "credits-audio:video:v1"
 	CreditsVideoAlgorithm       = "credits-video:v1"
 
-	// chromaprintDialogueAlgorithmPrefix matches every version of the
-	// subtitle-refined Chromaprint identifier.
-	chromaprintDialogueAlgorithmPrefix = "chromaprint:dialogue:" //nolint:misspell // Persisted algorithm identifier.
-
 	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
 	// The silence backfill revisits its markers under the current limit.
 	legacyChapterSilenceAlgorithm = "chapter:silence:v1"
 )
 
 type Config struct {
-	FFmpegPath                                string
-	MaxParallelFFmpeg                         int
-	AnalysisPercent                           int
-	AnalysisLengthLimitMinutes                int
-	MinimumIntroDurationSeconds               int
-	MaximumIntroDurationSeconds               int
-	SilenceRefinementEnabled                  bool
-	SilenceWindowBeforeSeconds                float64
-	SilenceWindowAfterSeconds                 float64
-	SilenceMinimumDurationSeconds             float64
-	SilenceNoiseThresholdDB                   *int
-	SilenceMinimumExtensionSeconds            float64
-	SilenceMaximumExtensionSeconds            float64
-	SilenceBackfillLimit                      int
-	SilenceBackfillMaxDuration                time.Duration
-	DialogueRefinementEnabled                 bool
-	DialogueRefinementWindowSeconds           float64
-	DialogueRefinementMaxShiftSeconds         float64
-	DialogueRefinementMinimumRemainingSeconds float64
+	FFmpegPath                     string
+	MaxParallelFFmpeg              int
+	AnalysisPercent                int
+	AnalysisLengthLimitMinutes     int
+	MinimumIntroDurationSeconds    int
+	MaximumIntroDurationSeconds    int
+	SilenceRefinementEnabled       bool
+	SilenceWindowBeforeSeconds     float64
+	SilenceWindowAfterSeconds      float64
+	SilenceMinimumDurationSeconds  float64
+	SilenceNoiseThresholdDB        *int
+	SilenceMinimumExtensionSeconds float64
+	SilenceMaximumExtensionSeconds float64
+	SilenceBackfillLimit           int
+	SilenceBackfillMaxDuration     time.Duration
 	// HWAccel and HWDevice are the playback.hw_accel and playback.hw_device
 	// settings. Credits tail passes decode keyframes on the hardware they
 	// resolve to and fall back to software (see hwdecode.go). They shape no
@@ -113,25 +104,21 @@ func DefaultConfig(ffmpegPath string) Config {
 		ffmpegPath = "ffmpeg"
 	}
 	return Config{
-		FFmpegPath:                                ffmpegPath,
-		MaxParallelFFmpeg:                         DefaultDetectionWorkers,
-		AnalysisPercent:                           25,
-		AnalysisLengthLimitMinutes:                10,
-		MinimumIntroDurationSeconds:               defaultMinimumIntroDurationSeconds,
-		MaximumIntroDurationSeconds:               defaultMaximumIntroDurationSeconds,
-		SilenceRefinementEnabled:                  true,
-		SilenceWindowBeforeSeconds:                3,
-		SilenceWindowAfterSeconds:                 30,
-		SilenceMinimumDurationSeconds:             0.33,
-		SilenceNoiseThresholdDB:                   intPtr(-50),
-		SilenceMinimumExtensionSeconds:            0.5,
-		SilenceMaximumExtensionSeconds:            defaultSilenceMaximumExtensionSeconds,
-		SilenceBackfillLimit:                      2000,
-		SilenceBackfillMaxDuration:                45 * time.Minute,
-		DialogueRefinementEnabled:                 true,
-		DialogueRefinementWindowSeconds:           15,
-		DialogueRefinementMaxShiftSeconds:         20,
-		DialogueRefinementMinimumRemainingSeconds: defaultMinimumIntroDurationSeconds,
+		FFmpegPath:                     ffmpegPath,
+		MaxParallelFFmpeg:              DefaultDetectionWorkers,
+		AnalysisPercent:                25,
+		AnalysisLengthLimitMinutes:     10,
+		MinimumIntroDurationSeconds:    defaultMinimumIntroDurationSeconds,
+		MaximumIntroDurationSeconds:    defaultMaximumIntroDurationSeconds,
+		SilenceRefinementEnabled:       true,
+		SilenceWindowBeforeSeconds:     3,
+		SilenceWindowAfterSeconds:      30,
+		SilenceMinimumDurationSeconds:  0.33,
+		SilenceNoiseThresholdDB:        intPtr(-50),
+		SilenceMinimumExtensionSeconds: 0.5,
+		SilenceMaximumExtensionSeconds: defaultSilenceMaximumExtensionSeconds,
+		SilenceBackfillLimit:           2000,
+		SilenceBackfillMaxDuration:     45 * time.Minute,
 	}
 }
 
@@ -178,15 +165,6 @@ func (c Config) normalized() Config {
 	if c.SilenceBackfillMaxDuration <= 0 {
 		c.SilenceBackfillMaxDuration = 45 * time.Minute
 	}
-	if c.DialogueRefinementWindowSeconds <= 0 {
-		c.DialogueRefinementWindowSeconds = 15
-	}
-	if c.DialogueRefinementMaxShiftSeconds <= 0 {
-		c.DialogueRefinementMaxShiftSeconds = 20
-	}
-	if c.DialogueRefinementMinimumRemainingSeconds <= 0 {
-		c.DialogueRefinementMinimumRemainingSeconds = float64(c.MinimumIntroDurationSeconds)
-	}
 	return c
 }
 
@@ -212,13 +190,9 @@ func (c Config) ConfigHash() string {
 // fingerprints.
 func (c Config) AnalysisConfigHash() string {
 	c = c.normalized()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%t:%.3f:%.3f:%.3f:%d:%d",
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%d",
 		c.ConfigHash(),
 		AnalysisBehaviorVersion,
-		c.DialogueRefinementEnabled,
-		c.DialogueRefinementWindowSeconds,
-		c.DialogueRefinementMaxShiftSeconds,
-		c.DialogueRefinementMinimumRemainingSeconds,
 		c.MinimumIntroDurationSeconds,
 		c.MaximumIntroDurationSeconds,
 	)))
@@ -439,27 +413,24 @@ func (a SilenceRefinementAttempt) sameInputs(other SilenceRefinementAttempt) boo
 }
 
 type RunSummary struct {
-	LibrariesScanned             int      `json:"libraries_scanned"`
-	FilesConsidered              int      `json:"files_considered"`
-	SeasonGroupsConsidered       int      `json:"season_groups_considered"`
-	FingerprintsComputed         int      `json:"fingerprints_computed"`
-	FingerprintCacheHits         int      `json:"fingerprint_cache_hits"`
-	FingerprintExtractionErrors  int      `json:"fingerprint_extraction_errors"`
-	ChapterMarkersWritten        int      `json:"chapter_markers_written"`
-	ChromaprintMarkersWritten    int      `json:"chromaprint_markers_written"`
-	GroupsNotFound               int      `json:"groups_not_found"`
-	GroupsSkipped                int      `json:"groups_skipped"`
-	Errors                       []string `json:"errors,omitempty"`
-	ChromaprintSupported         bool     `json:"chromaprint_supported"`
-	ChromaprintSupportMessage    string   `json:"chromaprint_support_message,omitempty"`
-	SilenceRefinementsAttempted  int      `json:"silence_refinements_attempted"`
-	SilenceRefinementsApplied    int      `json:"silence_refinements_applied"`
-	SilenceRefinementErrors      int      `json:"silence_refinement_errors"`
-	EpisodeVersionMarkersCopied  int      `json:"episode_version_markers_copied"`
-	SilenceBackfillConsidered    int      `json:"silence_backfill_considered"`
-	DialogueRefinementsAttempted int      `json:"dialogue_refinements_attempted"`
-	DialogueRefinementsApplied   int      `json:"dialogue_refinements_applied"`
-	DialogueRefinementErrors     int      `json:"dialogue_refinement_errors"`
+	LibrariesScanned            int      `json:"libraries_scanned"`
+	FilesConsidered             int      `json:"files_considered"`
+	SeasonGroupsConsidered      int      `json:"season_groups_considered"`
+	FingerprintsComputed        int      `json:"fingerprints_computed"`
+	FingerprintCacheHits        int      `json:"fingerprint_cache_hits"`
+	FingerprintExtractionErrors int      `json:"fingerprint_extraction_errors"`
+	ChapterMarkersWritten       int      `json:"chapter_markers_written"`
+	ChromaprintMarkersWritten   int      `json:"chromaprint_markers_written"`
+	GroupsNotFound              int      `json:"groups_not_found"`
+	GroupsSkipped               int      `json:"groups_skipped"`
+	Errors                      []string `json:"errors,omitempty"`
+	ChromaprintSupported        bool     `json:"chromaprint_supported"`
+	ChromaprintSupportMessage   string   `json:"chromaprint_support_message,omitempty"`
+	SilenceRefinementsAttempted int      `json:"silence_refinements_attempted"`
+	SilenceRefinementsApplied   int      `json:"silence_refinements_applied"`
+	SilenceRefinementErrors     int      `json:"silence_refinement_errors"`
+	EpisodeVersionMarkersCopied int      `json:"episode_version_markers_copied"`
+	SilenceBackfillConsidered   int      `json:"silence_backfill_considered"`
 	// Credits counters. Credits season groups and tail fingerprints are
 	// counted apart from the intro groups and fingerprints above.
 	CreditsSeasonGroupsConsidered int `json:"credits_season_groups_considered"`

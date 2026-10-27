@@ -117,10 +117,13 @@ provider's contribution settings when its config row is first created; later
 admin changes stick, and a reinstall starts from the defaults again.
 `default_contribute_enabled` on the v2 provider configuration reports a provider
 whose manifest turns sharing on. The server setting `markers.share_by_default`
-(`true` or `false`, default `true`, set by the setup wizard) decides whether
-those defaults apply: when it is `false`, new providers start with sharing off,
-and changing it to `false` also turns contribution and automatic sharing off
-for existing providers whose manifest turns sharing on. That change commits
+(`true` or `false`) decides whether those defaults apply; they apply only when
+it is `true`. A new server leaves it unset until the admin saves the setup
+wizard's Features step, which shows sharing as on, so a server whose admin
+never saves that step starts every provider with sharing off. A migration
+stored `true` on servers set up before the wizard saved the choice. Changing it
+to `false` also turns contribution and automatic sharing off for existing
+providers whose manifest turns sharing on. That change commits
 with the setting: if it fails, the save fails and the setting keeps its old
 value. Changing it back to `true` changes no existing provider. Every
 contribution, whether from the automatic run, a manual marker save, or an admin

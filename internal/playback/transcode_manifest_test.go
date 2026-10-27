@@ -321,6 +321,14 @@ func TestLongTitlePlaylistsCarryTheSignedQueryOnce(t *testing.T) {
 			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery, false),
 		},
 		{
+			// A quote cannot sit in a definition's quoted-string value.
+			name: "encoded transcode, query with a double quote",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, &TranscodeSession{opts: encoded}, rawQuery+`&x="`)
+			},
+			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery+"&x=%22", false),
+		},
+		{
 			name: "copy remux, complete keyframe playlist",
 			render: func(t *testing.T) []byte {
 				return buildManifestForTest(t, &TranscodeSession{opts: copyOpts, copyPlan: &copySegmentPlan{durations: keyframeDurations}}, rawQuery)
@@ -742,6 +750,27 @@ func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
 	uris := resolvePlaylistURIs(t, string(got))
 	if len(uris) < 2 || uris[0] != "segment/source_timeline_gap.ts?"+rawQuery || uris[len(uris)-1] != "segment/seg_01800.ts?"+rawQuery {
 		t.Fatalf("resolved URIs = %q", uris)
+	}
+}
+
+// TestPlaybackManifestRefusesAnOversizedQuery covers both entry points the API
+// and the transcode node serve playlists through: a query that every URI would
+// repeat is refused past maxManifestQueryBytes instead of multiplied.
+func TestPlaybackManifestRefusesAnOversizedQuery(t *testing.T) {
+	session := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}}
+	for _, query := range []string{
+		"st=" + strings.Repeat("a", maxManifestQueryBytes),
+		// Under the bound as sent, over it once each quote is escaped.
+		"st=" + strings.Repeat(`"`, maxManifestQueryBytes/2),
+	} {
+		for name, build := range map[string]func(string, string) ([]byte, error){
+			"BuildPlaybackManifest":              session.BuildPlaybackManifest,
+			"BuildSourceAlignedPlaybackManifest": session.BuildSourceAlignedPlaybackManifest,
+		} {
+			if _, err := build("segment/", query); !errors.Is(err, ErrManifestQueryTooLong) {
+				t.Errorf("%s(%d-byte query) error = %v, want ErrManifestQueryTooLong", name, len(query), err)
+			}
+		}
 	}
 }
 
