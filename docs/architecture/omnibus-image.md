@@ -102,8 +102,10 @@ uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the Compose
 stack. Each database records the C library collation version it was built
 under, and an index on text sorted under another version can miss rows. On
 every start `init-postgres-db` compares the recorded version with the running
-one, and for each database that differs it rebuilds the indexes on libc
-collations and runs `ALTER DATABASE ... REFRESH COLLATION VERSION`. That covers
+one, and for each database that differs it rebuilds the indexes whose keys use
+a libc collation and every partial or expression index (`pg_index` records no
+collation for a predicate or expression), except vector indexes, then runs
+`ALTER DATABASE ... REFRESH COLLATION VERSION`. That covers
 a data directory from the Compose stack's image, which is Debian 12 (glibc
 2.36) where this one has 2.41, and a later move of this image to a newer Debian
 release. The rebuild runs before Silo starts, so a large catalog's first start
