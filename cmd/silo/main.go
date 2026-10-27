@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -681,6 +682,7 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 	cfg.Server.Mode = bc.Mode
 	cfg.Database.URL = bc.DatabaseURL
 	cfg.JellyfinCompat.Listen = bc.JFListen
+	cfg.AudiobookshelfCompat = cfg.AudiobookshelfCompat.WithBootstrapListen(bc.ABSListen)
 	cfg.Redis = cfg.Redis.WithBootstrapURL(bc.RedisURL)
 }
 
@@ -882,6 +884,21 @@ func main() {
 				settings, _ = settingsRepo.GetAll(ctx)
 			}
 		}
+	}
+
+	// SILO_SEARCH_PROVIDER and the Meilisearch variables win over the stored
+	// search settings. They are stored so the admin UI shows the values in
+	// effect. Only API servers build search, so only they read them.
+	var searchEnv map[string]string
+	if isPrimaryNode {
+		searchEnv, err = catalog.SearchSettingsFromEnv(os.Getenv)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+		if err := catalog.StoreSearchSettings(ctx, settingsRepo, settings, searchEnv); err != nil {
+			log.Fatalf("storing search settings from the environment: %v", err)
+		}
+		maps.Copy(settings, searchEnv)
 	}
 
 	// Step 5: Auto-generate secrets
@@ -1239,6 +1256,7 @@ func main() {
 		Mode:        bc.Mode,
 		DatabaseURL: bc.DatabaseURL,
 		JFListen:    bc.JFListen,
+		ABSListen:   bc.ABSListen,
 		RedisURL:    bc.RedisURL,
 	})
 	configWatcher.OnLoad(normalizeLoadedConfig)
@@ -1270,6 +1288,10 @@ func main() {
 		}
 		bootstrapSensitiveConfigured[clientip.SettingTrustedProxies] = true
 		bootstrapSensitiveValues[clientip.SettingTrustedProxies] = normalizedTrustedProxies
+	}
+	for key, value := range searchEnv {
+		bootstrapSensitiveConfigured[key] = true
+		bootstrapSensitiveValues[key] = value
 	}
 
 	// Shared Redis client for components needing raw Redis beyond the event

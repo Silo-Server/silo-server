@@ -252,11 +252,22 @@ type authConfigRaw struct {
 }
 
 // AudiobookshelfCompatConfig holds the dedicated ABS-compat listener setting.
-// The listener binds its own port (:13378, ABS's
+// The listener binds its own port (ABS_PORT, default :13378, ABS's
 // conventional port) and serves the full ABS protocol — login, libraries,
 // items, sessions — without colliding with silo's SPA on the main listener.
+// An empty Listen means the listener is disabled.
 type AudiobookshelfCompatConfig struct {
 	Listen string `yaml:"-"`
+}
+
+// WithBootstrapListen returns the config of a process started with ABS_PORT:
+// an enabled listener moves to listen, a disabled one stays disabled. An empty
+// listen changes nothing.
+func (c AudiobookshelfCompatConfig) WithBootstrapListen(listen string) AudiobookshelfCompatConfig {
+	if c.Listen != "" && listen != "" {
+		c.Listen = listen
+	}
+	return c
 }
 
 // JellyfinCompatConfig holds compatibility proxy settings.

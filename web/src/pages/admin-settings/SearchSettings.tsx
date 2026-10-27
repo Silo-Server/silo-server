@@ -23,6 +23,14 @@ const PROVIDER_KEY = "catalog.search.provider";
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
 
+// The environment variable that sets each key on every server start; while it
+// is set the server refuses saves of that key.
+const ENV_VARS: Record<string, string> = {
+  [PROVIDER_KEY]: "SILO_SEARCH_PROVIDER",
+  [MEILI_URL_KEY]: "SILO_MEILISEARCH_URL",
+  [MEILI_API_KEY]: "SILO_MEILISEARCH_API_KEY",
+};
+
 // Reaching Meilisearch and the two choices that change what a search returns
 // are shown once it is selected; the index name, timing and ranking mix are
 // tuning behind Advanced.
@@ -56,6 +64,11 @@ export default function SearchSettings() {
 
   const provider = form.getValue(PROVIDER_KEY) || "postgres";
   const meiliEnabled = provider === "meilisearch";
+  const envVar = (key: string) =>
+    form.sensitiveManagedByEnv.includes(key) ? ENV_VARS[key] : undefined;
+  const providerEnv = envVar(PROVIDER_KEY);
+  const urlEnv = envVar(MEILI_URL_KEY);
+  const apiKeyEnv = envVar(MEILI_API_KEY);
   const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   // Staged Meilisearch edits stay reachable after switching the provider back,
@@ -82,7 +95,9 @@ export default function SearchSettings() {
     }
   }
 
-  if (form.isLoading) {
+  // Which fields the environment sets comes from the protected-credential
+  // status, so the page waits for it rather than take an edit it must refuse.
+  if (form.isLoading || (!form.sensitiveStatusReady && !form.sensitiveStatusError)) {
     return (
       <div className="space-y-6" role="status" aria-label="Loading settings">
         <Skeleton className="h-8 w-48" />
@@ -106,7 +121,11 @@ export default function SearchSettings() {
           <SettingField
             label="Search engine"
             type="select"
-            description="Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically."
+            description={
+              providerEnv
+                ? `Managed by ${providerEnv}.`
+                : "Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically."
+            }
             value={provider}
             onChange={(value) => form.setValue(PROVIDER_KEY, value)}
             options={[
@@ -114,6 +133,7 @@ export default function SearchSettings() {
               { value: "meilisearch", label: "Meilisearch" },
             ]}
             status={meiliEnabled && !searchStatus?.degraded ? <SearchStatusSummary /> : undefined}
+            disabled={providerEnv != null}
             restartRequired={restartKeys.has(PROVIDER_KEY)}
           />
           {meiliEnabled && searchStatus?.degraded && (
@@ -144,10 +164,11 @@ export default function SearchSettings() {
             <>
               <SettingField
                 label="Meilisearch URL"
+                description={urlEnv && `Managed by ${urlEnv}.`}
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint="http://localhost:7700"
-                disabled={!meiliEnabled}
+                disabled={!meiliEnabled || urlEnv != null}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}
               />
               <SecretField
@@ -160,8 +181,12 @@ export default function SearchSettings() {
                 // Meilisearch instance without a master key needs it empty.
                 onClear={() => form.setValue(MEILI_API_KEY, "")}
                 cleared={form.isClearStaged(MEILI_API_KEY)}
-                hint="Master key, or one that can read and write the index."
-                disabled={!meiliEnabled}
+                hint={
+                  apiKeyEnv
+                    ? `Managed by ${apiKeyEnv}.`
+                    : "Master key, or one that can read and write the index."
+                }
+                disabled={!meiliEnabled || apiKeyEnv != null}
                 restartRequired={restartKeys.has(MEILI_API_KEY)}
               />
               <ConnectionCheckAction

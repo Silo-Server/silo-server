@@ -13,6 +13,20 @@ no-store responses:
   `managed_by_env` names. Values are never returned. Both fields are arrays,
   including when empty.
 
+`managed_by_env` lists the keys the server's environment sets on every start:
+`redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
+(`SILO_TRUSTED_PROXIES`), `catalog.search.provider` (`SILO_SEARCH_PROVIDER`),
+`catalog.search.meilisearch.url` (`SILO_MEILISEARCH_URL`), and
+`catalog.search.meilisearch.api_key` (`SILO_MEILISEARCH_API_KEY`). The
+environment variables are read by the server answering the request, so the list
+can differ between API servers that were started differently. A write of one of
+these keys is refused with the detail `<key> is managed by an environment
+variable`; `redis.db` has one exception, described below. The values of
+`SILO_TRUSTED_PROXIES` and the search variables are also stored at startup, so
+stored settings show the trusted proxies, the search provider and the
+Meilisearch URL in effect; the API key is stored encrypted and, like every
+secret, only appears in `configured`. `REDIS_URL` is never stored.
+
 Stored and effective settings are string dictionaries keyed by the server
 settings registry. An empty dictionary is `{}`. Inspection copies stored values
 before redaction so a cached settings map remains intact. Missing settings storage

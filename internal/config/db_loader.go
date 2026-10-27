@@ -435,6 +435,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// AudiobookshelfCompat — dedicated listener for ABS client apps. Docker
 	// deployments publish :13378, so listen by default unless disabled.
+	// ABS_PORT moves it; see AudiobookshelfCompatConfig.WithBootstrapListen.
 	absCompatEnabled, err := boolOr(m, "audiobookshelf_compat.enabled", true)
 	if err != nil {
 		return nil, err
