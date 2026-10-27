@@ -568,11 +568,11 @@ reports the failure under `local`. Banner, thumb, clear art and disc art
 sidecars, and image URLs an NFO names, are not offered. When the library's
 provider chain cannot be resolved, the movie or series list still returns `200`
 with its local choices and reports the failure under `chain` in
-`provider_errors`; other lists return `500`. A movie, series or season whose
-poster, backdrop or logo is an uploaded image also lists that image as a
-`local` choice, after the sidecar choices, with an `upload://` `original_url`
-and a display URL for the stored image; an upload replaced since is not
-listed. Frozen v1 lists provider choices only. See
+`provider_errors`; other lists return `500`. When a movie or series shows an
+uploaded poster, backdrop or logo, or a season shows an uploaded poster, the
+list also offers that image as a `local` choice, after the sidecar choices,
+with an `upload://` `original_url` and a display URL for the stored image. An
+upload that has since been replaced is not listed. Frozen v1 lists provider choices only. See
 [Local NFO metadata](architecture/local-nfo-metadata.md#admin-image-picker).
 
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
@@ -601,9 +601,11 @@ of at most 10 MiB. Movies and series take all three types and seasons take a
 poster; episodes and other item types return `422`. The bytes decide the
 format, not the part's declared type, so a part sent as
 `application/octet-stream` is accepted when the image is. Anything else
-returns `422`, a larger
-file `413`, and a server without artwork storage `503`. The image is stored as
-the item's local artwork and published like an applied image, with the same
+returns `422`, except that a JPEG or PNG over 4 megapixels whose header reads
+but whose pixel data is damaged returns `500`, as collection artwork uploads
+do. A larger file returns `413`, and a server without artwork storage `503`.
+The image is stored as the item's local artwork and published like an applied
+image, with the same
 images lock, source record (`upload://` and the image's SHA-256), orphan
 cleanup and response. The upload replaces the current image of its type, and
 the replaced revision is collected after the usual grace period. It is
