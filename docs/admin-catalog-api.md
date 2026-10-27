@@ -61,9 +61,9 @@ The cursor is bound to the caller, `limit`, and every filter; a changed filter
 starts a new listing. `content_ids` is a set, so repeating or reordering ids
 keeps the cursor. Ids that are not present movies, series or episodes are left
 out without an error, which is how a caller learns an item left the catalog.
-Each page is read in one snapshot, two statements whatever it holds; later pages
-read the live catalog, so an item added behind the cursor appears on the next
-full pass, not this one.
+Each page is read in one snapshot with at most two statements, whatever it
+holds; later pages read the live catalog, so an item added behind the cursor
+appears on the next full pass, not this one.
 
 Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
 `library_ids`: every enabled library it is present in, whatever `library_id`

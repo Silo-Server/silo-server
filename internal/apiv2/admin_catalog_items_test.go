@@ -84,7 +84,7 @@ func TestAdminCatalogItemsContract(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodGet, bad, "", actingRequestAdmin), TypeInvalidCursor)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, nextPath, "", bearer(adminToken)), TypeInvalidCursor)
-	for _, q := range []string{"?limit=201", "?type=audiobook", "?library_id=0", "?library_id=x", "?added_after=yesterday", "?content_ids=%20", "?content_ids=x" + strings.Repeat("&content_ids=x", 200)} {
+	for _, q := range []string{"?limit=201", "?type=audiobook", "?library_id=0", "?library_id=x", "?library_id=3000000000", "?added_after=yesterday", "?content_ids=%20", "?content_ids=x" + strings.Repeat("&content_ids=x", 200)} {
 		requireProblem(t, do(t, h, http.MethodGet, path+q, "", actingRequestAdmin), TypeValidationFailed)
 	}
 	if denied := do(t, h, http.MethodGet, path, "", bearer(memberToken)); denied.Code != 403 {

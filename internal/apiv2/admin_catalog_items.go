@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -111,7 +112,7 @@ func registerAdminCatalogItems(reg *Registry) {
 		filter := catalogpkg.AdminCatalogItemFilter{Type: in.Type}
 		if in.LibraryID != "" {
 			n, err := intOfID(in.LibraryID)
-			if err != nil || n <= 0 {
+			if err != nil || n <= 0 || n > math.MaxInt32 {
 				return nil, NewProblem(TypeValidationFailed, "Invalid library_id.")
 			}
 			filter.LibraryID = n

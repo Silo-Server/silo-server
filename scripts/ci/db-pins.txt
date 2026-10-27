@@ -318,5 +318,5 @@
 
 # Administrator catalog listing: present movies, series and episodes only, per-library
 # versus earliest first-seen times, every present file with one track's facts, and two
-# statements per page whatever it holds.
+# statements for a page with files, whatever else it holds.
 ./internal/catalog TestListAdminCatalogItemsDB

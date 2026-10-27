@@ -128,7 +128,7 @@ func adminCatalogIDs(items []AdminCatalogItem) []string {
 // TestListAdminCatalogItemsDB pins what the administrator listing returns —
 // present movies, series and episodes only, per-library versus earliest
 // first-seen times, every present file with consistent track facts — and that
-// a page costs two statements whatever it holds.
+// a page with files costs two statements, whatever else it holds.
 func TestListAdminCatalogItemsDB(t *testing.T) {
 	tracer := &adminListingStatementTracer{}
 	pool := searchOptimizationPool(t, tracer)
