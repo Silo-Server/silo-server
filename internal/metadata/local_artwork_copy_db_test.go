@@ -16,19 +16,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// localArtworkTestStore is the real queue with the target-row reads answered
-// as if every job's target still names its source and holds no cached copy,
-// so the tests need no catalog rows.
+// localArtworkTestStore is the real queue with the target-row read answered
+// as if every job's target still names its source, so the tests need no
+// catalog rows.
 type localArtworkTestStore struct {
 	*ImageCacheJobRepository
 }
 
 func (s localArtworkTestStore) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
 	return job.SourcePath, nil
-}
-
-func (s localArtworkTestStore) CurrentTargetCachedPath(context.Context, *models.MetadataImageCacheJob) (string, error) {
-	return "", nil
 }
 
 // recordingArtworkTargets records every source-matched artwork update, from

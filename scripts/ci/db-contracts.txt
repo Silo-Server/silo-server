@@ -177,6 +177,10 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# A re-cached sidecar leaves its old copy to the reference-checked revision
+# GC, which keeps a copy published again since the re-cache.
+./internal/metadata TestRecachedSidecarRetiresTheOldCopyThroughRevisionGCDB
+
 # With metadata.cache_images off, stored artwork goes back to its provider
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB

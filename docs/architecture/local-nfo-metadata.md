@@ -402,9 +402,11 @@ Caching and refresh:
 - The metadata image-cache processor caches the file under
   `local/{contentType}/{contentID}/{hash8}/{imageType}/...` (`hash8` = content
   hash; the discriminator sits before the imageType segment because variant
-  clamping reads the parent directory). A replaced image rotates the key; the
-  stale hashed prefix is deleted after a successful re-cache, and item
-  deletion trims local paths to the content prefix.
+  clamping reads the parent directory). A replaced image rotates the key. The
+  catalog update that points at the new copy displaces the old one to the
+  artwork revision GC, which deletes it only once nothing references it: an
+  admin pick of the same bytes shares the key. Item deletion trims local
+  paths to the content prefix.
 - The process that discovered the sidecar copies it
   (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
   processes run refreshes and the image cache, and a refresh can only discover

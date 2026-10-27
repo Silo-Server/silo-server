@@ -2260,11 +2260,9 @@ func main() {
 				},
 			)
 			// Local file:// artwork (NFO sidecars): confine reads to the owning
-			// library's roots and sweep stale hashed local/ prefixes on re-cache.
-			// The process whose refresh discovers a sidecar copies it, so a
-			// server without the library mount never has to.
+			// library's roots. The process whose refresh discovers a sidecar
+			// copies it, so a server without the library mount never has to.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
-			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
 			metadataService.SetLocalArtworkCopier(metadataImageCacheProcessor)
 			// The admin image picker previews and applies the same local files,
 			// under the same confinement.
