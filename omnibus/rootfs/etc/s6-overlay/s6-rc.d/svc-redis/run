@@ -15,9 +15,15 @@ export HOME=/config/redis
 # alone can restore a playback session older than its revocation.
 config=(--save 60 1000 --appendfsync everysec --logfile '' --loglevel notice)
 [[ -f /config/redis/redis.conf ]] && config=(/config/redis/redis.conf)
+# With ENABLE_NODE_ACCESS, every interface, behind the password init-config
+# wrote to a file only the redis account reads.
+listen=(--bind 127.0.0.1)
+if [[ -f "$STATE_DIR/redis-auth.conf" ]]; then
+  listen=(--bind '*' '-::*' --include "$STATE_DIR/redis-auth.conf")
+fi
 # The append-only file stays on even with a redis.conf: command-line options
 # override the file.
 exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
   s6-setuidgid redis redis-server "${config[@]}" --appendonly yes \
-    --bind 127.0.0.1 --port 6379 --unixsocket '' --protected-mode yes \
+    "${listen[@]}" --port 6379 --unixsocket '' --protected-mode yes \
     --dir /config/redis --daemonize no --supervised no

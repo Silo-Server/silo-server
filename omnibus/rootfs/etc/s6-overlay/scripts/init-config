@@ -47,11 +47,42 @@ install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
 own_tree silo silo /tmp/silo-transcode
 own_tree silo silo /tmp/silo-download-artifacts
 
+# Proxy and transcode nodes run against the main server's PostgreSQL and
+# Redis and start none of the bundled services.
+case "${MODE:-integrated}" in
+  integrated|api) ;;
+  *)
+    if [[ -z "${DATABASE_URL:-}" || -z "${REDIS_URL:-}" ]]; then
+      echo "MODE=$MODE needs DATABASE_URL and REDIS_URL pointing at the main server's PostgreSQL and Redis" >&2
+      exit 1
+    fi
+    for name in ENABLE_REDIS ENABLE_MEILISEARCH ENABLE_NODE_ACCESS; do
+      if truthy "${!name:-false}"; then warn "$name has no effect with MODE=$MODE"; fi
+    done
+    log "mode: $MODE, on the main server's PostgreSQL and Redis"
+    exit 0
+    ;;
+esac
+
+# ENABLE_NODE_ACCESS opens the bundled PostgreSQL and Redis to proxy and
+# transcode nodes on other hosts, behind passwords. Silo itself keeps using the
+# socket and loopback.
+node_access=false
+if truthy "${ENABLE_NODE_ACCESS:-false}"; then node_access=true; fi
+
 # PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere.
 if [[ -z "${DATABASE_URL:-}" ]]; then
   : > "$STATE_DIR/postgres.enabled"
   export_env DATABASE_URL "postgres://silo@/silo?host=/run/postgresql&sslmode=disable"
   postgres_state="bundled"
+  if [[ "$node_access" == true ]]; then
+    if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
+      echo "ENABLE_NODE_ACCESS needs POSTGRES_PASSWORD, the password nodes sign in to PostgreSQL with as silo" >&2
+      exit 1
+    fi
+    : > "$STATE_DIR/postgres.network"
+    postgres_state="bundled, open to nodes"
+  fi
   # Tune the bundled cluster by default, within half the container's memory,
   # since Silo shares the container with it. A database of the deployment's
   # own keeps Silo's default, which leaves it alone.
@@ -61,6 +92,9 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
 else
   # Not the URL itself: it can carry a password.
   postgres_state="external"
+  if [[ "$node_access" == true ]]; then
+    warn "ENABLE_NODE_ACCESS opens only the bundled PostgreSQL; nodes reach the one DATABASE_URL names directly"
+  fi
 fi
 
 # Redis: off by default. An explicit REDIS_URL always wins over the bundle.
@@ -70,6 +104,19 @@ fi
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 if [[ -n "${REDIS_URL:-}" ]]; then
   redis_state="external"
+elif [[ "$node_access" == true ]]; then
+  # Nodes need Redis, and the one the main server uses. The password goes
+  # into a URL, so keep it to characters that need no escaping there.
+  if [[ ! "${REDIS_PASSWORD:-}" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+    echo "ENABLE_NODE_ACCESS needs REDIS_PASSWORD made of letters, digits, and . _ ~ - (openssl rand -hex 24 makes one)" >&2
+    exit 1
+  fi
+  : > "$STATE_DIR/redis.enabled"
+  # $STATE_DIR is root's, so writing here as root is safe; only redis reads it.
+  (umask 077 && printf 'requirepass %s\n' "$REDIS_PASSWORD" > "$STATE_DIR/redis-auth.conf")
+  chown redis:redis "$STATE_DIR/redis-auth.conf"
+  export_env REDIS_URL "redis://:$REDIS_PASSWORD@127.0.0.1:6379"
+  redis_state="bundled, open to nodes"
 elif truthy "${ENABLE_REDIS:-false}" || truthy "${ENABLE_MEILISEARCH:-false}" || [[ "$env_provider" == meilisearch ]]; then
   : > "$STATE_DIR/redis.enabled"
   export_env REDIS_URL "redis://127.0.0.1:6379"
@@ -118,10 +165,6 @@ else
 fi
 # A provider the deployment sets itself replaces the image's choice for good.
 [[ -z "$user_provider" ]] || rm -f "$SEARCH_MARKER"
-
-if [[ -n "${MODE:-}" && "$MODE" != "integrated" ]]; then
-  warn "MODE=$MODE; the omnibus image runs one integrated node, other modes are not supported"
-fi
 
 log "postgres: $postgres_state"
 log "redis: $redis_state"

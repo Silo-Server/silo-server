@@ -3,10 +3,10 @@
 The omnibus image is the regular Silo image plus PostgreSQL, and optional Redis
 and Meilisearch, in one container supervised by
 [s6-overlay](https://github.com/just-containers/s6-overlay). It serves
-single-node installs that want one container instead of the Compose stack, and
-it always runs one integrated node. Deployments with proxy or transcode nodes
-use the regular image. Its source is `omnibus/`, and `docker-compose.omnibus.yml`
-runs it.
+installs that want one container instead of the Compose stack: a main server
+with its own PostgreSQL, and proxy and transcode nodes that use it (see
+[Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.omnibus.yml` runs a
+main server and `docker-compose.node.yml` a node.
 
 ## Build
 
@@ -52,7 +52,8 @@ order:
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
    `REDIS_URL` turns the matching bundled service off. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
-   a deployment's own database keeps Silo's default, tuning off.
+   a deployment's own database keeps Silo's default, tuning off. A proxy or
+   transcode `MODE` turns them all off and requires both URLs.
 4. `init-postgres` creates the cluster on first start and writes the image's
    settings and `pg_hba.conf` on every start; `svc-postgres` runs it;
    `init-postgres-db` creates the `silo` database and rebuilds
@@ -155,3 +156,36 @@ and delete it. Search returns to PostgreSQL, and from the next start the
 administrator can choose a provider again. Without a marker the stored provider
 is left alone, so an external Meilisearch configured in the admin UI keeps
 working.
+
+## Nodes
+
+The same image runs a proxy or transcode node. With `MODE=proxy` or
+`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`, starts
+none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
+and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
+`POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
+changes the shared database's schema or settings. `/config` holds the node's
+own state. An administrator adds the node on the main server, which then checks
+its health over `NODE_URL`.
+
+A main server shares its bundled services with nodes when
+`ENABLE_NODE_ACCESS=true`, which `docker-compose.node-access.yml` sets
+alongside publishing ports 5432 and 6379 on `NODE_ACCESS_HOST`:
+
+- PostgreSQL also listens on every interface (`conf.d/01-node-access.conf`),
+  and `pg_hba.conf` gains `host silo silo all scram-sha-256`.
+  `init-postgres-db` sets the `silo` role's password to `POSTGRES_PASSWORD` on
+  every start, passing it to `psql` through the environment.
+- Redis starts even without `ENABLE_REDIS`, since nodes need the Redis the main
+  server uses. It binds every interface and requires `REDIS_PASSWORD`, which
+  `init-config` writes to a file only the `redis` account and root read; the
+  readiness check signs in from it. The password is limited to characters that
+  need no escaping in a URL, because Silo's own `REDIS_URL` carries it.
+- Silo on the main server still uses the socket and loopback.
+
+Turning node access off removes the listener and the network rule, clears the
+role's password, and puts Redis back on loopback. Nodes sign in as `silo`, the
+cluster's superuser, as they did with the multi-container stack, and neither
+connection is encrypted, so the ports belong on a trusted network only.
+Reusing `POSTGRES_PASSWORD` means a main server moved from that stack keeps the
+`DATABASE_URL` its nodes already have; their `REDIS_URL` gains the password.

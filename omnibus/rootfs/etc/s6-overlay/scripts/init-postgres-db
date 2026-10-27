@@ -18,6 +18,19 @@ if [[ "$(psql_silo -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'si
   psql_silo -d postgres -c 'CREATE DATABASE silo'
 fi
 
+# Nodes sign in as silo with POSTGRES_PASSWORD. Without node access the role
+# has no password, so only peer authentication on the socket lets anyone in.
+# The password travels in psql's environment, not on its command line.
+if [[ -e "$STATE_DIR/postgres.network" ]]; then
+  SILO_ROLE_PASSWORD="$POSTGRES_PASSWORD" s6-setuidgid silo \
+    psql -v ON_ERROR_STOP=1 -qAtX -h /run/postgresql -U silo -d postgres <<'SQL'
+\getenv password SILO_ROLE_PASSWORD
+ALTER ROLE silo PASSWORD :'password';
+SQL
+else
+  psql_silo -d postgres -c 'ALTER ROLE silo PASSWORD NULL'
+fi
+
 # Each database records the C library collation version it was created under.
 # Another version, from an image on a newer Debian release or from a cluster
 # the Compose stack's PostgreSQL image created, can sort text differently, and
