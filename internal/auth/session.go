@@ -176,19 +176,6 @@ func (r *SessionRepository) GetByID(ctx context.Context, id string) (*models.Aut
 	return scanSession(r.pool.QueryRow(ctx, query, id))
 }
 
-// ListByUser returns all sessions for a given user, ordered by created_at
-// descending (newest first).
-func (r *SessionRepository) ListByUser(ctx context.Context, userID int) ([]*models.AuthSession, error) {
-	query := `SELECT ` + sessionColumns + ` FROM auth_sessions WHERE user_id = $1 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing sessions for user %d: %w", userID, err)
-	}
-	defer rows.Close()
-
-	return scanSessions(rows)
-}
-
 // SessionKey is the keyset position of one session in the
 // (created_at DESC, id DESC) order ListByUserPage serves.
 type SessionKey struct {

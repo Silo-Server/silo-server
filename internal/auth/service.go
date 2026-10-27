@@ -1365,11 +1365,6 @@ func ValidateNewPassword(password string) error {
 	return nil
 }
 
-// GetSessions returns all sessions for the given user ID.
-func (s *Service) GetSessions(ctx context.Context, userID int) ([]*models.AuthSession, error) {
-	return s.sessions.ListByUser(ctx, userID)
-}
-
 // GetSessionsPage returns one keyset page of the user's live sessions; see
 // SessionRepository.ListByUserPage.
 func (s *Service) GetSessionsPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {

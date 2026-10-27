@@ -28,18 +28,6 @@ func TestOperationalDiscoveryPreservesCompatibilityView(t *testing.T) {
 		t.Fatal(response.Code, response.Body.String())
 	}
 	assertDiscoverySchema(t, response, "CompatConnectInfoResponse")
-	legacy := httptest.NewRecorder()
-	service.HandleGetConnectInfo(legacy, httptest.NewRequest(http.MethodGet, "/api/v1/compat/connect-info", nil))
-	var actual, want map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &actual); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(legacy.Body.Bytes(), &want); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("v2=%v legacy=%v", actual, want)
-	}
 	requireProblem(t, do(t, handler, http.MethodGet, Prefix+"/compat/connect-info", "", nil), TypeAuthenticationRequired)
 	deps.CompatConnectInfo = nil
 	requireProblem(t, do(t, NewHandler(deps), http.MethodGet, Prefix+"/compat/connect-info", "", bearer(memberToken)), TypeDependencyUnavailable)
@@ -56,12 +44,7 @@ func TestOperationalDiscoveryImageLadderAndOptionalProfile(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &actual); err != nil {
 		t.Fatal(err)
 	}
-	legacy := httptest.NewRecorder()
-	handlers.HandleImagesCapability(legacy, httptest.NewRequest(http.MethodGet, "/api/v1/images/capability", nil))
-	var want handlers.ImagesCapabilityResponse
-	if err := json.Unmarshal(legacy.Body.Bytes(), &want); err != nil {
-		t.Fatal(err)
-	}
+	want := handlers.GetImagesCapability()
 	if !actual.EpisodeStillProvenance || !actual.ExtendedItemArtwork || actual.SeasonListArtworkParam != want.SeasonListArtworkParam || actual.SeasonListArtworkParam != "include_artwork" || actual.State != StateAvailable || actual.Revision == "" || actual.Param != want.Param || actual.OriginalMaxWidthPx != want.OriginalMaxWidthPx || !reflect.DeepEqual(actual.Sizes, want.Sizes) || len(actual.Widths) != len(want.Widths)+len(extendedItemArtworkTypes) {
 		t.Fatalf("v2=%+v legacy=%+v", actual, want)
 	}
@@ -71,8 +54,8 @@ func TestOperationalDiscoveryImageLadderAndOptionalProfile(t *testing.T) {
 			t.Fatalf("image width %s: got %+v, want %+v", key, width, expected)
 		}
 	}
-	// The extended artwork types are a v2 addition: the frozen v1 view must
-	// not list them, and v2 reports their ladder.
+	// The extended artwork types are a v2 addition: the shared view does not
+	// list them, and v2 reports their ladder.
 	for key, expected := range map[string]ImageSizeWidths{
 		"banner":   {Small: 500, Medium: 500, Large: 1000},
 		"thumb":    {Small: 300, Medium: 500, Large: 1280},
@@ -80,7 +63,7 @@ func TestOperationalDiscoveryImageLadderAndOptionalProfile(t *testing.T) {
 		"disc":     {Small: 300, Medium: 500, Large: 1000},
 	} {
 		if _, ok := want.Widths[key]; ok {
-			t.Fatalf("v1 image capability lists %s", key)
+			t.Fatalf("shared image capability lists %s", key)
 		}
 		if got := actual.Widths[key]; got != expected {
 			t.Fatalf("image width %s: got %+v, want %+v", key, got, expected)

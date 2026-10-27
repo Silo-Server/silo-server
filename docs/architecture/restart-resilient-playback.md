@@ -7,8 +7,8 @@ reconstruction + a server-side session-deny marker for revocation).
 > **Status: both halves are implemented.** Token-carried reconstruction shipped
 > first; the session-deny marker now ships alongside it. The Redis key
 > `silo:streamauth:<session_id>` carries a TTL equal to the stream token
-> lifetime (`playback.MaxTokenTTL`, 24h) and is written by a user stop on v1 and
-> v2, by session expiry and stream abort, and by admin stop and terminate. The
+> lifetime (`playback.MaxTokenTTL`, 24h) and is written by a user stop, by
+> session expiry and stream abort, and by admin stop and terminate. The
 > API checks it before it serves or reconstructs a session (the
 > `loadTranscodeServeSession` and `LoadOrReconstructSession` callers, which
 > cover the stream and subtitle handlers), and the proxy and the transcode node
@@ -254,7 +254,7 @@ on the native path).
 The revocation surface was deliberately
 kept to the *one* case the offloaded topology cannot otherwise cover, rather than
 a periodic re-check of every stream. Every event that ends a session — a user
-stop on v1 or v2, session expiry, a stream abort, and an admin stop or terminate
+stop, session expiry, a stream abort, and an admin stop or terminate
 — writes `silo:streamauth:<session_id> = deny` with a TTL equal to the stream
 token lifetime (`playback.MaxTokenTTL`, 24h). The API reads it before it serves
 or reconstructs a session, and the offload node reads it (a node-local Redis
@@ -334,8 +334,8 @@ package.
   `MaxTokenTTL`, and `Denied(sessionID)` is a fail-open reader with a ~2s
   in-process cache and a one-second lookup timeout. No poller, no allow-leases,
   no access re-resolver. A nil `*StreamDeny` (no Redis configured) is a no-op.
-- The write happens on every session-ending event: user stop on both the v1 and
-  v2 handlers (`stopPlaybackSessionWithResult`, `finishStopV2`), session expiry
+- The write happens on every session-ending event: user stop
+  (`stopPlaybackSessionWithResult`, `finishStopV2`), session expiry
   and stream abort (`markAttemptStoppedServerSide`), and admin stop and
   terminate (`internal/api/handlers/admin_playback_terminate.go`). The abort path
   writes the marker as well as deleting the recipe card.

@@ -453,67 +453,6 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 	})
 }
 
-// TestSidecarRoutesEnforceOwningProfile: a household profile must not read
-// another profile's sidecars or HLS by session id.
-func TestSidecarRoutesEnforceOwningProfile(t *testing.T) {
-	manager := playback.NewSessionManager(0, 0)
-	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := NewPlaybackHandler(manager)
-	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
-	stream.TM = handler.TranscodeManager()
-	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
-	for name, serve := range map[string]http.HandlerFunc{
-		"manifest": handler.HandleGetTranscodeManifest,
-		"segment":  handler.HandleGetTranscodeSegment,
-		"stream":   stream.HandleStream,
-		"subtitle": stream.HandleSubtitle,
-		"fonts":    stream.HandleSubtitleFonts,
-	} {
-		req := playbackTestRequest(http.MethodGet, "/", nil, params)
-		req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
-		rr := httptest.NewRecorder()
-		serve(rr, req)
-		if rr.Code != http.StatusForbidden {
-			t.Fatalf("%s: status = %d, want 403 for another profile; body = %s", name, rr.Code, rr.Body.String())
-		}
-	}
-}
-
-// TestSidecarRoutesReconstructFromTheStreamReference: after a restart the
-// subtitle and font URLs carry the same signed reference as the media URL
-// and must rebuild the session from it instead of answering 404.
-func TestSidecarRoutesReconstructFromTheStreamReference(t *testing.T) {
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager)
-	handler.JWTSecret = "sidecar-secret"
-	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
-	stream.JWTSecret = handler.JWTSecret
-	stream.TM = handler.TranscodeManager()
-	sessionID := uuid.NewString()
-	card := playback.NewDirectRecipeCard(sessionID, 1, "profile-1", 100)
-	token := handler.signStreamClaims(card.ToClaims())
-	if token == "" {
-		t.Fatal("no stream token")
-	}
-	params := map[string]string{"session_id": sessionID, "track": "0"}
-	for name, serve := range map[string]http.HandlerFunc{
-		"subtitle": stream.HandleSubtitle,
-		"fonts":    stream.HandleSubtitleFonts,
-	} {
-		rr := httptest.NewRecorder()
-		serve(rr, playbackTestRequest(http.MethodGet, "/?"+streamTokenParam+"="+token, nil, params))
-		if rr.Code == http.StatusNotFound && strings.Contains(rr.Body.String(), "session") {
-			t.Fatalf("%s: session was not reconstructed: %d %s", name, rr.Code, rr.Body.String())
-		}
-		if _, err := manager.GetSession(sessionID); err != nil {
-			t.Fatalf("%s: session not registered after reconstruction: %v", name, err)
-		}
-	}
-}
-
 func TestSubtitleFontServiceReconstructsAndChecksAdmission(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
 	playbackHandler := NewPlaybackHandler(manager)
@@ -785,4 +724,116 @@ func TestStaleCopyExpiryLeavesTheRemoteTransport(t *testing.T) {
 			t.Fatalf("expiry of a copy stopped on another replica did not stop its remote transport: %v", got)
 		}
 	})
+}
+
+// TestSidecarRoutesEnforceOwningProfile: a household profile must not read
+// another profile's sidecars or HLS by session id. The font service's check
+// is TestSubtitleFontServiceReconstructsAndChecksAdmission.
+func TestSidecarRoutesEnforceOwningProfile(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewPlaybackHandler(manager)
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	stream.TM = handler.TranscodeManager()
+	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
+	for name, serve := range map[string]http.HandlerFunc{
+		"manifest": handler.HandleGetTranscodeManifest,
+		"segment":  handler.HandleGetTranscodeSegment,
+		"stream":   stream.HandleStream,
+		"subtitle": stream.HandleSubtitle,
+	} {
+		req := playbackTestRequest(http.MethodGet, "/", nil, params)
+		req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
+		rr := httptest.NewRecorder()
+		serve(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s: status = %d, want 403 for another profile; body = %s", name, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// TestSidecarRoutesReconstructFromTheStreamReference: after a restart the
+// subtitle URL carries the same signed reference as the media URL and must
+// rebuild the session from it instead of answering 404. The font service's
+// reconstruction is TestSubtitleFontServiceReconstructsAndChecksAdmission.
+func TestSidecarRoutesReconstructFromTheStreamReference(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager)
+	handler.JWTSecret = "sidecar-secret"
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	stream.JWTSecret = handler.JWTSecret
+	stream.TM = handler.TranscodeManager()
+	sessionID := uuid.NewString()
+	card := playback.NewDirectRecipeCard(sessionID, 1, "profile-1", 100)
+	token := handler.signStreamClaims(card.ToClaims())
+	if token == "" {
+		t.Fatal("no stream token")
+	}
+	params := map[string]string{"session_id": sessionID, "track": "0"}
+	for name, serve := range map[string]http.HandlerFunc{
+		"subtitle": stream.HandleSubtitle,
+	} {
+		rr := httptest.NewRecorder()
+		serve(rr, playbackTestRequest(http.MethodGet, "/?"+streamTokenParam+"="+token, nil, params))
+		if rr.Code == http.StatusNotFound && strings.Contains(rr.Body.String(), "session") {
+			t.Fatalf("%s: session was not reconstructed: %d %s", name, rr.Code, rr.Body.String())
+		}
+		if _, err := manager.GetSession(sessionID); err != nil {
+			t.Fatalf("%s: session not registered after reconstruction: %v", name, err)
+		}
+	}
+}
+
+// Progress and stop act on an attempt only for the profile that owns it: a
+// sibling profile on the same account, or another account, is refused and
+// leaves the session as it was.
+func TestPlaybackMutationsV2RequireTheOwningProfile(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stop      bool
+		userID    int
+		profileID string
+		refused   bool
+	}{
+		{name: "progress from another account", userID: 2, profileID: "profile-1", refused: true},
+		{name: "progress from a sibling profile", userID: 1, profileID: "profile-2", refused: true},
+		{name: "progress from the owning profile", userID: 1, profileID: "profile-1"},
+		{name: "stop from another account", stop: true, userID: 2, profileID: "profile-1", refused: true},
+		{name: "stop from a sibling profile", stop: true, userID: 1, profileID: "profile-2", refused: true},
+		{name: "stop from the owning profile", stop: true, userID: 1, profileID: "profile-1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			caller := f.caller
+			caller.UserID, caller.ProfileID = test.userID, test.profileID
+			ctx := playbackCallerContextV3(test.userID, test.profileID)
+			var err error
+			if test.stop {
+				_, err = f.handler.StopPlaybackV2(ctx, caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+			} else {
+				_, err = f.handler.ApplyProgressV2(ctx, caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 42})
+			}
+			session, getErr := f.manager.GetSession(f.session.ID)
+			switch {
+			case test.refused:
+				assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+				if getErr != nil || session.Position != 0 {
+					t.Fatalf("refused caller changed the session: %+v, %v", session, getErr)
+				}
+			case err != nil:
+				t.Fatalf("owner mutation: %v", err)
+			case test.stop:
+				if !errors.Is(getErr, playback.ErrSessionNotFound) {
+					t.Fatalf("owner stop left the session: %+v, %v", session, getErr)
+				}
+			default:
+				if getErr != nil || session.Position != 42 {
+					t.Fatalf("owner progress not applied: %+v, %v", session, getErr)
+				}
+			}
+		})
+	}
 }

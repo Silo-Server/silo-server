@@ -213,23 +213,3 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 	}
 	return nil
 }
-
-// writePluginLifecycleError keeps the frozen bridge answers for the seams.
-func writePluginLifecycleError(w http.ResponseWriter, r *http.Request, err error, action string) {
-	var apiErr *APIError
-	switch {
-	case errors.As(err, &apiErr):
-		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-	case errors.Is(err, plugins.ErrInstallationNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
-	case errors.Is(err, ErrPluginBuiltinInstallation):
-		if action == "uninstall" {
-			writeError(w, http.StatusConflict, "builtin_installation", "Built-in host providers cannot be uninstalled")
-			return
-		}
-		writeError(w, http.StatusConflict, "builtin_installation", "Built-in host providers cannot be modified")
-	default:
-		slog.ErrorContext(r.Context(), "plugin installation lifecycle failed", "component", "api", "action", action, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to "+action+" plugin")
-	}
-}

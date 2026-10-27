@@ -12,8 +12,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
-	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -232,110 +230,6 @@ func facetSearchError(err error) error {
 		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
-}
-
-// QueryItems answers one page of the JSON-body catalog query. The limit is
-// already clamped by the caller; the filter body is validated here.
-func (h *CatalogHandler) QueryItems(ctx context.Context, v ItemViewer, req CatalogQueryRequest) (CatalogQueryView, error) {
-	if h == nil || h.itemsH == nil || h.itemsH.browseRepo == nil {
-		return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-	}
-	fb := sections.NewFilterBuilder("mi")
-	filterWhere, filterArgs, err := fb.Build(req.FilterConfig)
-	if err != nil {
-		return CatalogQueryView{}, apiError(http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
-	}
-	accessFilter := v.Access
-	if req.LibraryID > 0 {
-		accessFilter.PresentationLibraryID = &req.LibraryID
-	}
-	libraryIDs := accessFilter.AllowedLibraryIDs
-
-	var conditions []string
-	args := filterArgs
-	argIdx := fb.ArgIdx()
-	if filterWhere != "" {
-		conditions = append(conditions, filterWhere)
-	}
-	fromClause := "media_items mi"
-	libraryConditions, libraryArgs, nextArgIdx, earlyEmpty := buildPostCatalogLibraryScope(req.LibraryID, libraryIDs, accessFilter.DisabledLibraryIDs, argIdx)
-	if earlyEmpty {
-		return CatalogQueryView{Items: []itemListResponse{}, Total: 0}, nil
-	}
-	conditions = append(conditions, libraryConditions...)
-	args = append(args, libraryArgs...)
-	argIdx = nextArgIdx
-	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaturityLimits: accessFilter.MaturityLimits}, &conditions, &args, &argIdx)
-
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
-	sortClause := "ORDER BY mi.created_at DESC"
-	if req.Sort != "" {
-		sortClause = filterSortClause(req.Sort, req.Order)
-	}
-	// Single-pass query: COUNT(*) OVER () returns the same total on every
-	// row of the filtered set, so it is read once from the first scanned row
-	// instead of firing a separate SELECT COUNT(*).
-	query := fmt.Sprintf(`SELECT %s, COUNT(*) OVER () AS total_count FROM %s %s %s LIMIT $%d OFFSET $%d`,
-		filterItemColumns("mi"), fromClause, whereClause, sortClause, argIdx, argIdx+1)
-	args = append(args, req.Limit, req.Offset)
-
-	rows, err := h.itemsH.browseRepo.Pool().Query(ctx, query, args...)
-	if err != nil {
-		return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to query items")
-	}
-	defer rows.Close()
-
-	var total int
-	modelItems := make([]*models.MediaItem, 0)
-	for rows.Next() {
-		var item models.MediaItem
-		var rowTotal int
-		scanErr := rows.Scan(
-			&item.ContentID, &item.Type, &item.Title, &item.SortTitle, &item.OriginalTitle,
-			&item.Year, &item.Genres, &item.ContentRating, &item.Runtime, &item.Overview, &item.Tagline,
-			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
-			&item.ImdbID, &item.TmdbID, &item.TvdbID,
-			&item.PosterPath, &item.PosterThumbhash, &item.BackdropPath, &item.BackdropThumbhash, &item.LogoPath,
-			&item.MetadataS3Path, &item.MetadataEtag, &item.SeasonCount,
-			&item.Studios, &item.Networks, &item.Countries, &item.FirstAirDate, &item.LastAirDate,
-			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-			&rowTotal,
-		)
-		if scanErr != nil {
-			return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to scan item")
-		}
-		modelItems = append(modelItems, &item)
-		total = rowTotal
-	}
-	if err := rows.Err(); err != nil {
-		return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to query items")
-	}
-	// COUNT(*) OVER () emits no rows when the data SELECT is empty, so total
-	// stays 0 even when the broader result set has matching rows (OFFSET past
-	// the last page). Re-query the count to give callers the real total.
-	if len(modelItems) == 0 && req.Offset > 0 {
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM (SELECT 1 FROM %s %s) sub", fromClause, whereClause)
-		countArgs := args[:len(args)-2]
-		if err := h.itemsH.browseRepo.Pool().QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-			return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to count items")
-		}
-	}
-
-	viewer := ItemViewer{Access: accessFilter, ProfileID: v.ProfileID}
-	userStates := h.itemsH.listItemUserStates(ctx, viewer, modelItems)
-	items := make([]itemListResponse, 0, len(modelItems))
-	for _, item := range modelItems {
-		if h.itemsH.detailSvc != nil {
-			if localized, locErr := h.itemsH.detailSvc.LocalizeItemModel(ctx, item, accessFilter); locErr == nil && localized != nil {
-				item = localized
-			}
-		}
-		items = append(items, h.itemsH.toItemListResponseWithOverlay(ctx, viewer, item, nil, userStates[item.ContentID], accessFilter.Artwork()))
-	}
-	return CatalogQueryView{Total: total, HasMore: req.Offset+req.Limit < total, Items: items}, nil
 }
 
 // AudiobookGroups answers one page of authors, narrators, or series of an

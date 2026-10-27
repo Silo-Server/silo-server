@@ -405,3 +405,10 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 		}
 	}
 }
+
+// The lifecycle operations find these methods by runtime assertion, so a
+// removed method would only show up as a 503; keep the check at compile time.
+var (
+	_ personalCollectionLifecycle       = (*handlers.CollectionHandler)(nil)
+	_ personalCollectionImportLifecycle = (*handlers.UserCollectionImportHandler)(nil)
+)

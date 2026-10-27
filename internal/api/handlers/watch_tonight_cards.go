@@ -4,13 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"maps"
-	"net/http"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -87,32 +84,6 @@ var knownGenres = map[string]struct{}{
 	"Fantasy": {}, "History": {}, "Horror": {}, "Music": {},
 	"Mystery": {}, "Romance": {}, "Science Fiction": {}, "Thriller": {},
 	"War": {}, "Western": {},
-}
-
-// HandleWatchTonightCards handles GET /recommendations/watch-tonight/cards.
-// It returns paginated, genre-filterable swipe cards with cast data for the
-// gamified Watch Tonight experience.
-func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, r *http.Request) {
-	mode := r.URL.Query().Get("mode")
-	if mode != "continue" && mode != "discover" {
-		writeError(w, http.StatusBadRequest, "invalid_mode", `mode must be "continue" or "discover"`)
-		return
-	}
-
-	genres := parseGenreParams(r.URL.Query()["genres[]"])
-	excludeIDs := parseExcludeIDs(r.URL.Query()["exclude_ids[]"])
-	limit := swipeDefaultLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= swipeMaxLimit {
-			limit = n
-		}
-	}
-	resp, err := h.watchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit, true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // WatchTonightCards is the swipe-card seam. mode is "continue" or
@@ -612,27 +583,6 @@ func buildCastSlice(castMap map[string][]models.ItemPerson, lookupID string) []s
 	return cast
 }
 
-// parseGenreParams validates and deduplicates genre query params.
-func parseGenreParams(raw []string) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(raw))
-	genres := make([]string, 0, len(raw))
-	for _, g := range raw {
-		g = strings.TrimSpace(g)
-		if _, valid := knownGenres[g]; !valid {
-			continue
-		}
-		if _, dup := seen[g]; dup {
-			continue
-		}
-		seen[g] = struct{}{}
-		genres = append(genres, g)
-	}
-	return genres
-}
-
 func discoverCandidatePoolSize(limit int, genreCount int) int {
 	multiplier := 15
 	if genreCount > 0 {
@@ -659,25 +609,6 @@ func mapKeys(values map[string]struct{}) []string {
 		keys = append(keys, key)
 	}
 	return keys
-}
-
-// parseExcludeIDs extracts and caps the exclude_ids query params.
-func parseExcludeIDs(raw []string) map[string]struct{} {
-	if len(raw) == 0 {
-		return nil
-	}
-	ids := make(map[string]struct{}, len(raw))
-	for _, id := range raw {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		ids[id] = struct{}{}
-		if len(ids) >= maxExcludeIDs {
-			break
-		}
-	}
-	return ids
 }
 
 // Card is the section card the swipe card wraps. The v1 body carries runtime

@@ -141,13 +141,13 @@ Subsequent calls pass that checkpoint as `cursor`, return newer deliveries in
 ascending order, and set `initial_snapshot: false`. Continue immediately through
 `page.next_cursor` while `page.has_more` is true. When caught up, retain
 `sync_cursor` for the next wake or reconnect. The page size is part of the cursor
-scope; legacy v1 cursors cannot be reused.
+scope.
 
 ## Preference writes
 
 `enabled`, `notify_favorites`, `notify_watchlist`, `notify_continue_watching`, and
 `notify_next_up` are optional booleans. Explicit false is preserved; v2 rejects
-null. Both API versions now apply partial fields in one database statement,
+null. Partial fields apply in one database statement,
 preventing independent concurrent toggles from overwriting each other. Missing
 preference rows retain the existing all-enabled defaults.
 
@@ -159,7 +159,7 @@ retry mutations or optimistically mark every cached delivery read.
 
 `GET /api/v2/notifications/push/apple/display/{delivery_id}`
 (`getNotificationApplePushDisplay`) returns compact display metadata from the
-same delivery row and renderer as the bridge endpoint. The response fields are
+delivery row and its renderer. The response fields are
 `delivery_id` (string), `title`, optional `body` and `thread_id`, `category`, and
 `url`. Responses use `Cache-Control: no-store`; missing or other-profile
 notifications return a 404 problem. Delivery IDs are opaque strings: the store
@@ -171,8 +171,8 @@ token binds its own profile, ignores a supplied profile header, and requires a
 valid login session and a still-owned profile. It is rejected by other API v2
 operations. Query-string display credentials are not accepted. Existing
 pre-auth and post-auth rate limits apply. This read neither marks a notification
-read nor sends a push. Apple registration and display-token issuance retain
-the bridge contract until their separate migration is accepted.
+read nor sends a push. Apple registration and display-token issuance are
+described in [Apple registration and display renewal](#apple-registration-and-display-renewal).
 
 The Apple notification extension is the consumer; Android does not call this
 Apple display endpoint. Jellyfin compatibility has no equivalent display-token
@@ -279,11 +279,9 @@ default changed are pinned to off by migration and keep their prior behavior
 until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
-Relay errors become v2 problems, with `Retry-After` retained when supplied.
-Bridge 400 validation becomes 422 and bridge 502 upstream failures become the
-shared 500 `internal_error`; other existing supported statuses retain their
-meaning. V1 response statuses, error codes, timestamp format, and headers remain
-unchanged. Native clients and Jellyfin compatibility do not manage relay
+Relay errors are problem documents, with `Retry-After` retained when supplied.
+Validation failures are 422 and relay upstream failures are the shared 500
+`internal_error`. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
 
 ### API v2 email and Discord preferences
@@ -291,9 +289,11 @@ credentials and need no consumer change.
 `GET` and `PUT /api/v2/notifications/email-preferences` read and set the acting
 profile's email mode. The response retains `mode`, `custom_email`,
 `pending_email`, and `can_edit_address`. Each profile uses its own verified
-address; there is no login-account email fallback. Address verification and
-removal remain separate bridge operations pending their durable dispatch and
-callback migration.
+address; there is no login-account email fallback. Address verification
+(`PUT /api/v2/notifications/email-preferences/address`,
+`requestNotificationEmailVerification`) and removal
+(`DELETE /api/v2/notifications/email-preferences/address`,
+`clearNotificationEmailAddress`) are separate operations.
 
 `GET` and `PUT /api/v2/notifications/discord-preferences` read and set the login
 account's Discord mode. Reads keep their optional-profile behavior; a supplied
@@ -304,14 +304,14 @@ role never widens a selected secondary profile's authority. Responses retain `li
 `discord_username` and `link_failure`, and `mode`. The underlying Discord user
 identifier and credentials are not returned.
 
-The same admission applies to v1 and v2 link initiation, mode changes, and
+The same admission applies to link initiation, mode changes, and
 unlinking, before creating consent state or calling the mutation backend. A
 profile-less non-admin session is denied. A profile-less admin session is allowed
 only while its household has no PIN or stored access restriction; a profile-less
 admin API key keeps its documented scoped exception. A key declaring a locked
 primary profile cannot use its skipped PIN check as verification. Missing authority
-wiring fails closed. Refusals reuse v1 `403 forbidden` and v2 `403 permission_denied`
-or `profile_verification_required`; storage errors remain `500`. The web shows
+wiring fails closed. Refusals are `403 permission_denied` or
+`profile_verification_required`; storage errors remain `500`. The web shows
 Discord settings as read-only unless the selected profile is primary.
 
 Delivery remains account-wide. The public callback and the existing consent-state
@@ -349,8 +349,7 @@ Existing web lists drain bounded pages under captured authority and use scoped
 cache keys. Missing/repeated continuations and authority changes fail explicitly
 without returning a partial list. The current web display limit is 100 pages of
 100 records; exceeding it is an explicit error. Destination creation, updates,
-deletes, tests, and secret rotation remain separate bridge operations until their
-own guarded mutation migration. No native destination-management caller exists;
+deletes, tests, and secret rotation are separate operations, described below. No native destination-management caller exists;
 Jellyfin compatibility has no equivalent list surface.
 
 ### API v2 administrator Discord credential test
@@ -368,8 +367,7 @@ The operation is `non_retryable`. The existing administrator test button capture
 authority, prevents overlapping tests, disables authentication replay, and refuses
 stale results after an account/profile switch. Apple and Android have no caller;
 Jellyfin compatibility has no corresponding operation. Discord link initiation,
-OAuth callbacks, and unlinking retain their bridge routes pending their separate
-migration.
+the OAuth callback, and unlinking are separate operations.
 
 ### API v2 webhook and server-channel test delivery
 
@@ -390,8 +388,7 @@ services return 503. Responses are no-store. Both operations are `non_retryable`
 
 Existing web cards capture authority, prevent overlapping test calls, disable
 authentication replay, and suppress stale results. Configuration changes and
-secret rotation retain their bridge routes pending guarded mutation migration.
-Apple and Android have no destination-test callers. Jellyfin compatibility has
+secret rotation are separate operations. Apple and Android have no destination-test callers. Jellyfin compatibility has
 no corresponding operation.
 
 ### API v2 tokenized notification email links
@@ -414,10 +411,9 @@ An unavailable service returns a 503 problem. API v2 adds no-store and
 no-referrer headers; pages never reflect the proof or internal error text.
 
 The one-click POST is `non_retryable`: the existing capability token can turn
-email off again after the profile later re-enables it. This migration adds no
-generation guard or delivery retry. Address request/clear transports remain on
-the bridge until their separate migration. Previously sent bridge links keep
-working through the bridge release. Mail clients follow the emitted URLs;
+email off again after the profile later re-enables it. There is no generation
+guard or delivery retry. Links in mail sent before the `/api/v1` retirement
+point at retired routes and answer `410`. Mail clients follow the emitted URLs;
 Apple and Android have no in-app callback consumer, and Jellyfin compatibility
 has no corresponding operation.
 
@@ -442,12 +438,8 @@ The result is HTTP 302 with Location pointing to notification settings and the
 existing success/error query fields, plus the usual HTML redirect body. It never
 invents a JSON 200 response. API v2 applies no-store/no-referrer headers.
 
-Register the exact v2 redirect URI in the Discord application's OAuth settings
-before using v2 linking. Keep the bridge redirect registered while bridge flows
-remain supported; their consent and exchange still use the v1 URI. This port
-preserves the existing link-state and account-link write semantics. It adds no
-generation guard for overlapping consent flows or unlinking; unlink migration
-remains separate. Apple and Android have no notification Discord-link callers,
+Register the exact v2 redirect URI in the Discord application's OAuth settings.
+There is no generation guard for overlapping consent flows or unlinking. Apple and Android have no notification Discord-link callers,
 and Jellyfin compatibility has no equivalent operation.
 
 ### API v2 destination creation
@@ -456,7 +448,7 @@ and Jellyfin compatibility has no equivalent operation.
 `POST /api/v2/admin/notifications/server-channels` creates a server channel for
 an acting administrator. Both require `name` and `url`; optional type and event
 flags retain the existing service defaults. Creation validates and stores the
-destination through the same service as the bridge and does not send a message.
+destination through the notification service and does not send a message.
 
 Destinations require HTTPS without embedded credentials. Registration resolves
 the host with a two-second deadline and rejects failed, empty, or disallowed
@@ -496,7 +488,7 @@ The operation is **non-retryable**. A delayed repeat can clear an address reques
 
 `DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies. The UI never supplies a wildcard.
 
-A database sequence and insert/update trigger allocate a fresh revision for every row change, including legacy configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. Deploy the revision migration before code that reads the new column. This does not change provider delivery or recall an already-dispatched request.
+A database sequence and insert/update trigger allocate a fresh revision for every row change, including configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. Deploy the revision migration before code that reads the new column. This does not change provider delivery or recall an already-dispatched request.
 
 The settings confirmation captures the list's original ID and validator when opened, and passes that immutable intent plus captured authority through the mutation's variables. It sends once without authentication replay. A stale/missing/failed response surfaces without a read, rebase, or automatic retry. The user must explicitly reload and reconsider the current row; returned conflict validators are never adopted automatically. Success invalidates only the captured authority's list. Administrator channel deletion remains a separate operation.
 
@@ -510,7 +502,7 @@ Deletion removes the channel and its row-local watermark, last-attempt and outco
 
 `POST /api/v2/notifications/webhooks/{id}/rotate-secret` (`rotateNotificationWebhookSecret`) requires acting-profile authority and the demo guard. Only generic webhooks have signing secrets; a Discord webhook returns `422`, missing/foreign IDs `404`, and unavailable service `503`. A successful `200` returns `signing_secret` once with `Cache-Control: no-store`. The secret is encrypted at rest with the webhook's existing associated-data binding.
 
-The v2 storage path updates only the encrypted secret and timestamp; it does not write a stale configuration snapshot or reset provider failure/disabled state. The revision trigger still advances the row validator. Existing bridge rotation is unchanged. Rotation immediately replaces the signing secret, with no dual-acceptance window or recoverable receipt. Later concurrent rotations or legacy configuration writes can supersede that secret; the response is not a lease guaranteeing continued acceptance.
+The v2 storage path updates only the encrypted secret and timestamp; it does not write a stale configuration snapshot or reset provider failure/disabled state. The revision trigger still advances the row validator. Rotation immediately replaces the signing secret, with no dual-acceptance window or recoverable receipt. Later concurrent rotations or configuration writes can supersede that secret; the response is not a lease guaranteeing continued acceptance.
 
 This operation is non-retryable. The existing settings action captures ID and authority into invocation variables, sends once without authentication replay, checks authority before revealing the secret, and refreshes only the captured webhook list. Failure or uncertainty never causes an automatic read, rebase, repeat rotation or compensating write. No webhook delivery is sent by rotation; in-flight provider work may still use a previously captured secret.
 
@@ -518,15 +510,15 @@ This operation is non-retryable. The existing settings action captures ID and au
 
 `PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state and notification reason flags are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
 
-The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The reviewed server-owned revision trigger remains required and covers provider bookkeeping and bridge writers; those changes can conservatively invalidate an editor. Legacy writers may still change the row after this operation commits. A successful response is an observation, not a lease.
+The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The server-owned revision trigger remains required and covers provider bookkeeping; those changes can conservatively invalidate an editor. Other writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 
-The settings editor retains the row selected when opened, including its original validator. The enabled toggle uses the displayed row's validator. Invocation captures a copy of the input and current authority before a possible offline pause. The client sends once without authentication replay, refuses stale dispatch/receipts and invalidates only the captured webhook list after success. It never reads a newer validator to rebase or automatically retries a conflict or uncertain result. The recorded natural-idempotent classification describes setting configuration values; it does not waive the required original precondition. No provider delivery is sent by this operation. The bridge update wire contract remains unchanged.
+The settings editor retains the row selected when opened, including its original validator. The enabled toggle uses the displayed row's validator. Invocation captures a copy of the input and current authority before a possible offline pause. The client sends once without authentication replay, refuses stale dispatch/receipts and invalidates only the captured webhook list after success. It never reads a newer validator to rebase or automatically retries a conflict or uncertain result. The recorded natural-idempotent classification describes setting configuration values; it does not waive the required original precondition. No provider delivery is sent by this operation.
 
 ### Rotate an administrator server-channel signing secret
 
 `POST /api/v2/admin/notifications/server-channels/{id}/rotate-secret` (`rotateAdminNotificationServerChannelSecret`) requires acting-admin authority and the demo guard. It targets the exact global channel ID. Only generic channels have signing secrets; Discord channels return `422`, missing IDs `404`, and unavailable service `503`. Success returns `200` with one-time `signing_secret` and `Cache-Control: no-store`, encrypted at rest with the existing server-channel-specific associated-data binding.
 
-The v2 write updates only the encrypted secret and timestamp. It preserves channel configuration, disabled/failure state and row-local watermark/last-attempt/outcome bookkeeping. It introduces no attempt table, revision protocol or provider send. The bridge rotation remains unchanged. Replacement is immediate with no dual-acceptance window or recoverable receipt; later rotations or legacy full-row configuration writes can supersede the returned secret, and in-flight delivery may use a previously captured secret.
+The v2 write updates only the encrypted secret and timestamp. It preserves channel configuration, disabled/failure state and row-local watermark/last-attempt/outcome bookkeeping. It introduces no attempt table, revision protocol or provider send. Replacement is immediate with no dual-acceptance window or recoverable receipt; later rotations or configuration writes can supersede the returned secret, and in-flight delivery may use a previously captured secret.
 
 The operation is non-retryable. The existing administrator action captures ID and authority at invocation, refuses stale dispatch/receipt/disclosure, and sends once without authentication replay. It invalidates only the captured administrator channel-list cache after success. Uncertainty never triggers an automatic read, rebase, retry or compensating rotation. This operation does not establish a secret lease or fleet rollout readiness.
 
@@ -534,11 +526,11 @@ The operation is non-retryable. The existing administrator action captures ID an
 
 `PUT /api/v2/admin/notifications/server-channels/{id}` (`updateAdminNotificationServerChannel`) requires acting-admin authority and the demo guard. It updates the exact global channel ID. Name, URL, enabled state and event flags are optional; omitted values stay unchanged. Type and signing secret are not configuration fields. Success returns `200` with the stored channel; missing ID returns `404`, invalid configuration `422`, and unavailable service `503`.
 
-The v2 repository reads the current row under a lock and commits configuration and any required dispatch reset together. It excludes signing secret and type from its write. Existing URL validation, type restrictions and channel-bound encryption remain. Replacing the URL, or moving a stopped/auto-disabled channel into enabled delivery, clears failure backoff and last-attempt state and moves the watermark to the present, avoiding replay of the stopped interval. As in the bridge, editing an enabled but auto-disabled channel also resumes it. A disable or an already-delivering enable leaves the watermark unchanged. Reset time is sampled after any row-lock wait, so an old transaction start cannot rewind the reset watermark. Provider outcome fields remain intact.
+The v2 repository reads the current row under a lock and commits configuration and any required dispatch reset together. It excludes signing secret and type from its write. Existing URL validation, type restrictions and channel-bound encryption remain. Replacing the URL, or moving a stopped/auto-disabled channel into enabled delivery, clears failure backoff and last-attempt state and moves the watermark to the present, avoiding replay of the stopped interval. Editing an enabled but auto-disabled channel also resumes it. A disable or an already-delivering enable leaves the watermark unchanged. Reset time is sampled after any row-lock wait, so an old transaction start cannot rewind the reset watermark. Provider outcome fields remain intact.
 
-This is a non-retryable operation: resubmitting a URL replacement advances the watermark again and can skip intervening events. There is no conditional revision contract for this administrator row. The lock protects the transaction; it does not reject stale editor observations or prevent later bridge/configuration writes. The actual editor and enabled toggle capture a copy of input and authority at invocation, send once without authentication replay, refuse stale dispatch/receipt/cache/error publication and invalidate only the captured administrator list after success. No automatic read, rebase, retry or compensating write follows uncertainty.
+This is a non-retryable operation: resubmitting a URL replacement advances the watermark again and can skip intervening events. There is no conditional revision contract for this administrator row. The lock protects the transaction; it does not reject stale editor observations or prevent later configuration writes. The actual editor and enabled toggle capture a copy of input and authority at invocation, send once without authentication replay, refuse stale dispatch/receipt/cache/error publication and invalidate only the captured administrator list after success. No automatic read, rebase, retry or compensating write follows uncertainty.
 
-The bridge update wire and behavior remain unchanged. No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
+No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
 
 ## Ordered Apple registration storage
 
@@ -564,12 +556,9 @@ provider cannot be recalled. Modes `off` and `in_app_only` retain existing row
 and enabled-field semantics; delivery eligibility continues to check push mode.
 Profile cleanup deletes device rows but retains installation ordering metadata.
 
-The migration must precede deployment of guarded writers. Every serving node
-must run the guarded Apple bridge upsert and generic bridge deletion before
-ordered Apple adoption; adopted installations reject those legacy writes.
-Generic deletion locks Android ordering before Apple ordering. The migration's
-Down operation is not an online rollback protocol. This storage prerequisite
-does not introduce an Apple v2 endpoint, native adoption or rollout authorization.
+The migration must precede deployment of guarded writers. Generic deletion
+locks Android ordering before Apple ordering. The migration's Down operation is
+not an online rollback protocol.
 
 ## Apple registration and display renewal
 
@@ -619,9 +608,9 @@ not enable it. The browser has no Apple-registration caller.
 
 ## Durable email verification storage prerequisite
 
-The retained address-request route still uses the bridge flow. Its v2 port
-requires durable dispatch: replacing a pending token and sending inline would
-invalidate an earlier link and send again after a lost HTTP response.
+Address requests use durable dispatch: replacing a pending token and sending
+inline would invalidate an earlier link and send again after a lost HTTP
+response.
 
 The email repository now supports a client-created verification intent UUID,
 bound to its original account, profile and normalized address. Admission locks
@@ -646,18 +635,15 @@ and notification mode stay unchanged while a new address is pending. Clear and
 verification keep their existing effects; retained intent rows prevent their old
 requests from recreating pending state.
 
-The migration must precede guarded writers on every serving node. After a profile
-has admitted a durable intent, the bridge's inline request path returns
-`email_verification_upgrade_required` rather than overwriting its pending token.
-Unadopted profiles retain the bridge behavior. This prerequisite does not wire a
-v2 route, web caller or sender, and must not be activated without the dispatch and
-caller work. The table's Down operation is not an online rollback protocol.
+The migration must precede guarded writers on every serving node. The table's
+Down operation is not an online rollback protocol. Dispatch and the HTTP caller
+are described below.
 
-Future dispatch must check current pending hash, expiry, account/profile authority
+Dispatch must check current pending hash, expiry, account/profile authority
 and message ownership under its claim before sending. Queued work cannot authorize
 a send after clear, replacement or profile deletion. Retained receipts must survive
-payload cleanup; no retention or worker lease policy is introduced here. The outbox
-currently has no dispatch state, automatic retries or recovery worker.
+payload cleanup. [Email verification dispatch](#email-verification-dispatch)
+gives the dispatch state, retry and retention policy.
 
 SMTP has no provider idempotency key and a failed connection cannot always establish
 whether the server accepted the message. Durable admission therefore does not imply

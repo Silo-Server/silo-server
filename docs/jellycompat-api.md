@@ -29,7 +29,7 @@ serves as External. The key matches case-insensitively; any other key returns
 
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
-owns registration; the native `/api/v1` contract is separate.
+owns registration; the native `/api/v2` contract is separate.
 
 ## Viewer state and preferences
 
@@ -639,7 +639,7 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native `POST /api/v1/auth/login`. Both routes count
+  the global budget, like native `POST /api/v2/auth/login`. Both routes count
   against the same per-IP `login` counter. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a

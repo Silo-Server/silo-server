@@ -542,13 +542,3 @@ func (h *SectionHandler) ReorderAdminSections(ctx context.Context, scope string,
 	}
 	return h.repo.ReorderScopeIfRevision(ctx, scope, library, ids, expected)
 }
-func (h *SectionHandler) reorderLegacySections(ctx context.Context, entries []sections.ReorderEntry) error {
-	return h.repo.Reorder(ctx, entries)
-}
-
-func adminSectionServiceError(err error) error {
-	if errors.Is(err, sections.ErrSectionNotFound) {
-		return apiError(404, "not_found", "Section not found")
-	}
-	return err
-}

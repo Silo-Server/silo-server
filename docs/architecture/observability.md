@@ -314,7 +314,7 @@ The native API exposes administrator summaries at
 OpenAPI. The resource response identifies the sampled API process with a random
 instance ID, which matters when a load balancer sends successive requests to
 different replicas. Workers attach the same attribution to authenticated health
-transport. Frozen v1 resource fields retain their existing meaning.
+transport.
 
 | Measurement | Population and limits |
 | --- | --- |
@@ -581,8 +581,7 @@ or else the `X-Silo-Client` product name that also labels
 `streamapp_apiv2_requests_total{client}`. The first-party clients send only
 `X-Silo-Client`. Only an inserted row counts. A v2 report that
 repeats its `event_id` inserts nothing on any replica, so a retry is not counted
-twice. Legacy v1-bridge reports carry no event id and are counted on every
-report. Events dropped because the in-process write queue is full are never
+twice. Events dropped because the in-process write queue is full are never
 observed. Each replica exports the events it wrote; sum across replicas.
 
 The clients do not time the same interval yet. The web player measures from the

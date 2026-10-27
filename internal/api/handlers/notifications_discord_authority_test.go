@@ -3,14 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -45,100 +39,28 @@ func (p discordAuthorityStores) ForUser(context.Context, int) (userstore.UserSto
 	return p.store, p.err
 }
 
-func TestDiscordV1HouseholdAdmission(t *testing.T) {
-	for _, tc := range []struct {
-		name, profile                         string
-		admin, locked, restricted, proof, key bool
-		status                                int
-	}{
-		{name: "member primary", profile: "primary"},
-		{name: "admin primary", profile: "primary", admin: true},
-		{name: "secondary", profile: "secondary", status: 403},
-		{name: "admin secondary", profile: "secondary", admin: true, status: 403},
-		{name: "restricted secondary", profile: "secondary", restricted: true, status: 403},
-		{name: "unknown profile", profile: "foreign", status: 403},
-		{name: "locked primary missing proof", profile: "primary", locked: true, status: 403},
-		{name: "locked primary verified", profile: "primary", locked: true, proof: true},
-		{name: "key cannot prove locked primary", profile: "primary", admin: true, key: true, locked: true, proof: true, status: 403},
-		{name: "profileless member", status: 403},
-		{name: "profileless unrestricted admin", admin: true},
-		{name: "profileless restricted admin", admin: true, restricted: true, status: 403},
-		{name: "profileless locked household admin", admin: true, locked: true, status: 403},
-		{name: "profileless admin key exception", admin: true, key: true, locked: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			primary := userstore.Profile{ID: "primary", IsPrimary: true, PINRevision: 2}
-			secondary := userstore.Profile{ID: "secondary"}
-			if tc.locked {
-				primary.PINHash = "synthetic-pin-hash"
-			}
-			if tc.restricted {
-				secondary.MaxContentRating = "PG"
-			}
-			h := NewDiscordNotificationsHandler(nil, "")
-			h.Stores = discordAuthorityStores{store: discordAuthorityStore{profiles: []userstore.Profile{primary, secondary}}}
-			h.ProfileTokens = access.NewProfileTokenService("synthetic-discord-test-signing-key", 0)
-			token := ""
-			if tc.proof {
-				var err error
-				token, _, err = h.ProfileTokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: 2})
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			for _, op := range []struct {
-				call           http.HandlerFunc
-				admittedStatus int
-			}{
-				{h.HandleLinkInit, 409},          // Integration disabled: admission succeeds without consent.
-				{h.HandleUpdatePreferences, 400}, // No preference store: no external transport exists.
-				{h.HandleUnlink, 200},
-			} {
-				r := householdRequest(tc.profile, tc.admin, token)
-				r.Body = http.NoBody
-				if tc.key {
-					c := *apimw.GetClaims(r.Context())
-					c.TokenType = auth.TokenTypeAPIKey
-					c.SessionID = ""
-					r = r.WithContext(apimw.SetClaims(r.Context(), &c))
-				}
-				rec := httptest.NewRecorder()
-				op.call(rec, r)
-				want := tc.status
-				if want == 0 {
-					want = op.admittedStatus
-				}
-				if rec.Code != want {
-					t.Fatalf("status=%d want=%d body=%s", rec.Code, want, rec.Body.String())
-				}
-				if want == 403 && !strings.Contains(rec.Body.String(), `"error":"forbidden"`) {
-					t.Fatalf("v1 error changed: %s", rec.Body.String())
-				}
-			}
-		})
-	}
-}
-
+// The Discord destination is account-wide, so an unreadable household never
+// admits a manager: no store denies, and a failed read is an error.
 func TestDiscordHouseholdAdmissionFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		stores userstore.UserStoreProvider
-		status int
+		name    string
+		stores  userstore.UserStoreProvider
+		wantErr bool
 	}{
-		{"unwired", nil, 403},
-		{"nil store", discordAuthorityStores{}, 403},
-		{"open failure", discordAuthorityStores{err: errors.New("synthetic store failure")}, 500},
-		{"read failure", discordAuthorityStores{store: discordAuthorityStore{err: errors.New("synthetic read failure")}}, 500},
+		{"unwired", nil, false},
+		{"nil store", discordAuthorityStores{}, false},
+		{"open failure", discordAuthorityStores{err: errors.New("synthetic store failure")}, true},
+		{"read failure", discordAuthorityStores{store: discordAuthorityStore{err: errors.New("synthetic read failure")}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := NewDiscordNotificationsHandler(nil, "")
 			h.Stores = tc.stores
-			for _, call := range []http.HandlerFunc{h.HandleLinkInit, h.HandleUpdatePreferences, h.HandleUnlink} {
-				rec := httptest.NewRecorder()
-				call(rec, householdRequest("primary", false, ""))
-				if rec.Code != tc.status {
-					t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-				}
+			allowed, err := h.MayManageDiscordNotifications(t.Context(), 1, "primary", func(string) error { return nil })
+			if allowed {
+				t.Fatal("admitted a manager without reading the household")
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
 			}
 		})
 	}

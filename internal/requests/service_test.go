@@ -665,12 +665,12 @@ func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
 			_, err := service.Search(context.Background(), viewer, "fight", MediaTypeMovie, 1)
 			return err
 		}},
-		{"discover all", func() error {
-			_, err := service.DiscoverAll(context.Background(), viewer)
+		{"discover rows", func() error {
+			_, err := service.DiscoverRows(context.Background(), viewer)
 			return err
 		}},
-		{"discover section", func() error {
-			_, err := service.Discover(context.Background(), viewer, "popular_movies", 1)
+		{"discover row", func() error {
+			_, err := service.DiscoverRow(context.Background(), viewer, "popular_movies", 1)
 			return err
 		}},
 		{"detail", func() error {

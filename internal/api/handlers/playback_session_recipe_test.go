@@ -34,6 +34,115 @@ type headerAuthRestartFixtureV3 struct {
 	configure func(*PlaybackHandler)
 }
 
+// restart is the API process after a restart: nothing in memory.
+func (f headerAuthRestartFixtureV3) restart() *PlaybackHandler {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	f.configure(handler)
+	return handler
+}
+
+func transcodeServeRequestV3(ctx context.Context, sessionID, segment string) *http.Request {
+	path := "/api/v1/playback/transcode/" + sessionID + "/master.m3u8"
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", sessionID)
+	if segment != "" {
+		path = "/api/v1/playback/transcode/" + sessionID + "/segment/" + segment
+		routeCtx.URLParams.Add("name", segment)
+	}
+	return httptest.NewRequest(http.MethodGet, path, nil).WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx))
+}
+
+func playbackCallerContextV3(userID int, profileID string) context.Context {
+	ctx := context.Background()
+	if userID != 0 {
+		ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: userID, Role: "user", TokenType: auth.TokenTypeAccess})
+	}
+	if profileID != "" {
+		ctx = apimw.SetProfileID(ctx, profileID)
+	}
+	return ctx
+}
+
+// lockedRecipeCardStoreV3 is a recipe store safe for the goroutine that writes
+// a moved transport's node recipe after the move has returned.
+type lockedRecipeCardStoreV3 struct {
+	mu    sync.Mutex
+	inner recordingRecipeCardStoreV3
+}
+
+func (s *lockedRecipeCardStoreV3) Enabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner.Enabled()
+}
+
+// unavailableAttemptStoreV3 is an attempt store whose reads fail the way a
+// saturated or failing-over Postgres does.
+type unavailableAttemptStoreV3 struct {
+	playback.PlanStoreV3
+}
+
+func (unavailableAttemptStoreV3) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
+	return nil, errors.New("connection reset by peer")
+}
+
+func (s *lockedRecipeCardStoreV3) Get(ctx context.Context, key string) (*playback.RecipeCard, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner.Get(ctx, key)
+}
+
+func (s *lockedRecipeCardStoreV3) Put(ctx context.Context, key string, card playback.RecipeCard) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner.Put(ctx, key, card)
+}
+
+func (s *lockedRecipeCardStoreV3) Delete(ctx context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inner.Delete(ctx, key)
+}
+
+// An FFmpeg exit or a copy-safety stop tears the session down without ending
+// the attempt, so the client's next request rebuilds it, as a stream token
+// would. A user's stop retires the recovery card, and so does any teardown of
+// a remote transcode, whose node job and node recipe go with it.
+func TestSessionRecipeRetentionOnStop(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(node.Close)
+	for _, test := range []struct {
+		name          string
+		userInitiated bool
+		nodeURL       string
+		wantDeleted   bool
+	}{
+		{name: "system teardown", userInitiated: false, wantDeleted: false},
+		{name: "user stop", userInitiated: true, wantDeleted: true},
+		// The teardown stops the node job and drops its recipe, so the card
+		// could only rebuild a session the node no longer serves.
+		{name: "system teardown of a remote transcode", userInitiated: false, nodeURL: node.URL, wantDeleted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := playback.NewSessionManager(0, 0)
+			manager.RegisterReconstructed(&playback.Session{ID: "session-recipe-stop", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode, RequireMediaAuthorization: true,
+				TranscodeNodeURL: test.nodeURL, TranscodeTransportID: "session-recipe-stop-transport"})
+			handler := NewPlaybackHandler(manager)
+			recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+				"session-recipe-stop": {SessionID: "session-recipe-stop", UserID: 1, PlanID: "plan:current", RequireMediaAuthorization: true},
+			}}
+			handler.SessionRecipeStore = recipes
+
+			if err := handler.stopPlaybackSessionByID(context.Background(), "session-recipe-stop", test.userInitiated); err != nil {
+				t.Fatalf("stop: %v", err)
+			}
+			if deleted := len(recipes.deleted) == 1 && recipes.deleted[0] == "session-recipe-stop"; deleted != test.wantDeleted {
+				t.Fatalf("session recipes deleted = %v, want deleted %v", recipes.deleted, test.wantDeleted)
+			}
+		})
+	}
+}
+
 func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.StartRequestV3)) headerAuthRestartFixtureV3 {
 	t.Helper()
 	newNode := func() *httptest.Server {
@@ -100,7 +209,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 		opt(&start)
 	}
 	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+	serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &f.started) != nil || f.started.PlaybackPlan == nil {
 		t.Fatalf("start status=%d body=%s", rr.Code, rr.Body.String())
 	}
@@ -116,35 +225,6 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 		f.other = first.URL
 	}
 	return f
-}
-
-// restart is the API process after a restart: nothing in memory.
-func (f headerAuthRestartFixtureV3) restart() *PlaybackHandler {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	f.configure(handler)
-	return handler
-}
-
-func transcodeServeRequestV3(ctx context.Context, sessionID, segment string) *http.Request {
-	path := "/api/v1/playback/transcode/" + sessionID + "/master.m3u8"
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", sessionID)
-	if segment != "" {
-		path = "/api/v1/playback/transcode/" + sessionID + "/segment/" + segment
-		routeCtx.URLParams.Add("name", segment)
-	}
-	return httptest.NewRequest(http.MethodGet, path, nil).WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx))
-}
-
-func playbackCallerContextV3(userID int, profileID string) context.Context {
-	ctx := context.Background()
-	if userID != 0 {
-		ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: userID, Role: "user", TokenType: auth.TokenTypeAccess})
-	}
-	if profileID != "" {
-		ctx = apimw.SetProfileID(ctx, profileID)
-	}
-	return ctx
 }
 
 // A header-authenticated session's URLs carry no stream token, so the API
@@ -303,7 +383,7 @@ func TestHeaderAuthenticatedDirectStreamRecoversAfterAnAPIRestart(t *testing.T) 
 	start := v3HandlerStartRequest()
 	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
 	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+	serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	var started playback.DecisionResponseV3
 	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil ||
 		started.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
@@ -325,85 +405,5 @@ func TestHeaderAuthenticatedDirectStreamRecoversAfterAnAPIRestart(t *testing.T) 
 	stream.HandleStream(rr, request)
 	if rr.Code != http.StatusOK || rr.Body.Len() == 0 {
 		t.Fatalf("direct stream after restart = %d (%s), want the file bytes", rr.Code, rr.Body.String())
-	}
-}
-
-// lockedRecipeCardStoreV3 is a recipe store safe for the goroutine that writes
-// a moved transport's node recipe after the move has returned.
-type lockedRecipeCardStoreV3 struct {
-	mu    sync.Mutex
-	inner recordingRecipeCardStoreV3
-}
-
-func (s *lockedRecipeCardStoreV3) Enabled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Enabled()
-}
-
-// unavailableAttemptStoreV3 is an attempt store whose reads fail the way a
-// saturated or failing-over Postgres does.
-type unavailableAttemptStoreV3 struct {
-	playback.PlanStoreV3
-}
-
-func (unavailableAttemptStoreV3) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
-	return nil, errors.New("connection reset by peer")
-}
-
-func (s *lockedRecipeCardStoreV3) Get(ctx context.Context, key string) (*playback.RecipeCard, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Get(ctx, key)
-}
-
-func (s *lockedRecipeCardStoreV3) Put(ctx context.Context, key string, card playback.RecipeCard) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Put(ctx, key, card)
-}
-
-func (s *lockedRecipeCardStoreV3) Delete(ctx context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Delete(ctx, key)
-}
-
-// An FFmpeg exit or a copy-safety stop tears the session down without ending
-// the attempt, so the client's next request rebuilds it, as a stream token
-// would. A user's stop retires the recovery card, and so does any teardown of
-// a remote transcode, whose node job and node recipe go with it.
-func TestSessionRecipeRetentionOnStop(t *testing.T) {
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	t.Cleanup(node.Close)
-	for _, test := range []struct {
-		name          string
-		userInitiated bool
-		nodeURL       string
-		wantDeleted   bool
-	}{
-		{name: "system teardown", userInitiated: false, wantDeleted: false},
-		{name: "user stop", userInitiated: true, wantDeleted: true},
-		// The teardown stops the node job and drops its recipe, so the card
-		// could only rebuild a session the node no longer serves.
-		{name: "system teardown of a remote transcode", userInitiated: false, nodeURL: node.URL, wantDeleted: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager := playback.NewSessionManager(0, 0)
-			manager.RegisterReconstructed(&playback.Session{ID: "session-recipe-stop", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode, RequireMediaAuthorization: true,
-				TranscodeNodeURL: test.nodeURL, TranscodeTransportID: "session-recipe-stop-transport"})
-			handler := NewPlaybackHandler(manager)
-			recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
-				"session-recipe-stop": {SessionID: "session-recipe-stop", UserID: 1, PlanID: "plan:current", RequireMediaAuthorization: true},
-			}}
-			handler.SessionRecipeStore = recipes
-
-			if err := handler.stopPlaybackSessionByID(context.Background(), "session-recipe-stop", test.userInitiated); err != nil {
-				t.Fatalf("stop: %v", err)
-			}
-			if deleted := len(recipes.deleted) == 1 && recipes.deleted[0] == "session-recipe-stop"; deleted != test.wantDeleted {
-				t.Fatalf("session recipes deleted = %v, want deleted %v", recipes.deleted, test.wantDeleted)
-			}
-		})
 	}
 }

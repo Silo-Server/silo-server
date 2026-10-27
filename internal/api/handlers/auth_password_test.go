@@ -1,15 +1,11 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
@@ -34,24 +30,6 @@ func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID in
 	return s.err
 }
 
-func passwordRequest(t *testing.T, method, profileID string, claims auth.Claims, body any) *http.Request {
-	t.Helper()
-	var payload []byte
-	if body != nil {
-		var err error
-		payload, err = json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal request: %v", err)
-		}
-	}
-	req := httptest.NewRequest(method, "/api/v1/auth/account/password", bytes.NewReader(payload))
-	ctx := apimw.SetClaims(req.Context(), &claims)
-	if profileID != "" {
-		ctx = apimw.SetProfileID(ctx, profileID)
-	}
-	return req.WithContext(ctx)
-}
-
 func passwordClaims() auth.Claims {
 	return auth.Claims{UserID: 42, Role: "user", SessionID: "session-1", TokenType: auth.TokenTypeAccess}
 }
@@ -63,101 +41,6 @@ func newPasswordHandler(passwords accountPasswordService) *AuthHandler {
 		return profileID == "primary", profileID == "primary" || profileID == "secondary", nil
 	})
 	return handler
-}
-
-func TestHandleChangePasswordRequiresPrimaryProfile(t *testing.T) {
-	t.Parallel()
-
-	service := &stubAccountPasswordService{available: true}
-	handler := newPasswordHandler(service)
-	body := changePasswordRequest{CurrentPassword: "current password", NewPassword: "new password"}
-
-	t.Run("primary profile", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "primary", passwordClaims(), body))
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusNoContent, rec.Body.String())
-		}
-		if service.userID != 42 || service.current != body.CurrentPassword || service.new != body.NewPassword {
-			t.Fatalf("password call = (%d, %q, %q)", service.userID, service.current, service.new)
-		}
-	})
-
-	t.Run("secondary profile", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "secondary", passwordClaims(), body))
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
-		}
-	})
-
-	t.Run("admin without selected profile", func(t *testing.T) {
-		claims := passwordClaims()
-		claims.Role = "admin"
-		rec := httptest.NewRecorder()
-		handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "", claims, body))
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusNoContent, rec.Body.String())
-		}
-	})
-
-	t.Run("admin on secondary profile", func(t *testing.T) {
-		claims := passwordClaims()
-		claims.Role = "admin"
-		rec := httptest.NewRecorder()
-		handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "secondary", claims, body))
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
-		}
-	})
-}
-
-func TestHandleChangePasswordRejectsNonUserSessions(t *testing.T) {
-	t.Parallel()
-
-	handler := newPasswordHandler(&stubAccountPasswordService{available: true})
-	body := changePasswordRequest{CurrentPassword: "current password", NewPassword: "new password"}
-
-	tests := []struct {
-		name   string
-		claims auth.Claims
-	}{
-		{name: "API key", claims: auth.Claims{UserID: 42, Role: "admin", TokenType: auth.TokenTypeAPIKey}},
-		{name: "impersonation", claims: auth.Claims{UserID: 42, Role: "user", SessionID: "session-1", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: new(7)}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			rec := httptest.NewRecorder()
-			handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "primary", tt.claims, body))
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
-			}
-		})
-	}
-}
-
-func TestAccountPasswordCapability(t *testing.T) {
-	t.Parallel()
-
-	handler := newPasswordHandler(&stubAccountPasswordService{available: true})
-	rec := httptest.NewRecorder()
-	req := passwordRequest(t, http.MethodGet, "primary", passwordClaims(), nil)
-	handler.HandleAccountPasswordCapability(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var response accountPasswordCapabilityResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !response.ChangePassword || !response.RequiresCurrentPassword {
-		t.Fatalf("capability = %#v", response)
-	}
-	if response.MinimumPasswordLength != auth.MinimumPasswordLength || response.MaximumPasswordBytes != auth.MaximumPasswordBytes {
-		t.Fatalf("password limits = (%d, %d)", response.MinimumPasswordLength, response.MaximumPasswordBytes)
-	}
 }
 
 // A session holding a temporary password can do nothing else, including pick
@@ -183,52 +66,77 @@ func TestTemporaryPasswordSessionMayChangeWithoutProfile(t *testing.T) {
 	}
 }
 
-func TestChangePasswordRejectsReusedTemporaryPassword(t *testing.T) {
+// Only the account's own login session acting as the primary profile (or an
+// admin with no profile selected) may replace the password; the capability
+// reports the same answer.
+func TestAuthorizePasswordChange(t *testing.T) {
 	t.Parallel()
 
-	handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: auth.ErrPasswordUnchanged})
-	claims := passwordClaims()
-	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass")
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Field != "new_password" || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("err = %#v", err)
+	handler := newPasswordHandler(&stubAccountPasswordService{available: true})
+	admin := passwordClaims()
+	admin.Role = "admin"
+	for _, tc := range []struct {
+		name    string
+		claims  auth.Claims
+		profile string
+		allowed bool
+	}{
+		{"primary profile", passwordClaims(), "primary", true},
+		{"secondary profile", passwordClaims(), "secondary", false},
+		{"admin without selected profile", admin, "", true},
+		{"admin on secondary profile", admin, "secondary", false},
+		{"API key", auth.Claims{UserID: 42, Role: "admin", TokenType: auth.TokenTypeAPIKey}, "primary", false},
+		{"impersonation", auth.Claims{UserID: 42, Role: "user", SessionID: "session-1", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: new(7)}, "primary", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			claims := tc.claims
+			err := handler.AuthorizePasswordChange(context.Background(), &claims, tc.profile)
+			if tc.allowed && err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if !tc.allowed {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden {
+					t.Fatalf("err = %v, want 403", err)
+				}
+			}
+			capability, err := handler.AccountPasswordCapability(context.Background(), &claims, tc.profile)
+			if err != nil || capability.ChangePassword != tc.allowed {
+				t.Fatalf("capability = %+v, %v; want change_password %v", capability, err, tc.allowed)
+			}
+		})
 	}
 }
 
-func TestHandleChangePasswordMapsCredentialErrors(t *testing.T) {
+func TestChangePasswordMapsCredentialErrors(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-		wantCode   string
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+		field  string
 	}{
-		{name: "wrong current password", err: auth.ErrCurrentPasswordInvalid, wantStatus: http.StatusBadRequest, wantCode: "invalid_current_password"},
-		{name: "weak password", err: auth.ErrPasswordTooShort, wantStatus: http.StatusBadRequest, wantCode: codeWeakPassword},
-		{name: "password too long", err: auth.ErrPasswordTooLong, wantStatus: http.StatusBadRequest, wantCode: codePasswordTooLong},
-		{name: "local login disabled", err: auth.ErrPasswordLoginDisabled, wantStatus: http.StatusConflict, wantCode: "password_login_disabled"},
-		{name: "repository failure", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		{"wrong current password", auth.ErrCurrentPasswordInvalid, http.StatusBadRequest, "invalid_current_password", "current_password"},
+		{"weak password", auth.ErrPasswordTooShort, http.StatusBadRequest, codeWeakPassword, "new_password"},
+		{"password too long", auth.ErrPasswordTooLong, http.StatusBadRequest, codePasswordTooLong, "new_password"},
+		{"reused temporary password", auth.ErrPasswordUnchanged, http.StatusBadRequest, codeWeakPassword, "new_password"},
+		{"local login disabled", auth.ErrPasswordLoginDisabled, http.StatusConflict, "password_login_disabled", ""},
+		{"repository failure", errors.New("database unavailable"), http.StatusInternalServerError, "internal_error", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: tt.err})
-			rec := httptest.NewRecorder()
-			handler.HandleChangePassword(rec, passwordRequest(t, http.MethodPost, "primary", passwordClaims(), changePasswordRequest{
-				CurrentPassword: "current password",
-				NewPassword:     "new password",
-			}))
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
+			service := &stubAccountPasswordService{available: true, err: tc.err}
+			claims := passwordClaims()
+			err := newPasswordHandler(service).ChangePassword(context.Background(), &claims, "current password", "new password")
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code || apiErr.Field != tc.field {
+				t.Fatalf("err = %#v, want %d %s field %q", err, tc.status, tc.code, tc.field)
 			}
-			var response errorResponse
-			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if response.Error != tt.wantCode {
-				t.Fatalf("error = %q, want %q", response.Error, tt.wantCode)
+			if service.userID != 42 || service.sessionID != "session-1" || service.new != "new password" {
+				t.Fatalf("password call = (%d, %q, %q)", service.userID, service.sessionID, service.new)
 			}
 		})
 	}

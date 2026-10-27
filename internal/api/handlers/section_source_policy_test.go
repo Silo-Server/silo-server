@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	sectionspkg "github.com/Silo-Server/silo-server/internal/sections"
@@ -178,6 +179,16 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 	profile := apimw.SetClaims(t.Context(), &auth.Claims{Role: "user", UserID: 1})
 	admin := apimw.SetActingAdminDecider(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}),
 		func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
+	// A child profile on an admin's account is not the admin an admin-only
+	// recipe asks for.
+	childOfAdmin := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}), "kid")
+	childOfAdmin = access.SetScope(childOfAdmin, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
+	childOfAdmin = apimw.SetActingAdminDecider(childOfAdmin, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	})
+	// The resolver treats a row without section_id as user-added whatever
+	// is_user_added says, so the legacy section_type/config shape is gated too.
+	legacyPicks := SectionOverrideWrite{SectionType: "admin_curated_list", Config: json.RawMessage(`{"item_ids":["a"]}`)}
 
 	cases := []struct {
 		name   string
@@ -186,6 +197,8 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 		writes []SectionOverrideWrite
 		refuse bool
 	}{
+		{"new Editor's picks from an admin account's child profile", childOfAdmin, nil, []SectionOverrideWrite{picks}, true},
+		{"new Editor's picks in the legacy shape", profile, nil, []SectionOverrideWrite{legacyPicks}, true},
 		{"rule row with nothing saved", profile, nil, []SectionOverrideWrite{rules}, false},
 		{"kept and changed Editor's picks beside a new rule row", profile, stored, []SectionOverrideWrite{picks, rules}, false},
 		{"new Editor's picks", profile, nil, []SectionOverrideWrite{picks}, true},

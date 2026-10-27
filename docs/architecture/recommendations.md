@@ -519,9 +519,8 @@ passing over those it rated 2 stars or lower; the worker, the reads and
 Watch Tonight choose them the same way. A read asks for a refresh only when
 there are anchors and none has a cached row.
 
-List reads return at most 50 items per row (default 20); the v1 for-you and
-similar-users reads keep 20, and section "see all" reads return up to 60, a
-whole cached row. Home and library sections read the whole cached pool,
+List reads return at most 50 items per row (default 20), and section "see all"
+reads return up to 60, a whole cached row. Home and library sections read the whole cached pool,
 scope it to the section's libraries, then trim to the section's size. The
 main row is ranked for every title the profile can see, so a library with a
 small share of the catalog can hold few of its titles. A library's For You

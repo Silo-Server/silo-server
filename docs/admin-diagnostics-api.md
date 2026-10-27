@@ -19,14 +19,10 @@ change prevents creating a browser download from the completed response. The
 native Apple and Android clients do not consume this administrator endpoint;
 Jellyfin compatibility has no diagnostic administration counterpart.
 
-The frozen v1 download operation retains its existing presigned-URL and proxy
-modes during the bridge release. Other diagnostic administration operations
-continue migrating separately.
-
 ## Report list and detail
 
 `GET /api/v2/admin/diagnostics/reports` (`listAdminDiagnosticReports`) returns an
-`items` collection and `page` metadata. It retains the bridge filters `user_id`,
+`items` collection and `page` metadata. It accepts the filters `user_id`,
 `platform`, `report_type`, `from`, `to`, and `short_id`. Time filters bound
 `received_at` inclusively; `from` must not follow `to`. Page size defaults to 50
 and is bounded to 1–200. Ordering remains descending `(received_at, id)`.

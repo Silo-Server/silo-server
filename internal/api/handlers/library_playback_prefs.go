@@ -11,9 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -63,42 +60,6 @@ type libraryPlaybackPrefResponse struct {
 
 type libraryPlaybackPrefsListResponse struct {
 	Preferences []libraryPlaybackPrefResponse `json:"preferences"`
-}
-
-// HandleListLibraryPlaybackPrefs handles GET /library-playback-prefs.
-func (h *LibraryPlaybackPrefHandler) HandleListLibraryPlaybackPrefs(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	prefs, err := h.ListLibraryPlaybackPreferences(r.Context(), userID, profileID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := libraryPlaybackPrefsListResponse{
-		Preferences: make([]libraryPlaybackPrefResponse, 0, len(prefs)),
-	}
-	for _, pref := range prefs {
-		resp.Preferences = append(resp.Preferences, toLibraryPlaybackPrefResponse(pref))
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// ListLibraryPlaybackPreferences is the listing behind v1 GET
-// /library-playback-prefs: the legacy user_library_playback_preferences rows
-// as stored. A failure is an *APIError.
-func (h *LibraryPlaybackPrefHandler) ListLibraryPlaybackPreferences(ctx context.Context, userID int, profileID string) ([]userstore.LibraryPlaybackPreference, error) {
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	prefs, err := store.ListLibraryPlaybackPreferences(ctx, profileID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list library playback preferences")
-	}
-	return prefs, nil
 }
 
 // libraryPlaybackSettingKeys are the four canonical profile_library keys the
@@ -398,45 +359,6 @@ func libraryPlaybackPreferenceOf(profileID string, libraryID int, req LibraryPla
 	return pref, pref.HasAudioLanguage || pref.HasSubtitleLanguage || pref.HasSubtitleMode || pref.HasShowForcedSubtitles
 }
 
-// setLibraryPlaybackPreference is the whole-row write behind v1 PUT, after
-// the library check the v1 handler runs before it reads the body: the legacy
-// row and the canonical profile_library rows commit together, and a
-// user_settings.changed event follows each canonical row that moved. A
-// request with every member nil removes the row.
-func (h *LibraryPlaybackPrefHandler) setLibraryPlaybackPreference(ctx context.Context, userID int, profileID string, libraryID int, req LibraryPlaybackPrefUpdate) error {
-	if !isValidLibrarySubtitleMode(req.SubtitleMode) {
-		return fieldError("subtitle_mode", "Invalid subtitle_mode")
-	}
-	sync, err := planLibraryPlaybackSettingsSync(setLibraryPlaybackPrefRequest(req))
-	if err != nil {
-		return fieldError(libraryPlaybackPrefField(err), err.Error())
-	}
-
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-
-	pref, has := libraryPlaybackPreferenceOf(profileID, libraryID, req)
-	if !has {
-		if err := h.applyLibraryPlaybackSettingsSync(ctx, store, userID,
-			profileID, libraryID, sync, func(tx userstore.PreferenceSettingsWriter) error {
-				return tx.DeleteLibraryPlaybackPreference(ctx, profileID, libraryID)
-			}); err != nil {
-			return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete library playback preference")
-		}
-		return nil
-	}
-
-	if err := h.applyLibraryPlaybackSettingsSync(ctx, store, userID,
-		profileID, libraryID, sync, func(tx userstore.PreferenceSettingsWriter) error {
-			return tx.UpsertLibraryPlaybackPreference(ctx, pref)
-		}); err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to store library playback preference")
-	}
-	return nil
-}
-
 // DeleteLibraryPlaybackPreference is the delete v1 DELETE
 // /library-playback-prefs/{library_id} and v2 deleteLibraryPlaybackPreference
 // share. Deleting a preference that does not exist succeeds; an unknown
@@ -461,49 +383,6 @@ func (h *LibraryPlaybackPrefHandler) DeleteLibraryPlaybackPreference(ctx context
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete library playback preference")
 	}
 	return nil
-}
-
-// HandleSetLibraryPlaybackPref handles PUT /library-playback-prefs/{library_id}.
-func (h *LibraryPlaybackPrefHandler) HandleSetLibraryPlaybackPref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	libraryID, ok := parseLibraryID(w, r)
-	if !ok {
-		return
-	}
-	if err := h.libraryExists(r.Context(), libraryID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	var req setLibraryPlaybackPrefRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.setLibraryPlaybackPreference(r.Context(), userID, profileID, libraryID, LibraryPlaybackPrefUpdate(req)); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleDeleteLibraryPlaybackPref handles DELETE /library-playback-prefs/{library_id}.
-func (h *LibraryPlaybackPrefHandler) HandleDeleteLibraryPlaybackPref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	libraryID, ok := parseLibraryID(w, r)
-	if !ok {
-		return
-	}
-	if err := h.DeleteLibraryPlaybackPreference(r.Context(), userID, profileID, libraryID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func planLibraryPlaybackSettingsSync(req setLibraryPlaybackPrefRequest) ([]profileSettingSync, error) {
@@ -565,25 +444,6 @@ func (h *LibraryPlaybackPrefHandler) applyLibraryPlaybackSettingsSync(
 	}, writes, legacyMutation)
 }
 
-func parseLibraryID(w http.ResponseWriter, r *http.Request) (int, bool) {
-	libraryIDStr := chi.URLParam(r, "library_id")
-	if libraryIDStr == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Library ID is required")
-		return 0, false
-	}
-
-	libraryID, err := strconv.Atoi(libraryIDStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Library ID must be a valid integer")
-		return 0, false
-	}
-	if libraryID <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Library ID must be a positive integer")
-		return 0, false
-	}
-	return libraryID, true
-}
-
 // libraryExists refuses a library id no library carries; without a lookup
 // every id passes. A failure is an *APIError.
 func (h *LibraryPlaybackPrefHandler) libraryExists(ctx context.Context, libraryID int) error {
@@ -611,25 +471,4 @@ func isValidLibrarySubtitleMode(mode *string) bool {
 	default:
 		return false
 	}
-}
-
-func toLibraryPlaybackPrefResponse(p userstore.LibraryPlaybackPreference) libraryPlaybackPrefResponse {
-	resp := libraryPlaybackPrefResponse{
-		ProfileID: p.ProfileID,
-		LibraryID: p.LibraryID,
-		UpdatedAt: p.UpdatedAt,
-	}
-	if p.HasAudioLanguage {
-		resp.AudioLanguage = stringPtr(p.AudioLanguage)
-	}
-	if p.HasSubtitleLanguage {
-		resp.SubtitleLanguage = stringPtr(p.SubtitleLanguage)
-	}
-	if p.HasSubtitleMode {
-		resp.SubtitleMode = stringPtr(p.SubtitleMode)
-	}
-	if p.HasShowForcedSubtitles {
-		resp.ShowForcedSubtitles = boolPtr(p.ShowForcedSubtitles)
-	}
-	return resp
 }

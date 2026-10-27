@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http"
 	"sync"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -42,77 +39,6 @@ func (c *sessionRealtimeConn) WritePing() error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	return writeWebSocketControl(c.conn, websocket.PingMessage, nil)
-}
-
-// HandleSessionWebSocket handles GET /playback/ws/{session_id}.
-// It upgrades to a realtime control WebSocket. Sessions become control-ready
-// only after a validated hello message. Disconnects degrade command delivery
-// but do not stop an otherwise valid playback session.
-func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.RealtimeHub == nil {
-		http.Error(w, "realtime unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	sessionID := chi.URLParam(r, "session_id")
-	if sessionID == "" {
-		http.Error(w, "session_id required", http.StatusBadRequest)
-		return
-	}
-	setPlaybackSessionLogContext(r, sessionID)
-
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
-		writePlaybackSessionNotFound(w)
-		return
-	}
-	if session.UserID != userID {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
-		return
-	}
-
-	realtimeConn := &sessionRealtimeConn{conn: conn}
-	registration := h.RealtimeHub.Register(sessionID, realtimeConn)
-	if registration == nil {
-		conn.Close()
-		slog.WarnContext(r.Context(), "failed to register realtime websocket", "component", "api", "session", sessionID, "playback_session_id", sessionID)
-		return
-	}
-
-	defer func() {
-		if h.setRealtimeConnectionState(sessionID, false) {
-			h.syncSessionsNow(context.Background(), "realtime_disconnect")
-		}
-		h.RealtimeHub.Unregister(registration)
-		_ = conn.Close()
-	}()
-
-	configureWebSocket(conn)
-	ctx, cancelRead := context.WithCancel(r.Context())
-	defer cancelRead()
-	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
-
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
-			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		}
-	}
 }
 
 func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []byte) error {

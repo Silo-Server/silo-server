@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -60,11 +59,6 @@ type CompatConnectAccountInfo struct {
 type CompatConnectInfoResponse struct {
 	Jellyfin jellycompat.ConnectInfo  `json:"jellyfin"`
 	Account  CompatConnectAccountInfo `json:"account"`
-}
-
-// HandleGetConnectInfo handles GET /compat/connect-info.
-func (h *CompatConnectInfoHandler) HandleGetConnectInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.GetConnectInfo(r.Context()))
 }
 
 // GetConnectInfo is the shared account-facing view used by both API versions.

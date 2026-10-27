@@ -3,14 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -154,208 +153,99 @@ func decodeErrorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Error
 }
 
-func TestHandleCreateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
-	tests := []struct {
-		name       string
-		claims     *auth.Claims
-		body       string
-		wantStatus int
-		wantCreate bool
-	}{
-		{
-			name:       "scoped key cannot mint an admin",
-			claims:     scopedKeyClaims(),
-			body:       `{"username":"mallory","email":"m@example.com","password":"hunter2","role":"admin"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key may provision an ordinary account",
-			claims:     scopedKeyClaims(),
-			body:       `{"username":"ada","email":"ada@example.com","password":"hunter2","role":"user"}`,
-			wantStatus: http.StatusCreated,
-			wantCreate: true,
-		},
-		{
-			name:       "unscoped key keeps full access",
-			claims:     unscopedKeyClaims(),
-			body:       `{"username":"ada","email":"ada@example.com","password":"hunter2","role":"admin"}`,
-			wantStatus: http.StatusCreated,
-			wantCreate: true,
-		},
-		{
-			name:       "jwt admin keeps full access",
-			claims:     jwtAdminClaims(),
-			body:       `{"username":"ada","email":"ada@example.com","password":"hunter2","role":"admin"}`,
-			wantStatus: http.StatusCreated,
-			wantCreate: true,
-		},
+// A scoped admin-users API key manages ordinary accounts but cannot mint an
+// admin.
+func TestCreateAdminAccountRejectsScopedAPIKeyEscalation(t *testing.T) {
+	// The refusal comes before any database work; the pool never connects.
+	pool, err := pgxpool.New(t.Context(), "postgres://silo:silo@127.0.0.1:1/silo?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(pool.Close)
+	h, repo := newScopedKeyAdminHandler(models.RoleUser)
+	h.pool = pool
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h, repo := newScopedKeyAdminHandler("user")
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(tt.body))
-			req = req.WithContext(apimw.SetClaims(req.Context(), tt.claims))
-			rec := httptest.NewRecorder()
-
-			h.HandleCreateUser(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-			if tt.wantStatus == http.StatusForbidden {
-				if code := decodeErrorCode(t, rec); code != "insufficient_scope" {
-					t.Fatalf("error code = %q, want insufficient_scope", code)
-				}
-			}
-			if got := repo.created != nil; got != tt.wantCreate {
-				t.Fatalf("user created = %v, want %v", got, tt.wantCreate)
-			}
-		})
+	_, err = h.CreateAdminAccount(apimw.SetClaims(t.Context(), scopedKeyClaims()), auth.CreateAccountInput{User: models.CreateUserInput{
+		Username: "mallory", Email: "m@example.com", Password: "a-new-long-password", Role: models.RoleAdmin,
+	}})
+	requireAdminError(t, err, http.StatusForbidden, "insufficient_scope")
+	if repo.created != nil {
+		t.Fatal("scoped key created an admin")
 	}
 }
 
-func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
-	tests := []struct {
+// A scoped key cannot grant admin or change an admin's credentials, recovery
+// email, or role; it can still manage ordinary accounts and admin policy
+// fields. Unscoped keys and signed-in admins keep full access. The rules run
+// against the account as the locked write reads it.
+func TestUpdateAdminAccountRejectsScopedAPIKeyEscalation(t *testing.T) {
+	password := "a-new-long-password"
+	attacker := "attacker@example.test"
+	ordinaryEmail := "new@example.test"
+	admin, user := models.RoleAdmin, models.RoleUser
+	for _, tt := range []struct {
 		name       string
 		claims     *auth.Claims
 		targetRole string
 		self       bool
-		body       string
-		wantStatus int
-		wantUpdate bool
+		promote    bool
+		input      models.UpdateUserInput
+		allowed    bool
 	}{
-		{
-			name:       "scoped key cannot promote to admin",
-			claims:     scopedKeyClaims(),
-			targetRole: "user",
-			body:       `{"role":"admin"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key cannot take over an admin",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"password":"hunter2"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key cannot demote an admin",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"role":"user"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key cannot redirect its admin owner's recovery email",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			self:       true,
-			body:       `{"email":"attacker@example.test"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key cannot redirect another admin's recovery email",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"email":"attacker@example.test"}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key cannot clear an admin's recovery email",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"email":""}`,
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "scoped key may edit an ordinary recovery email",
-			claims:     scopedKeyClaims(),
-			targetRole: "user",
-			body:       `{"email":"new@example.test"}`,
-			wantStatus: http.StatusOK,
-			wantUpdate: true,
-		},
-		{
-			name:       "scoped key may reset an ordinary password",
-			claims:     scopedKeyClaims(),
-			targetRole: "user",
-			body:       `{"password":"hunter2"}`,
-			wantStatus: http.StatusOK,
-			wantUpdate: true,
-		},
-		{
-			name:       "scoped key may still edit policy fields on an admin",
-			claims:     scopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"max_streams":3}`,
-			wantStatus: http.StatusOK,
-			wantUpdate: true,
-		},
-		{
-			name:       "unscoped key keeps full access",
-			claims:     unscopedKeyClaims(),
-			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
-			wantStatus: http.StatusOK,
-			wantUpdate: true,
-		},
-		{
-			name:       "jwt admin keeps full access",
-			claims:     jwtAdminClaims(),
-			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
-			wantStatus: http.StatusOK,
-			wantUpdate: true,
-		},
-	}
-
-	for _, tt := range tests {
+		{name: "scoped key cannot promote to admin", claims: scopedKeyClaims(), targetRole: user, input: models.UpdateUserInput{Role: &admin}},
+		{name: "scoped key cannot take over an admin", claims: scopedKeyClaims(), targetRole: admin, input: models.UpdateUserInput{Password: &password}},
+		{name: "scoped key cannot demote an admin", claims: scopedKeyClaims(), targetRole: admin, input: models.UpdateUserInput{Role: &user}},
+		{name: "scoped key cannot redirect its admin owner's recovery email", claims: scopedKeyClaims(), targetRole: admin, self: true, input: models.UpdateUserInput{Email: &attacker}},
+		{name: "scoped key cannot redirect another admin's recovery email", claims: scopedKeyClaims(), targetRole: admin, input: models.UpdateUserInput{Email: &attacker}},
+		{name: "scoped key rechecks a password write against the locked account", claims: scopedKeyClaims(), targetRole: user, promote: true, input: models.UpdateUserInput{Password: &password}},
+		{name: "scoped key rechecks an email write against the locked account", claims: scopedKeyClaims(), targetRole: user, promote: true, input: models.UpdateUserInput{Email: &attacker}},
+		{name: "scoped key may edit an ordinary recovery email", claims: scopedKeyClaims(), targetRole: user, input: models.UpdateUserInput{Email: &ordinaryEmail}, allowed: true},
+		{name: "scoped key may reset an ordinary password", claims: scopedKeyClaims(), targetRole: user, input: models.UpdateUserInput{Password: &password}, allowed: true},
+		{name: "scoped key may still edit policy fields on an admin", claims: scopedKeyClaims(), targetRole: admin, input: models.UpdateUserInput{MaxStreams: models.SetValue(3)}, allowed: true},
+		{name: "unscoped key keeps full access", claims: unscopedKeyClaims(), targetRole: admin, input: models.UpdateUserInput{Password: &password, Role: &admin, Email: &ordinaryEmail}, allowed: true},
+		{name: "jwt admin keeps full access", claims: jwtAdminClaims(), targetRole: admin, input: models.UpdateUserInput{Password: &password, Role: &admin, Email: &ordinaryEmail}, allowed: true},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newScopedKeyAdminHandler(tt.targetRole)
+			repo.promoteBeforeMutate = tt.promote
 			if tt.self {
 				tt.claims.UserID = repo.user.ID
 			}
-			rec := updateUserRequestFor(t, h, tt.claims, tt.body)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-			if tt.wantStatus == http.StatusForbidden {
-				if code := decodeErrorCode(t, rec); code != "insufficient_scope" {
-					t.Fatalf("error code = %q, want insufficient_scope", code)
+			_, err := h.UpdateAdminAccount(apimw.SetClaims(t.Context(), tt.claims), repo.user.ID, -1, 0, tt.input)
+			if tt.allowed {
+				if err != nil || repo.updated == nil {
+					t.Fatalf("err = %v, updated = %v; want the update written", err, repo.updated != nil)
 				}
+				return
 			}
-			if got := repo.updated != nil; got != tt.wantUpdate {
-				t.Fatalf("user updated = %v, want %v", got, tt.wantUpdate)
+			requireAdminError(t, err, http.StatusForbidden, "insufficient_scope")
+			if repo.updated != nil {
+				t.Fatal("refused update was written")
 			}
 		})
 	}
 }
 
-// A group named alongside the admin role is rejected the same way whether the
-// account is being promoted, is already an admin, or echoes its current role.
-func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
-	tests := []struct {
-		name string
-		role string
-		body string
+// An admin never belongs to an access group, whether it is being promoted,
+// already is one, or echoes its current role.
+func TestUpdateAdminAccountRejectsGroupingAnAdmin(t *testing.T) {
+	admin := models.RoleAdmin
+	for _, tt := range []struct {
+		name  string
+		role  string
+		input models.UpdateUserInput
 	}{
-		{name: "existing admin, group only", role: "admin", body: `{"access_group_id":5}`},
-		{name: "existing admin echoing role", role: "admin", body: `{"role":"admin","access_group_id":5}`},
-		{name: "promote with group", role: "user", body: `{"role":"admin","access_group_id":5}`},
-		{name: "promote with unknown group", role: "user", body: `{"role":"admin","access_group_id":99999}`},
-	}
-	for _, tt := range tests {
+		{name: "existing admin, group only", role: admin, input: models.UpdateUserInput{AccessGroupID: models.SetValue[int64](5)}},
+		{name: "existing admin echoing role", role: admin, input: models.UpdateUserInput{Role: &admin, AccessGroupID: models.SetValue[int64](5)}},
+		{name: "promote with group", role: models.RoleUser, input: models.UpdateUserInput{Role: &admin, AccessGroupID: models.SetValue[int64](5)}},
+		{name: "promote with unknown group", role: models.RoleUser, input: models.UpdateUserInput{Role: &admin, AccessGroupID: models.SetValue[int64](99999)}},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newScopedKeyAdminHandler(tt.role)
-
-			rec := updateUserRequestFor(t, h, jwtAdminClaims(), tt.body)
-			if rec.Code != http.StatusUnprocessableEntity {
-				t.Fatalf("status = %d, want 422 (body %s)", rec.Code, rec.Body.String())
-			}
-			if code := decodeErrorCode(t, rec); code != "unprocessable_entity" {
-				t.Fatalf("error code = %q, want unprocessable_entity", code)
+			_, err := h.UpdateAdminAccount(apimw.SetClaims(t.Context(), jwtAdminClaims()), repo.user.ID, -1, 0, tt.input)
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Field != "access_group_id" {
+				t.Fatalf("err = %v, want an access_group_id field error", err)
 			}
 			if repo.updated != nil {
 				t.Fatal("grouped-admin assignment must not be written")
@@ -364,79 +254,14 @@ func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
 	}
 }
 
-func TestHandleCreateUserRejectsGroupedAdmin(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
-	body := `{"username":"mallory","email":"m@example.com","password":"hunter2","role":"admin","access_group_id":5}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(body))
-	req = req.WithContext(apimw.SetClaims(req.Context(), jwtAdminClaims()))
-	rec := httptest.NewRecorder()
-
-	h.HandleCreateUser(rec, req)
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422 (body %s)", rec.Code, rec.Body.String())
-	}
-	if code := decodeErrorCode(t, rec); code != "unprocessable_entity" {
-		t.Fatalf("error code = %q, want unprocessable_entity", code)
-	}
-	if repo.created != nil {
-		t.Fatal("grouped admin must not be created")
-	}
-}
-
-// The scoped-key guard loads the target account before validating, so a
-// missing account has to surface as 404 rather than an escalation decision.
-func TestHandleUpdateUserScopedAPIKeyMissingTarget(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
+// The scoped-key guard loads the target account first, so a missing account
+// is not found rather than an escalation decision.
+func TestUpdateAdminAccountScopedAPIKeyMissingTarget(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler(models.RoleUser)
 	repo.getErr = auth.ErrNotFound
-
-	rec := updateUserRequestFor(t, h, scopedKeyClaims(), `{"password":"hunter2"}`)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated != nil {
-		t.Fatal("a missing target must not be updated")
-	}
-}
-
-// A username or email another account already uses is a conflict, the same
-// answer v1 account creation gives, not a server error.
-func TestHandleUpdateUserDuplicateIdentifierIsConflict(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
-	repo.updateErr = fmt.Errorf("%w: user_login_identifiers_holder_key", auth.ErrDuplicate)
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"username":"grace@example.com"}`)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
-	}
-	if code := decodeErrorCode(t, rec); code != "duplicate" {
-		t.Fatalf("error code = %q, want duplicate", code)
-	}
-}
-
-func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(body))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "42")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	req = req.WithContext(apimw.SetClaims(ctx, claims))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateUser(rec, req)
-	return rec
-}
-
-func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
-	for _, body := range []string{`{"password":"new-password"}`, `{"email":"attacker@example.test"}`} {
-		t.Run(body, func(t *testing.T) {
-			h, repo := newScopedKeyAdminHandler(models.RoleUser)
-			repo.promoteBeforeMutate = true
-			rec := updateUserRequestFor(t, h, scopedKeyClaims(), body)
-			if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
-				t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
-			}
-		})
+	password := "a-new-long-password"
+	_, err := h.UpdateAdminAccount(apimw.SetClaims(t.Context(), scopedKeyClaims()), repo.user.ID, -1, 0, models.UpdateUserInput{Password: &password})
+	if !auth.IsNotFound(err) || repo.updated != nil {
+		t.Fatalf("err = %v, updated = %v; want not found and nothing written", err, repo.updated != nil)
 	}
 }

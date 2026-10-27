@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,16 +10,12 @@ import (
 	"net/http"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -333,167 +328,6 @@ type pluginChunkedUploadSessionResponse struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 }
 
-func (h *PluginHandler) HandleListRepositories(w http.ResponseWriter, r *http.Request) {
-	repositories, err := h.repositories.List(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "listing plugin repositories", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin repositories")
-		return
-	}
-
-	response := make([]pluginRepositoryResponse, 0, len(repositories))
-	for _, repository := range repositories {
-		response = append(response, toPluginRepositoryResponse(repository))
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (h *PluginHandler) HandleCreateRepository(w http.ResponseWriter, r *http.Request) {
-	var req pluginRepositoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if strings.TrimSpace(req.URL) == "" || strings.TrimSpace(req.DisplayName) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "url and display_name are required")
-		return
-	}
-	if req.URL == plugins.DefaultRepositoryURL || req.URL == plugins.ApprovedCommunityRepositoryURL {
-		writeError(w, http.StatusBadRequest, "managed_repository", "Use catalog settings to manage built-in plugin repositories")
-		return
-	}
-
-	repository, err := h.repositories.Create(r.Context(), plugins.CreateRepositoryInput{
-		URL:         req.URL,
-		DisplayName: req.DisplayName,
-		Enabled:     req.Enabled,
-	})
-	if err != nil {
-		slog.ErrorContext(r.Context(), "creating plugin repository", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create plugin repository")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, toPluginRepositoryResponse(repository))
-}
-
-func (h *PluginHandler) HandleUpdateRepository(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid repository ID")
-		return
-	}
-
-	var req pluginRepositoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	input := plugins.UpdateRepositoryInput{
-		Enabled: req.Enabled,
-	}
-	if strings.TrimSpace(req.URL) != "" {
-		input.URL = &req.URL
-	}
-	if strings.TrimSpace(req.DisplayName) != "" {
-		input.DisplayName = &req.DisplayName
-	}
-
-	if err := h.repositories.Update(r.Context(), id, input); err != nil {
-		if errors.Is(err, plugins.ErrRepositoryNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
-			return
-		}
-		if errors.Is(err, plugins.ErrManagedRepositoryReadOnly) {
-			writeError(w, http.StatusConflict, "managed_repository", "Managed plugin repositories are controlled by catalog settings")
-			return
-		}
-		slog.ErrorContext(r.Context(), "updating plugin repository", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin repository")
-		return
-	}
-
-	repository, err := h.repositories.GetByID(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "loading updated plugin repository", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin repository")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, toPluginRepositoryResponse(repository))
-}
-
-func (h *PluginHandler) HandleDeleteRepository(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid repository ID")
-		return
-	}
-
-	if err := h.repositories.Delete(r.Context(), id); err != nil {
-		if errors.Is(err, plugins.ErrRepositoryNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
-			return
-		}
-		if errors.Is(err, plugins.ErrManagedRepositoryReadOnly) {
-			writeError(w, http.StatusConflict, "managed_repository", "Managed plugin repositories cannot be deleted")
-			return
-		}
-		slog.ErrorContext(r.Context(), "deleting plugin repository", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete plugin repository")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *PluginHandler) HandleGetCatalogSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.repositories.GetCatalogSettings(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "loading plugin catalog settings", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin catalog settings")
-		return
-	}
-	writeJSON(w, http.StatusOK, toPluginCatalogSettingsResponse(settings))
-}
-
-func (h *PluginHandler) HandlePutCatalogSettings(w http.ResponseWriter, r *http.Request) {
-	var req pluginCatalogSettingsRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Request body must contain one JSON object")
-		return
-	}
-	if req.IncludeApprovedCommunityPlugins == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "include_approved_community_plugins is required")
-		return
-	}
-
-	settings, err := h.repositories.SetIncludeApprovedCommunity(r.Context(), *req.IncludeApprovedCommunityPlugins)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "updating plugin catalog settings", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin catalog settings")
-		return
-	}
-	writeJSON(w, http.StatusOK, toPluginCatalogSettingsResponse(settings))
-}
-
-func (h *PluginHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
-	response, err := h.ListAdminPluginCatalog(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "fetching plugin catalog", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch plugin catalog")
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
 // ListAdminPluginCatalog fetches every enabled repository index and returns
 // the discoverable catalog, one entry per plugin ID. Both listeners read this
 // one projection. The fetch is a live remote read and records last_fetched_at
@@ -537,16 +371,6 @@ func pluginCatalogEntryView(entry plugins.CatalogEntry) PluginCatalogEntryView {
 	}
 }
 
-func (h *PluginHandler) HandleListInstallations(w http.ResponseWriter, r *http.Request) {
-	response, err := h.ListAdminPluginInstallations(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "listing plugin installations", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin installations")
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
 // ListAdminPluginInstallations returns every manageable installation with its
 // manifest surface, redacted global configuration and bindings. The reserved
 // builtin row is excluded. Both listeners read this one projection, so the
@@ -560,90 +384,6 @@ func (h *PluginHandler) ListAdminPluginInstallations(ctx context.Context) ([]Plu
 		return nil, err
 	}
 	return h.buildInstallationResponses(ctx, installations)
-}
-
-func (h *PluginHandler) HandleCreateInstallation(w http.ResponseWriter, r *http.Request) {
-	var req pluginInstallationCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	response, err := h.CreateAdminPluginInstallation(r.Context(), PluginInstallationCreateInput(req))
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest {
-			writeError(w, http.StatusBadRequest, "bad_request", apiErr.Message)
-			return
-		}
-		writePluginLifecycleError(w, r, err, "install")
-		return
-	}
-	writeJSON(w, http.StatusCreated, response)
-}
-
-func (h *PluginHandler) HandleUploadInstallation(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxPluginUploadSize)
-	response, err := h.InstallAdminPluginUpload(r.Context(), r)
-	if err != nil {
-		// Frozen bridge: every multipart parse failure, including an oversize
-		// body, is the v1 400 bad_request. Only v2 distinguishes 413.
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && (apiErr.Status == http.StatusBadRequest || apiErr.Status == http.StatusRequestEntityTooLarge) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid plugin upload")
-			return
-		}
-		writePluginUploadError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, response)
-}
-
-func (h *PluginHandler) HandleCreateChunkedUpload(w http.ResponseWriter, r *http.Request) {
-	var req pluginChunkedUploadCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	session, err := h.CreateAdminPluginUpload(r.Context(), PluginChunkedUploadCreateInput(req))
-	if err != nil {
-		writePluginUploadError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, toPluginChunkedUploadSessionResponse(session))
-}
-
-func (h *PluginHandler) HandleUploadChunk(w http.ResponseWriter, r *http.Request) {
-	uploadID := chi.URLParam(r, "upload_id")
-	chunkIndex, err := strconv.Atoi(chi.URLParam(r, "chunk_index"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid chunk index")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, h.uploads.MaxChunkSize()+1)
-	defer r.Body.Close()
-	session, err := h.PutAdminPluginUploadChunk(r.Context(), uploadID, chunkIndex, r.Body, r.ContentLength)
-	if err != nil {
-		writePluginUploadError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, toPluginChunkedUploadSessionResponse(session))
-}
-
-func (h *PluginHandler) HandleCompleteChunkedUpload(w http.ResponseWriter, r *http.Request) {
-	response, err := h.CompleteAdminPluginUpload(r.Context(), chi.URLParam(r, "upload_id"))
-	if err != nil {
-		writePluginUploadError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, response)
-}
-
-func (h *PluginHandler) HandleCancelChunkedUpload(w http.ResponseWriter, r *http.Request) {
-	if err := h.CancelAdminPluginUpload(r.Context(), chi.URLParam(r, "upload_id")); err != nil {
-		writePluginUploadError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) (*plugins.InstallResult, error) {
@@ -718,20 +458,6 @@ func isZipUploadFile(path string) (bool, error) {
 	return isZipUpload(header[:n]), nil
 }
 
-func toPluginChunkedUploadSessionResponse(session uploads.SessionInfo) pluginChunkedUploadSessionResponse {
-	return pluginChunkedUploadSessionResponse{
-		UploadID:       session.ID,
-		Filename:       session.Filename,
-		SizeBytes:      session.SizeBytes,
-		ChunkSize:      session.ChunkSize,
-		TotalChunks:    session.TotalChunks,
-		ReceivedChunks: session.ReceivedChunks,
-		ReceivedBytes:  session.ReceivedBytes,
-		Complete:       session.Complete,
-		ExpiresAt:      session.ExpiresAt,
-	}
-}
-
 func uploadErrorResponse(err error) (int, string) {
 	var maxBytesErr *http.MaxBytesError
 	switch {
@@ -752,228 +478,6 @@ func uploadErrorResponse(err error) (int, string) {
 	default:
 		return http.StatusInternalServerError, "Failed to process upload"
 	}
-}
-
-func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-	var req pluginInstallationUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	response, err := h.UpdateAdminPluginInstallation(r.Context(), id, PluginInstallationUpdateInput(req))
-	if err != nil {
-		writePluginLifecycleError(w, r, err, "update")
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (h *PluginHandler) HandleApplyUpdate(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-	response, err := h.ApplyAdminPluginUpdate(r.Context(), id)
-	if err != nil {
-		writePluginLifecycleError(w, r, err, "update")
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (h *PluginHandler) HandlePutInstallationConfig(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-
-	var req pluginConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if h.service == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Plugin service not configured")
-		return
-	}
-	if h.rejectBuiltinInstallation(w, r, id) {
-		return
-	}
-
-	if err := h.service.SetGlobalConfigWithClears(
-		r.Context(), id, req.Key, req.Value, req.ClearSecrets,
-	); err != nil {
-		var validationErr *plugins.ConfigValidationError
-		switch {
-		case errors.As(err, &validationErr):
-			writeError(w, http.StatusBadRequest, "bad_request", validationErr.Error())
-		case errors.Is(err, plugins.ErrInstallationNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
-		default:
-			slog.ErrorContext(r.Context(), "setting plugin global config", "component", "api", "installation_id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save plugin config")
-		}
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *PluginHandler) HandleTestInstallationConfig(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-	if h.service == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Plugin service not configured")
-		return
-	}
-
-	var req pluginConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if strings.TrimSpace(req.Key) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "key is required")
-		return
-	}
-	if h.rejectBuiltinInstallation(w, r, id) {
-		return
-	}
-
-	if err := h.service.TestGlobalConfigWithClears(
-		r.Context(), id, req.Key, req.Value, req.ClearSecrets,
-	); err != nil {
-		if errors.Is(err, plugins.ErrInstallationNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
-			return
-		}
-
-		var connectionErr *plugins.ConnectionTestError
-		if errors.As(err, &connectionErr) {
-			writeJSON(w, http.StatusOK, connectionCheckResponse{
-				Success: false,
-				Message: connectionErr.Error(),
-			})
-			return
-		}
-
-		slog.ErrorContext(r.Context(), "testing plugin config", "component", "api", "installation_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to test plugin config")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, connectionCheckResponse{
-		Success: true,
-		Message: "Connection successful.",
-	})
-}
-
-func (h *PluginHandler) HandlePutAuthBinding(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-
-	if h.rejectBuiltinInstallation(w, r, id) {
-		return
-	}
-
-	var req pluginAuthBindingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if strings.TrimSpace(req.CapabilityID) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "capability_id is required")
-		return
-	}
-
-	if err := h.configs.UpsertAuthBinding(r.Context(), plugins.AuthBinding{
-		InstallationID: id,
-		CapabilityID:   req.CapabilityID,
-		Enabled:        req.Enabled,
-		DisplayOrder:   req.DisplayOrder,
-		AutoProvision:  req.AutoProvision,
-		DefaultLogin:   req.DefaultLogin,
-	}); err != nil {
-		if errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled) {
-			writeError(w, http.StatusConflict, "provider_already_enabled", "Another sign-in provider is already enabled; turn it off first")
-			return
-		}
-		slog.ErrorContext(r.Context(), "saving plugin auth binding", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save auth binding")
-		return
-	}
-
-	// Sign-in providers rebuild on every node; no restart is needed.
-	h.notifyAuthProvidersChanged(r.Context())
-	w.Header().Set("X-Silo-Restart-Required", "false")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *PluginHandler) HandlePutTaskBinding(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-
-	if h.rejectBuiltinInstallation(w, r, id) {
-		return
-	}
-
-	capabilityID := chi.URLParam(r, "capability_id")
-	if strings.TrimSpace(capabilityID) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "capability_id is required")
-		return
-	}
-
-	var req pluginTaskBindingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.configs.UpsertTaskBinding(r.Context(), plugins.TaskBinding{
-		InstallationID: id,
-		CapabilityID:   capabilityID,
-		Enabled:        req.Enabled,
-		Trigger:        req.Trigger,
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "saving plugin task binding", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save task binding")
-		return
-	}
-
-	h.restartStatus.MarkRequired("plugin_task_binding")
-	writeJSON(w, http.StatusOK, pluginTaskBindingUpdateResponse{RestartRequired: true})
-}
-
-// rejectBuiltinInstallation writes a 409 and returns true when the target
-// installation is the reserved builtin row, which no plugin-management
-// endpoint may mutate. Lookup errors are left to the caller's own handling.
-func (h *PluginHandler) rejectBuiltinInstallation(w http.ResponseWriter, r *http.Request, id int) bool {
-	installation, err := h.installations.GetByID(r.Context(), id)
-	if err != nil {
-		return false
-	}
-	if !installation.IsBuiltin() {
-		return false
-	}
-	writeError(w, http.StatusConflict, "builtin_installation", "Built-in host providers cannot be modified")
-	return true
 }
 
 // ErrPluginBuiltinInstallation reports a mutation aimed at the reserved
@@ -1117,19 +621,6 @@ func (h *PluginHandler) SetAdminPluginTaskBinding(ctx context.Context, id int, c
 	return nil
 }
 
-func (h *PluginHandler) HandleDeleteInstallation(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-	if err := h.DeleteAdminPluginInstallation(r.Context(), id); err != nil {
-		writePluginLifecycleError(w, r, err, "uninstall")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // manifestHasUserNavigableRoute returns true if the manifest declares any
 // navigable HTTP route with navigation_kind="user". Such plugins should
 // appear in the user-facing plugin list (and therefore in the user sidebar)
@@ -1141,15 +632,6 @@ func manifestHasUserNavigableRoute(manifest *pluginv1.PluginManifest) bool {
 		}
 	}
 	return false
-}
-
-func (h *PluginHandler) HandleListUserPluginSettings(w http.ResponseWriter, r *http.Request) {
-	views, err := h.ListUserPluginSettings(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, pluginUserSettingsListResponse{Installations: views})
 }
 
 // ListUserPluginSettings lists the enabled, non-builtin installations that
@@ -1188,22 +670,6 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 	return views, nil
 }
 
-func (h *PluginHandler) HandleGetUserPluginSettings(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "installation_id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-
-	view, err := h.GetUserPluginSettings(r.Context(), apimw.GetUserID(r.Context()), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, view)
-}
-
 // PluginUserSettingsDetailView is one installation's user settings surface
 // plus the account's stored values for it.
 type PluginUserSettingsDetailView struct {
@@ -1231,32 +697,6 @@ func (h *PluginHandler) GetUserPluginSettings(ctx context.Context, userID, insta
 		Installation: toUserPluginSettingsSummary(installation, manifest),
 		Values:       values,
 	}, nil
-}
-
-func (h *PluginHandler) HandlePutUserPluginSettings(w http.ResponseWriter, r *http.Request) {
-	id, err := parseNamedIDParam(r, "installation_id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
-		return
-	}
-
-	if _, _, err := h.loadUserConfigInstallation(r.Context(), id); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	var req userPluginSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.SetUserPluginSettings(r.Context(), apimw.GetUserID(r.Context()), id, req.Values); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // SetUserPluginSettings replaces the account's values for the installation
@@ -1510,30 +950,6 @@ func toPluginPresentationJSON(presentation *pluginv1.PluginPresentation) *Plugin
 		PublisherName:       presentation.GetPublisherName(),
 		PublisherURL:        presentation.GetPublisherUrl(),
 		LicenseSPDX:         presentation.GetLicenseSpdx(),
-	}
-}
-
-func toPluginRepositoryResponse(repository *plugins.Repository) pluginRepositoryResponse {
-	return pluginRepositoryResponse{
-		ID:            repository.ID,
-		URL:           repository.URL,
-		DisplayName:   repository.DisplayName,
-		Enabled:       repository.Enabled,
-		SourceKind:    repository.SourceKind,
-		Managed:       repository.ManagedKey != nil,
-		LastFetchedAt: repository.LastFetchedAt,
-		CreatedAt:     repository.CreatedAt,
-		UpdatedAt:     repository.UpdatedAt,
-	}
-}
-
-func toPluginCatalogSettingsResponse(settings plugins.CatalogSettings) pluginCatalogSettingsResponse {
-	return pluginCatalogSettingsResponse{
-		IncludeApprovedCommunityPlugins: settings.IncludeApprovedCommunityPlugins,
-		ApprovedCommunityPluginCount:    settings.ApprovedCommunityPluginCount,
-		InstalledCommunityPluginCount:   settings.InstalledCommunityPluginCount,
-		MigratedPluginCount:             settings.MigratedPluginCount,
-		CommunityUpdatesPaused:          settings.CommunityUpdatesPaused,
 	}
 }
 
@@ -1794,8 +1210,4 @@ func structToMap(value interface{ AsMap() map[string]any }) map[string]any {
 		return nil
 	}
 	return value.AsMap()
-}
-
-func parseNamedIDParam(r *http.Request, name string) (int, error) {
-	return strconv.Atoi(chi.URLParam(r, name))
 }

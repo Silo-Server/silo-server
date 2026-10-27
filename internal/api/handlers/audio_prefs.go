@@ -2,13 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -46,44 +42,6 @@ type audioPrefResponse struct {
 }
 
 // --- Handler methods ---
-
-// HandleGetAudioPref handles GET /audio-prefs/{series_id}.
-func (h *AudioPrefHandler) HandleGetAudioPref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	pref, err := h.GetAudioPreference(r.Context(), userID, profileID, seriesID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, toAudioPrefResponse(pref))
-}
-
-// GetAudioPreference reads the legacy preference used by v1. A missing
-// series preference returns a 404 APIError.
-func (h *AudioPrefHandler) GetAudioPreference(ctx context.Context, userID int, profileID, seriesID string) (userstore.AudioPreference, error) {
-	var none userstore.AudioPreference
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	pref, err := store.GetAudioPreference(ctx, profileID, seriesID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to get audio preference")
-	}
-	if pref == nil {
-		return none, apiError(http.StatusNotFound, "not_found", "Audio preference not found")
-	}
-	return *pref, nil
-}
 
 // GetAudioPreferenceCanonical keeps the legacy track identity and overlays the
 // canonical series language for v2. An absent canonical row clears the language;
@@ -131,37 +89,6 @@ func (h *AudioPrefHandler) GetAudioPreferenceCanonical(ctx context.Context, user
 	return pref, nil
 }
 
-// HandleSetAudioPref handles PUT /audio-prefs/{series_id}.
-func (h *AudioPrefHandler) HandleSetAudioPref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	var req setAudioPrefRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.SetAudioPreference(r.Context(), userID, userstore.AudioPreference{
-		ProfileID:       profileID,
-		SeriesID:        seriesID,
-		AudioTrackIndex: req.AudioTrackIndex,
-		AudioLanguage:   req.AudioLanguage,
-		TrackSignature:  req.TrackSignature,
-	}); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // SetAudioPreference is the write v1 PUT /audio-prefs/{series_id} and v2
 // updateAudioPreference share: the legacy row and the canonical
 // profile_series audio-language row commit together, and a
@@ -189,25 +116,6 @@ func (h *AudioPrefHandler) SetAudioPreference(ctx context.Context, userID int, p
 	return nil
 }
 
-// HandleDeleteAudioPref handles DELETE /audio-prefs/{series_id}.
-func (h *AudioPrefHandler) HandleDeleteAudioPref(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	seriesID := chi.URLParam(r, "series_id")
-
-	if seriesID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
-		return
-	}
-
-	if err := h.DeleteAudioPreference(r.Context(), userID, profileID, seriesID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // DeleteAudioPreference is the delete v1 DELETE /audio-prefs/{series_id} and
 // v2 deleteAudioPreference share. Deleting a preference that does not exist
 // succeeds. A failure is an *APIError.
@@ -229,14 +137,3 @@ func (h *AudioPrefHandler) DeleteAudioPreference(ctx context.Context, userID int
 }
 
 // --- Helpers ---
-
-func toAudioPrefResponse(p userstore.AudioPreference) audioPrefResponse {
-	return audioPrefResponse{
-		ProfileID:       p.ProfileID,
-		SeriesID:        p.SeriesID,
-		AudioTrackIndex: p.AudioTrackIndex,
-		AudioLanguage:   p.AudioLanguage,
-		TrackSignature:  p.TrackSignature,
-		UpdatedAt:       p.UpdatedAt,
-	}
-}

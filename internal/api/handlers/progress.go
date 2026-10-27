@@ -2,31 +2,18 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/clientclock"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const syncProgressStatusError = "error"
-
-// parseClientEventTime parses an RFC3339 client event time. Malformed values
-// are an error the caller must reject: treating them as "now" would let a
-// stale offline event win LWW as a fresh server-time write.
-func parseClientEventTime(s string) (time.Time, error) {
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return t.UTC(), nil
-}
 
 // ProgressLibraryLookup resolves which progress items belong to a library.
 type ProgressLibraryLookup interface {
@@ -98,63 +85,6 @@ type syncProgressResponse struct {
 }
 
 // --- Handler methods ---
-
-// HandleListProgress handles GET /progress?status=in_progress&limit=20&offset=0.
-func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	status := r.URL.Query().Get("status")
-	since := r.URL.Query().Get("since")
-	limit, offset := parsePagination(r)
-	libraryID, err := parseLibraryIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library_id")
-		return
-	}
-
-	// A ?since= cursor switches to server-ordered delta delivery (rows changed
-	// elsewhere since the cursor), immune to client clock skew. Absent since →
-	// today's status/pagination listing.
-	var entries []userstore.WatchProgress
-	var nextCursor string
-	if since != "" {
-		entries, nextCursor, err = store.ListProgressSince(r.Context(), profileID, since)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
-			return
-		}
-		entries, err = h.filterProgress(r.Context(), entries, libraryID)
-	} else {
-		entries, err = h.listProgressFrom(r.Context(), store, profileID, ProgressQuery{Status: status, LibraryID: libraryID, Limit: limit, Offset: offset})
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := progressListResponse{
-		Progress:   make([]progressEntryResponse, 0, len(entries)),
-		NextCursor: nextCursor,
-	}
-	for _, e := range entries {
-		resp.Progress = append(resp.Progress, progressEntryResponse{
-			MediaItemID:     e.MediaItemID,
-			PositionSeconds: e.PositionSeconds,
-			DurationSeconds: e.DurationSeconds,
-			Completed:       e.Completed,
-			UpdatedAt:       e.UpdatedAt,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
 
 // ProgressQuery is the status listing's filter and window.
 type ProgressQuery struct {
@@ -260,20 +190,6 @@ func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstor
 	return entries, nil
 }
 
-func parseLibraryIDParam(r *http.Request) (int, error) {
-	raw := r.URL.Query().Get("library_id")
-	if raw == "" {
-		return 0, nil
-	}
-
-	libraryID, err := strconv.Atoi(raw)
-	if err != nil || libraryID <= 0 {
-		return 0, strconv.ErrSyntax
-	}
-
-	return libraryID, nil
-}
-
 // progressContentIDs collects the media item IDs from a progress slice.
 func progressContentIDs(entries []userstore.WatchProgress) []string {
 	contentIDs := make([]string, 0, len(entries))
@@ -332,47 +248,6 @@ func filterProgressEntriesByAccess(
 	}
 
 	return keepAccessibleEntries(entries, accessible), nil
-}
-
-// HandleSyncProgress handles POST /sync/progress.
-// It accepts a batch of progress updates and returns per-item results.
-func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req syncProgressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if len(req.Items) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "At least one progress item is required")
-		return
-	}
-
-	// The wire string is parsed here so a malformed one keeps its v1 per-item
-	// answer; the seam takes the parsed event time.
-	updates := make([]ProgressSyncUpdate, 0, len(req.Items))
-	for _, item := range req.Items {
-		update := ProgressSyncUpdate{MediaItemID: item.MediaItemID, Position: item.Position, Duration: item.Duration, ForceOverwrite: item.ForceOverwrite}
-		if item.UpdatedAt != nil {
-			client, parseErr := parseClientEventTime(*item.UpdatedAt)
-			if parseErr != nil {
-				update.invalidUpdatedAt = true
-			} else {
-				update.UpdatedAt = &client
-			}
-		}
-		updates = append(updates, update)
-	}
-
-	results, err := h.SyncProgress(r.Context(), userID, profileID, updates)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, syncProgressResponse{Results: results})
 }
 
 // ProgressSyncUpdate is one progress write of a sync batch.

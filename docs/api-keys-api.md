@@ -1,9 +1,7 @@
 # API Keys API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` key routes are summarized in
-> [Bridge note](#bridge-note) and are retired after the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 API keys are long-lived credentials for scripts and integrations. A key is a
 string with an `sa_` prefix and is sent the same way as a JWT access token:
@@ -147,19 +145,3 @@ media playback, account editing, filesystem paths or API-key management.
 These additions do not change existing unscoped credentials or add client-specific
 permission rules. Existing native clients need no migration; scope catalogs and
 capability documents remain additive.
-
-## Bridge note
-
-The frozen alpha surface serves the same features at `/api/v1/api-keys`,
-`/api/v1/api-keys/scopes`, `/api/v1/admin/api-keys`,
-`/api/v1/admin/users/{userId}/api-keys`, and `/api/v1/admin/api-keys/{id}/tier`. It
-uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
-cursor pagination, and does not use `ETag`/`If-Match` preconditions. Those routes are
-frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
-namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
-an admin account acting through its primary profile, as described under
-[Personal key management](#personal-key-management); v1 refuses anyone else with
-`403 forbidden` before reading the body. Applying the primary-profile rule to v1 is a
-critical bridge fix: before it, a child profile on an admin account could mint a key
-and use it to open PIN-protected profiles.

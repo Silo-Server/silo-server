@@ -255,7 +255,8 @@ A series request names the seasons it wants (`seasons`). Season numbers start
 at 1: a request naming season 0 (specials) or a negative number is refused with
 `validation_failed`, never read as naming none. When the requester names none, the server asks for every aired regular season (TMDB's seasons that
 have started airing, specials excluded) that is not complete in the library.
-Requests from before season requests, and every v1 request, have no seasons:
+Requests from before season requests, including every request made through
+the retired `/api/v1` routes, have no seasons:
 they mean the whole series and keep the old rule that any episode in the
 library fulfills them. A series with no aired season yet, and not in the
 library, is requested whole unless the requester names seasons.
@@ -539,7 +540,7 @@ state's `download`, with one targets query for an active request that is queued
 or downloading; search and discovery do not load targets per result. It
 carries no requester identity, so anyone who can see the title's request state
 sees it. `GET /api/v2/requests/status` advertises
-`download_progress_supported`. v1 does not carry progress. Release names,
+`download_progress_supported`. Release names,
 indexers, download clients, paths and queue messages never reach a client.
 Clients poll every 30 seconds while anything they show has `download`, and stop
 polling otherwise. The TMDB client keeps a title's detail for two minutes, so
@@ -570,10 +571,9 @@ written for the admin who fixes the submission: it can name a server or a
 routing rule, or pass on a plugin's own error text. A requester still sees the
 request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
-`/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
-return them to everyone.
+`/api/v2/admin/requests` operations.
 
-On these profile routes, v1 and v2 alike, "admin" means the acting admin
+On these profile routes, "admin" means the acting admin
 (`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
 acting through its primary profile, an admin API key, or an admin login session
 with no profile while no profile on the account has a PIN or an access limit, the
@@ -589,8 +589,7 @@ The admin queue groups requests by what an admin does next, from status and
 outcome alone so the database can filter and count them: needs approval
 (pending), in progress (approved, queued or downloading), failed, and done
 (completed, or closed by a decline or cancellation). An admin can retry a
-failed request or close it, which moves it to done (v2 only; the v1 cancel
-still refuses a failed request). A closed request stays closed: a target that
+failed request or close it, which moves it to done. A closed request stays closed: a target that
 reports later updates only itself. A request's
 history is its `media_request_events` rows. Target updates record the
 request's status or outcome only when it changes, so neither a reconcile pass

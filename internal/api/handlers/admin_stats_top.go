@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -157,42 +155,6 @@ func (p *AdminTopActivityProvider) Close() {
 		return
 	}
 	p.cache.Close()
-}
-
-// HandleGetTopActivity handles GET /admin/stats/top-activity.
-func (h *AdminHandler) HandleGetTopActivity(w http.ResponseWriter, r *http.Request) {
-	days, err := parseClampedIntQuery(
-		r, "days",
-		adminTopActivityDefaultDays,
-		adminTopActivityMinDays,
-		adminTopActivityMaxDays,
-	)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	limit, err := parseClampedIntQuery(
-		r, "limit",
-		adminTopActivityDefaultLimit,
-		adminTopActivityMinLimit,
-		adminTopActivityMaxLimit,
-	)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	activity, err := h.ReadAdminTopActivity(r.Context(), days, limit, isTruthyQuery(r.URL.Query().Get("refresh")))
-	if errors.Is(err, ErrAdminDashboardUnavailable) {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get top activity")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, activity)
 }
 
 func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days, limit int) (*AdminTopActivity, error) {

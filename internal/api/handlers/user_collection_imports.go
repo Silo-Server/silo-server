@@ -11,9 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -59,10 +56,6 @@ func NewUserCollectionImportHandler(
 	}
 }
 
-func (h *UserCollectionImportHandler) HandleListTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.registry.Catalog())
-}
-
 type UserImportSharedFields struct {
 	Title                  string          `json:"title"`
 	Description            string          `json:"description"`
@@ -95,53 +88,6 @@ type UserImportTMDBListRequest struct {
 type UserImportView struct {
 	Collection PersonalCollectionView      `json:"collection"`
 	Sync       *usercollections.SyncResult `json:"sync,omitempty"`
-}
-
-func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter, r *http.Request) {
-	var req UserImportMDBListRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ImportMDBList(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r *http.Request) {
-	var req UserImportTMDBRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ImportTMDB(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-// HandleImportTrakt answers the frozen v1 profile Trakt import route. Silo no
-// longer supports Trakt, so every well-formed request is refused.
-func (h *UserCollectionImportHandler) HandleImportTrakt(w http.ResponseWriter, r *http.Request) {
-	var req struct{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	writeAPIError(w, traktImportRetired())
 }
 
 // ImportMDBList creates an MDBList-backed collection for the profile and
@@ -380,15 +326,6 @@ func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Contex
 	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
-func (h *UserCollectionImportHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
-	result, err := h.SyncPersonalCollection(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
 type MDBListDiscoveryView struct {
 	Configured bool                  `json:"configured"`
 	Lists      []mdblist.ListSummary `json:"lists"`
@@ -431,24 +368,6 @@ func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDi
 		return MDBListDiscoveryView{}, apiError(http.StatusBadGateway, "upstream_error", fmt.Sprintf("MDBList top failed: %v", err))
 	}
 	return MDBListDiscoveryView{Configured: true, Lists: lists}, nil
-}
-
-func (h *UserCollectionImportHandler) HandleSearchMDBList(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.SearchMDBList(r.Context(), r.URL.Query().Get("q"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *UserCollectionImportHandler) HandleTopMDBList(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.TopMDBList(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func validateOptionalLimit(limit *int) error {

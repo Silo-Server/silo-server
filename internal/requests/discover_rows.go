@@ -3,7 +3,6 @@ package requests
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -193,74 +192,6 @@ func (s *Service) DiscoverRow(ctx context.Context, viewer Viewer, rowID string, 
 	result, nextPage, err := s.fillRowPage(ctx, viewer, rowPageRequest{
 		source: source, page: page, want: sectionResultsPerPage, budget: sectionBackfillBudgetSingle,
 		ceiling: ceiling, hideAvailable: row.HideAvailable, endCursor: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return discoverySectionOf(row, result, nextPage), nil
-}
-
-// Discover is the frozen /api/v1 discovery row: one of the six built-in rows
-// as the default layout has them, whatever the admin's layout says.
-func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, errRequestServiceNotConfigured
-	}
-	ctx = withPolicyCache(ctx)
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	return s.discoverLegacy(ctx, viewer, section, page, sectionBackfillBudgetSingle, ceiling)
-}
-
-// DiscoverAll is the frozen /api/v1 discovery page: the six built-in rows as
-// the default layout has them.
-func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySection, error) {
-	if s == nil || s.store == nil || s.tmdb == nil {
-		return nil, errRequestServiceNotConfigured
-	}
-	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
-	keys := discoverrows.LegacyIDs()
-	sections := make([]DiscoverySection, len(keys))
-	group, gctx := errgroup.WithContext(ctx)
-	group.SetLimit(externalIDHydrationConcurrency)
-	for i, key := range keys {
-		group.Go(func() error {
-			section, err := s.discoverLegacy(gctx, viewer, key, 1, sectionBackfillBudgetAggregate, ceiling)
-			if err != nil {
-				return err
-			}
-			sections[i] = *section
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, err
-	}
-	return sections, nil
-}
-
-// discoverLegacy renders one built-in row for an already-resolved ceiling,
-// as /api/v1 always has: every survivor of the consumed pages, untrimmed.
-func (s *Service) discoverLegacy(ctx context.Context, viewer Viewer, section string, page, budget int, ceiling string) (*DiscoverySection, error) {
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
-	}
-	row, ok := discoverrows.LegacyRow(strings.TrimSpace(section))
-	if !ok {
-		return nil, fmt.Errorf("%w: invalid discovery section", ErrInvalidInput)
-	}
-	kind, _ := discoverrows.KindOf(row.Type)
-	result, nextPage, err := s.fillRowPage(ctx, viewer, rowPageRequest{
-		source: kind.Source(s.discoverEnv(), row), page: page, want: sectionResultsPerPage, budget: budget, ceiling: ceiling,
 	})
 	if err != nil {
 		return nil, err

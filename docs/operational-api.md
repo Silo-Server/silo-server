@@ -8,22 +8,18 @@ its own password sign-in is on, and `auth.local_password_login` is on or the
 account is break-glass. The enabled flag reflects the running listener, while pending
 restart compares its state with stored settings. Only the three compatibility
 settings needed for this view and `auth.local_password_login` are read. Missing
-settings fall back to boot configuration, and an unresolved account
-retains the bridge's password-availability fallback. The web Connect Apps page
+settings fall back to boot configuration, and an account or server
+switch that cannot be read reports `password_login_available: true`. The web Connect Apps page
 uses this v2 operation.
 
 `GET /api/v2/images/capabilities` reports capability `revision` and `state`, the
 query parameter `param`, ordered `sizes`, per-artwork-type `widths`, and
 `original_max_width_px`. Widths come from the current variant ladder. The image
 operation accepts account-only requests; when an acting profile is supplied,
-viewer-access and PIN verification still apply. This preserves the bridge gate.
-The v2 response uses capability revision/state instead of legacy `schema_version`.
+viewer-access and PIN verification still apply.
 
 Both are structured Huma reads and return Problem Details for authorization,
-validation, or unavailable wiring. The frozen v1 reads call the same application
-views. Compatibility listener behavior and image delivery URLs do not change.
-Apple image discovery, including TopShelf, must adopt the v2 capability path and
-shape before cutover. No Android image-discovery or native compatibility-connection
-consumer was found in the pinned migration inventory. Independent review and
-consumer acceptance are tracked in the migration ledger; these operations do not
-complete worker protocol negotiation or the 1.0 retirement gates.
+validation, or unavailable wiring. Compatibility listener behavior and image delivery URLs do not change.
+Apple image discovery, including TopShelf, must use the v2 capability path. No
+Android image-discovery or native compatibility-connection consumer was found in
+the pinned migration inventory.

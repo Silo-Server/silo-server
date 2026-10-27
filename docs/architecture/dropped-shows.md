@@ -19,8 +19,7 @@ The rule reads `user_watch_progress` in PostgreSQL, so on deployments that keep 
 state in the SQLite user store a drop never ends by watching; it ends only when undone.
 
 A v2 Home dismissal (`PUT /api/v2/home/dismissals/{surface}/{item_id}`) of an episode or
-a series drops the series, from either surface. The frozen v1 route keeps per-card
-dismissals.
+a series drops the series, from either surface.
 Undoing the dismissal (`DELETE` on the same path) undrops it. Movies, audiobooks, and
 ebooks keep per-item dismissals. Dismissing again refreshes `dropped_at`, which re-drops a
 series the profile watched since.
@@ -47,7 +46,7 @@ Each connection has one setting, `sync_dropped_enabled`. It is on for new connec
 and for existing connections that sync anything, so the first sync after the feature
 ships imports drops already on the provider; a connection with every sync setting off
 stays paused. A provider takes part when it advertises the `sync_dropped` capability.
-Only v2 exposes the setting and capability; the frozen v1 responses omit them.
+The v2 watch-provider connection responses expose the setting and capability.
 
 `watch_provider_dropped_items` records, per connection, the series Silo and the provider
 last agreed are dropped. Each series is a three-way merge of the local drop, the remote

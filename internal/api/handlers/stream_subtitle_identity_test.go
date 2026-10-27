@@ -80,45 +80,6 @@ func TestSubtitleEmbeddedIdentitySurvivesExternalInsertion(t *testing.T) {
 	}
 }
 
-func TestSubtitleFontIdentitySurvivesExternalInsertion(t *testing.T) {
-	dir := t.TempDir()
-	mediaPath := filepath.Join(dir, "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("synthetic fixture"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte("#!/bin/sh\nprintf '{\"streams\":[]}'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	file := &models.MediaFile{ID: 42, FilePath: mediaPath,
-		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/synthetic/new.srt", Format: "srt"}},
-		SubtitleTracks:    []models.SubtitleTrack{{Index: 4, Codec: "ass"}},
-	}
-	manager := playback.NewSessionManager(0, 0)
-	session, err := manager.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
-	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: filepath.Join(dir, "ffmpeg")} }
-	response := httptest.NewRecorder()
-	handler.HandleSubtitleFonts(response, playbackTestRequest(http.MethodGet,
-		"/stream/"+session.ID+"/subtitles/0/fonts?file_id=42&embedded_stream_index=4", nil,
-		map[string]string{"session_id": session.ID, "track": "0"}))
-	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "[]" {
-		t.Fatalf("frozen font identity failed after scan insertion: %d %q", response.Code, response.Body.String())
-	}
-	query := url.Values{"file_id": {"42"}, playback.EmbeddedSubtitleStreamIndexParamV3: {"4"}}
-	fonts, err := handler.SubtitleFonts(newAuthorizedPlaybackContext(), SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: query})
-	if err != nil || fonts == nil || len(fonts) != 0 {
-		t.Fatalf("shared font service failed after scan insertion: fonts=%v err=%v", fonts, err)
-	}
-	query[playback.EmbeddedSubtitleStreamIndexParamV3] = []string{"4", "7"}
-	_, err = handler.SubtitleFonts(newAuthorizedPlaybackContext(), SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: query})
-	if failure, ok := errors.AsType[*APIError](err); !ok || failure.Status != http.StatusBadRequest {
-		t.Fatalf("conflicting identity pins were accepted: %v", err)
-	}
-}
-
 func TestSubtitleExternalIdentitySurvivesReordering(t *testing.T) {
 	dir := t.TempDir()
 	selectedPath, otherPath := filepath.Join(dir, "selected.srt"), filepath.Join(dir, "other.srt")
@@ -189,15 +150,6 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 	if srt.Code != http.StatusOK || srt.Body.String() != srtFile ||
 		!strings.HasPrefix(srt.Header().Get("Content-Type"), "application/x-subrip") {
 		t.Fatalf(".srt must serve the original file: %d %q %q", srt.Code, srt.Header().Get("Content-Type"), srt.Body.String())
-	}
-	// The frozen /api/v1 route shares the handler and keeps WebVTT for the
-	// same URL.
-	v1 := httptest.NewRecorder()
-	handler.HandleSubtitle(v1, playbackTestRequest(http.MethodGet,
-		"/stream/"+session.ID+"/subtitles/0.srt?file_id=42"+original, nil,
-		map[string]string{"session_id": session.ID, "track": "0.srt"}))
-	if v1.Code != http.StatusOK || !strings.HasPrefix(v1.Header().Get("Content-Type"), "text/vtt") {
-		t.Fatalf("/api/v1 .srt?original=1 must keep WebVTT: %d %q", v1.Code, v1.Header().Get("Content-Type"))
 	}
 
 	for _, converted := range []struct{ track, query string }{{"0.vtt", ""}, {"0.srt", ""}, {"0.vtt", original}} {
@@ -281,5 +233,40 @@ func TestOriginalSubRipDeclaresUTF8OnlyForUTF8Bytes(t *testing.T) {
 				t.Fatalf("content type = %q, want %q; body changed: %v", got, tc.want, rr.Body.String() != string(tc.data))
 			}
 		})
+	}
+}
+
+// A font request pins the embedded stream it was planned against, so a scan
+// that inserts an external subtitle ahead of it does not move the request onto
+// another track, and conflicting pins are refused.
+func TestSubtitleFontIdentitySurvivesExternalInsertion(t *testing.T) {
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("synthetic fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte("#!/bin/sh\nprintf '{\"streams\":[]}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, FilePath: mediaPath,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/synthetic/new.srt", Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 4, Codec: "ass"}},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: filepath.Join(dir, "ffmpeg")} }
+	query := url.Values{"file_id": {"42"}, playback.EmbeddedSubtitleStreamIndexParamV3: {"4"}}
+	fonts, err := handler.SubtitleFonts(newAuthorizedPlaybackContext(), SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: query})
+	if err != nil || fonts == nil || len(fonts) != 0 {
+		t.Fatalf("frozen font identity failed after scan insertion: fonts=%v err=%v", fonts, err)
+	}
+	query[playback.EmbeddedSubtitleStreamIndexParamV3] = []string{"4", "7"}
+	_, err = handler.SubtitleFonts(newAuthorizedPlaybackContext(), SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: query})
+	if failure, ok := errors.AsType[*APIError](err); !ok || failure.Status != http.StatusBadRequest {
+		t.Fatalf("conflicting identity pins were accepted: %v", err)
 	}
 }

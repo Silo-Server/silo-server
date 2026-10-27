@@ -107,11 +107,7 @@ func TestPersonalCollectionLifecycleProfileAccess(t *testing.T) {
 			if tc.want != 0 && store.mutations != 0 {
 				t.Fatalf("unauthorized mutations: %d", store.mutations)
 			}
-			_, err := h.ListPersonalCollectionItems(t.Context(), 1, profile, "c")
-			if (err == nil) != tc.wantRead {
-				t.Errorf("list error = %v", err)
-			}
-			_, err = h.GetPersonalCollection(t.Context(), 1, profile, "c")
+			_, err := h.GetPersonalCollection(t.Context(), 1, profile, "c")
 			if (err == nil) != tc.wantRead {
 				t.Errorf("get error = %v", err)
 			}

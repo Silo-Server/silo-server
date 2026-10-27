@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -523,7 +522,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 		actingAdmin = apimw.NewActingAdminDecider(checkPrimaryProfile, householdRequiresProfile)
 	}
-	requireActingAdmin := apimw.RequireActingAdminWith(actingAdmin)
 	// Routes outside the admin groups that widen what an admin sees or may do
 	// ask apimw.ActingAdmin, which answers with this same decision.
 	r.Use(apimw.ProvideActingAdmin(actingAdmin))
@@ -776,12 +774,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	// Build demo guard middleware if server settings are available.
-	var demoGuard *apimw.DemoGuard
-	if settingsRepo != nil {
-		demoGuard = apimw.NewDemoGuard(settingsRepo)
-	}
-
 	// Build library handler if folder repo is available.
 	var libraryHandler *handlers.LibraryHandler
 	if deps.FolderRepo != nil {
@@ -978,6 +970,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if requester, ok := deps.MetadataService.(handlers.MetadataRefreshRequester); ok {
 			itemsHandler.SetMetadataRefreshRequester(requester)
 		}
+		if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
+			// Share the process's configured limiter so the per-user budget
+			// is one budget on Redis deployments rather than one per
+			// instance. Nil when rate limiting is disabled; the handler then
+			// keeps its private in-memory fallback.
+			itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
+			itemsHandler.SetTrailerRefreshRequester(requester)
+		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
 		}
@@ -1156,7 +1156,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
 	var audioPrefHandler *handlers.AudioPrefHandler
 	var libraryPlaybackPrefHandler *handlers.LibraryPlaybackPrefHandler
-	var watchProviderHandler *handlers.WatchProviderHandler
 	var playbackSessionsLoader *handlers.PlaybackSessionsLoader
 	// Personal collections without an uploaded or imported poster show a
 	// collage of their titles; it needs artwork storage and poster signing.
@@ -1284,7 +1283,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// Household management: a primary profile acting for another
 			// profile on its own account. Without the token service a
 			// PIN-locked primary cannot widen rather than widening unguarded.
-			settingValuesHandler.ProfileTokens = profileTokenService
 			settingValuesHandler.SetAdminDefaults(adminDefaults)
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
@@ -1297,7 +1295,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
-		deviceHandler.ProfileTokens = profileTokenService
 		if deps.DB != nil {
 			deviceHandler.Connections = &connectionstore.Store{Pool: deps.DB}
 		}
@@ -1320,9 +1317,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else if deps.DB != nil {
 			libraryPlaybackPrefHandler.SetLibraryLookup(catalog.NewFolderRepository(deps.DB))
 		}
-	}
-	if deps.WatchProviderService != nil {
-		watchProviderHandler = handlers.NewWatchProviderHandler(deps.WatchProviderService)
 	}
 
 	// Build ratings handler if both repo and itemRepo are available.
@@ -1378,6 +1372,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
+		playbackHandler.ItemAccess = itemRepo
+		playbackHandler.EpisodeLookup = episodeRepo
+		playbackHandler.ExtraLookup = extraRepo
+		playbackHandler.OriginalLangLookup = itemRepo
+		playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
 			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
@@ -1998,6 +1997,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 		subtitleAIHandler.StoreProvider = deps.UserStoreProvider
 		subtitleAIHandler.LiveNotifier = subtitleAINotifier
 	}
+	if subtitleSearchHandler != nil && deps.FileRepo != nil && itemRepo != nil {
+		fileAuthorizer := &handlers.MediaFileAuthorizer{
+			FileResolver:  deps.FileRepo,
+			ItemAccess:    itemRepo,
+			EpisodeLookup: episodeRepo,
+			ExtraLookup:   extraRepo,
+		}
+		subtitleSearchHandler.FileAuthorizer = fileAuthorizer
+		if subtitleAIHandler != nil {
+			subtitleAIHandler.FileAuthorizer = fileAuthorizer
+		}
+	}
 
 	// Metadata AI translation (descriptions into the localization tables).
 	var metadataAIHandler *handlers.MetadataAIHandler
@@ -2029,6 +2040,29 @@ func newChiRouter(deps Dependencies) chi.Router {
 			})
 		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
+		if itemRepo != nil {
+			metadataAIHandler.ItemAccess = itemRepo
+			metadataAIHandler.SeasonLookup = seasonRepo
+			metadataAIHandler.EpisodeLookup = episodeRepo
+			if deps.FolderRepo != nil {
+				metadataAIHandler.Libraries = deps.FolderRepo
+			} else {
+				metadataAIHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+			}
+			if detailSvc != nil {
+				metadataAIHandler.Pending = detailSvc
+			}
+			metadataAIHandler.ItemLibraries = itemRepo
+			// The budget caps provider spend, so like the profile PIN
+			// limiter it counts in Redis whenever Redis is configured,
+			// whatever ratelimit.backend says, and per node only without
+			// Redis.
+			if deps.RedisClient != nil {
+				metadataAIHandler.Limiter = ratelimit.NewRedisLimiter(deps.RedisClient)
+			} else {
+				metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
+			}
+		}
 		// Wire the refresh fallback: libraries with auto_translate_metadata get
 		// missing localizations filled after each metadata refresh.
 		if mt, ok := deps.MetadataService.(interface {
@@ -2040,14 +2074,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Build section handler if DB is available.
 	var sectionHandler *handlers.SectionHandler
-	var sectionSettingsHandler *handlers.SectionSettingsHandler
-	var sectionBulkHandler *handlers.SectionBulkHandler
 	var libraryCollectionHandler *handlers.LibraryCollectionHandler
 	var libraryCollectionGroupHandler *handlers.LibraryCollectionGroupHandler
 	libraryCollectionService := deps.CollectionService
 	if deps.DB != nil {
 		sectionRepo := sections.NewRepository(deps.DB)
-		sectionBulkHandler = &handlers.SectionBulkHandler{Repo: sectionRepo}
 		sectionFetcher := sections.NewFetcher(deps.DB)
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
 		sectionFetcher.AdminDefaults = adminDefaults
@@ -2088,9 +2119,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if accessGroupStore != nil {
 			sectionHandler.AccessGroups = accessGroupStore
-		}
-		if settingsRepo != nil {
-			sectionSettingsHandler = &handlers.SectionSettingsHandler{}
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
@@ -2502,6 +2530,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsRepo,
 		compatUsers,
 	)
+	if authHandler != nil {
+		authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
+	}
+	if deps.Notifications != nil {
+		// Tokenized email links are built against the public URL, and
+		// notification artwork resolves through the detail service.
+		deps.Notifications.SetPublicURL(deps.PublicURL)
+		if detailSvc != nil {
+			deps.Notifications.SetImageResolver(detailSvc)
+		}
+	}
 	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, actingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
 	// Server identity is public discovery data, so it reads through the raw
@@ -2619,10 +2658,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		return observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/bandwidth-probe", handler.ServeHTTP)
 	}
 
-	var themeHandler *handlers.ThemeHandler
-	if settingsRepo != nil {
-		themeHandler = handlers.NewThemeHandler(settingsRepo)
-	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
 	}
@@ -2637,7 +2672,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -2691,7 +2726,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
 			})
 			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r)
 			})
 			v2deps.PlaybackMedia.SubtitleFonts = streamHandler
 		}
@@ -2831,7 +2866,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
-		v2deps.NotificationDiscordManagement = newDiscordNotificationsHandler(deps, profileTokenService)
+		v2deps.NotificationDiscordManagement = newDiscordNotificationsHandler(deps)
 		v2deps.NotificationEmailVerification = deps.Notifications.EmailVerification
 		v2deps.NotificationEmailLinks = handlers.NewEmailLinkHandler(deps.Notifications)
 		linkHandler := handlers.NewDiscordLinkHandler(deps.Notifications, deps.Notifications.Settings, deps.PublicURL)
@@ -2921,6 +2956,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 			jwtSecret = deps.Config.Auth.JWTSecret
 		}
 		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
+		// A re-probe stores the node's new inventory through the sweep's own
+		// refresh, so the drift and persist rules have one implementation.
+		// Without a health checker the node still re-probes and the row
+		// catches up on a later sweep.
+		if deps.NodeHealthChecker != nil {
+			nodeHandler.SetCapabilityRefresher(deps.NodeHealthChecker)
+		}
+		// An acceleration override change makes this server's cached view of
+		// the node wrong the moment it lands; the same invalidation the health
+		// sweep uses drops it.
+		nodeHandler.SetCapabilityInvalidator(deps.invalidateNodeCapabilities(playbackHandler))
+		// A node with no override of its own runs the cluster's acceleration
+		// policy, and how many devices that names is what decides how long
+		// its re-probe may take.
+		nodeHandler.SetClusterPlaybackPolicy(playbackHandler.PlaybackConfig)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
 		v2deps.AdminNodeDrain = nodeHandler
@@ -3158,1670 +3208,20 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveRoutes = deps.v2RouteSnapshot
 	r.Handle("/api/v2/*", apiv2.NewHandler(v2deps))
 
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", healthHandler.ServeHTTP)
-		r.Get("/ready", readyHandler.ServeHTTP)
-
-		// Branding handler is shared between the public read/serve endpoints
-		// (registered with the theme endpoints below) and the admin
-		// upload/delete endpoints (registered in the admin group).
-		var brandingHandler *handlers.BrandingHandler
-		if deps.BrandingService != nil {
-			brandingHandler = handlers.NewBrandingHandler(deps.BrandingService)
-		}
-
-		if webhookSyncHandler != nil {
-			r.Post("/plex-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
-			r.Post("/webhook-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
-		}
-
-		// Theme endpoints (admin-css is public for pre-login branding).
-		if settingsRepo != nil {
-			r.Get("/theme/admin-css", themeHandler.HandleAdminCSS)
-			if brandingHandler != nil {
-				// Public branding read + asset serving (pre-login white-label).
-				r.Get("/theme/branding", brandingHandler.HandleGetBranding)
-				r.Get("/branding/assets/{kind}", brandingHandler.HandleServeAsset)
-			}
-
-			// Catalog and download proxies require auth (to avoid open proxy).
-			if authMiddleware != nil {
-				r.Group(func(r chi.Router) {
-					r.Use(authMiddleware.RequireAuth)
-					r.Get("/theme/catalog", themeHandler.HandleCatalog)
-					r.Get("/theme/download", themeHandler.HandleDownload)
-					r.With(requireActingAdmin).Post("/theme/catalog/refresh", themeHandler.HandleCatalogRefresh)
-				})
-			}
-		}
-
-		if deps.PluginHTTPProxy != nil {
-			r.HandleFunc("/plugins/{installation_id}/*", func(w http.ResponseWriter, r *http.Request) {
-				installationID, err := strconv.Atoi(chi.URLParam(r, "installation_id"))
-				if err != nil {
-					http.Error(w, "invalid installation id", http.StatusBadRequest)
-					return
-				}
-				authenticated, admin, userID, profileID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo)
-				ctx := plugins.WithPluginAccessUser(r.Context(), authenticated, admin, userID, profileID)
-				deps.PluginHTTPProxy.ServeRoute(w, r.WithContext(ctx), installationID, authenticated, admin)
-			})
-			r.Get("/plugin-assets/{installation_id}/*", func(w http.ResponseWriter, r *http.Request) {
-				installationID, err := strconv.Atoi(chi.URLParam(r, "installation_id"))
-				if err != nil {
-					http.Error(w, "invalid installation id", http.StatusBadRequest)
-					return
-				}
-				assetPath := strings.TrimPrefix(chi.URLParam(r, "*"), "/")
-				if assetPath == "" {
-					http.NotFound(w, r)
-					return
-				}
-				authenticated, admin := resolveOptionalPluginAccess(r, jwtService, sessionRepo)
-				deps.PluginHTTPProxy.ServeAsset(w, r.WithContext(plugins.WithPluginAccess(r.Context(), authenticated, admin)), installationID, assetPath)
-			})
-		}
-
-		// Auth routes: public (no auth required).
-		if authHandler != nil {
-			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
-
-			if invitationService != nil {
-				r.Route("/invitations/{token}", func(r chi.Router) {
-					if deps.RateLimitMW != nil {
-						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Get("/", invitationHandler.HandleLookupInvitation)
-						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Post("/accept", invitationHandler.HandleAcceptInvitation)
-					} else {
-						r.Get("/", invitationHandler.HandleLookupInvitation)
-						r.Post("/accept", invitationHandler.HandleAcceptInvitation)
-					}
-				})
-			}
-
-			r.Route("/auth", func(r chi.Router) {
-				r.Get("/device/capability", authHandler.HandleDeviceCapability)
-				if deps.RateLimitMW != nil {
-					r.With(deps.RateLimitMW.AuthEndpointHandler("login")).Post("/login", authHandler.HandleLogin)
-					r.With(deps.RateLimitMW.AuthEndpointHandler("setup")).Post("/setup", authHandler.HandleSetup)
-					r.With(deps.RateLimitMW.AuthEndpointHandler("signup")).Post("/signup", authHandler.HandleSignup)
-				} else {
-					r.Post("/login", authHandler.HandleLogin)
-					r.Post("/setup", authHandler.HandleSetup)
-					r.Post("/signup", authHandler.HandleSignup)
-				}
-				r.Get("/setup", authHandler.HandleSetupStatus)
-				r.Get("/providers", authHandler.HandleProviders)
-				r.Post("/refresh", authHandler.HandleRefresh)
-				r.Get("/signup", authHandler.HandleSignupStatus)
-				if authMiddleware != nil {
-					r.With(
-						authMiddleware.RequireAuth,
-						optionalProfileViewerAccess(viewerAccessMiddleware),
-					).Post("/plugin-launch", authHandler.HandlePluginLaunch)
-				}
-				if oauthHandler != nil {
-					r.Post("/oauth/complete", oauthHandler.HandleComplete)
-					r.Route("/oauth/{install_id}", func(r chi.Router) {
-						r.Post("/init", oauthHandler.HandleInit)
-						r.Get("/callback", oauthHandler.HandleCallback)
-					})
-				}
-				if deps.RateLimitMW != nil {
-					r.With(deps.RateLimitMW.AuthEndpointHandler("device_start")).Post("/device/start", authHandler.HandleDeviceStart)
-					r.With(deps.RateLimitMW.AuthEndpointHandler("device_lookup")).Get("/device", authHandler.HandleDeviceLookup)
-					r.With(deps.RateLimitMW.AuthEndpointHandler("device_poll")).Post("/device/poll", authHandler.HandleDevicePoll)
-				} else {
-					r.Post("/device/start", authHandler.HandleDeviceStart)
-					r.Get("/device", authHandler.HandleDeviceLookup)
-					r.Post("/device/poll", authHandler.HandleDevicePoll)
-				}
-
-				// Device sign-in decisions take a user code, so they spend
-				// the lookup's guessing budget as well as authenticating.
-				var deviceDecisionMiddlewares []func(http.Handler) http.Handler
-				if deps.RateLimitMW != nil {
-					deviceDecisionMiddlewares = append(deviceDecisionMiddlewares, deps.RateLimitMW.AuthEndpointHandler("device_lookup"))
-				}
-
-				// Protected auth routes (require valid session).
-				if authMiddleware != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(authMiddleware.RequireAuth)
-						r.Post("/logout", authHandler.HandleLogout)
-						r.Post("/impersonation/end", authHandler.HandleEndImpersonation)
-						r.Get("/me", authHandler.HandleMe)
-						r.Get("/sessions", authHandler.HandleListSessions)
-						r.Delete("/sessions/{id}", authHandler.HandleDeleteSession)
-						r.With(optionalProfileViewerAccess(viewerAccessMiddleware)).
-							Get("/account/capability", authHandler.HandleAccountPasswordCapability)
-						passwordChangeMiddlewares := []func(http.Handler) http.Handler{
-							optionalProfileViewerAccess(viewerAccessMiddleware),
-						}
-						if deps.RateLimitMW != nil {
-							passwordChangeMiddlewares = append(
-								passwordChangeMiddlewares,
-								deps.RateLimitMW.AuthEndpointHandler("password_change"),
-							)
-						}
-						r.With(passwordChangeMiddlewares...).
-							Post("/account/password", authHandler.HandleChangePassword)
-						r.With(deviceDecisionMiddlewares...).Post("/device/approve", authHandler.HandleDeviceApprove)
-						r.With(deviceDecisionMiddlewares...).Post("/device/deny", authHandler.HandleDeviceDeny)
-					})
-					if viewerAccessMiddleware != nil {
-						r.With(
-							authMiddleware.RequireAuth,
-							viewerAccessMiddleware.RequireViewerAccess,
-						).With(deviceDecisionMiddlewares...).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
-					}
-				}
-			})
-		}
-
-		// Autoscan webhook intake: public — Sonarr/Radarr POST here without a
-		// Silo session; the URL's bearer token authenticates the delivery and
-		// maps it to its Autoscan source. Rate limited per-IP (plus the
-		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
-		if autoscanHandler != nil {
-			if deps.RateLimitMW != nil {
-				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).
-					Post("/autoscan/webhooks/{token}", autoscanHandler.HandleWebhookDelivery)
-			} else {
-				r.Post("/autoscan/webhooks/{token}", autoscanHandler.HandleWebhookDelivery)
-			}
-		}
-
-		// Discord account-link OAuth callback: public — Discord redirects the
-		// browser here without credentials; the one-time link-state row
-		// authenticates the request and maps it back to the initiating
-		// account. The static path coexists with the authenticated
-		// /notifications subrouter below (static routes win in chi).
-		var discordNotificationsHandler *handlers.DiscordNotificationsHandler
-		if deps.Notifications != nil {
-			discordNotificationsHandler = newDiscordNotificationsHandler(deps, profileTokenService)
-			if deps.OnConfigChange != nil {
-				h := discordNotificationsHandler
-				deps.OnConfigChange(func(_, updated *config.Config) { h.SetPublicURL(updated.Server.PublicURL) })
-			}
-			r.Get("/notifications/discord/link/callback", discordNotificationsHandler.HandleLinkCallback)
-
-			// Tokenized email links: public — clicked from mail clients on
-			// devices without a Silo session; the single-use token (verify)
-			// or per-profile capability token (unsubscribe) authenticates the
-			// request. Static paths coexist with the authenticated
-			// /notifications subrouter below, same as the Discord callback.
-			deps.Notifications.SetPublicURL(deps.PublicURL)
-			emailLinkHandler := handlers.NewEmailLinkHandler(deps.Notifications)
-			r.Get("/notifications/email/verify", emailLinkHandler.HandleVerify)
-			r.Get("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
-			r.Post("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
-		}
-
-		// API key management routes (auth only, no viewer access needed).
-		if apiKeyRepo != nil && authMiddleware != nil {
-			r.Group(func(r chi.Router) {
-				r.Use(authMiddleware.RequireAuth)
-				if demoGuard != nil {
-					r.Use(demoGuard.Guard)
-				}
-
-				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
-				r.Route("/api-keys", func(r chi.Router) {
-					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
-					r.Get("/", apiKeyHandler.HandleListAPIKeys)
-					r.Get("/scopes", apiKeyHandler.HandleListAPIKeyScopes)
-					r.Delete("/{id}", apiKeyHandler.HandleDeleteAPIKey)
-				})
-			})
-		}
-
-		// Client diagnostics are account-scoped and must work before profile
-		// selection, so this route intentionally uses auth only plus the
-		// generic rate limiter, not viewer/profile middleware.
-		if diagnosticsHandler != nil && authMiddleware != nil {
-			r.Group(func(r chi.Router) {
-				r.Use(authMiddleware.RequireAuth)
-				// Demo mode blocks non-admin report uploads (a write to the
-				// private bucket and DB); the read-only status endpoint stays
-				// available because DemoGuard always lets GETs through.
-				if demoGuard != nil {
-					r.Use(demoGuard.Guard)
-				}
-				if deps.RateLimitMW != nil {
-					r.Use(deps.RateLimitMW.Handler)
-				}
-				r.Route("/diagnostics", func(r chi.Router) {
-					r.Get("/status", diagnosticsHandler.HandleStatus)
-					r.Post("/reports", diagnosticsHandler.HandleUpload)
-					// Chunked fallback for bundles a fronting proxy's
-					// request-body cap rejects as one request. Same
-					// ingest/validation path; see diagnostics_chunked.go.
-					r.Route("/reports/uploads", func(r chi.Router) {
-						r.Post("/", diagnosticsHandler.HandleChunkedUploadInit)
-						r.Put("/{upload_id}/chunks/{chunk_index}", diagnosticsHandler.HandleChunkedUploadChunk)
-						r.Post("/{upload_id}/complete", diagnosticsHandler.HandleChunkedUploadComplete)
-						r.Delete("/{upload_id}", diagnosticsHandler.HandleChunkedUploadAbort)
-					})
-				})
-			})
-		}
-
-		// Compatibility-listener connection details. Account-scoped like
-		// diagnostics above: the settings card that renders this describes how
-		// to sign in, so it must not depend on a profile already being chosen.
-		if authMiddleware != nil {
-			r.Group(func(r chi.Router) {
-				r.Use(authMiddleware.RequireAuth)
-				if deps.RateLimitMW != nil {
-					r.Use(deps.RateLimitMW.Handler)
-				}
-				r.Get("/compat/connect-info", compatConnectInfoHandler.HandleGetConnectInfo)
-			})
-		}
-
-		// Apple notification display metadata: authenticated by either the
-		// normal access token or the long-lived display token minted at Apple
-		// push registration. Sits outside the RequireAuth group because the
-		// display token is not an access token; RequireApplePushDisplayAuth
-		// still validates the session and binds the profile from the claims.
-		if authMiddleware != nil && deps.Notifications != nil {
-			// The route only left the authenticated group to accept the
-			// display token. Both credential paths share the same
-			// post-auth chain: the limiter (per-API-key budgets need
-			// claims), then viewer access so a deleted or foreign profile
-			// is rejected and rejected resolutions still consume budget.
-			// The limiter also runs once before auth: a display token lives
-			// as long as a refresh token, so its session lookup must not be
-			// reachable outside the global and per-IP budgets.
-			var limiter func(http.Handler) http.Handler
-			if deps.RateLimitMW != nil {
-				limiter = deps.RateLimitMW.Handler
-			}
-			postAuth := func(next http.Handler) http.Handler {
-				chain := apimw.RequireProfile(next)
-				if viewerAccessMiddleware != nil {
-					chain = viewerAccessMiddleware.RequireViewerAccess(chain)
-				}
-				if limiter != nil {
-					chain = limiter(chain)
-				}
-				return chain
-			}
-			standardDisplayAuth := func(next http.Handler) http.Handler {
-				return authMiddleware.RequireAuth(postAuth(next))
-			}
-			displayMiddlewares := []func(http.Handler) http.Handler{}
-			if limiter != nil {
-				displayMiddlewares = append(displayMiddlewares, limiter)
-			}
-			displayMiddlewares = append(displayMiddlewares,
-				authMiddleware.RequireApplePushDisplayAuth(standardDisplayAuth, postAuth))
-			r.With(displayMiddlewares...).Get(
-				"/notifications/push/apple/display/{delivery_id}",
-				handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub).HandleApplePushDisplay,
-			)
-		}
-
-		// All remaining routes require auth.
-		if authMiddleware != nil {
-			r.Group(func(r chi.Router) {
-				r.Use(authMiddleware.RequireAuth)
-				if demoGuard != nil {
-					r.Use(demoGuard.Guard)
-				}
-				if deps.RateLimitMW != nil {
-					r.Use(deps.RateLimitMW.Handler)
-				}
-				if viewerAccessMiddleware != nil {
-					r.Use(viewerAccessMiddleware.RequireViewerAccess)
-				}
-				// v1 bridge fix: the profile-optional viewer reads below
-				// refuse a request without X-Profile-Id when the account
-				// has a PIN-protected or access-restricted profile, which
-				// account scope would otherwise bypass. Capability probes,
-				// profile selection, and account routes stay
-				// profile-optional; see apimw.HouseholdProfileGate. It is
-				// wired with viewer access: without a user store neither runs.
-				householdProfileGate := func(next http.Handler) http.Handler { return next }
-				if viewerAccessMiddleware != nil {
-					householdProfileGate = apimw.NewHouseholdProfileGate(deps.UserStoreProvider).Require
-				}
-
-				// User-facing library route (all authenticated users).
-				if libraryHandler != nil {
-					r.Get("/user/libraries", libraryHandler.HandleListUserLibraries)
-				}
-				if deps.EventsHub != nil {
-					eventsHandler := handlers.NewEventsHandler(
-						deps.EventsHub,
-						adminJobsHandler,
-						adminHandler,
-						deps.TaskManager,
-						deps.ScanRegistry,
-						deps.LibraryScanQueue,
-						historyImportSvc,
-					)
-					eventsHandler.SetNotificationsSystem(deps.Notifications)
-					if sessionRepo != nil {
-						eventsHandler.SetSessionRoles(sessionRepo)
-					}
-					eventsHandler.SetProfileVerifier(viewerResolver)
-					r.Get("/events/ws", eventsHandler.HandleWebSocket)
-					r.Get("/events/capability", eventsHandler.HandleCapability)
-				}
-
-				// Artwork size selection. Static: the answer depends only on
-				// the server's variant ladder, not on the caller.
-				r.Get("/images/capability", handlers.HandleImagesCapability)
-
-				// User notifications: profile-scoped inbox, preferences, and
-				// the websocket handshake ticket.
-				if deps.Notifications != nil {
-					if detailSvc != nil {
-						deps.Notifications.SetImageResolver(detailSvc)
-					}
-					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
-					notificationsHandler.SetApplePushDisplayTokenIssuer(jwtService)
-					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
-					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
-					// Discord DM channel: the linked identity and mode hang off
-					// the login account. Writes require the household manager
-					// in the handler; the optional profile routes stay outside
-					// the RequireProfile subrouter below (static paths coexist
-					// with it, same as the public email-link routes above).
-					if discordNotificationsHandler != nil {
-						r.Get("/notifications/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
-						r.Put("/notifications/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)
-						r.Delete("/notifications/discord-link", discordNotificationsHandler.HandleUnlink)
-						r.Post("/notifications/discord/link/init", discordNotificationsHandler.HandleLinkInit)
-					}
-					r.Route("/notifications", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", notificationsHandler.HandleList)
-						r.Get("/sync", notificationsHandler.HandleSync)
-						r.Get("/unread-count", notificationsHandler.HandleUnreadCount)
-						r.Get("/capability", notificationsHandler.HandleCapability)
-						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
-						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
-						// Platform-generic registration used by the Android
-						// client; Apple keeps its dedicated route above.
-						r.Post("/push/devices", notificationsHandler.HandleRegisterPushDevice)
-						r.Delete("/push/devices/{device_id}", notificationsHandler.HandleUnregisterPushDevice)
-						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
-						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
-						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
-						r.Delete("/email-preferences/address", notificationsHandler.HandleClearEmailAddress)
-						r.Post("/read-all", notificationsHandler.HandleReadAll)
-						r.Route("/webhooks", func(r chi.Router) {
-							r.Get("/", notificationsHandler.HandleListWebhooks)
-							r.Post("/", notificationsHandler.HandleCreateWebhook)
-							r.Put("/{id}", notificationsHandler.HandleUpdateWebhook)
-							r.Delete("/{id}", notificationsHandler.HandleDeleteWebhook)
-							r.Post("/{id}/rotate-secret", notificationsHandler.HandleRotateWebhookSecret)
-							r.Post("/{id}/test", notificationsHandler.HandleTestWebhook)
-						})
-						r.Route("/web-push", func(r chi.Router) {
-							r.Get("/subscriptions", notificationsHandler.HandleWebPushList)
-							r.Post("/subscriptions", notificationsHandler.HandleWebPushSubscribe)
-							r.Delete("/subscriptions/{id}", notificationsHandler.HandleWebPushDelete)
-							r.Post("/unsubscribe", notificationsHandler.HandleWebPushUnsubscribe)
-						})
-						r.Get("/{id}", notificationsHandler.HandleGet)
-						r.Post("/{id}/read", notificationsHandler.HandleMarkRead)
-					})
-				}
-
-				// Marker reads for any authenticated viewer; writes require the
-				// marker_edit permission, decided by the policy PDP. Users fix
-				// and create intro/recap/credits/preview markers from the
-				// player. Writes are stamped source="manual" and contributed to
-				// enabled providers in the background. Contribution + provider
-				// config stay admin-only (see the /admin group below).
-				if markersHandler != nil && markerEditAccess != nil {
-					r.Route("/markers", func(r chi.Router) {
-						r.Use(householdProfileGate)
-						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
-						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
-						r.Group(func(r chi.Router) {
-							r.Use(markerEditAccess)
-							r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
-							r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
-							r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
-						})
-					})
-				}
-
-				// Library management routes (admin-only).
-				if libraryHandler != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(requireActingAdmin)
-
-						r.Route("/libraries", func(r chi.Router) {
-							r.Get("/", libraryHandler.HandleListLibraries)
-							r.Get("/roots", libraryHandler.HandleListRoots)
-							r.Put("/roots/override", libraryHandler.HandleUpsertRootOverride)
-							r.Delete("/roots/override", libraryHandler.HandleDeleteRootOverride)
-							r.Get("/skipped-roots", libraryHandler.HandleListSkippedRoots)
-							r.Get("/stale-ids", libraryHandler.HandleListStaleIDs)
-							r.Post("/stale-ids/{contentID}/rematch", libraryHandler.HandleRematchStaleID)
-							r.Get("/unmatched-items", libraryHandler.HandleListUnmatchedItems)
-							r.Get("/metadata-match-queue", libraryHandler.HandleListMetadataMatchQueues)
-							r.Post("/", libraryHandler.HandleCreateLibrary)
-							r.Put("/reorder", libraryHandler.HandleReorderLibraries)
-							r.Put("/{id}", libraryHandler.HandleUpdateLibrary)
-							r.Delete("/{id}", libraryHandler.HandleDeleteLibrary)
-							r.Post("/{id}/check-mount", libraryHandler.HandleCheckLibraryMount)
-							r.Post("/{id}/confirm-empty-root-cleanup", libraryHandler.HandleConfirmEmptyRootCleanup)
-							r.Get("/{id}/metadata-match-queue", libraryHandler.HandleGetMetadataMatchQueue)
-							r.Post("/{id}/metadata-match-queue/retry", libraryHandler.HandleRetryMetadataMatchQueue)
-							r.Post("/{id}/metadata-match-queue/cancel", libraryHandler.HandleCancelMetadataMatchQueue)
-							r.Post("/{id}/refresh-metadata", libraryHandler.HandleRefreshLibraryMetadata)
-							r.Get("/provider-defaults", libraryHandler.HandleGetLibraryProviderDefaults)
-							r.Get("/{id}/providers", libraryHandler.HandleGetLibraryProviders)
-							r.Put("/{id}/providers", libraryHandler.HandleSetLibraryProviders)
-							r.Put("/{id}/poster", libraryHandler.HandleUploadPoster)
-							r.Delete("/{id}/poster", libraryHandler.HandleDeletePoster)
-						})
-
-						r.Post("/scan", libraryHandler.HandleScan)
-						r.Post("/scan/cancel", libraryHandler.HandleScanCancel)
-					})
-				}
-
-				// Browse, search, and item detail routes.
-				if itemsHandler != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(householdProfileGate)
-						r.Get("/catalog", catalogHandler.HandleGetCatalog)
-						r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
-						r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
-						r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
-						r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
-						if literaryWorkHandler != nil {
-							r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
-						}
-						if catalogResourceHandler != nil {
-							r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
-							r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
-							r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
-							r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
-							r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
-							r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
-							r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)
-						}
-						r.Get("/watch/{id}", itemsHandler.HandleGetWatchDetail)
-					})
-				}
-
-				if calendarRepo != nil {
-					r.With(apimw.RequireProfile).Get("/calendar", calendarHandler.HandleGetCalendar)
-				}
-
-				if peopleHandler != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(householdProfileGate)
-						r.Get("/people", peopleHandler.HandleSearch)
-						r.Get("/people/{id}", peopleHandler.HandleGetPerson)
-						r.Post("/people/{id}/refresh", peopleHandler.HandleRefreshPerson)
-					})
-				}
-
-				if libraryCollectionHandler != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(householdProfileGate)
-						r.Get("/library/{id}/collections", libraryCollectionHandler.HandleListLibraryCollections)
-						r.Get("/library/{id}/collections/{collection_id}/items", libraryCollectionHandler.HandleGetLibraryCollectionItems)
-						r.Get("/library/{id}/user-collections", libraryCollectionHandler.HandleListLibraryUserCollections)
-					})
-				}
-
-				// Profile routes.
-				if profileHandler != nil {
-					r.Route("/profiles", func(r chi.Router) {
-						r.Get("/household/sessions", profileHandler.HandleListHouseholdSessions)
-						r.Get("/", profileHandler.HandleListProfiles)
-						r.Post("/", profileHandler.HandleCreateProfile)
-						r.Put("/{id}", profileHandler.HandleUpdateProfile)
-						r.Delete("/{id}", profileHandler.HandleDeleteProfile)
-						r.Put("/{id}/avatar", profileHandler.HandleUploadAvatar)
-						r.Delete("/{id}/avatar", profileHandler.HandleDeleteAvatar)
-						r.Post("/{id}/verify-pin", profileHandler.HandleVerifyPIN)
-					})
-				}
-
-				// The viewer's own device registry. Distinct from the push
-				// device routes under /notifications and from the TV login
-				// pairing flow under /auth/device: this is the installation
-				// identity that carries device-scoped settings.
-				if deviceHandler != nil {
-					r.Route("/devices", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", deviceHandler.HandleListDevices)
-						r.Delete("/{device_id}", deviceHandler.HandleForgetDevice)
-						r.Delete("/{device_id}/settings", deviceHandler.HandleClearDeviceSettings)
-					})
-				}
-
-				// Favorites, watchlist, and history routes (profile-scoped).
-				if personalDataHandler != nil && itemsHandler != nil {
-					r.Route("/watched", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Post("/{id}", itemsHandler.HandleMarkWatched)
-						r.Delete("/{id}", itemsHandler.HandleMarkUnwatched)
-					})
-
-					r.Route("/favorites", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", personalDataHandler.HandleListFavorites)
-						r.Get("/{item_id}", personalDataHandler.HandleCheckFavorite)
-						r.Put("/{item_id}", personalDataHandler.HandleAddFavorite)
-						r.Delete("/{item_id}", personalDataHandler.HandleRemoveFavorite)
-					})
-
-					r.Route("/watchlist", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", personalDataHandler.HandleListWatchlist)
-						r.Get("/{item_id}", personalDataHandler.HandleCheckWatchlist)
-						r.Put("/{item_id}", personalDataHandler.HandleAddToWatchlist)
-						r.Delete("/{item_id}", personalDataHandler.HandleRemoveFromWatchlist)
-					})
-
-					r.Route("/history", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", personalDataHandler.HandleListHistory)
-						r.Post("/remove", personalDataHandler.HandleRemoveHistory)
-					})
-
-					// Ratings routes (profile-scoped).
-					if ratingsHandler != nil {
-						r.Route("/ratings", func(r chi.Router) {
-							r.Use(apimw.RequireProfile)
-							r.Get("/", ratingsHandler.HandleListRatings)
-							r.Get("/{item_id}", ratingsHandler.HandleGetRating)
-							r.Put("/{item_id}", ratingsHandler.HandleSetRating)
-							r.Delete("/{item_id}", ratingsHandler.HandleDeleteRating)
-						})
-					}
-				}
-
-				// Progress and sync routes (profile-scoped).
-				if progressHandler != nil {
-					r.Route("/progress", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", progressHandler.HandleListProgress)
-					})
-
-					r.Route("/sync", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Post("/progress", progressHandler.HandleSyncProgress)
-					})
-				}
-
-				// Collection routes (profile-scoped).
-				if collectionHandler != nil {
-					r.Route("/collections", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", collectionHandler.HandleListCollections)
-						r.Get("/capabilities", collectionHandler.HandleCapabilities)
-						r.Put("/sort-preference", collectionHandler.HandleSetCollectionSortPreference)
-						r.Delete("/sort-preference", collectionHandler.HandleClearCollectionSortPreference)
-						if libraryCollectionHandler != nil {
-							// Aggregated server (admin-curated) collections across
-							// every accessible library. Separate from "/" (personal,
-							// editable) by design — different access + cache lifecycle.
-							r.Get("/server", libraryCollectionHandler.HandleListServerCollections)
-						}
-						r.Post("/", collectionHandler.HandleCreateCollection)
-						r.Post("/preview", collectionHandler.HandlePreviewCollection)
-						r.Put("/order", collectionHandler.HandleReorderCollections)
-						r.Post("/groups", collectionHandler.HandleCreateCollectionGroup)
-						r.Put("/groups/order", collectionHandler.HandleReorderCollectionGroups)
-						r.Put("/groups/{id}", collectionHandler.HandleUpdateCollectionGroup)
-						r.Delete("/groups/{id}", collectionHandler.HandleDeleteCollectionGroup)
-						if userImportHandler != nil {
-							r.Get("/templates", userImportHandler.HandleListTemplates)
-							r.Get("/import/mdblist/search", userImportHandler.HandleSearchMDBList)
-							r.Get("/import/mdblist/top", userImportHandler.HandleTopMDBList)
-							r.Post("/import/mdblist", userImportHandler.HandleImportMDBList)
-							r.Post("/import/tmdb", userImportHandler.HandleImportTMDB)
-							r.Post("/import/trakt", userImportHandler.HandleImportTrakt)
-							r.Post("/{id}/sync", userImportHandler.HandleSync)
-						}
-						r.Put("/{id}", collectionHandler.HandleUpdateCollection)
-						r.Delete("/{id}", collectionHandler.HandleDeleteCollection)
-						r.Delete("/{id}/image", collectionHandler.HandleDeleteCollectionImage)
-						r.Get("/{id}/items", collectionHandler.HandleListCollectionItems)
-						r.Put("/{id}/items/order", collectionHandler.HandleReorderCollectionItems)
-						r.Put("/{id}/items/{item_id}", collectionHandler.HandleAddCollectionItem)
-						r.Delete("/{id}/items/{item_id}", collectionHandler.HandleRemoveCollectionItem)
-					})
-				}
-
-				if homeDismissalHandler != nil {
-					r.Route("/home/dismissals", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Put("/{surface}/{item_id}", homeDismissalHandler.HandleUpsertDismissal)
-						r.Delete("/{surface}/{item_id}", homeDismissalHandler.HandleDeleteDismissal)
-					})
-				}
-
-				if watchProviderHandler != nil {
-					r.Route("/watch-providers", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", watchProviderHandler.HandleListProviders)
-						r.Get("/{provider}/connection", watchProviderHandler.HandleGetConnection)
-						r.Patch("/{provider}/connection", watchProviderHandler.HandleUpdateConnection)
-						r.Delete("/{provider}/connection", watchProviderHandler.HandleDeleteConnection)
-						r.Post("/{provider}/auth/device-code", watchProviderHandler.HandleStartDeviceAuth)
-						r.Post("/{provider}/auth/poll", watchProviderHandler.HandlePollDeviceAuth)
-						r.Post("/{provider}/auth/api-key", watchProviderHandler.HandleConnectAPIKey)
-						r.Post("/{provider}/sync", watchProviderHandler.HandleManualSync)
-						r.Get("/{provider}/sync-runs", watchProviderHandler.HandleListSyncRuns)
-					})
-				}
-
-				if requestHandler != nil {
-					r.Route("/requests", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/search", requestHandler.HandleSearch)
-						r.Get("/discover", requestHandler.HandleDiscover)
-						r.Get("/discover/studios", requestHandler.HandleListStudios)
-						r.Get("/discover/networks", requestHandler.HandleListNetworks)
-						r.Get("/discover/genres", requestHandler.HandleListGenres)
-						r.Get("/discover/browse/studio/{slug}", requestHandler.HandleBrowseStudio)
-						r.Get("/discover/browse/network/{slug}", requestHandler.HandleBrowseNetwork)
-						r.Get("/discover/browse/genre/{slug}", requestHandler.HandleBrowseGenre)
-						r.Get("/discover/{section}", requestHandler.HandleDiscoverSection)
-						r.Get("/detail/{media_type}/{tmdb_id}", requestHandler.HandleGetDetail)
-						r.Get("/status", requestHandler.HandleGetStatus)
-						r.Post("/", requestHandler.HandleCreate)
-						r.Get("/mine", requestHandler.HandleListMine)
-						r.Get("/{id}", requestHandler.HandleGet)
-						r.Post("/{id}/cancel", requestHandler.HandleCancel)
-					})
-				}
-
-				// Onboarding tour routes (profile-scoped).
-				if onboardingHandler != nil {
-					r.Route("/onboarding", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/flow", onboardingHandler.HandleGetFlow)
-						r.Get("/state", onboardingHandler.HandleGetState)
-						r.Post("/progress", onboardingHandler.HandlePostProgress)
-					})
-				}
-
-				// Settings routes (user-scoped, no profile required).
-				if settingsHandler != nil {
-					r.Route("/settings", func(r chi.Router) {
-						if deps.PluginUserConfig != nil && deps.PluginService != nil {
-							r.Get("/plugins", userPluginSettingsHandler.HandleListUserPluginSettings)
-							r.Get("/plugins/{installation_id}", userPluginSettingsHandler.HandleGetUserPluginSettings)
-							r.Put("/plugins/{installation_id}", userPluginSettingsHandler.HandlePutUserPluginSettings)
-						}
-						r.Get("/", settingsHandler.HandleListSettings)
-						r.Get("/overlay-config", settingsHandler.HandleGetOverlayConfig)
-						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireProfile)
-							r.Get("/effective", settingsHandler.HandleGetEffectiveSettings)
-							r.Get("/subtitle_appearance/effective", settingsHandler.HandleGetEffectiveSubtitleAppearance)
-							r.Put("/device/subtitle_appearance", settingsHandler.HandleSetSubtitleAppearanceDeviceOverride)
-							r.Delete("/device/subtitle_appearance", settingsHandler.HandleDeleteSubtitleAppearanceDeviceOverride)
-							r.Get("/device/{key}", settingsHandler.HandleGetDeviceSetting)
-							r.Put("/device/{key}", settingsHandler.HandleSetDeviceSetting)
-							r.Delete("/device/{key}", settingsHandler.HandleDeleteDeviceSetting)
-						})
-						// The canonical settings API. Registered before the
-						// catch-all /{key} routes below, which would otherwise
-						// swallow "contract" and "values" as setting names.
-						if settingValuesHandler != nil {
-							r.Get("/contract", settingValuesHandler.HandleGetContract)
-							r.Get("/contract/capabilities", settingValuesHandler.HandleGetCapabilities)
-							// The contract spec names these paths, and a new
-							// client detects a pre-contract server by the
-							// absence of GET /settings/manifest — a 404 here
-							// would read as "this server still needs
-							// upgrading" forever.
-							r.Get("/manifest", settingValuesHandler.HandleGetContract)
-							r.Get("/capability", settingValuesHandler.HandleGetCapabilities)
-							r.Group(func(r chi.Router) {
-								r.Use(apimw.RequireProfile)
-								r.Get("/values", settingValuesHandler.HandleGetValues)
-								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
-								r.Post("/values/effective", settingValuesHandler.HandlePostEffective)
-								r.Put("/values/nav.shortcuts/item", settingValuesHandler.HandleSetNavigationShortcut)
-								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
-								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)
-								r.Delete("/values/{key}", settingValuesHandler.HandleDeleteValue)
-							})
-						}
-
-						r.Get("/{key}", settingsHandler.HandleGetSetting)
-						r.Put("/{key}", settingsHandler.HandleSetSetting)
-						r.Delete("/{key}", settingsHandler.HandleDeleteSetting)
-					})
-				}
-
-				if historyImportHandler != nil {
-					r.Route("/history-imports", func(r chi.Router) {
-						r.Get("/sources", historyImportHandler.HandleListSources)
-						r.Post("/emby-connect/login", historyImportHandler.HandleLoginConnect)
-						r.Post("/plex/auth/pin", historyImportHandler.HandleCreatePlexPin)
-						r.Post("/plex/auth/check", historyImportHandler.HandleCheckPlexPin)
-						r.Get("/runs", historyImportHandler.HandleListRuns)
-						r.Post("/runs", historyImportHandler.HandleCreateRun)
-						r.Get("/runs/{id}", historyImportHandler.HandleGetRun)
-					})
-				}
-				if webhookSyncHandler != nil {
-					r.Route("/plex-sync", func(r chi.Router) {
-						r.Get("/connections", webhookSyncHandler.HandleLegacyListConnections)
-						r.Post("/connections", webhookSyncHandler.HandleLegacyCreateConnection)
-						r.Delete("/connections/{id}", webhookSyncHandler.HandleLegacyDeleteConnection)
-						r.Post("/connections/{id}/webhook/rotate", webhookSyncHandler.HandleLegacyRotateWebhook)
-						r.Get("/connections/{id}/actors", webhookSyncHandler.HandleLegacyGetActors)
-						r.Put("/connections/{id}/actors", webhookSyncHandler.HandleLegacyUpdateActors)
-					})
-					r.Route("/webhook-sync", func(r chi.Router) {
-						r.Get("/connections", webhookSyncHandler.HandleListConnections)
-						r.Post("/connections", webhookSyncHandler.HandleCreateConnection)
-						r.Put("/connections/{id}", webhookSyncHandler.HandleUpdateConnection)
-						r.Delete("/connections/{id}", webhookSyncHandler.HandleDeleteConnection)
-						r.Post("/connections/{id}/webhook/rotate", webhookSyncHandler.HandleRotateWebhook)
-						r.Get("/connections/{id}/events", webhookSyncHandler.HandleListEvents)
-						r.Get("/connections/{id}/profile-mappings", webhookSyncHandler.HandleGetProfileMappings)
-						r.Put("/connections/{id}/profile-mappings", webhookSyncHandler.HandleUpdateProfileMappings)
-					})
-				}
-
-				// Subtitle preference routes (profile-scoped).
-				if subtitlePrefHandler != nil {
-					r.Route("/subtitle-prefs", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/{series_id}", subtitlePrefHandler.HandleGetSubtitlePref)
-						r.Put("/{series_id}", subtitlePrefHandler.HandleSetSubtitlePref)
-						r.Delete("/{series_id}", subtitlePrefHandler.HandleDeleteSubtitlePref)
-					})
-				}
-
-				// Audio preference routes (profile-scoped).
-				if audioPrefHandler != nil {
-					r.Route("/audio-prefs", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/{series_id}", audioPrefHandler.HandleGetAudioPref)
-						r.Put("/{series_id}", audioPrefHandler.HandleSetAudioPref)
-						r.Delete("/{series_id}", audioPrefHandler.HandleDeleteAudioPref)
-					})
-				}
-
-				// Library playback preference routes (profile-scoped).
-				if libraryPlaybackPrefHandler != nil {
-					r.Route("/library-playback-prefs", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", libraryPlaybackPrefHandler.HandleListLibraryPlaybackPrefs)
-						r.Put("/{library_id}", libraryPlaybackPrefHandler.HandleSetLibraryPlaybackPref)
-						r.Delete("/{library_id}", libraryPlaybackPrefHandler.HandleDeleteLibraryPlaybackPref)
-					})
-				}
-
-				if ebookReaderHandler != nil {
-					r.Route("/ebooks", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
-						r.Get("/{content_id}/files/{file_id}/read", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/ebooks/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile))
-						r.Head("/{content_id}/files/{file_id}/read", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/ebooks/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile))
-						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
-						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
-						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
-						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
-						r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
-						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
-						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
-						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
-					})
-				}
-
-				// Metadata AI translation availability probe (the metadata editor
-				// and detail pages show or hide their translate actions based on
-				// this) plus the viewer-facing on-view translation trigger.
-				if metadataAIHandler != nil {
-					r.Get("/metadata/ai/status", metadataAIHandler.HandleStatus)
-					if itemRepo != nil {
-						metadataAIHandler.ItemAccess = itemRepo
-						metadataAIHandler.SeasonLookup = seasonRepo
-						metadataAIHandler.EpisodeLookup = episodeRepo
-						if deps.FolderRepo != nil {
-							metadataAIHandler.Libraries = deps.FolderRepo
-						} else if deps.DB != nil {
-							metadataAIHandler.Libraries = catalog.NewFolderRepository(deps.DB)
-						}
-						if detailSvc != nil {
-							metadataAIHandler.Pending = detailSvc
-						}
-						metadataAIHandler.ItemLibraries = itemRepo
-						// The budget caps provider spend, so like the profile
-						// PIN limiter it counts in Redis whenever Redis is
-						// configured, whatever ratelimit.backend says, and per
-						// node only without Redis.
-						if deps.RedisClient != nil {
-							metadataAIHandler.Limiter = ratelimit.NewRedisLimiter(deps.RedisClient)
-						} else {
-							metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
-						}
-						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
-					}
-				} else {
-					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
-				}
-
-				// Viewer-facing trailer fetch. Registered beside the on-view
-				// translation trigger because it is the same shape: a
-				// non-admin, item-scoped metadata action guarded by item
-				// access plus a per-user limiter, with the real budget being
-				// the per-item cooldown the metadata service enforces.
-				//
-				// The action route is conditional (it needs the metadata
-				// service to implement the optional interface), so the
-				// capability probe beside it is not: per the v1 rules a client
-				// feature-detects rather than version-sniffs, and a probe that
-				// itself 404s would leave it interpreting the same ambiguous
-				// status it was meant to replace. Unwired, the probe answers
-				// refresh:false.
-				if itemsHandler != nil && itemRepo != nil {
-					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
-						// Share the process's configured limiter so the
-						// per-user budget is one budget on Redis deployments
-						// rather than one per instance. Nil when rate limiting
-						// is disabled; the handler then keeps its private
-						// in-memory fallback.
-						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
-						itemsHandler.SetTrailerRefreshRequester(requester)
-						r.With(householdProfileGate).Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
-					}
-					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
-				}
-
-				// Subtitle search + AI translation routes.
-				if subtitleSearchHandler != nil {
-					if deps.FileRepo != nil && itemRepo != nil {
-						fileAuthorizer := &handlers.MediaFileAuthorizer{
-							FileResolver:  deps.FileRepo,
-							ItemAccess:    itemRepo,
-							EpisodeLookup: episodeRepo,
-							ExtraLookup:   extraRepo,
-						}
-						subtitleSearchHandler.FileAuthorizer = fileAuthorizer
-						if subtitleAIHandler != nil {
-							subtitleAIHandler.FileAuthorizer = fileAuthorizer
-						}
-					}
-					r.Route("/subtitles", func(r chi.Router) {
-						// Capability probe for external subtitle search. Two
-						// segments on purpose: a bare /providers would shadow
-						// the /{media_file_id} route below, while
-						// /providers/status never competes with it in chi.
-						r.Get("/providers/status", subtitleSearchHandler.HandleProviderStatus)
-						// The probes and the file-less language detection
-						// do not authorize against the viewer scope.
-						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
-						if subtitleAIHandler != nil {
-							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
-							r.Get("/ai/quota", subtitleAIHandler.HandleQuota)
-						} else {
-							// Answer the capability probe with 200 {"enabled": false}
-							// when AI translation isn't wired, so the client gets a
-							// clean negative instead of a 404.
-							r.Get("/ai/status", handlers.WriteSubtitleAIDisabledStatus)
-						}
-						// Media-file actions authorize against the viewer
-						// scope, so they take the household gate.
-						r.Group(func(r chi.Router) {
-							r.Use(householdProfileGate)
-							r.Post("/search", subtitleSearchHandler.HandleSearch)
-							r.Post("/download", subtitleSearchHandler.HandleDownload)
-							r.Post("/upload", subtitleSearchHandler.HandleUpload)
-							if subtitleAIHandler != nil {
-								r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
-								r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
-								r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
-								r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
-							}
-							r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
-							r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
-						})
-					})
-				} else {
-					// The whole group above is conditional (it needs the DB,
-					// S3 and the subtitle repo), so on a storage-less
-					// deployment the capability probe would 404 — leaving a
-					// client to interpret the same ambiguous status the probe
-					// exists to replace. Mount the probe alone, answering
-					// enabled:false, so feature detection always gets a real
-					// answer.
-					r.Route("/subtitles", func(r chi.Router) {
-						r.Get("/providers/status", handlers.WriteSubtitleProvidersDisabledStatus)
-					})
-				}
-
-				// Playback routes.
-				if playbackHandler != nil {
-					playbackHandler.ItemAccess = itemRepo
-					playbackHandler.EpisodeLookup = episodeRepo
-					playbackHandler.ExtraLookup = extraRepo
-					playbackHandler.OriginalLangLookup = itemRepo
-					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
-
-					r.Route("/playback", func(r chi.Router) {
-						r.Get("/capability", playbackHandler.HandlePlaybackCapabilityV3)
-						// HLS transcode delivery. Legacy sessions treat the UUID
-						// as a bearer capability; negotiated V3 sessions require
-						// the authenticated owner inside the handler.
-						r.Get("/transcode/{session_id}/master.m3u8", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest))
-						r.Get("/transcode/{session_id}/segment/{name}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment))
-
-						// Playback realtime control socket — needs auth but not profile.
-						r.Get("/sessions/{session_id}/control/ws", playbackHandler.HandleSessionWebSocket)
-
-						// All mutation routes require profile auth.
-						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireProfile)
-							r.Post("/start", playbackHandler.HandleStartPlayback)
-							r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
-							r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
-							r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
-							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
-						})
-					})
-				}
-
-				if watchTogetherHandler != nil {
-					r.Route("/watch-together", func(r chi.Router) {
-						r.Get("/rooms/{room_id}/ws", watchTogetherHandler.HandleRoomWebSocket)
-						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireProfile)
-							r.Post("/rooms", watchTogetherHandler.HandleCreateRoom)
-							r.Post("/join", watchTogetherHandler.HandleJoinRoom)
-							r.Get("/rooms/{room_id}", watchTogetherHandler.HandleGetRoom)
-							r.Put("/rooms/{room_id}/selection", watchTogetherHandler.HandleSelectRoomItem)
-							r.Patch("/rooms/{room_id}/policy", watchTogetherHandler.HandleUpdateRoomPolicy)
-							r.Delete("/rooms/{room_id}", watchTogetherHandler.HandleCloseRoom)
-							r.Get("/rooms/{room_id}/suggestions", watchTogetherHandler.HandleListSuggestions)
-							r.Post("/rooms/{room_id}/suggestions", watchTogetherHandler.HandleCreateSuggestion)
-							r.Delete("/rooms/{room_id}/suggestions/{suggestion_id}", watchTogetherHandler.HandleDeleteSuggestion)
-							r.Post("/rooms/{room_id}/suggestions/{suggestion_id}/vote", watchTogetherHandler.HandleVote)
-							r.Delete("/rooms/{room_id}/suggestions/{suggestion_id}/vote", watchTogetherHandler.HandleUnvote)
-							r.Post("/rooms/{room_id}/suggestions/promote", watchTogetherHandler.HandlePromoteSuggestion)
-						})
-					})
-				}
-
-				// Stream routes.
-				if streamHandler != nil {
-					r.Get("/stream/{session_id}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/stream/{session_id}", streamHandler.HandleStream))
-					r.Head("/stream/{session_id}", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/stream/{session_id}", streamHandler.HandleStream))
-					r.Get("/stream/{session_id}/subtitles/{track}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle))
-					r.Head("/stream/{session_id}/subtitles/{track}", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle))
-					r.Get("/stream/{session_id}/subtitles/{track}/fonts", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts))
-				}
-
-				// Download routes.
-				if policyHandler != nil {
-					r.Get("/policy/capability", policyHandler.HandleCapability)
-				}
-				r.Route("/downloads", func(r chi.Router) {
-					r.Get("/capability", downloadHandler.HandleCapability)
-					// Create, list, delete and the file routes serve an
-					// ephemeral (device-less) download under the request's
-					// scope, so they take the household gate. The managed
-					// routes below already refuse a request without a profile.
-					r.Group(func(r chi.Router) {
-						r.Use(householdProfileGate)
-						r.Post("/", downloadHandler.HandleCreateDownload)
-						r.Get("/", downloadHandler.HandleListDownloads)
-						r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
-						// GET+HEAD: background download stacks probe with HEAD
-						// before issuing ranged GETs; http.ServeContent handles
-						// HEAD natively.
-						r.Get("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-						r.Head("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-						r.Get("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
-						r.Head("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
-					})
-					// Series monitoring (auto-download) subscriptions.
-					r.Post("/subscriptions", downloadHandler.HandleCreateSubscription)
-					r.Post("/subscriptions/sync", downloadHandler.HandleSyncSubscriptions)
-					r.Get("/subscriptions", downloadHandler.HandleListSubscriptions)
-					r.Get("/subscriptions/{id}", downloadHandler.HandleGetSubscription)
-					r.Patch("/subscriptions/{id}", downloadHandler.HandlePatchSubscription)
-					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
-					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
-					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
-					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
-					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
-					r.Get("/{id}/subtitles/{ref}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle))
-				})
-				r.Group(func(r chi.Router) {
-					r.Use(householdProfileGate)
-					r.Get("/direct-download", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-					r.Head("/direct-download", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-					r.Get("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
-					r.Head("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
-				})
-
-				// Recipe gallery catalog (no profile required — purely static metadata).
-				recipeHandler := &handlers.RecipeHandler{}
-				r.Get("/sections/recipes", recipeHandler.HandleList)
-				r.Get("/sections/recipes/{type}/candidates", recipeHandler.HandleCandidates)
-
-				// Section endpoints (profile-scoped).
-				if sectionHandler != nil {
-					r.Group(func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/home/layout", sectionHandler.HandleHomeLayout)
-						r.Get("/home/sections", sectionHandler.HandleHomeSections)
-						r.Get("/home/sections/{id}/items", sectionHandler.HandleHomeSectionItems)
-						r.Get("/library/{id}/layout", sectionHandler.HandleLibraryLayout)
-						r.Get("/library/{id}/sections", sectionHandler.HandleLibrarySections)
-						r.Get("/library/{id}/sections/{sectionId}/items", sectionHandler.HandleLibrarySectionItems)
-					})
-
-					r.Route("/profile/sections", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/", sectionHandler.HandleGetProfileOverrides)
-						r.Put("/", sectionHandler.HandleSaveProfileOverrides)
-						r.Delete("/reset", sectionHandler.HandleResetProfileOverrides)
-						r.Get("/settings", sectionHandler.HandleSectionSettings)
-						if sectionSettingsHandler != nil {
-							r.Get("/flags", sectionSettingsHandler.HandleGetProfileFlag)
-						}
-					})
-				}
-
-				// Recommendation routes (profile-scoped).
-				if recsHandler != nil {
-					r.Route("/recommendations", func(r chi.Router) {
-						r.Use(apimw.RequireProfile)
-						r.Get("/for-you/main", recsHandler.HandleForYouMain)
-						r.Get("/for-you/rows", recsHandler.HandleForYouRows)
-						r.Get("/because-watched/{item_id}", recsHandler.HandleBecauseWatched)
-						r.Get("/similar/{item_id}", recsHandler.HandleSimilar)
-						r.Get("/similar-users", recsHandler.HandleSimilarUsers)
-						r.Get("/taste-profile", recsHandler.HandleTasteProfile)
-						r.Get("/popular", recsHandler.HandlePopular)
-						r.Get("/recently-added", recsHandler.HandleRecentlyAdded)
-						r.Get("/discover", recsHandler.HandleDiscover)
-						r.Get("/section/{kind}", recsHandler.HandleSection)
-						r.Get("/section/{kind}/{key}", recsHandler.HandleSection)
-						r.Get("/watch-tonight", recsHandler.HandleWatchTonight)
-						r.Get("/watch-tonight/cards", recsHandler.HandleWatchTonightCards)
-						r.Get("/taste-seed/items", recsHandler.HandleTasteSeedItems)
-						r.Post("/taste-seed", recsHandler.HandleTasteSeed)
-					})
-				}
-
-				// Admin routes.
-				if adminHandler != nil {
-					r.Route("/admin", func(r chi.Router) {
-						metadataItemAccess := requireActingAdmin
-						if metadataCurationAccess != nil {
-							metadataItemAccess = metadataCurationAccess
-						}
-
-						r.Group(func(r chi.Router) {
-							r.Use(metadataItemAccess)
-							r.Post("/items/{id}/refresh-metadata", adminHandler.HandleRefreshItemMetadata)
-							r.Patch("/items/{id}/metadata", adminHandler.HandleUpdateItemMetadata)
-							if adminMatchHandler != nil {
-								r.Post("/items/{id}/match/search", adminMatchHandler.HandleSearchItemMatchCandidates)
-								r.Post("/items/{id}/match/apply", adminMatchHandler.HandleApplyItemMatch)
-							}
-							if adminSplitHandler != nil {
-								r.Get("/items/{id}/files", adminSplitHandler.HandleListItemFiles)
-								r.Post("/items/{id}/split", adminSplitHandler.HandleSplitItem)
-								r.Post("/items/{id}/merge", adminSplitHandler.HandleMergeItem)
-							}
-							if metadataAIHandler != nil {
-								r.Post("/items/{id}/metadata-translation", metadataAIHandler.HandleTranslate)
-								r.Get("/items/{id}/metadata-translation/jobs", metadataAIHandler.HandleListJobs)
-								r.Post("/items/{id}/metadata-translation/jobs/{job_id}/cancel", metadataAIHandler.HandleCancelJob)
-							}
-						})
-
-						if adminJobsHandler != nil {
-							// Curators must poll their own item-refresh jobs, so this stays outside
-							// the admin-only group. HandleGet enforces per-job authorization.
-							r.Get("/jobs/{id}", adminJobsHandler.HandleGet)
-						}
-
-						r.Group(func(r chi.Router) {
-							r.Use(requireActingAdmin)
-
-							r.Get("/users", adminHandler.HandleListUsers)
-							r.Post("/users", adminHandler.HandleCreateUser)
-							r.Get("/users/{id}", adminHandler.HandleGetUser)
-							r.Put("/users/{id}", adminHandler.HandleUpdateUser)
-							r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
-							r.Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
-							r.Get("/users/{id}/profiles", adminHandler.HandleListUserProfiles)
-							// The canonical settings API's admin projection. It
-							// replaced the string-registry /users/{id}/settings*
-							// and device-settings* routes (see the pre-lock
-							// removals table in docs/architecture/v1-scope.md):
-							// one list across every scope, and set/delete at an
-							// explicit scope named in the query string.
-							if settingValuesHandler != nil {
-								r.Get("/users/{id}/settings/values", settingValuesHandler.HandleAdminListUserSettingValues)
-								r.Put("/users/{id}/settings/values/{key}", settingValuesHandler.HandleAdminSetUserSettingValue)
-								r.Delete("/users/{id}/settings/values/{key}", settingValuesHandler.HandleAdminDeleteUserSettingValue)
-							}
-							r.Get("/devices", adminHandler.HandleListDevices)
-							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
-							if accessGroupHandler != nil {
-								r.Get("/access-groups", accessGroupHandler.HandleList)
-								r.Post("/access-groups", accessGroupHandler.HandleCreate)
-								r.Get("/access-groups/{id}", accessGroupHandler.HandleGet)
-								r.Put("/access-groups/{id}", accessGroupHandler.HandleUpdate)
-								r.Delete("/access-groups/{id}", accessGroupHandler.HandleDelete)
-							}
-
-							r.Get("/sessions", adminHandler.HandleListSessions)
-							// P0d parity projection: the merged telemetry view beside
-							// both legacy live-session projections and their diff. It
-							// compares only — the repoint is the separate retirement
-							// change, which this endpoint exists to give evidence for.
-							r.Get("/stream-telemetry/parity", (&handlers.StreamTelemetryParityHandler{
-								Registry:  deps.StreamTelemetry,
-								ViewCache: deps.StreamTelemetryViewCache,
-								Pool:      deps.DB,
-								Redis:     deps.RedisClient,
-							}).HandleGetStreamTelemetryParity)
-							r.Get("/sessions/capabilities", adminHandler.HandleGetSessionsCapabilities)
-							r.Get("/playback-routing/capabilities", adminHandler.HandleGetPlaybackRoutingCapabilities)
-							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
-							r.Get("/unmatched", adminHandler.HandleListUnmatched)
-							r.Get("/stats", adminHandler.HandleGetStats)
-							// Dashboard aggregates. Both are cached reads over the
-							// same catalog/playback tables /stats uses, split out
-							// because their windows and refresh rates differ.
-							r.Get("/stats/playback-activity", adminHandler.HandleGetPlaybackActivity)
-							r.Get("/stats/top-activity", adminHandler.HandleGetTopActivity)
-							// Offline-download aggregate for the dashboard's
-							// downloads widget. Reads the downloads table, which
-							// exists whether or not the feature is enabled, so a
-							// download-less deployment answers zeros.
-							r.Get("/stats/downloads", adminHandler.HandleGetDownloadsStats)
-							// Minute-resolution samples written by the dashboard
-							// metrics sampler (internal/dashmetrics); the only
-							// history for concurrent streams and egress.
-							r.Get("/stats/timeseries", adminHandler.HandleGetTimeseries)
-							r.Get("/server/status", adminHandler.HandleGetServerStatus)
-							// Per-admin-account dashboard arrangement. The server
-							// stores it as an opaque JSON object; the web client
-							// owns widget-id and span validation.
-							r.Get("/dashboard/capabilities", adminHandler.HandleGetDashboardCapabilities)
-							r.Get("/dashboard/layout", adminHandler.HandleGetDashboardLayout)
-							r.Put("/dashboard/layout", adminHandler.HandlePutDashboardLayout)
-							r.Delete("/dashboard/layout", adminHandler.HandleDeleteDashboardLayout)
-							r.Get("/catalog/search/status", adminHandler.HandleGetCatalogSearchStatus)
-							if policyHandler != nil {
-								r.Route("/policy", func(r chi.Router) {
-									r.Get("/vendor", policyHandler.HandleListVendor)
-									r.Get("/documents", policyHandler.HandleListDocuments)
-									r.Post("/documents", policyHandler.HandleCreateDocument)
-									r.Get("/documents/{id}", policyHandler.HandleGetDocument)
-									r.Delete("/documents/{id}", policyHandler.HandleDeleteDocument)
-									r.Get("/documents/{id}/versions", policyHandler.HandleListVersions)
-									r.Post("/documents/{id}/versions", policyHandler.HandleCreateVersion)
-									r.Get("/documents/{id}/versions/{version}", policyHandler.HandleGetVersion)
-									r.Post("/documents/{id}/versions/{version}/activate", policyHandler.HandleActivateVersion)
-									r.Post("/documents/{id}/enabled", policyHandler.HandleSetDocumentEnabled)
-									r.Post("/validate", policyHandler.HandleValidate)
-									r.Post("/simulate", policyHandler.HandleSimulate)
-									r.Get("/decisions", policyHandler.HandleListDecisions)
-									r.Get("/decisions/{id}", policyHandler.HandleGetDecision)
-								})
-							}
-							if literaryWorkHandler != nil {
-								r.Get("/literary-works/items/{content_id}/candidates", literaryWorkHandler.HandleListCandidates)
-								r.Post("/literary-works/link", literaryWorkHandler.HandleLinkItems)
-								r.Delete("/literary-works/{work_id}/items/{content_id}", literaryWorkHandler.HandleUnlinkItem)
-								r.Post("/literary-works/matches/confirm", literaryWorkHandler.HandleConfirmMatch)
-								r.Post("/literary-works/matches/ignore", literaryWorkHandler.HandleIgnoreMatch)
-							}
-							r.Post("/server/restart", serverControlHandler.HandleRestart)
-							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
-							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)
-							r.Post("/jellyfin-compat/web/install", adminHandler.HandleInstallJellyfinCompatWeb)
-							r.Post("/jellyfin-compat/web/update", adminHandler.HandleUpdateJellyfinCompatWeb)
-							r.Post("/jellyfin-compat/web/remove", adminHandler.HandleRemoveJellyfinCompatWeb)
-							r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
-							r.Get("/settings/restart-keys", adminHandler.HandleGetRestartKeys)
-							r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
-							if sectionSettingsHandler != nil {
-								r.Get("/settings/sections", sectionSettingsHandler.HandleGet)
-								r.Put("/settings/sections", sectionSettingsHandler.HandlePut)
-							}
-							r.Get("/settings/effective", adminHandler.HandleGetEffectiveSettings)
-							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
-							r.Get("/settings", adminHandler.HandleGetSettings)
-							r.Put("/settings", adminHandler.HandleUpdateSettings)
-							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
-							if brandingHandler != nil {
-								// Branding image upload/delete (scalar branding
-								// fields use the generic settings PUT above).
-								r.Post("/branding/assets/{kind}", brandingHandler.HandleUploadAsset)
-								r.Delete("/branding/assets/{kind}", brandingHandler.HandleDeleteAsset)
-							}
-							if settingsRepo != nil {
-								r.Post("/email/test", emailHandler.HandleTest)
-							}
-							if discordNotificationsHandler != nil {
-								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
-							}
-							if deps.Notifications != nil || settingsRepo != nil {
-								applePushHandler := handlers.NewAdminApplePushHandler(deps.Notifications, settingsRepo)
-								if deps.Notifications != nil {
-									r.Post("/notifications/push/apple/test", applePushHandler.HandleTest)
-									r.Post("/notifications/push/fcm/test", applePushHandler.HandleTestAndroid)
-								}
-								if settingsRepo != nil {
-									r.Post("/notifications/push/relay/register", applePushHandler.HandleRegisterRelay)
-									r.Delete("/notifications/push/relay", applePushHandler.HandleClearRelay)
-								}
-							}
-							if deps.Notifications != nil && deps.Notifications.ServerChannels != nil {
-								serverChannelsHandler := handlers.NewAdminServerChannelsHandler(deps.Notifications)
-								r.Route("/notifications/server-channels", func(r chi.Router) {
-									r.Get("/", serverChannelsHandler.HandleList)
-									r.Post("/", serverChannelsHandler.HandleCreate)
-									r.Put("/{id}", serverChannelsHandler.HandleUpdate)
-									r.Delete("/{id}", serverChannelsHandler.HandleDelete)
-									r.Post("/{id}/rotate-secret", serverChannelsHandler.HandleRotateSecret)
-									r.Post("/{id}/test", serverChannelsHandler.HandleTest)
-								})
-							}
-							if adminIntroHandler != nil {
-								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
-								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
-							}
-							if markersHandler != nil {
-								// Marker read/write/clear live on the authenticated
-								// /markers routes; writes require marker_edit.
-								// Contribution and audit history stay admin operations.
-								r.Post("/files/{fileId}/contribute", markersHandler.HandleContributeFile)
-								r.Get("/files/{fileId}/contributions", markersHandler.HandleListFileContributions)
-								r.Get("/markers/history", markersHandler.HandleListMarkerHistory)
-								r.Get("/markers/files/{fileId}/history", markersHandler.HandleListFileMarkerHistory)
-								r.Get("/markers/items/{id}/history", markersHandler.HandleListItemMarkerHistory)
-							}
-							if adminMarkerProvidersHandler != nil {
-								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)
-								r.Put("/markers/providers/{provider}", adminMarkerProvidersHandler.HandleUpdateProvider)
-								r.Post("/markers/providers/{provider}/validate", adminMarkerProvidersHandler.HandleValidateProvider)
-							}
-							if peopleHandler != nil {
-								r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)
-								r.Patch("/people/{id}", peopleHandler.HandleAdminUpdatePerson)
-							}
-
-							if adminImageHandler != nil {
-								r.Get("/items/{id}/images", adminImageHandler.HandleGetItemImages)
-								r.Post("/items/{id}/images/apply", adminImageHandler.HandleApplyItemImage)
-							}
-
-							filesystemHandler := handlers.NewFilesystemHandler()
-							r.Get("/filesystem/browse", filesystemHandler.HandleBrowse)
-
-							if catalogSeedHandler != nil {
-								r.Route("/catalog", func(r chi.Router) {
-									r.Post("/export", catalogSeedHandler.HandleExport)
-									r.Post("/export-jobs", catalogSeedHandler.HandleCreateExportJob)
-									r.Post("/export-jobs/{id}/publish", catalogSeedHandler.HandlePublishExportJob)
-									r.Post("/import-jobs", catalogSeedHandler.HandleCreateImportJob)
-									r.Get("/import-sources", catalogSeedHandler.HandleListImportSources)
-									r.Get("/local-import-sources", catalogSeedHandler.HandleListLocalImportSources)
-									r.Post("/import", catalogSeedHandler.HandleImport)
-								})
-							}
-
-							if adminJobsHandler != nil {
-								r.Route("/jobs", func(r chi.Router) {
-									r.Get("/", adminJobsHandler.HandleList)
-									r.Post("/{id}/cancel", adminJobsHandler.HandleCancel)
-								})
-							}
-
-							if deps.PluginService != nil && deps.PluginUserConfig != nil {
-								pluginHandler := handlers.NewPluginHandler(
-									plugins.NewRepositoryStore(deps.DB),
-									plugins.NewInstallationStore(deps.DB),
-									plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher),
-									deps.PluginService,
-									deps.PluginUserConfig,
-									deps.PluginHTTPProxy,
-									metadata.NewChainRepository(deps.DB),
-									deps.PluginImageResolver,
-									restartStatus,
-								)
-								pluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
-								r.Route("/plugins", func(r chi.Router) {
-									r.Get("/catalog-settings", pluginHandler.HandleGetCatalogSettings)
-									r.Put("/catalog-settings", pluginHandler.HandlePutCatalogSettings)
-									r.Get("/repositories", pluginHandler.HandleListRepositories)
-									r.Post("/repositories", pluginHandler.HandleCreateRepository)
-									r.Put("/repositories/{id}", pluginHandler.HandleUpdateRepository)
-									r.Delete("/repositories/{id}", pluginHandler.HandleDeleteRepository)
-									r.Get("/catalog", pluginHandler.HandleCatalog)
-									r.Get("/installations", pluginHandler.HandleListInstallations)
-									r.Post("/installations", pluginHandler.HandleCreateInstallation)
-									r.Post("/uploads", pluginHandler.HandleUploadInstallation)
-									r.Post("/uploads/chunked", pluginHandler.HandleCreateChunkedUpload)
-									r.Put("/uploads/chunked/{upload_id}/chunks/{chunk_index}", pluginHandler.HandleUploadChunk)
-									r.Post("/uploads/chunked/{upload_id}/complete", pluginHandler.HandleCompleteChunkedUpload)
-									r.Delete("/uploads/chunked/{upload_id}", pluginHandler.HandleCancelChunkedUpload)
-									r.Put("/installations/{id}", pluginHandler.HandleUpdateInstallation)
-									r.Post("/installations/{id}/update", pluginHandler.HandleApplyUpdate)
-									r.Post("/installations/{id}/config/test", pluginHandler.HandleTestInstallationConfig)
-									r.Put("/installations/{id}/config", pluginHandler.HandlePutInstallationConfig)
-									r.Put("/installations/{id}/auth-binding", pluginHandler.HandlePutAuthBinding)
-									r.Put("/installations/{id}/task-bindings/{capability_id}", pluginHandler.HandlePutTaskBinding)
-									r.Delete("/installations/{id}", pluginHandler.HandleDeleteInstallation)
-								})
-							}
-
-							if historyImportHandler != nil {
-								r.Route("/history-import-sources", func(r chi.Router) {
-									r.Get("/", historyImportHandler.HandleAdminListSources)
-									r.Post("/", historyImportHandler.HandleAdminCreateSource)
-									r.Put("/{id}", historyImportHandler.HandleAdminUpdateSource)
-									r.Delete("/{id}", historyImportHandler.HandleAdminDeleteSource)
-								})
-
-								r.Route("/history-imports", func(r chi.Router) {
-									r.Post("/plex/login", historyImportHandler.HandleAdminPlexLogin)
-									r.Put("/sources/{id}/token", historyImportHandler.HandleAdminSetSourceToken)
-									r.Delete("/sources/{id}/token", historyImportHandler.HandleAdminClearSourceToken)
-									r.Get("/sources/{id}/users", historyImportHandler.HandleAdminDiscoverUsers)
-									r.Post("/sources/{id}/bulk-run", historyImportHandler.HandleAdminBulkRun)
-									r.Get("/mappings", historyImportHandler.HandleAdminListMappings)
-									r.Post("/mappings", historyImportHandler.HandleAdminCreateMapping)
-									r.Put("/mappings/{id}", historyImportHandler.HandleAdminUpdateMapping)
-									r.Delete("/mappings/{id}", historyImportHandler.HandleAdminDeleteMapping)
-									r.Post("/mappings/{id}/run", historyImportHandler.HandleAdminCreateRun)
-									r.Get("/runs", historyImportHandler.HandleAdminListRuns)
-									r.Get("/runs/{id}", historyImportHandler.HandleAdminGetRun)
-									r.Post("/runs/{id}/cancel", historyImportHandler.HandleAdminCancelRun)
-								})
-							}
-
-							if sectionHandler != nil {
-								r.Route("/sections", func(r chi.Router) {
-									r.Get("/", sectionHandler.HandleListSections)
-									r.Post("/", sectionHandler.HandleCreateSection)
-									r.Post("/preview", sectionHandler.HandlePreview)
-									r.Put("/reorder", sectionHandler.HandleReorderSections)
-									r.Post("/restore-defaults", sectionHandler.HandleRestoreDefaults)
-									r.Put("/{id}", sectionHandler.HandleUpdateSection)
-									r.Delete("/{id}", sectionHandler.HandleDeleteSection)
-									if sectionBulkHandler != nil {
-										r.Post("/bulk-create", sectionBulkHandler.HandleBulkCreate)
-									}
-								})
-							}
-
-							if libraryCollectionHandler != nil {
-								collectionTemplateHandler := handlers.NewCollectionTemplateHandler(nil)
-								r.Route("/collections", func(r chi.Router) {
-									r.Get("/", libraryCollectionHandler.HandleListAdminCollections)
-									r.Get("/templates", collectionTemplateHandler.HandleListTemplates)
-									r.Get("/template-bundles", libraryCollectionHandler.HandleListTemplateBundles)
-									r.Post("/template-bundles/{bundleID}/apply", libraryCollectionHandler.HandleApplyTemplateBundle)
-									r.Post("/template-bundles/{bundleID}/apply-job", libraryCollectionHandler.HandleApplyTemplateBundleJob)
-									r.Post("/", libraryCollectionHandler.HandleCreateAdminCollection)
-									r.Post("/preview", libraryCollectionHandler.HandlePreviewAdminCollection)
-									r.Put("/order", libraryCollectionHandler.HandleReorderAdminCollections)
-									r.Put("/{id}", libraryCollectionHandler.HandleUpdateAdminCollection)
-									r.Delete("/{id}", libraryCollectionHandler.HandleDeleteAdminCollection)
-									r.Post("/{id}/sync", libraryCollectionHandler.HandleSyncAdminCollection)
-									r.Delete("/{id}/image", libraryCollectionHandler.HandleDeleteCollectionImage)
-									r.Put("/{id}/items/order", libraryCollectionHandler.HandleReorderAdminCollectionItems)
-									r.Put("/{id}/items/{item_id}", libraryCollectionHandler.HandleAddAdminCollectionItem)
-									r.Delete("/{id}/items/{item_id}", libraryCollectionHandler.HandleRemoveAdminCollectionItem)
-									r.Post("/import/mdblist", libraryCollectionHandler.HandleImportMDBList)
-									r.Post("/import/tmdb", libraryCollectionHandler.HandleImportTMDBCollection)
-									r.Post("/import/trakt", libraryCollectionHandler.HandleImportTraktCollection)
-								})
-							}
-							if libraryCollectionGroupHandler != nil {
-								r.Route("/libraries/{libraryID}/collection-groups", func(r chi.Router) {
-									r.Get("/", libraryCollectionGroupHandler.HandleListGroups)
-									r.Post("/", libraryCollectionGroupHandler.HandleCreateGroup)
-									r.Put("/reorder", libraryCollectionGroupHandler.HandleReorderGroups)
-								})
-								r.Route("/collection-groups", func(r chi.Router) {
-									r.Put("/{id}", libraryCollectionGroupHandler.HandleUpdateGroup)
-									r.Delete("/{id}", libraryCollectionGroupHandler.HandleDeleteGroup)
-									r.Put("/{groupID}/collections/reorder", libraryCollectionGroupHandler.HandleReorderCollectionsInGroup)
-								})
-							}
-
-							if deps.NodeRepo != nil {
-								// A re-probe stores the node's new inventory through the
-								// sweep's own refresh, so the drift and persist rules have
-								// one implementation. Without a health checker the node
-								// still re-probes and the row catches up on a later sweep.
-								if deps.NodeHealthChecker != nil {
-									nodeHandler.SetCapabilityRefresher(deps.NodeHealthChecker)
-								}
-								// An acceleration override change makes this
-								// server's cached view of the node wrong the
-								// moment it lands; the same invalidation the
-								// health sweep uses drops it.
-								nodeHandler.SetCapabilityInvalidator(deps.invalidateNodeCapabilities(playbackHandler))
-								// A node with no override of its own runs the
-								// cluster's acceleration policy, and how many
-								// devices that names is what decides how long its
-								// re-probe may take.
-								nodeHandler.SetClusterPlaybackPolicy(playbackHandler.PlaybackConfig)
-								r.Route("/nodes", func(r chi.Router) {
-									r.Get("/", nodeHandler.HandleListNodes)
-									r.Post("/", nodeHandler.HandleCreateNode)
-									r.Put("/{id}", nodeHandler.HandleUpdateNode)
-									r.Delete("/{id}", nodeHandler.HandleDeleteNode)
-									r.Post("/{id}/check", nodeHandler.HandleCheckNode)
-									r.Post("/force-reload", nodeHandler.HandleForceReloadNodes)
-									r.Post("/{id}/force-reload", nodeHandler.HandleForceReloadNode)
-									r.Post("/{id}/reprobe", nodeHandler.HandleReprobeNode)
-								})
-								// Live node sessions (reads from Redis)
-								// Note: /admin/sessions is already used for playback sessions from PostgreSQL.
-								r.Get("/node-sessions", nodeHandler.HandleListSessions)
-							}
-
-							// System inspection.
-							{
-								sysJWTSecret := ""
-								if deps.Config != nil {
-									sysJWTSecret = deps.Config.Auth.JWTSecret
-								}
-								// Read per request, not captured: playback
-								// settings hot reload, and a probe against the
-								// values this process started with would show an
-								// operator a result for the configuration they
-								// just replaced.
-								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret,
-									func() (string, string, string) {
-										cfg := deps.CurrentConfig()
-										if cfg == nil {
-											return "", "", ""
-										}
-										return cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice
-									})
-								if deps.ResourceSampler != nil {
-									systemHandler.SetResourceSampler(deps.ResourceSampler)
-								}
-								r.Route("/system", func(r chi.Router) {
-									r.Get("/build", systemHandler.HandleBuildInfo)
-									r.Get("/hw-accel", systemHandler.HandleHWAccel)
-									r.Get("/resources", systemHandler.HandleSystemResources)
-								})
-							}
-
-							if deps.RecWorker != nil {
-								adminRecsHandler := handlers.NewAdminRecommendationsHandler(deps.RecWorker)
-								r.Route("/recommendations", func(r chi.Router) {
-									r.Get("/status", adminRecsHandler.HandleStatus)
-									r.Post("/trigger/embeddings", adminRecsHandler.HandleTriggerEmbeddings)
-									r.Post("/trigger/taste-profiles", adminRecsHandler.HandleTriggerTasteProfiles)
-									r.Post("/trigger/cowatch", adminRecsHandler.HandleTriggerCowatch)
-									r.Post("/trigger/recommendations", adminRecsHandler.HandleTriggerRecommendations)
-								})
-							}
-
-							if invitationService != nil {
-								adminInvitationHandler := handlers.NewAdminInvitationHandler(invitationService)
-								r.Route("/invitations", func(r chi.Router) {
-									r.Get("/", adminInvitationHandler.HandleListInvitations)
-									r.Post("/", adminInvitationHandler.HandleCreateInvitation)
-									r.Post("/{id}/resend", adminInvitationHandler.HandleResendInvitation)
-									r.Delete("/{id}", adminInvitationHandler.HandleRevokeInvitation)
-								})
-							}
-
-							if inviteCodeRepo != nil {
-								inviteCodeHandler := handlers.NewInviteCodeHandler(inviteCodeRepo)
-								r.Route("/invite-codes", func(r chi.Router) {
-									r.Get("/", inviteCodeHandler.HandleListInviteCodes)
-									r.Post("/", inviteCodeHandler.HandleCreateInviteCode)
-									r.Put("/{id}", inviteCodeHandler.HandleUpdateInviteCode)
-									r.Post("/{id}/top-up", inviteCodeHandler.HandleTopUpInviteCode)
-									r.Delete("/{id}", inviteCodeHandler.HandleDeleteInviteCode)
-								})
-							}
-
-							if adminSubtitleHandler != nil {
-								r.Route("/subtitle-providers", func(r chi.Router) {
-									r.Get("/", adminSubtitleHandler.HandleListProviders)
-									r.Route("/{provider}", func(r chi.Router) {
-										r.Put("/", adminSubtitleHandler.HandleUpdateProvider)
-										r.Post("/test", adminSubtitleHandler.HandleTestProvider)
-									})
-								})
-								r.Route("/subtitles", func(r chi.Router) {
-									r.Get("/", adminSubtitleHandler.HandleListDownloadedSubtitles)
-									r.Route("/{id}", func(r chi.Router) {
-										r.Patch("/", adminSubtitleHandler.HandlePatchDownloadedSubtitle)
-										r.Get("/download", adminSubtitleHandler.HandleDownloadDownloadedSubtitle)
-										r.Delete("/", adminSubtitleHandler.HandleDeleteDownloadedSubtitle)
-									})
-								})
-							}
-
-							// Rate limit admin routes. Mounted even when the limiter is not
-							// running (deps.RateLimitMW == nil) so admins can always reach the
-							// config; otherwise disabling rate limiting and restarting would
-							// lock the settings page out of re-enabling it.
-							if settingsRepo != nil {
-								r.Route("/rate-limits", func(r chi.Router) {
-									r.Get("/config", rateLimitHandler.HandleGetConfig)
-									r.Put("/config", rateLimitHandler.HandleUpdateConfig)
-								})
-							}
-
-							if apiKeyRepo != nil {
-								apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
-								if userRepo != nil {
-									apiKeyHandler.Owners = userRepo
-								}
-								r.Get("/users/{userId}/api-keys", apiKeyHandler.HandleAdminListUserAPIKeys)
-								r.Get("/api-keys", apiKeyHandler.HandleAdminListAllAPIKeys)
-								r.Post("/api-keys", apiKeyHandler.HandleAdminCreateAPIKey)
-								r.Delete("/api-keys/{id}", apiKeyHandler.HandleAdminDeleteAPIKey)
-								r.Put("/api-keys/{id}/tier", apiKeyHandler.HandleAdminUpdateTier)
-							}
-
-							if requestHandler != nil {
-								r.Get("/requests", requestHandler.HandleAdminList)
-								r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
-								r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
-								r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
-								r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
-								r.Get("/request-settings", requestHandler.HandleGetSettings)
-								r.Put("/request-settings", requestHandler.HandleUpdateSettings)
-								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
-								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
-								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
-								r.Post("/request-integrations", requestHandler.HandleCreateIntegration)
-								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
-								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
-								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
-							}
-
-							if autoscanHandler != nil {
-								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
-								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
-								r.Get("/autoscan/connections", autoscanHandler.HandleListConnections)
-								r.Post("/autoscan/connections", autoscanHandler.HandleCreateConnection)
-								r.Put("/autoscan/connections/{id}", autoscanHandler.HandleUpdateConnection)
-								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
-								r.Post("/autoscan/connections/test", autoscanHandler.HandleTestConnection)
-								r.Get("/autoscan/scan-source-plugins", autoscanHandler.HandleListAvailableScanSources)
-								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
-								r.Post("/autoscan/sources", autoscanHandler.HandleCreateSource)
-								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
-								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
-								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
-								r.Post("/autoscan/sources/{id}/webhook", autoscanHandler.HandleCreateSourceWebhook)
-								r.Post("/autoscan/sources/{id}/webhook/rotate", autoscanHandler.HandleRotateSourceWebhook)
-								r.Delete("/autoscan/sources/{id}/webhook", autoscanHandler.HandleDeleteSourceWebhook)
-								r.Get("/autoscan/scans", autoscanHandler.HandleListScans)
-								r.Get("/autoscan/events", autoscanHandler.HandleListEvents)
-								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
-								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
-							}
-
-							if deps.ActivityLogRepo != nil {
-								adminIPHandler := handlers.NewAdminIPHandler(deps.ActivityLogRepo)
-								r.Get("/users/{id}/ips", adminIPHandler.HandleGetUserIPs)
-								r.Get("/ips", adminIPHandler.HandleGetIPUsers)
-							}
-							if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil {
-								adminLogsHandler := handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub)
-								r.Get("/logs/app", adminLogsHandler.HandleListOperationalLogs)
-								r.Get("/logs/audit", adminLogsHandler.HandleListAuditLogs)
-								r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)
-							}
-							if diagnosticsHandler != nil {
-								handlers.RegisterAdminDiagnosticsRoutes(r, diagnosticsHandler)
-							}
-							if adminPlaybackControlHandler != nil {
-								r.Post("/sessions/{session_id}/pause", adminPlaybackControlHandler.HandlePauseSession)
-								r.Post("/sessions/{session_id}/resume", adminPlaybackControlHandler.HandleResumeSession)
-								r.Post("/sessions/{session_id}/stop", adminPlaybackControlHandler.HandleStopSession)
-								r.Post("/sessions/{session_id}/terminate", adminPlaybackControlHandler.HandleTerminateSession)
-								r.Post("/sessions/{session_id}/message", adminPlaybackControlHandler.HandleMessageSession)
-							}
-
-							if deps.TaskManager != nil {
-								taskHistoryRepo := repository.NewPgExecutionRepository(deps.DB)
-								taskMetrics := handlers.NewTaskMetricsService(metadata.NewRefreshDebtRepository(deps.DB))
-								taskHandler := handlers.NewTaskHandler(deps.TaskManager, taskHistoryRepo, taskMetrics)
-								r.Route("/tasks", func(r chi.Router) {
-									r.Get("/", taskHandler.HandleListTasks)
-									r.Get("/{key}", taskHandler.HandleGetTask)
-									r.Get("/{key}/metrics", taskHandler.HandleGetMetrics)
-									r.Post("/{key}/run", taskHandler.HandleRunTask)
-									r.Post("/{key}/cancel", taskHandler.HandleCancelTask)
-									r.Put("/{key}/triggers", taskHandler.HandleUpdateTriggers)
-									r.Get("/{key}/history", taskHandler.HandleGetHistory)
-								})
-							}
-						})
-					})
-				}
-			})
-		}
-	})
+	// The retired /api/v1 namespace: the operational probes stay at their
+	// paths, and everything else answers the retirement tombstone.
+	r.Get("/api/v1/health", healthHandler.ServeHTTP)
+	r.Get("/api/v1/ready", readyHandler.ServeHTTP)
+	r.Handle("/api/v1", v1Tombstone)
+	r.Handle("/api/v1/*", v1Tombstone)
+	// Integrations keep calling the retired URLs that carry a credential in
+	// the path. Naming the segment lets the request and activity logs redact
+	// it (activitylog.RedactSecretPathParams), as they did for the live routes.
+	r.Handle("/api/v1/autoscan/webhooks/{token}", v1Tombstone)
+	r.Handle("/api/v1/plex-sync/webhooks/{secret}", v1Tombstone)
+	r.Handle("/api/v1/webhook-sync/webhooks/{secret}", v1Tombstone)
+	r.Handle("/api/v1/invitations/{token}", v1Tombstone)
+	r.Handle("/api/v1/invitations/{token}/*", v1Tombstone)
 
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
@@ -4880,11 +3280,11 @@ func skipNativeMediaCompression(r *http.Request) bool {
 		return false
 	}
 	p := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	if len(p) < 3 || p[0] != "api" || (p[1] != "v1" && p[1] != "v2") {
+	if len(p) < 3 || p[0] != "api" || p[1] != "v2" {
 		return false
 	}
 	switch {
-	case len(p) == 8 && p[1] == "v2" && p[2] == "catalog" && p[3] == "items" && p[4] != "" && p[5] == "themes" && p[6] != "" && p[7] == "audio":
+	case len(p) == 8 && p[2] == "catalog" && p[3] == "items" && p[4] != "" && p[5] == "themes" && p[6] != "" && p[7] == "audio":
 		return true
 	case len(p) == 4 && p[2] == "stream" && p[3] != "":
 		return true
@@ -4898,26 +3298,6 @@ func skipNativeMediaCompression(r *http.Request) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// optionalProfileViewerAccess preserves the established profile-less plugin
-// launch path while validating any profile a newer caller asks the launch
-// cookie to carry. A missing viewer resolver must not remove this existing v1
-// route or add a policy/store dependency for legacy callers.
-func optionalProfileViewerAccess(viewer *apimw.ViewerAccessMiddleware) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		if viewer == nil {
-			return next
-		}
-		validated := viewer.RequireViewerAccess(next)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.TrimSpace(r.Header.Get("X-Profile-Id")) == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			validated.ServeHTTP(w, r)
-		})
 	}
 }
 
@@ -5418,21 +3798,14 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 
 // newPersonalAPIKeyHandler builds the account-scoped API key handler with the
 // household check its creation path runs.
-func newPersonalAPIKeyHandler(
-	repo *auth.APIKeyRepository,
-	stores userstore.UserStoreProvider,
-	tokens *access.ProfileTokenService,
-) *handlers.APIKeyHandler {
+func newPersonalAPIKeyHandler(repo *auth.APIKeyRepository, stores userstore.UserStoreProvider) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
-	h.ProfileTokens = tokens
 	return h
 }
 
-// Both API versions use the same household authority dependencies.
-func newDiscordNotificationsHandler(deps Dependencies, tokens *access.ProfileTokenService) *handlers.DiscordNotificationsHandler {
+func newDiscordNotificationsHandler(deps Dependencies) *handlers.DiscordNotificationsHandler {
 	h := handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
 	h.Stores = deps.UserStoreProvider
-	h.ProfileTokens = tokens
 	return h
 }

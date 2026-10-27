@@ -187,15 +187,6 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 			t.Fatalf("%d %q", rec.Code, got.Error)
 		}
 	})
-
-	t.Run("demo restricted", func(t *testing.T) {
-		rec := newReasonWriter()
-		writeDemoBlocked(rec)
-		got := decodeDenial(t, rec)
-		if rec.Code != http.StatusForbidden || got.Error != "demo_restricted" {
-			t.Fatalf("%d %q", rec.Code, got.Error)
-		}
-	})
 }
 
 type stubResolver struct{ err error }

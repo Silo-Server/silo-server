@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -24,50 +23,6 @@ func (revocationTestGroups) List(context.Context) ([]access.Group, error) { retu
 
 func (revocationTestGroups) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
 	return nil, nil
-}
-
-// Policy changes take effect on the next request and reach connected clients
-// through the realtime socket, and a role change makes the account's clients
-// refresh their access tokens, so only credential and enabled changes sign the
-// account out.
-func TestHandleUpdateUserSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {
-	tests := []struct {
-		name       string
-		body       string
-		wantRevoke bool
-	}{
-		{name: "access group", body: `{"access_group_id":5}`},
-		{name: "permissions", body: `{"permissions":["marker_edit"]}`},
-		{name: "playback quality override", body: `{"max_playback_quality":"720p"}`},
-		{name: "playback quality cleared", body: `{"max_playback_quality":null}`},
-		{name: "password", body: `{"password":"a-new-long-password"}`, wantRevoke: true},
-		{name: "disable", body: `{"enabled":false}`, wantRevoke: true},
-		{name: "role", body: `{"role":"admin"}`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h, repo := newScopedKeyAdminHandler(models.RoleUser)
-			quality := "1080p"
-			repo.user.MaxPlaybackQuality = &quality
-			h.AccessGroups = revocationTestGroups{}
-			var notified []int
-			h.OnUserSessionsRevoked = func(_ context.Context, userID int) { notified = append(notified, userID) }
-
-			rec := updateUserRequestFor(t, h, jwtAdminClaims(), tt.body)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-			}
-			if repo.updated == nil {
-				t.Fatal("update was not written")
-			}
-			if repo.revoked != tt.wantRevoke {
-				t.Fatalf("sign-ins revoked = %v, want %v", repo.revoked, tt.wantRevoke)
-			}
-			if got := len(notified) == 1 && notified[0] == repo.user.ID; got != tt.wantRevoke {
-				t.Fatalf("compatibility sessions dropped for %v, want revocation %v", notified, tt.wantRevoke)
-			}
-		})
-	}
 }
 
 func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {

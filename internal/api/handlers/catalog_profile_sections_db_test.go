@@ -139,7 +139,7 @@ func TestCatalogProfileSectionsDB(t *testing.T) {
 				}
 				var layoutErr error
 				if scope == "home" {
-					_, layoutErr = h.HomeLayout(viewerContext(owner))
+					_, layoutErr = h.HomeLayoutWithItems(viewerContext(owner), SectionViewer{Access: viewer}, 0)
 				} else {
 					_, layoutErr = h.LibraryLayout(viewerContext(owner), f.library)
 				}

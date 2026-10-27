@@ -93,27 +93,6 @@ func (s *Service) provider(id string) (Provider, error) {
 	return provider, nil
 }
 
-func (s *Service) ListConnections(ctx context.Context, userID int) ([]Connection, error) {
-	connections, err := s.repo.ListConnections(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	serverCtx := s.localNetwork.Context(ctx, userID)
-	for i := range connections {
-		provider, providerErr := s.provider(connections[i].Provider)
-		if providerErr != nil {
-			continue
-		}
-		if _, available, err := provider.DiscoverUsers(serverCtx, &connections[i], nil); err == nil {
-			connections[i].AccountDiscoveryAvailable = available
-			if err := s.repo.SetDiscoveryAvailable(ctx, connections[i].ID, available); err != nil {
-				slog.WarnContext(ctx, "webhook sync: failed to persist discovery availability", "component", "webhooksync", "connection_id", connections[i].ID, "error", err)
-			}
-		}
-	}
-	return connections, nil
-}
-
 func (s *Service) CreateConnection(ctx context.Context, userID int, input CreateConnectionInput, baseURL string) (*CreateConnectionResult, error) {
 	provider, err := s.provider(input.Provider)
 	if err != nil {
@@ -247,14 +226,6 @@ func (s *Service) UpdateProfileMappings(ctx context.Context, userID int, id stri
 		}
 	}
 	return s.repo.ReplaceMappings(ctx, conn.ID, input.Mappings)
-}
-
-func (s *Service) ListEventLogs(ctx context.Context, userID int, id string, limit int) ([]WebhookEventLog, error) {
-	conn, err := s.repo.GetConnection(ctx, userID, id)
-	if err != nil {
-		return nil, err
-	}
-	return s.repo.ListEventLogs(ctx, conn.ID, limit)
 }
 
 func (s *Service) CreateEventLog(ctx context.Context, entry WebhookEventLog) (*WebhookEventLog, error) {

@@ -3,53 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"mime"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
-
-func newEbookReaderAuthRequest(method, path string) *http.Request {
-	req := httptest.NewRequest(method, path, nil)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	})
-	ctx = apimw.SetProfileID(ctx, "profile-1")
-	return req.WithContext(ctx)
-}
-
-func withEbookReaderRouteParams(req *http.Request, contentID, fileID string) *http.Request {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("content_id", contentID)
-	routeCtx.URLParams.Add("file_id", fileID)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func withEbookReaderContentRouteParam(req *http.Request, contentID string) *http.Request {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("content_id", contentID)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func withEbookReaderAnnotationRouteParams(req *http.Request, contentID, annotationID string) *http.Request {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("content_id", contentID)
-	routeCtx.URLParams.Add("annotation_id", annotationID)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
 
 type fakeEbookProgressStore struct {
 	progress *EbookReaderProgress
@@ -131,44 +94,6 @@ func (s *fakeEbookReaderAnnotationStore) Delete(_ context.Context, userID int, p
 	return nil
 }
 
-func TestEbookReaderServesContainerMimeForMismatchedExtension(t *testing.T) {
-	filePath := writePlaybackTestMediaFile(t, "book.txt")
-	if err := os.WriteFile(filePath, []byte("<html>not really</html>"), 0o644); err != nil {
-		t.Fatalf("write ebook: %v", err)
-	}
-
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{
-				ID:        42,
-				ContentID: "ebook-1",
-				FilePath:  filePath,
-				Container: "epub",
-				BaseType:  "ebook",
-			},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	})
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
-	req = withEbookReaderRouteParams(req, "ebook-1", "42")
-
-	rr := httptest.NewRecorder()
-	handler.HandleReadFile(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	// The file is admitted via its validated container, so the response must
-	// carry that container's MIME type, never application/octet-stream.
-	if got := rr.Header().Get("Content-Type"); got != "application/epub+zip" {
-		t.Fatalf("content-type = %q, want application/epub+zip", got)
-	}
-	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Fatalf("x-content-type-options = %q, want nosniff", got)
-	}
-}
-
 func TestEbookMimeTypeNeverReturnsOctetStreamForAdmittedFiles(t *testing.T) {
 	cases := []struct {
 		path      string
@@ -187,31 +112,6 @@ func TestEbookMimeTypeNeverReturnsOctetStreamForAdmittedFiles(t *testing.T) {
 		if got := ebookMimeType(tc.path, tc.container); got != tc.wantMime {
 			t.Fatalf("ebookMimeType(%q, %q) = %q, want %q", tc.path, tc.container, got, tc.wantMime)
 		}
-	}
-}
-
-func TestEbookReaderRejectsNonEbookFile(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{
-				ID:        42,
-				ContentID: "movie-1",
-				FilePath:  "/tmp/movie.mkv",
-				Container: "mkv",
-				BaseType:  "movie",
-			},
-		},
-		ItemAccess: stubItemAccessChecker{},
-	})
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/movie-1/files/42/read")
-	req = withEbookReaderRouteParams(req, "movie-1", "42")
-
-	rr := httptest.NewRecorder()
-	handler.HandleReadFile(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -260,31 +160,6 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 	}
 }
 
-func TestEbookReaderMapsAccessFailureToNotFound(t *testing.T) {
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{
-			file: &models.MediaFile{
-				ID:        42,
-				ContentID: "ebook-1",
-				FilePath:  "/tmp/book.epub",
-				Container: "epub",
-				BaseType:  "ebook",
-			},
-		},
-		ItemAccess: stubItemAccessChecker{err: catalog.ErrItemNotFound},
-	})
-
-	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
-	req = withEbookReaderRouteParams(req, "ebook-1", "42")
-
-	rr := httptest.NewRecorder()
-	handler.HandleReadFile(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func existingEbookReaderAnnotation() *EbookReaderAnnotation {
 	createdAt := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	return &EbookReaderAnnotation{
@@ -301,107 +176,6 @@ func existingEbookReaderAnnotation() *EbookReaderAnnotation {
 		Metadata:     json.RawMessage(`{"chapter":"one"}`),
 		CreatedAt:    createdAt,
 		UpdatedAt:    createdAt,
-	}
-}
-
-func patchEbookReaderAnnotation(t *testing.T, store *fakeEbookReaderAnnotationStore, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.AnnotationStore = store
-
-	req := newEbookReaderAuthRequest(http.MethodPatch, "/ebooks/ebook-1/annotations/ann-1")
-	req.Body = io.NopCloser(strings.NewReader(body))
-	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleUpdateAnnotation(rr, req)
-	return rr
-}
-
-func TestEbookReaderPatchKeepsAbsentFields(t *testing.T) {
-	original := existingEbookReaderAnnotation()
-	store := &fakeEbookReaderAnnotationStore{existing: original}
-
-	rr := patchEbookReaderAnnotation(t, store, `{"note":"updated","color":"#bfdbfe"}`)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.updated == nil || store.updated.ID != "ann-1" || store.updated.Note != "updated" || store.updated.Color != "#bfdbfe" {
-		t.Fatalf("updated = %+v", store.updated)
-	}
-	if !store.updated.UpdatedAt.After(original.UpdatedAt) {
-		t.Fatalf("updated_at %v did not advance past %v", store.updated.UpdatedAt, original.UpdatedAt)
-	}
-	if string(store.updated.Metadata) != `{"chapter":"one"}` {
-		t.Fatalf("metadata should be preserved when absent, got %s", store.updated.Metadata)
-	}
-	if store.updated.Kind != "highlight" || store.updated.CFIRange != "epubcfi(/6/4,/1:0,/1:12)" {
-		t.Fatalf("absent fields should keep stored values, got %+v", store.updated)
-	}
-}
-
-func TestEbookReaderPatchClearsExplicitlyEmptyFields(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
-
-	rr := patchEbookReaderAnnotation(t, store, `{"note":"","metadata":{}}`)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.updated == nil || store.updated.Note != "" {
-		t.Fatalf("note should be cleared, got %+v", store.updated)
-	}
-	if string(store.updated.Metadata) != `{}` {
-		t.Fatalf("metadata should be cleared to {}, got %s", store.updated.Metadata)
-	}
-}
-
-func TestEbookReaderPatchValidatesResultingState(t *testing.T) {
-	cases := map[string]string{
-		"kind change without location": `{"kind":"bookmark"}`,
-		"clearing required cfi_range":  `{"cfi_range":""}`,
-		"unknown kind":                 `{"kind":"doodle"}`,
-		"non-object metadata":          `{"metadata":["bad"]}`,
-	}
-	for name, body := range cases {
-		t.Run(name, func(t *testing.T) {
-			store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
-			rr := patchEbookReaderAnnotation(t, store, body)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-			}
-			if store.updated != nil {
-				t.Fatalf("invalid patch must not reach the store, got %+v", store.updated)
-			}
-		})
-	}
-}
-
-func TestEbookReaderRejectsOversizedProgressBody(t *testing.T) {
-	store := &fakeEbookProgressStore{}
-	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
-		FileResolver: stubMediaFileResolver{},
-		ItemAccess:   stubItemAccessChecker{},
-	})
-	handler.ProgressStore = store
-
-	body := `{"file_id":42,"location":"` + strings.Repeat("x", int(ebookReaderProgressMaxBodySize)) + `","progress":0.5}`
-	req := newEbookReaderAuthRequest(http.MethodPut, "/ebooks/ebook-1/progress")
-	req.Body = io.NopCloser(strings.NewReader(body))
-	req = withEbookReaderContentRouteParam(req, "ebook-1")
-
-	rr := httptest.NewRecorder()
-	handler.HandleSaveProgress(rr, req)
-
-	if rr.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if store.upserted != nil {
-		t.Fatalf("oversized body must not be saved, got %+v", store.upserted)
 	}
 }
 
@@ -427,6 +201,85 @@ func TestInlineContentDispositionProducesParseableHeaders(t *testing.T) {
 			if params["filename"] != want {
 				t.Fatalf("filename = %q, want %q", params["filename"], want)
 			}
+		})
+	}
+}
+
+func TestEbookReaderFileResolutionHidesNonReadableFiles(t *testing.T) {
+	ebook := &models.MediaFile{ID: 42, ContentID: "ebook-1", FilePath: "/tmp/book.epub", Container: "epub", BaseType: "ebook"}
+	cases := []struct {
+		name      string
+		resolver  stubMediaFileResolver
+		contentID string
+	}{
+		{"missing file", stubMediaFileResolver{err: scanner.ErrFileNotFound}, "ebook-1"},
+		{"non-ebook file", stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Container: "mkv", BaseType: "movie"}}, "movie-1"},
+		{"file of another item", stubMediaFileResolver{file: ebook}, "ebook-2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewEbookReaderHandler(&MediaFileAuthorizer{FileResolver: tc.resolver, ItemAccess: stubItemAccessChecker{}})
+			if _, err := h.ResolveReaderFile(context.Background(), tc.contentID, 42, catalog.AccessFilter{}); !errors.Is(err, catalog.ErrItemNotFound) {
+				t.Fatalf("ResolveReaderFile() error = %v, want ErrItemNotFound", err)
+			}
+		})
+	}
+}
+
+func TestEbookReaderAnnotationPatchMergesOntoStoredState(t *testing.T) {
+	cases := []struct {
+		name    string
+		patch   string
+		invalid bool
+		check   func(t *testing.T, original, updated *EbookReaderAnnotation)
+	}{
+		{name: "absent fields keep stored values", patch: `{"note":"updated","color":"#bfdbfe"}`, check: func(t *testing.T, original, updated *EbookReaderAnnotation) {
+			if updated.Note != "updated" || updated.Color != "#bfdbfe" {
+				t.Fatalf("patched fields not applied: %+v", updated)
+			}
+			if updated.Kind != original.Kind || updated.CFIRange != original.CFIRange || string(updated.Metadata) != string(original.Metadata) {
+				t.Fatalf("absent fields changed: %+v", updated)
+			}
+			if !updated.UpdatedAt.After(original.UpdatedAt) {
+				t.Fatalf("updated_at %v did not advance past %v", updated.UpdatedAt, original.UpdatedAt)
+			}
+		}},
+		{name: "explicitly empty fields clear", patch: `{"note":"","metadata":{}}`, check: func(t *testing.T, _, updated *EbookReaderAnnotation) {
+			if updated.Note != "" || string(updated.Metadata) != `{}` {
+				t.Fatalf("note/metadata not cleared: %+v", updated)
+			}
+		}},
+		{name: "kind change without location", patch: `{"kind":"bookmark"}`, invalid: true},
+		{name: "clearing required cfi_range", patch: `{"cfi_range":""}`, invalid: true},
+		{name: "unknown kind", patch: `{"kind":"doodle"}`, invalid: true},
+		{name: "non-object metadata", patch: `{"metadata":["bad"]}`, invalid: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := existingEbookReaderAnnotation()
+			store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+			h := NewEbookReaderHandler(&MediaFileAuthorizer{FileResolver: stubMediaFileResolver{}, ItemAccess: stubItemAccessChecker{}})
+			h.AnnotationStore = store
+			var patch EbookAnnotationPatch
+			if err := json.Unmarshal([]byte(tc.patch), &patch); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			scope := EbookAnnotationScope{UserID: 1, ProfileID: "profile-1", ContentID: "ebook-1"}
+			updated, err := h.UpdateReaderAnnotation(context.Background(), scope, "ann-1", patch, nil)
+			if tc.invalid {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+					t.Fatalf("UpdateReaderAnnotation() error = %v, want 400", err)
+				}
+				if store.updated != nil {
+					t.Fatalf("invalid patch reached the store: %+v", store.updated)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UpdateReaderAnnotation() error = %v", err)
+			}
+			tc.check(t, original, updated)
 		})
 	}
 }

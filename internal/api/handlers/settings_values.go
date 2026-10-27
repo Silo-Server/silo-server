@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -52,11 +50,6 @@ type SettingValuesHandler struct {
 	// RecWorker is told when a profile's hidden libraries change, so its
 	// recommendations are rebuilt without them. Optional.
 	RecWorker SignalsChangedNotifier
-
-	// ProfileTokens enables household management for a PIN-locked primary
-	// profile naming another profile on its own account. Nil means that
-	// widening is simply unavailable — never that it is unguarded.
-	ProfileTokens *access.ProfileTokenService
 }
 
 // languageSuggestionSource supplies the distinct original_language values the
@@ -268,35 +261,6 @@ type effectiveSourceContextResponse struct {
 	SeriesID     string `json:"series_id,omitempty"`
 }
 
-// HandleGetContract serves the public manifest.
-//
-// ETag-gated: clients vendor a pinned copy and generate bindings from it, so
-// the common request is a conditional GET that answers "still the same
-// contract?" without transferring it.
-func (h *SettingValuesHandler) HandleGetContract(w http.ResponseWriter, r *http.Request) {
-	etag, err := settingscontract.PublicETag()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
-		return
-	}
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "no-cache")
-
-	if match := r.Header.Get("If-None-Match"); match != "" && ETagMatches(match, etag) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-
-	body, err := settingscontract.PublicBytes()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read the settings contract")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
-}
-
 // SettingsCapabilitiesView is the settings capability document. Field order
 // is alphabetical on purpose: v1 encoded a map, whose keys sort, and the v1
 // bytes must not change.
@@ -344,17 +308,6 @@ func SettingsCapabilities(contract *settingscontract.Manifest) (SettingsCapabili
 		SupportsIdempotentWrites: true,
 		SupportsAtomicShortcuts:  true,
 	}, nil
-}
-
-// HandleGetCapabilities reports what this server supports, for feature
-// detection rather than version sniffing.
-func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *http.Request) {
-	view, err := SettingsCapabilities(h.contract)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
 }
 
 func normalizeNavigationShortcutItem(
@@ -715,23 +668,6 @@ func writeLegacyIntroSkipColumn(
 	return nil
 }
 
-func uniqueTrimmed(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
-}
-
 func parseOptionalPositiveJSONInt(raw json.RawMessage) (int, error) {
 	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == jsonNullLiteral {
 		return 0, nil
@@ -759,15 +695,6 @@ func parseOptionalPositiveJSONInt(raw json.RawMessage) (int, error) {
 // playback.preferred_quality's ceiling to. It must match the manifest's
 // constrained_by.policy_input, which is how the resolver looks the limit up.
 const policyInputMaxPlaybackQuality = "max_playback_quality"
-
-func (h *SettingValuesHandler) storeFor(w http.ResponseWriter, r *http.Request) (userstore.UserStore, bool) {
-	store, err := h.storeProvider.ForUser(r.Context(), apimw.GetUserID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return nil, false
-	}
-	return store, true
-}
 
 func sameSettingContext(a, b userstore.SettingIdentity) bool {
 	return a.Scope == b.Scope && a.ProfileID == b.ProfileID &&
@@ -939,51 +866,6 @@ func hashNavigationShortcutMutation(
 		Present   bool                   `json:"present"`
 	}{Operation: "set_navigation_shortcut_presence", Item: item, Present: present})
 	return hashMutationRequest(identity, canonical)
-}
-
-func writeRawJSON(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-// ETagMatches handles the comma-separated If-None-Match list, including "*".
-func ETagMatches(header, etag string) bool {
-	header = strings.TrimSpace(header)
-	if header == "*" {
-		return true
-	}
-	for _, candidate := range strings.Split(header, ",") {
-		if strings.TrimSpace(candidate) == etag {
-			return true
-		}
-	}
-	return false
-}
-
-func splitCSV(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
-func parseIntCSV(raw string) []int {
-	parts := splitCSV(raw)
-	out := make([]int, 0, len(parts))
-	for _, part := range parts {
-		if value, err := strconv.Atoi(part); err == nil && value > 0 {
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 // Capabilities is the settings capability document for this server's

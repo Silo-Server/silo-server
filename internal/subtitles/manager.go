@@ -451,17 +451,3 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 func (m *Manager) ListDownloadedSubtitles(ctx context.Context, mediaFileID int) ([]DownloadedSubtitle, error) {
 	return m.repo.ListDownloadedSubtitles(ctx, mediaFileID)
 }
-
-// DeleteSubtitle removes the database row, then attempts object cleanup.
-// Success means metadata is absent; object cleanup is best effort.
-func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
-	sub, err := m.repo.DeleteDownloadedSubtitle(ctx, id)
-	if err != nil {
-		return fmt.Errorf("delete subtitle record: %w", err)
-	}
-	if sub == nil {
-		return nil
-	}
-	m.cleanupSubtitleObject(ctx, sub.S3Key)
-	return nil
-}

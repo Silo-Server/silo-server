@@ -514,49 +514,6 @@ func (s *Service) SetClusterEventBus(bus cache.EventBus) error {
 	return nil
 }
 
-func (s *Service) CreateRoom(ctx context.Context, input CreateRoomInput) (*Room, error) {
-	if s == nil || s.repo == nil {
-		return nil, fmt.Errorf("watch together service unavailable")
-	}
-
-	now := s.now()
-	selectionMode := input.SelectionMode
-	if selectionMode != RoomSelectionModeVote {
-		selectionMode = RoomSelectionModeHostPick
-	}
-	room := Room{
-		ID:                    uuid.NewString(),
-		Code:                  randomToken(8),
-		JoinToken:             randomToken(24),
-		HostUserID:            input.HostUserID,
-		HostProfileID:         input.HostProfileID,
-		Phase:                 RoomPhaseLobby,
-		PlaybackState:         RoomPlaybackStateIdle,
-		ResumeOnReady:         false,
-		SelectionMode:         selectionMode,
-		SelectionRevision:     0,
-		GuestControlPolicy:    GuestControlPolicyHostOnly,
-		AnchorPositionSeconds: 0,
-		IsPaused:              true,
-		AnchorUpdatedAt:       now,
-		Generation:            1,
-		CreatedAt:             now,
-	}
-
-	created, err := s.repo.CreateRoom(ctx, room)
-	if err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	s.rooms[created.ID] = &liveRoom{
-		room:    *created,
-		members: make(map[string]*memberState),
-	}
-	s.mu.Unlock()
-	return created, nil
-}
-
 func (s *Service) JoinRoom(ctx context.Context, input JoinInput) (*Room, error) {
 	if s == nil || s.repo == nil {
 		return nil, fmt.Errorf("watch together service unavailable")

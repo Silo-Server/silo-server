@@ -409,62 +409,6 @@ func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 	}
 }
 
-func TestV1ProgressAndStopRequireTheOwningProfile(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		stop      bool
-		userID    int
-		profileID string
-		want      int
-	}{
-		{name: "progress from another account", userID: 2, profileID: "profile-1", want: http.StatusForbidden},
-		{name: "progress from a sibling profile", userID: 1, profileID: "profile-2", want: http.StatusForbidden},
-		{name: "progress from the owning profile", userID: 1, profileID: "profile-1", want: http.StatusNoContent},
-		{name: "stop from another account", stop: true, userID: 2, profileID: "profile-1", want: http.StatusForbidden},
-		{name: "stop from a sibling profile", stop: true, userID: 1, profileID: "profile-2", want: http.StatusForbidden},
-		{name: "stop from the owning profile", stop: true, userID: 1, profileID: "profile-1", want: http.StatusNoContent},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager := playback.NewSessionManager(0, 0)
-			manager.RegisterReconstructed(&playback.Session{
-				ID: "owned-session", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayDirect, Position: 10,
-			})
-			handler := NewPlaybackHandler(manager)
-
-			method, path, body, handle := http.MethodPost, "/api/v1/playback/owned-session/progress", `{"position":42}`, handler.HandleUpdateProgress
-			if test.stop {
-				method, path, body, handle = http.MethodDelete, "/api/v1/playback/owned-session", "", handler.HandleStopPlayback
-			}
-			req := httptest.NewRequest(method, path, strings.NewReader(body))
-			ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: test.userID, Role: "user", TokenType: auth.TokenTypeAccess})
-			ctx = apimw.SetProfileID(ctx, test.profileID)
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("session_id", "owned-session")
-			rr := httptest.NewRecorder()
-			handle(rr, req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx)))
-			if rr.Code != test.want {
-				t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), test.want)
-			}
-
-			session, err := manager.GetSession("owned-session")
-			switch {
-			case test.want == http.StatusForbidden:
-				if err != nil || session.Position != 10 {
-					t.Fatalf("refused caller changed the session: %+v, %v", session, err)
-				}
-			case test.stop:
-				if !errors.Is(err, playback.ErrSessionNotFound) {
-					t.Fatalf("owner stop left the session: %+v, %v", session, err)
-				}
-			default:
-				if err != nil || session.Position != 42 {
-					t.Fatalf("owner progress not applied: %+v, %v", session, err)
-				}
-			}
-		})
-	}
-}
-
 func TestGetTranscodeSegment_CopyMPEGTSRecoveryUsesResolvedManifestNumberWithoutLookaheadDelay(t *testing.T) {
 	outputDir := t.TempDir()
 	ffmpegPath := filepath.Join(outputDir, "ffmpeg")
@@ -870,378 +814,6 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 	}
 }
 
-// A start remembers the version it played: under the series for an episode,
-// so the next episode opens on the same traits, and under the movie itself,
-// naming the exact file, so a play too short to leave progress still keeps
-// the viewer's choice. On /api/v2 it never saves the audio track: a start
-// cannot tell a pick from Auto, a Next Up carry, or a fallback, and a saved
-// track would outrank the profile's language for the rest of the series, so
-// picks reach the audio preference through PUT /audio-prefs. The frozen
-// /api/v1 bridge keeps saving it.
-func TestHandleStartPlaybackV3_RemembersVersionButNotAudioTrack(t *testing.T) {
-	tests := []struct {
-		name       string
-		episodeID  string
-		key        string
-		wantFileID int
-		v1         bool
-	}{
-		{name: "episode", episodeID: "episode-1", key: "series-1", wantFileID: 0},
-		{name: "movie", key: "movie-1", wantFileID: 42},
-		{name: "v1 bridge episode", episodeID: "episode-1", key: "series-1", wantFileID: 0, v1: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store := newPlaybackTestStore(t)
-			file := v3HandlerFixtureFile(t)
-			file.EpisodeID = tt.episodeID
-			file.EditionKey = "directors-cut"
-			file.AudioTracks = []models.AudioTrack{
-				{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
-				{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
-			}
-
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-			handler.StoreProvider = testUserStoreProvider{store: store}
-			handler.ItemAccess = allowAllPlaybackItemAccess{}
-			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
-
-			request := v3HandlerStartRequest()
-			request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-			audioTrack := 1
-			request.AudioTrackIndex = &audioTrack
-			ctx, path := WithNativeAPIV2(newAuthorizedPlaybackContext()), "/api/v2/playback/start"
-			if tt.v1 {
-				ctx, path = newAuthorizedPlaybackContext(), "/api/v1/playback/start"
-			}
-			rr := httptest.NewRecorder()
-			handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, path, strings.NewReader(marshalV3StartRequest(t, request))).WithContext(ctx))
-			var response playback.DecisionResponseV3
-			if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil {
-				t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
-			}
-			handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
-
-			pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", tt.key)
-			if err != nil || pref == nil {
-				t.Fatalf("GetSeriesPlaybackPreference(%q) = %+v, %v", tt.key, pref, err)
-			}
-			if pref.Resolution != "1080p" || pref.CodecVideo != "h264" || pref.HDR {
-				t.Fatalf("stored pref = %+v, want 1080p/h264/false", pref)
-			}
-			wantEdition := ""
-			if tt.wantFileID != 0 {
-				wantEdition = "directors-cut"
-			}
-			if pref.FileID != tt.wantFileID || pref.EditionKey != wantEdition {
-				t.Fatalf("stored file/edition = %d/%q, want %d/%q", pref.FileID, pref.EditionKey, tt.wantFileID, wantEdition)
-			}
-
-			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
-			switch {
-			case err != nil:
-				t.Fatalf("GetAudioPreference(%q): %v", tt.key, err)
-			case tt.v1 && (audio == nil || audio.AudioTrackIndex != 1):
-				t.Fatalf("v1 bridge saved audio %+v, want track 1", audio)
-			case !tt.v1 && audio != nil:
-				t.Fatalf("GetAudioPreference(%q) = %+v; want no saved audio preference", tt.key, audio)
-			}
-		})
-	}
-}
-
-// A start that never produced a session played nothing, so it must not teach
-// the series what the viewer prefers.
-func TestHandleStartPlaybackV3_DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	file := v3HandlerFixtureFile(t)
-	file.EpisodeID = "episode-1"
-
-	handler := NewPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-	handler.StoreProvider = testUserStoreProvider{store: store}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
-
-	// v3 reports playback outcomes in the body; the request itself was fine.
-	response := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
-	if response.Terminal == nil || response.PlaybackPlan != nil {
-		t.Fatalf("expected a terminal with no plan, got %#v", response)
-	}
-
-	pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("GetSeriesPlaybackPreference: %v", err)
-	}
-	if pref != nil {
-		t.Fatalf("expected no persisted preference on failure, got %+v", pref)
-	}
-}
-
-// A v3 client sends a track identity only when the viewer picked one. With none
-// sent, the server resolves this profile's audio language through the settings
-// contract — the same resolution the catalog publishes as
-// effective_audio_track_index — instead of falling to ordinal zero.
-//
-// The legacy user_profiles.language column always carries a different track's
-// language than the canonical answer, so a regression to reading it flips the
-// selected index.
-func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
-	newFile := func(t *testing.T) *models.MediaFile {
-		file := v3HandlerFixtureFile(t)
-		file.AudioTracks = []models.AudioTrack{
-			{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
-			{Language: "jpn", Codec: "aac", Channels: 2, Layout: "stereo"},
-			{Language: "spa", Codec: "aac", Channels: 2, Layout: "stereo"},
-			{Language: "fra", Codec: "aac", Channels: 2, Layout: "stereo"},
-		}
-		return file
-	}
-
-	setLegacyLanguage := func(t *testing.T, store userstore.UserStore, language string) {
-		t.Helper()
-		if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
-			Language: &language,
-		}); err != nil {
-			t.Fatalf("seed legacy language column: %v", err)
-		}
-	}
-
-	setCanonicalLanguage := func(t *testing.T, store userstore.UserStore, identity userstore.SettingIdentity, language string) {
-		t.Helper()
-		identity.Key = settingskeys.PlaybackAudioLanguage
-		identity.ProfileID = "profile-1"
-		encoded, err := json.Marshal(language)
-		if err != nil {
-			t.Fatalf("encode canonical audio language: %v", err)
-		}
-		if _, err := store.UpsertSettingValue(context.Background(), identity, encoded); err != nil {
-			t.Fatalf("seed canonical audio language: %v", err)
-		}
-	}
-
-	startPlayback := func(
-		t *testing.T,
-		store userstore.UserStore,
-		file *models.MediaFile,
-		deviceID string,
-		mutate func(*playback.StartRequestV3),
-	) int {
-		t.Helper()
-		manager := playback.NewSessionManager(0, 0)
-		handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-		handler.StoreProvider = testUserStoreProvider{store: store}
-		handler.ItemAccess = allowAllPlaybackItemAccess{}
-		if file.EpisodeID != "" {
-			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: file.EpisodeID, SeriesID: "series-1"}}
-		}
-
-		startRequest := v3HandlerStartRequest()
-		startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-		if mutate != nil {
-			mutate(&startRequest)
-		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-			strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
-		// A client name or user agent is not a stable settings identity. Only
-		// the explicit device header may select a profile_device row.
-		req.Header.Set("User-Agent", "SiloTV/apple-tv")
-		if deviceID != "" {
-			req.Header.Set(deviceIDHeader, deviceID)
-		}
-		rr := httptest.NewRecorder()
-		handler.HandleStartPlayback(rr, req)
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-		}
-		var response playback.DecisionResponseV3
-		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		if response.PlaybackPlan == nil {
-			t.Fatalf("response = %#v", response)
-		}
-		session, err := manager.GetSession(response.PlaybackPlan.SessionID)
-		if err != nil {
-			t.Fatalf("GetSession: %v", err)
-		}
-		handler.waitForPlaybackStartSideEffectsV3(context.Background(), session.ID)
-		return session.AudioTrackIndex
-	}
-
-	t.Run("canonical value wins over legacy column", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		setLegacyLanguage(t, store, "eng")
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope: settingscontract.ScopeProfile,
-		}, "ja")
-
-		if index := startPlayback(t, store, newFile(t), "", nil); index != 1 {
-			t.Fatalf("AudioTrackIndex = %d, want 1 (canonical \"ja\" track)", index)
-		}
-	})
-
-	t.Run("device value applies only to the identified device", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope:    settingscontract.ScopeProfileDevice,
-			DeviceID: "apple-tv",
-		}, "ja")
-
-		if index := startPlayback(t, store, newFile(t), "apple-tv", nil); index != 1 {
-			t.Fatalf("AudioTrackIndex = %d, want 1 (device \"ja\" track)", index)
-		}
-		// The start above remembered its track for this movie; clear it so
-		// the next start shows only the scope resolution.
-		if err := store.DeleteAudioPreference(context.Background(), "profile-1", "movie-1"); err != nil {
-			t.Fatalf("DeleteAudioPreference: %v", err)
-		}
-		if index := startPlayback(t, store, newFile(t), "", nil); index != 0 {
-			t.Fatalf("AudioTrackIndex = %d, want 0 (profile \"en\" track without device identity)", index)
-		}
-	})
-
-	t.Run("series and library values outrank device value", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope:    settingscontract.ScopeProfileDevice,
-			DeviceID: "apple-tv",
-		}, "ja")
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope:     settingscontract.ScopeProfileLibrary,
-			LibraryID: 12,
-		}, "es")
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope:    settingscontract.ScopeProfileSeries,
-			SeriesID: "series-1",
-		}, "fr")
-
-		movie := newFile(t)
-		movie.MediaFolderID = 12
-		if index := startPlayback(t, store, movie, "apple-tv", nil); index != 2 {
-			t.Fatalf("AudioTrackIndex = %d, want 2 (library \"es\" track)", index)
-		}
-
-		episode := newFile(t)
-		episode.MediaFolderID = 12
-		episode.EpisodeID = "episode-1"
-		if index := startPlayback(t, store, episode, "apple-tv", nil); index != 3 {
-			t.Fatalf("AudioTrackIndex = %d, want 3 (series \"fr\" track)", index)
-		}
-	})
-
-	t.Run("explicit track selection outranks saved settings", func(t *testing.T) {
-		store := newPlaybackTestStore(t)
-		setCanonicalLanguage(t, store, userstore.SettingIdentity{
-			Scope:    settingscontract.ScopeProfileDevice,
-			DeviceID: "apple-tv",
-		}, "ja")
-		file := newFile(t)
-		if index := startPlayback(t, store, file, "apple-tv", func(request *playback.StartRequestV3) {
-			explicit := 0
-			request.AudioTrackIndex = &explicit
-			request.AudioTrackID = playback.TrackIDV3(file.ID, "audio", explicit)
-		}); index != 0 {
-			t.Fatalf("AudioTrackIndex = %d, want 0 (explicit \"en\" track)", index)
-		}
-	})
-}
-
-// An omitted start_position asks the server for its resume policy; an explicit
-// zero means "start over". The distinction is settled before planning, because
-// the plan's timeline is cut at the start position — a route chosen for zero
-// and then seeked to the resume point is a different route.
-func TestHandleStartPlaybackV3_ResumePolicyAppliesOnlyToAnOmittedStartPosition(t *testing.T) {
-	zero := 0.0
-	multipart := func(file *models.MediaFile) {
-		file.PresentationKind = "multipart"
-		file.PresentationGroupKey = file.ContentID
-		file.PresentationPartIndex = 4
-		file.PresentationPartTotal = 6
-	}
-
-	for _, tc := range []struct {
-		name          string
-		startPosition *float64
-		mutate        func(*models.MediaFile)
-		wantPosition  float64
-	}{
-		{name: "omitted start position restores the saved resume point", wantPosition: 900},
-		{name: "explicit zero starts over", startPosition: &zero, wantPosition: 0},
-		// Every part of a multipart item shares one resume point with the item,
-		// so a part-local seek to it would land somewhere arbitrary.
-		{name: "a multipart part does not resume into itself", mutate: multipart, wantPosition: 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newPlaybackTestStore(t)
-			if err := store.SetProgress(context.Background(), "profile-1", "movie-1", 900, 3600, userstore.ProgressThresholds{}); err != nil {
-				t.Fatalf("seed progress: %v", err)
-			}
-			file := v3HandlerFixtureFile(t)
-			if tc.mutate != nil {
-				tc.mutate(file)
-			}
-
-			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-			handler.StoreProvider = testUserStoreProvider{store: store}
-			handler.ItemAccess = allowAllPlaybackItemAccess{}
-
-			request := v3HandlerStartRequest()
-			request.StartPosition = tc.startPosition
-			response := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, request))
-			if response.PlaybackPlan == nil {
-				t.Fatalf("response = %#v", response)
-			}
-			// The plan and the session have to agree on where playback begins.
-			if got := response.PlaybackPlan.Timeline.SourceStartSeconds; got != tc.wantPosition {
-				t.Fatalf("plan source start = %v, want %v", got, tc.wantPosition)
-			}
-			session, err := manager.GetSession(response.PlaybackPlan.SessionID)
-			if err != nil {
-				t.Fatalf("GetSession: %v", err)
-			}
-			if session.Position != tc.wantPosition {
-				t.Fatalf("session position = %v, want %v", session.Position, tc.wantPosition)
-			}
-		})
-	}
-}
-
-// A missing backing file is not something a client can be handed a plan for,
-// and it must not leave a session behind that nothing will ever stop.
-func TestHandleStartPlaybackV3_MarksMissingFileAndSkipsSessionCreation(t *testing.T) {
-	sessionMgr := playback.NewSessionManager(0, 0)
-	marker := &recordingMissingMarker{}
-	file := v3HandlerFixtureFile(t)
-	file.FilePath = filepath.Join(t.TempDir(), "missing.mkv")
-
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.MissingMarker = marker
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if got := len(sessionMgr.AllSessions()); got != 0 {
-		t.Fatalf("session count = %d, want 0", got)
-	}
-	if len(marker.ids) != 1 || marker.ids[0] != 42 {
-		t.Fatalf("marked ids = %v, want [42]", marker.ids)
-	}
-}
-
 func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{
 		files: map[int]*models.MediaFile{
@@ -1495,5 +1067,363 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+// A start remembers the version it played: under the series for an episode,
+// so the next episode opens on the same traits, and under the movie itself,
+// naming the exact file, so a play too short to leave progress still keeps
+// the viewer's choice. On /api/v2 it never saves the audio track: a start
+// cannot tell a pick from Auto, a Next Up carry, or a fallback, and a saved
+// track would outrank the profile's language for the rest of the series, so
+// picks reach the audio preference through PUT /audio-prefs.
+func TestStartPlaybackV2RemembersVersionButNotAudioTrack(t *testing.T) {
+	tests := []struct {
+		name       string
+		episodeID  string
+		key        string
+		wantFileID int
+	}{
+		{name: "episode", episodeID: "episode-1", key: "series-1", wantFileID: 0},
+		{name: "movie", key: "movie-1", wantFileID: 42},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			file := v3HandlerFixtureFile(t)
+			file.EpisodeID = tt.episodeID
+			file.EditionKey = "directors-cut"
+			file.AudioTracks = []models.AudioTrack{
+				{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
+				{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
+			}
+
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+			handler.StoreProvider = testUserStoreProvider{store: store}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
+
+			request := v3HandlerStartRequest()
+			request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+			audioTrack := 1
+			request.AudioTrackIndex = &audioTrack
+			response := startPlaybackDecisionV2(t, handler, marshalV3StartRequest(t, request))
+			handler.waitForPlaybackStartSideEffectsV3(context.Background(), response.SessionID)
+
+			pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", tt.key)
+			if err != nil || pref == nil {
+				t.Fatalf("GetSeriesPlaybackPreference(%q) = %+v, %v", tt.key, pref, err)
+			}
+			if pref.Resolution != "1080p" || pref.CodecVideo != "h264" || pref.HDR {
+				t.Fatalf("stored pref = %+v, want 1080p/h264/false", pref)
+			}
+			wantEdition := ""
+			if tt.wantFileID != 0 {
+				wantEdition = "directors-cut"
+			}
+			if pref.FileID != tt.wantFileID || pref.EditionKey != wantEdition {
+				t.Fatalf("stored file/edition = %d/%q, want %d/%q", pref.FileID, pref.EditionKey, tt.wantFileID, wantEdition)
+			}
+
+			audio, err := store.GetAudioPreference(context.Background(), "profile-1", tt.key)
+			switch {
+			case err != nil:
+				t.Fatalf("GetAudioPreference(%q): %v", tt.key, err)
+			case audio != nil:
+				t.Fatalf("GetAudioPreference(%q) = %+v; want no saved audio preference", tt.key, audio)
+			}
+		})
+	}
+}
+
+// A start that never produced a session played nothing, so it must not teach
+// the series what the viewer prefers.
+func TestStartPlaybackV2DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	file := v3HandlerFixtureFile(t)
+	file.EpisodeID = "episode-1"
+
+	handler := NewPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: "episode-1", SeriesID: "series-1"}}
+
+	// v3 reports playback outcomes in the body; the request itself was fine.
+	response := startPlaybackDecisionV2(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
+	if response.Terminal == nil || response.PlaybackPlan != nil {
+		t.Fatalf("expected a terminal with no plan, got %#v", response)
+	}
+
+	pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("GetSeriesPlaybackPreference: %v", err)
+	}
+	if pref != nil {
+		t.Fatalf("expected no persisted preference on failure, got %+v", pref)
+	}
+}
+
+// A v3 client sends a track identity only when the viewer picked one. With none
+// sent, the server resolves this profile's audio language through the settings
+// contract — the same resolution the catalog publishes as
+// effective_audio_track_index — instead of falling to ordinal zero.
+//
+// The legacy user_profiles.language column always carries a different track's
+// language than the canonical answer, so a regression to reading it flips the
+// selected index.
+func TestStartPlaybackV2AudioLanguageResolvesCanonically(t *testing.T) { //nolint:funlen // ported unchanged from the retired v1 handler test
+	newFile := func(t *testing.T) *models.MediaFile {
+		file := v3HandlerFixtureFile(t)
+		file.AudioTracks = []models.AudioTrack{
+			{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
+			{Language: "jpn", Codec: "aac", Channels: 2, Layout: "stereo"},
+			{Language: "spa", Codec: "aac", Channels: 2, Layout: "stereo"},
+			{Language: "fra", Codec: "aac", Channels: 2, Layout: "stereo"},
+		}
+		return file
+	}
+
+	setLegacyLanguage := func(t *testing.T, store userstore.UserStore, language string) {
+		t.Helper()
+		if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
+			Language: &language,
+		}); err != nil {
+			t.Fatalf("seed legacy language column: %v", err)
+		}
+	}
+
+	setCanonicalLanguage := func(t *testing.T, store userstore.UserStore, identity userstore.SettingIdentity, language string) {
+		t.Helper()
+		identity.Key = settingskeys.PlaybackAudioLanguage
+		identity.ProfileID = "profile-1"
+		encoded, err := json.Marshal(language)
+		if err != nil {
+			t.Fatalf("encode canonical audio language: %v", err)
+		}
+		if _, err := store.UpsertSettingValue(context.Background(), identity, encoded); err != nil {
+			t.Fatalf("seed canonical audio language: %v", err)
+		}
+	}
+
+	startPlayback := func(
+		t *testing.T,
+		store userstore.UserStore,
+		file *models.MediaFile,
+		deviceID string,
+		mutate func(*playback.StartRequestV3),
+	) int {
+		t.Helper()
+		manager := playback.NewSessionManager(0, 0)
+		handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+		handler.StoreProvider = testUserStoreProvider{store: store}
+		handler.ItemAccess = allowAllPlaybackItemAccess{}
+		if file.EpisodeID != "" {
+			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: file.EpisodeID, SeriesID: "series-1"}}
+		}
+
+		startRequest := v3HandlerStartRequest()
+		startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+		if mutate != nil {
+			mutate(&startRequest)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start",
+			strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+		// A client name or user agent is not a stable settings identity. Only
+		// the explicit device header may select a profile_device row.
+		req.Header.Set("User-Agent", "SiloTV/apple-tv")
+		if deviceID != "" {
+			req.Header.Set(deviceIDHeader, deviceID)
+		}
+		rr := httptest.NewRecorder()
+		serveStartPlaybackV2(t, handler, rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var response playback.DecisionResponseV3
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if response.PlaybackPlan == nil {
+			t.Fatalf("response = %#v", response)
+		}
+		session, err := manager.GetSession(response.PlaybackPlan.SessionID)
+		if err != nil {
+			t.Fatalf("GetSession: %v", err)
+		}
+		handler.waitForPlaybackStartSideEffectsV3(context.Background(), session.ID)
+		return session.AudioTrackIndex
+	}
+
+	t.Run("canonical value wins over legacy column", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setLegacyLanguage(t, store, "eng")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfile,
+		}, "ja")
+
+		if index := startPlayback(t, store, newFile(t), "", nil); index != 1 {
+			t.Fatalf("AudioTrackIndex = %d, want 1 (canonical \"ja\" track)", index)
+		}
+	})
+
+	t.Run("device value applies only to the identified device", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+
+		if index := startPlayback(t, store, newFile(t), "apple-tv", nil); index != 1 {
+			t.Fatalf("AudioTrackIndex = %d, want 1 (device \"ja\" track)", index)
+		}
+		// The start above remembered its track for this movie; clear it so
+		// the next start shows only the scope resolution.
+		if err := store.DeleteAudioPreference(context.Background(), "profile-1", "movie-1"); err != nil {
+			t.Fatalf("DeleteAudioPreference: %v", err)
+		}
+		if index := startPlayback(t, store, newFile(t), "", nil); index != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (profile \"en\" track without device identity)", index)
+		}
+	})
+
+	t.Run("series and library values outrank device value", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:     settingscontract.ScopeProfileLibrary,
+			LibraryID: 12,
+		}, "es")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileSeries,
+			SeriesID: "series-1",
+		}, "fr")
+
+		movie := newFile(t)
+		movie.MediaFolderID = 12
+		if index := startPlayback(t, store, movie, "apple-tv", nil); index != 2 {
+			t.Fatalf("AudioTrackIndex = %d, want 2 (library \"es\" track)", index)
+		}
+
+		episode := newFile(t)
+		episode.MediaFolderID = 12
+		episode.EpisodeID = "episode-1"
+		if index := startPlayback(t, store, episode, "apple-tv", nil); index != 3 {
+			t.Fatalf("AudioTrackIndex = %d, want 3 (series \"fr\" track)", index)
+		}
+	})
+
+	t.Run("explicit track selection outranks saved settings", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+		file := newFile(t)
+		if index := startPlayback(t, store, file, "apple-tv", func(request *playback.StartRequestV3) {
+			explicit := 0
+			request.AudioTrackIndex = &explicit
+			request.AudioTrackID = playback.TrackIDV3(file.ID, "audio", explicit)
+		}); index != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (explicit \"en\" track)", index)
+		}
+	})
+}
+
+// An omitted start_position asks the server for its resume policy; an explicit
+// zero means "start over". The distinction is settled before planning, because
+// the plan's timeline is cut at the start position — a route chosen for zero
+// and then seeked to the resume point is a different route.
+func TestStartPlaybackV2ResumePolicyAppliesOnlyToAnOmittedStartPosition(t *testing.T) {
+	zero := 0.0
+	multipart := func(file *models.MediaFile) {
+		file.PresentationKind = "multipart"
+		file.PresentationGroupKey = file.ContentID
+		file.PresentationPartIndex = 4
+		file.PresentationPartTotal = 6
+	}
+
+	for _, tc := range []struct {
+		name          string
+		startPosition *float64
+		mutate        func(*models.MediaFile)
+		wantPosition  float64
+	}{
+		{name: "omitted start position restores the saved resume point", wantPosition: 900},
+		{name: "explicit zero starts over", startPosition: &zero, wantPosition: 0},
+		// Every part of a multipart item shares one resume point with the item,
+		// so a part-local seek to it would land somewhere arbitrary.
+		{name: "a multipart part does not resume into itself", mutate: multipart, wantPosition: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			if err := store.SetProgress(context.Background(), "profile-1", "movie-1", 900, 3600, userstore.ProgressThresholds{}); err != nil {
+				t.Fatalf("seed progress: %v", err)
+			}
+			file := v3HandlerFixtureFile(t)
+			if tc.mutate != nil {
+				tc.mutate(file)
+			}
+
+			manager := playback.NewSessionManager(0, 0)
+			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+			handler.StoreProvider = testUserStoreProvider{store: store}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+			request := v3HandlerStartRequest()
+			request.StartPosition = tc.startPosition
+			response := startPlaybackDecisionV2(t, handler, marshalV3StartRequest(t, request))
+			if response.PlaybackPlan == nil {
+				t.Fatalf("response = %#v", response)
+			}
+			// The plan and the session have to agree on where playback begins.
+			if got := response.PlaybackPlan.Timeline.SourceStartSeconds; got != tc.wantPosition {
+				t.Fatalf("plan source start = %v, want %v", got, tc.wantPosition)
+			}
+			session, err := manager.GetSession(response.PlaybackPlan.SessionID)
+			if err != nil {
+				t.Fatalf("GetSession: %v", err)
+			}
+			if session.Position != tc.wantPosition {
+				t.Fatalf("session position = %v, want %v", session.Position, tc.wantPosition)
+			}
+		})
+	}
+}
+
+// A missing backing file is not something a client can be handed a plan for,
+// and it must not leave a session behind that nothing will ever stop.
+func TestStartPlaybackV2MarksMissingFileAndSkipsSessionCreation(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	marker := &recordingMissingMarker{}
+	file := v3HandlerFixtureFile(t)
+	file.FilePath = filepath.Join(t.TempDir(), "missing.mkv")
+
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.MissingMarker = marker
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start",
+		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := len(sessionMgr.AllSessions()); got != 0 {
+		t.Fatalf("session count = %d, want 0", got)
+	}
+	if len(marker.ids) != 1 || marker.ids[0] != 42 {
+		t.Fatalf("marked ids = %v, want [42]", marker.ids)
 	}
 }

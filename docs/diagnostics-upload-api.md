@@ -1,7 +1,7 @@
 # Diagnostics upload API
 
 The native v2 diagnostics ingress uses the existing diagnostics validator and
-storage service. The bridge endpoints retain their wire contract.
+storage service.
 
 `GET /api/v2/diagnostics/capabilities` requires a signed-in account access token;
 API keys are refused. The capability document returns the account-specific status,
@@ -32,7 +32,7 @@ archive metadata and quota before accepting a report.
 Ingress streams the gzip part through the existing validator without buffering
 the complete multipart body in Huma. It applies the live bundle limit plus the
 existing 128 KiB framing allowance, finite ten-minute upload deadlines and the
-same process-local admission limiter used by bridge uploads and chunk completion.
+process-local admission limiter that chunk completion also uses.
 The OpenAPI multipart schema is attached after Huma input registration so Huma's
 compiled decoder does not pre-read the stream; the media gate still enforces the
 declared request content type.
@@ -47,11 +47,11 @@ Explicit quota and busy rejections include `Retry-After`. Uploads are
 must not replay automatically. `Retry-After` does not make an uncertain upload
 safe to repeat.
 
-The bridge and v2 chunk routes share sessions in process memory and temporary spool files,
+Chunk sessions live in process memory and temporary spool files,
 with a fifteen-minute lifetime, sixteen-session cap and one session per account.
 They require affinity to the creating process. Another replica or a process
 restart may return `404`, requiring a fresh session; this is not durable
-cross-replica resumability. Both transports retain those constraints.
+cross-replica resumability.
 
 ## Chunk transport
 

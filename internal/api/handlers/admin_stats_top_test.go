@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -31,33 +28,6 @@ func (s *stubTopActivitySource) Get(_ context.Context, days, limit int) (*AdminT
 }
 
 func (s *stubTopActivitySource) Invalidate() { s.invalidated++ }
-
-// A server with no watch history must answer with empty lists rather than
-// nulls: the bar-list widgets map over these fields directly.
-func TestAdminTopActivityEmptyListsSerializeAsArrays(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTopActivitySource{activity: &AdminTopActivity{
-		Days:     7,
-		Limit:    10,
-		Titles:   []AdminTopTitle{},
-		Profiles: []AdminTopProfile{},
-	}}
-	handler := &AdminHandler{TopActivitySource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTopActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/top-activity", nil))
-
-	var body struct {
-		Titles   []AdminTopTitle   `json:"titles"`
-		Profiles []AdminTopProfile `json:"profiles"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Titles == nil || body.Profiles == nil {
-		t.Fatalf("titles/profiles decoded as null: %s", rec.Body.String())
-	}
-}
 
 func TestAdminTopActivityProviderInvalidateClearsEveryVariant(t *testing.T) {
 	t.Parallel()

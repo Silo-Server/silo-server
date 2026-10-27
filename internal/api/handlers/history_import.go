@@ -2,17 +2,11 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 )
 
@@ -81,22 +75,6 @@ type HistoryImportActor struct {
 	UserID        int
 	ProfileID     string
 	VerifyProfile func(profileID string) error
-}
-
-// historyImportRequestActor uses the profile and PIN proof resolved by viewer
-// middleware. An API key's PIN exemption cannot authorize household access.
-func historyImportRequestActor(r *http.Request) HistoryImportActor {
-	ctx := r.Context()
-	return HistoryImportActor{
-		UserID:    apimw.GetUserID(ctx),
-		ProfileID: apimw.GetProfileID(ctx),
-		VerifyProfile: func(profileID string) error {
-			if scope, ok := access.GetScope(ctx); ok && scope.ProfileID == profileID && scope.ProfileVerified && !scope.PINVerificationSkipped {
-				return nil
-			}
-			return access.ErrProfileUnverified
-		},
-	}
 }
 
 // historyImportsForAnyProfile reports whether actor may import into, and see
@@ -192,195 +170,6 @@ func (h *HistoryImportHandler) CheckPlexPin(ctx context.Context, userID int, ses
 	return result, nil
 }
 
-func (h *HistoryImportHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.ListImportSources(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import sources")
-		return
-	}
-	writeJSON(w, http.StatusOK, sources)
-}
-
-func (h *HistoryImportHandler) HandleLoginConnect(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var req historyimport.LoginConnectInput
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.Username == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "username and password are required")
-		return
-	}
-
-	session, err := h.LoginEmbyConnect(r.Context(), userID, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, session)
-}
-
-func (h *HistoryImportHandler) HandleCreateRun(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var req historyimport.CreateRunInput
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	run, err := h.CreateImportRunAs(r.Context(), historyImportRequestActor(r), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, historyimport.PublicRun(*run))
-}
-
-func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	limit, _ := parsePagination(r)
-	// Keep the v1 limit and array response while sharing v2's profile filter.
-	runs, _, err := h.ListImportRunsPageAs(r.Context(), historyImportRequestActor(r), nil, min(limit, 50))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import runs")
-		return
-	}
-	for i := range runs {
-		runs[i] = historyimport.PublicRun(runs[i])
-	}
-	writeJSON(w, http.StatusOK, runs)
-}
-
-func (h *HistoryImportHandler) HandleGetRun(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	runID := chi.URLParam(r, "id")
-	if runID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Run ID is required")
-		return
-	}
-	run, err := h.GetImportRunAs(r.Context(), historyImportRequestActor(r), runID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, historyimport.PublicRun(*run))
-}
-
-func (h *HistoryImportHandler) HandleCreatePlexPin(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	pin, err := h.CreatePlexPin(r.Context(), userID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, pin)
-}
-
-func (h *HistoryImportHandler) HandleCheckPlexPin(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	var req historyimport.PlexCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.SessionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "session_id is required")
-		return
-	}
-	result, err := h.CheckPlexPin(r.Context(), userID, req.SessionID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (h *HistoryImportHandler) HandleAdminListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.service.ListAdminSources(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import sources")
-		return
-	}
-	writeJSON(w, http.StatusOK, sources)
-}
-
-func (h *HistoryImportHandler) HandleAdminCreateSource(w http.ResponseWriter, r *http.Request) {
-	var req historyimport.CreateSourceInput
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	source, err := h.service.CreateSource(r.Context(), req)
-	if err != nil {
-		h.writeHistoryImportError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, source)
-}
-
-func (h *HistoryImportHandler) HandleAdminUpdateSource(w http.ResponseWriter, r *http.Request) {
-	id, err := parseHistoryImportID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid source ID")
-		return
-	}
-	var req historyimport.UpdateSourceInput
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	source, err := h.service.UpdateSource(r.Context(), id, req)
-	if err != nil {
-		h.writeHistoryImportError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, source)
-}
-
-func (h *HistoryImportHandler) HandleAdminDeleteSource(w http.ResponseWriter, r *http.Request) {
-	id, err := parseHistoryImportID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid source ID")
-		return
-	}
-	if err := h.service.DeleteSource(r.Context(), id); err != nil {
-		h.writeHistoryImportError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *HistoryImportHandler) writeHistoryImportError(w http.ResponseWriter, err error) {
-	writeAPIError(w, historyImportAPIError(err))
-}
-
 // historyImportAPIError maps a history import failure onto the v1 decision
 // (status, code, message). Upstream statuses carry the historyimport
 // upstream-error code so the v2 listener can tell a rejected source
@@ -450,14 +239,6 @@ func historyImportUpstreamError(status int) (int, string, string) {
 	default:
 		return http.StatusBadGateway, "bad_gateway", "The source server couldn't complete the import right now. Please try again."
 	}
-}
-
-func parseHistoryImportID(r *http.Request) (int, error) {
-	id, err := strconv.Atoi(chi.URLParam(r, "id"))
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid id")
-	}
-	return id, nil
 }
 
 func looksLikeValidationError(err error) bool {

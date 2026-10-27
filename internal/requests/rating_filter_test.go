@@ -47,9 +47,9 @@ func TestDiscoverFiltersResultsAboveCeiling(t *testing.T) {
 	presence := &fakePresence{}
 	service := newRatedService(store, client, presence, "PG")
 
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
+	section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1)
 	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
+		t.Fatalf("DiscoverRow returned error: %v", err)
 	}
 	if len(section.Results) != 1 || section.Results[0].TMDBID != 1 {
 		t.Fatalf("results = %+v, want only the G-rated title", section.Results)
@@ -85,9 +85,9 @@ func TestDiscoverFilterDropsNRTitles(t *testing.T) {
 	}
 	service := newRatedService(store, client, nil, "G")
 
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
+	section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1)
 	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
+		t.Fatalf("DiscoverRow returned error: %v", err)
 	}
 	if len(section.Results) != 1 || section.Results[0].TMDBID != 11 {
 		t.Fatalf("results = %+v, want NR title dropped", section.Results)
@@ -105,7 +105,7 @@ func TestDiscoverCertificationErrorPropagates(t *testing.T) {
 
 	// A failed certification lookup must surface as an error, not as a
 	// silently empty (fail-closed) page that reads as "no matches".
-	if _, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1); err == nil {
+	if _, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1); err == nil {
 		t.Fatal("Discover succeeded, want certification error to propagate")
 	}
 }
@@ -156,9 +156,9 @@ func TestDiscoverBackfillsSectionFromLaterPages(t *testing.T) {
 	service := NewService(store, client, &fakePresence{})
 	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
 
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
+	section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", 1)
 	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
+		t.Fatalf("DiscoverRow returned error: %v", err)
 	}
 	ids := make([]int, 0, len(section.Results))
 	for _, r := range section.Results {
@@ -173,9 +173,10 @@ func TestDiscoverBackfillsSectionFromLaterPages(t *testing.T) {
 	if section.TotalPages != 3 {
 		t.Fatalf("TotalPages = %d, want TMDB's 3", section.TotalPages)
 	}
-	// All upstream pages were consumed within budget — nothing left to resume.
-	if section.NextPage != 0 {
-		t.Fatalf("NextPage = %d, want 0 (exhausted)", section.NextPage)
+	// All upstream pages were consumed within budget, so the cursor points
+	// past the last page and a client stops.
+	if section.NextPage != 4 {
+		t.Fatalf("NextPage = %d, want 4 (past TotalPages)", section.NextPage)
 	}
 }
 
@@ -210,7 +211,7 @@ func TestDiscoverBackfillPreservesOverflowAcrossPages(t *testing.T) {
 		if hops > 10 {
 			t.Fatal("pagination did not terminate")
 		}
-		section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", page)
+		section, err := service.DiscoverRow(context.Background(), testViewer(1), "trending_movies", page)
 		if err != nil {
 			t.Fatalf("Discover(page=%d) returned error: %v", page, err)
 		}
@@ -357,33 +358,5 @@ func TestCertificationCeilingFor(t *testing.T) {
 		if got := certificationCeilingFor(tc.ceiling, tc.mediaType); got != tc.want {
 			t.Errorf("certificationCeilingFor(%q, %q) = %q, want %q", tc.ceiling, tc.mediaType, got, tc.want)
 		}
-	}
-}
-
-func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	// Nothing survives filtering, so backfill always runs to its budget.
-	pages := map[int]*tmdb.MediaPage{}
-	for p := 1; p <= 10; p++ {
-		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 10, TotalResults: 200,
-			Results: []tmdb.MediaResult{{ID: p * 100, MediaType: "movie", Title: "Movie"}}}
-	}
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: map[int]string{}}, // all unrated -> dropped
-		pages:          pages,
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
-
-	sections, err := service.DiscoverAll(context.Background(), testViewer(1))
-	if err != nil {
-		t.Fatalf("DiscoverAll returned error: %v", err)
-	}
-	// 6 sections x aggregate budget of 2 pages = 12 list fetches, bounding the
-	// cold-path cost the review flagged (vs 6 x 5 = 30 at the single budget).
-	want := len(sections) * 2
-	if got := len(client.fetchedPage); got != want {
-		t.Fatalf("total TMDB page fetches = %d, want %d", got, want)
 	}
 }

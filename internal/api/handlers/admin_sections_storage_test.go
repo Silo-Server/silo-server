@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -21,28 +18,6 @@ type mixedSectionProvider struct{ userstore.UserStoreProvider }
 
 func (mixedSectionProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
 	panic("unsupported reset must reject before consulting account stores")
-}
-
-func TestRestoreSectionDefaultsRejectsUnsupportedProfileResetBeforeWrites(t *testing.T) {
-	for name, provider := range map[string]userstore.UserStoreProvider{
-		"unavailable":    nil,
-		"sqlite":         userdb.NewSQLiteProvider(nil),
-		"mixed":          mixedSectionProvider{pgstore.NewPostgresProvider(nil)},
-		"wrapped sqlite": notifications.WrapUserStoreProvider(userdb.NewSQLiteProvider(nil), &notifications.System{}),
-		"wrapped mixed":  notifications.WrapUserStoreProvider(mixedSectionProvider{pgstore.NewPostgresProvider(nil)}, &notifications.System{}),
-		"nil postgres":   (*pgstore.PostgresProvider)(nil),
-	} {
-		t.Run(name, func(t *testing.T) {
-			// No repository is wired: an attempted definition read or write would panic.
-			h := &SectionHandler{StoreProvider: provider}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/sections/restore-defaults", strings.NewReader(`{"scope":"home","reset_profiles":true}`))
-			rec := httptest.NewRecorder()
-			h.HandleRestoreDefaults(rec, req)
-			if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), "capability_unsupported") {
-				t.Fatalf("unsupported reset response: %d %s", rec.Code, rec.Body.String())
-			}
-		})
-	}
 }
 
 func TestSectionProfileResetCapabilitySurvivesProductionDecorator(t *testing.T) {

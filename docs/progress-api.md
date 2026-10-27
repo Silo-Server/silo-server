@@ -101,7 +101,7 @@ episode, rewatches included.
 `markWatched` on a partly watched item records a play. On a rewatch in progress
 (a watched movie or episode with a resume position) it records another completed
 play and clears the position, where it used to be a no-op. A season or series
-mark leaves those episodes alone, as do the frozen v1 operation and the
+mark leaves those episodes alone, as do the
 Jellyfin played endpoints. A repeated mark records nothing until playback sets
 a new position, so it is not exactly once: a retry that lands after a new
 progress report records another play.
@@ -132,7 +132,7 @@ already have the equivalent: `PlaybackPositionTicks` 0 without `Played` on
 
 ## Playback-origin uploads
 
-`POST /api/v2/sync/progress` and its v1 counterpart upload playback positions,
+`POST /api/v2/sync/progress` uploads playback positions,
 including client-owned audiobook timelines and offline queues. Neither
 `force_overwrite` nor `updated_at` carries playback authority. Genuine manual
 watch-state edits and trusted imports use separate operations and retain their

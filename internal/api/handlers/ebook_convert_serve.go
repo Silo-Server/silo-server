@@ -172,15 +172,3 @@ type ebookConversionCapability struct {
 	Header         string   `json:"header"`
 	HeaderOnFailed string   `json:"header_failed_value"`
 }
-
-// HandleConversionCapability reports whether Kindle->EPUB conversion is active
-// (admin flag on AND the converter initialized). GET /api/v1/ebooks/capability.
-func (h *EbookReaderHandler) HandleConversionCapability(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, ebookConversionCapability{
-		Enabled:        h.Conversion.active(r.Context()),
-		SourceFormats:  []string{"mobi", "azw", "azw3"},
-		ServedFormat:   "epub",
-		Header:         ConversionHeader,
-		HeaderOnFailed: "failed",
-	})
-}

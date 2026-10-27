@@ -111,16 +111,6 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
 }
 
-// ListSessions lists every retained login session of the caller, active,
-// revoked and expired alike. v1 GET /auth/sessions calls it.
-func (h *AuthHandler) ListSessions(ctx context.Context, userID int) ([]*models.AuthSession, error) {
-	sessions, err := h.service.GetSessions(ctx, userID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-	}
-	return sessions, nil
-}
-
 // ListSessionsPage is the keyset listing v2 listSessions serves: up to limit
 // of the caller's live sessions (not expired, not revoked), newest first by
 // (created_at DESC, id DESC) and strictly after the key; the bool reports

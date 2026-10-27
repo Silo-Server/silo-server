@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -19,19 +18,25 @@ import (
 
 // These tests pin the seam the settings cutover opened: every server-side
 // reader of the profile preferences resolves them from user_setting_values,
-// while the shipped clients still write them through POST/PUT /profiles. A
-// profile write that does not land in the canonical store never takes effect
-// — the stale backfilled row (or the contract default) wins forever.
+// while clients still write them through the profile create and update
+// operations. A profile write that does not land in the canonical store never
+// takes effect: the stale backfilled row (or the contract default) wins
+// forever.
 
-// updateProfileVia sends PUT /profiles/{id} as profile-1's own session.
-func updateProfileVia(t *testing.T, handler *ProfileHandler, profileID, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut, "/profiles/"+profileID, body, "user", profileID)
-	req = withProfileRouteParam(req, "id", profileID)
-	rr := httptest.NewRecorder()
-	handler.HandleUpdateProfile(rr, req)
-	return rr
+// updateOwnProfile updates profileID acting as itself (profile-1 is the
+// household primary).
+func updateOwnProfile(handler *ProfileHandler, profileID string, req ProfileUpdateRequest) (ProfileView, error) {
+	return handler.UpdateProfile(profileServiceContext(profileID), ProfileUpdateCommand{
+		UserID: 1, ProfileID: profileID, ActiveProfileID: profileID, Request: req,
+		VerifyProfile: noProfileVerification,
+	})
+}
+
+// createAsPrimary creates a profile acting as the primary profile-1.
+func createAsPrimary(handler *ProfileHandler, req ProfileCreateRequest) (ProfileView, error) {
+	return handler.CreateProfile(profileServiceContext("profile-1"), ProfileCreateCommand{
+		UserID: 1, ActiveProfileID: "profile-1", Request: req, VerifyProfile: noProfileVerification,
+	})
 }
 
 func storedProfileSetting(t *testing.T, store userstore.UserStore, key, profileID string) *userstore.SettingValue {
@@ -53,13 +58,10 @@ func TestUpdateProfileClearingLanguageClearsCanonicalRow(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
-	if rr := updateProfileVia(t, handler, "profile-1",
-		`{"preferred_metadata_language":"fr"}`); rr.Code != http.StatusOK {
-		t.Fatalf("seeding PUT = %d: %s", rr.Code, rr.Body.String())
-	}
-	if rr := updateProfileVia(t, handler, "profile-1",
-		`{"preferred_metadata_language":""}`); rr.Code != http.StatusOK {
-		t.Fatalf("clearing PUT = %d: %s", rr.Code, rr.Body.String())
+	for _, language := range []string{"fr", ""} {
+		if _, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{PreferredMetadataLanguage: new(language)}); err != nil {
+			t.Fatalf("update to %q: %v", language, err)
+		}
 	}
 
 	if value := storedProfileSetting(t, store, settingskeys.CatalogMetadataLanguage, "profile-1"); value != nil {
@@ -70,18 +72,17 @@ func TestUpdateProfileClearingLanguageClearsCanonicalRow(t *testing.T) {
 	}
 }
 
-// TestUpdateProfileSyncsSkipPreferences. The player resolves these four keys
-// canonically, so a legacy PUT that only moved the columns would return 200
-// and change nothing about playback.
+// TestUpdateProfileSyncsSkipPreferences. The player resolves these keys
+// canonically, so an update that only moved the columns would succeed and
+// change nothing about playback.
 func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
-	rr := updateProfileVia(t, handler, "profile-1",
-		`{"auto_skip_intro":true,"auto_skip_credits":true,"auto_skip_recap":true,`+
-			`"auto_play_next_preview":false}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+	if _, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{
+		AutoSkipIntro: new(true), AutoSkipCredits: new(true), AutoSkipRecap: new(true), AutoPlayNextPreview: new(false),
+	}); err != nil {
+		t.Fatalf("update: %v", err)
 	}
 
 	for key, want := range map[string]string{
@@ -90,7 +91,7 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 		settingskeys.PlaybackAutoSkipRecap:       `true`,
 		settingskeys.PlaybackAutoPlayNextPreview: `false`,
 		// auto_skip_intro carries its revision-7 replacement with it, so a
-		// client still using the legacy route does not leave a current client
+		// client still sending the old field does not leave a current client
 		// resolving the contract default.
 		settingskeys.PlaybackIntroSkipMode: `"always"`,
 	} {
@@ -104,14 +105,14 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 		}
 	}
 
-	// A field the request omitted must not be written: the shipped clients
-	// send single-field deltas, and an absent field is not a choice. Its own
+	// A field the request omitted must not be written: clients send
+	// single-field deltas, and an absent field is not a choice. Its own
 	// store, since the test store's DSN is derived from the test name.
 	t.Run("omitted fields are not written", func(t *testing.T) {
 		store := newProfileTestStore(t)
 		handler := NewProfileHandler(testUserStoreProvider{store: store})
-		if rr := updateProfileVia(t, handler, "profile-1", `{"auto_skip_intro":true}`); rr.Code != http.StatusOK {
-			t.Fatalf("single-field PUT = %d: %s", rr.Code, rr.Body.String())
+		if _, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{AutoSkipIntro: new(true)}); err != nil {
+			t.Fatalf("single-field update: %v", err)
 		}
 		if value := storedProfileSetting(t, store, settingskeys.PlaybackAutoSkipCredits, "profile-1"); value != nil {
 			t.Errorf("an omitted field wrote %s", value.Value)
@@ -120,16 +121,14 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 }
 
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical
-// endpoint would refuse must fail the request as a no-op instead of leaving
-// the column and the canonical store disagreeing.
+// store would refuse must fail the request as a no-op instead of leaving the
+// column and the canonical store disagreeing.
 func TestUpdateProfileRejectsInvalidLanguageBeforeWriting(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
-	rr := updateProfileVia(t, handler, "profile-1", `{"language":"!!!"}`)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("PUT of an invalid tag = %d, want 400: %s", rr.Code, rr.Body.String())
-	}
+	_, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{Language: new("!!!")})
+	requireAPIStatus(t, err, http.StatusBadRequest)
 
 	profile, err := store.GetProfile(context.Background(), "profile-1")
 	if err != nil || profile == nil {
@@ -143,23 +142,19 @@ func TestUpdateProfileRejectsInvalidLanguageBeforeWriting(t *testing.T) {
 	}
 }
 
-// TestCreateProfileSyncsCanonicalLanguages: a profile born with preferences
-// must be resolvable canonically from its first request.
-func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
+// TestCreateProfileSyncsCanonicalSettings: a profile born with preferences is
+// resolvable canonically from its first request, and it inherits the
+// account-level settings that survive from before profiles had their own.
+func TestCreateProfileSyncsCanonicalSettings(t *testing.T) {
 	store := newProfileTestStore(t)
+	if err := store.SetSetting(context.Background(), searchMediaScopeSettingKey, "audiobook"); err != nil {
+		t.Fatalf("seeding legacy account setting: %v", err)
+	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
-	req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
-		`{"name":"Kids","language":"de","preferred_metadata_language":"fr"}`,
-		"user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleCreateProfile(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST = %d: %s", rr.Code, rr.Body.String())
-	}
-	var created ProfileView
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decoding create response: %v", err)
+	created, err := createAsPrimary(handler, ProfileCreateRequest{Name: "Kids", Language: "de", PreferredMetadataLanguage: "fr"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
 	}
 
 	audio := storedProfileSetting(t, store, settingskeys.PlaybackAudioLanguage, created.ID)
@@ -169,28 +164,8 @@ func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
 	if got := access.PreferredMetadataLanguage(context.Background(), store, created.ID); got != "fr" {
 		t.Errorf("canonical metadata language after create = %q, want %q", got, "fr")
 	}
-}
-
-func TestCreateProfileInheritsSurvivingLegacyAccountSettings(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.SetSetting(context.Background(), searchMediaScopeSettingKey, "audiobook"); err != nil {
-		t.Fatalf("seeding legacy account setting: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
-		`{"name":"Guest"}`, "user", "profile-1")
-	rec := httptest.NewRecorder()
-	handler.HandleCreateProfile(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST = %d: %s", rec.Code, rec.Body.String())
-	}
-	var created ProfileView
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decoding create response: %v", err)
-	}
-	value := storedProfileSetting(t, store, searchMediaScopeSettingKey, created.ID)
-	if value == nil || string(value.Value) != `"audiobook"` {
-		t.Fatalf("inherited canonical value = %+v", value)
+	if inherited := storedProfileSetting(t, store, searchMediaScopeSettingKey, created.ID); inherited == nil || string(inherited.Value) != `"audiobook"` {
+		t.Errorf("inherited canonical value = %+v", inherited)
 	}
 }
 
@@ -230,22 +205,17 @@ func (w failingPreferenceSettingsWriter) UpsertSettingValue(
 	return nil, errors.New("settings storage unavailable")
 }
 
-// TestCreateProfileRollsBackWhenSettingsSyncFails pins the atomic profile and
-// canonical-settings transaction. A failed canonical write must leave no
-// half-configured profile and the client's retry must not hit a name conflict.
-func TestCreateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
+// TestProfileWritesRollBackWhenSettingsSyncFails pins the atomic profile and
+// canonical-settings transaction: a failed canonical write leaves no
+// half-configured profile, so the client's retry does not hit a name
+// conflict, and an update leaves both the column and the canonical row as
+// they were.
+func TestProfileWritesRollBackWhenSettingsSyncFails(t *testing.T) {
 	base := newProfileTestStore(t)
-	store := failingSettingsWriteStore{UserStore: base}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	failing := NewProfileHandler(testUserStoreProvider{store: failingSettingsWriteStore{UserStore: base}})
 
-	req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
-		`{"name":"Kids","language":"de"}`, "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleCreateProfile(rr, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("POST = %d, want 500: %s", rr.Code, rr.Body.String())
-	}
-
+	_, err := createAsPrimary(failing, ProfileCreateRequest{Name: "Kids", Language: "de"})
+	requireAPIStatus(t, err, http.StatusInternalServerError)
 	profiles, err := base.ListProfiles(context.Background())
 	if err != nil {
 		t.Fatalf("listing profiles: %v", err)
@@ -255,31 +225,17 @@ func TestCreateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
 			t.Fatalf("profile %q survived a failed settings sync", p.Name)
 		}
 	}
-
 	// The rollback lets the retry succeed once the store recovers.
-	retry := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
-		`{"name":"Kids","language":"de"}`, "user", "profile-1")
-	retryRec := httptest.NewRecorder()
-	NewProfileHandler(testUserStoreProvider{store: base}).HandleCreateProfile(retryRec, retry)
-	if retryRec.Code != http.StatusCreated {
-		t.Fatalf("retry POST = %d, want 201: %s", retryRec.Code, retryRec.Body.String())
+	if _, err := createAsPrimary(NewProfileHandler(testUserStoreProvider{store: base}), ProfileCreateRequest{Name: "Kids", Language: "de"}); err != nil {
+		t.Fatalf("retry create: %v", err)
 	}
-}
-
-func TestUpdateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
-	base := newProfileTestStore(t)
-	store := failingSettingsWriteStore{UserStore: base}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
 	before, err := base.GetProfile(context.Background(), "profile-1")
 	if err != nil || before == nil {
 		t.Fatalf("reading profile before update: profile=%+v err=%v", before, err)
 	}
-	rr := updateProfileVia(t, handler, "profile-1", `{"language":"de"}`)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("PUT = %d, want 500: %s", rr.Code, rr.Body.String())
-	}
-
+	_, err = updateOwnProfile(failing, "profile-1", ProfileUpdateRequest{Language: new("de")})
+	requireAPIStatus(t, err, http.StatusInternalServerError)
 	after, err := base.GetProfile(context.Background(), "profile-1")
 	if err != nil || after == nil {
 		t.Fatalf("reading profile after rollback: profile=%+v err=%v", after, err)
@@ -293,8 +249,8 @@ func TestUpdateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
 }
 
 // TestUpdateProfilePublishesUserSettingsEvents: the synced rows change what
-// other clients resolve, so they get the same refresh signal a
-// /settings/values write publishes.
+// other clients resolve, so they get the same refresh signal a settings
+// write publishes.
 func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
@@ -302,9 +258,8 @@ func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 	events, unsubscribe := handler.EventsHub.Subscribe()
 	defer unsubscribe()
 
-	rr := updateProfileVia(t, handler, "profile-1", `{"preferred_metadata_language":"de"}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+	if _, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{PreferredMetadataLanguage: new("de")}); err != nil {
+		t.Fatalf("update: %v", err)
 	}
 
 	env := receiveUserSettingsEvent(t, events)
@@ -320,22 +275,15 @@ func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 
 // --- Read side ---
 //
-// The mirror of the tests above: the DTO's preference fields are served from
+// The mirror of the tests above: the view's preference fields are served from
 // the canonical rows, so a write that never touched a legacy column is still
-// visible to every profile-DTO reader on every platform.
+// visible to every profile reader on every platform.
 
-// listProfilesVia sends GET /profiles as profile-1's own session.
-func listProfilesVia(t *testing.T, handler *ProfileHandler) ProfileListView {
+func listProfilesOf(t *testing.T, handler *ProfileHandler) ProfileListView {
 	t.Helper()
-	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/profiles", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleListProfiles(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /profiles = %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp ProfileListView
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decoding profile list: %v", err)
+	resp, err := handler.ListProfiles(profileServiceContext("profile-1"), 1)
+	if err != nil {
+		t.Fatalf("list profiles: %v", err)
 	}
 	return resp
 }
@@ -352,10 +300,9 @@ func profileFromList(t *testing.T, resp ProfileListView, profileID string) Profi
 }
 
 // TestListProfilesServesCanonicalWrite is the cross-client coherence gap this
-// read path exists to close: a preference saved through PUT
-// /settings/values?scope=profile writes only user_setting_values, and the
-// profile DTO — which the Apple clients read — must reflect it on the next GET
-// without the legacy column having moved at all.
+// read path exists to close: a preference saved as a profile-scope setting
+// writes only user_setting_values, and the profile view must reflect it on
+// the next read without the legacy column having moved at all.
 func TestListProfilesServesCanonicalWrite(t *testing.T) {
 	ctx := context.Background()
 	store := newProfileTestStore(t)
@@ -382,21 +329,10 @@ func TestListProfilesServesCanonicalWrite(t *testing.T) {
 		}
 	}
 
-	got := profileFromList(t, listProfilesVia(t, handler), "profile-1")
-	if got.Language != "de" {
-		t.Errorf("language = %q, want %q", got.Language, "de")
-	}
-	if got.PreferredMetadataLanguage != "fr" {
-		t.Errorf("preferred_metadata_language = %q, want %q", got.PreferredMetadataLanguage, "fr")
-	}
-	if got.SubtitleLanguage != "ja" {
-		t.Errorf("subtitle_language = %q, want %q", got.SubtitleLanguage, "ja")
-	}
-	if got.SubtitleMode != "always" {
-		t.Errorf("subtitle_mode = %q, want %q", got.SubtitleMode, "always")
-	}
-	if got.ShowForcedSubtitles {
-		t.Error("show_forced_subtitles = true, want false")
+	got := profileFromList(t, listProfilesOf(t, handler), "profile-1")
+	if got.Language != "de" || got.PreferredMetadataLanguage != "fr" || got.SubtitleLanguage != "ja" ||
+		got.SubtitleMode != "always" || got.ShowForcedSubtitles {
+		t.Errorf("listed preferences = %+v, want the canonical values", got)
 	}
 
 	// The legacy columns never moved: the canonical write is the only storage
@@ -410,11 +346,10 @@ func TestListProfilesServesCanonicalWrite(t *testing.T) {
 	}
 }
 
-// TestListProfilesRoundTripsLegacyWrite: the legacy write path still works
-// end to end. The columns are no longer read, so this only passes because the
-// write mirrors into the canonical rows — which is the whole cutover shape,
-// and the regression that would break every shipped client if the sync broke.
-func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
+// TestListProfilesRoundTripsProfileWrite: a profile update reaches every
+// reader. The columns are no longer read, so this only passes because the
+// write mirrors into the canonical rows, replacing a stale one.
+func TestListProfilesRoundTripsProfileWrite(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
@@ -425,37 +360,22 @@ func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 		t.Fatalf("seed stale canonical language: %v", err)
 	}
 
-	rr := updateProfileVia(t, handler, "profile-1",
-		`{"language":"es","preferred_metadata_language":"it","subtitle_language":"ko",`+
-			`"subtitle_mode":"off","show_forced_subtitles":false}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+	updated, err := updateOwnProfile(handler, "profile-1", ProfileUpdateRequest{
+		Language: new("es"), PreferredMetadataLanguage: new("it"), SubtitleLanguage: new("ko"),
+		SubtitleMode: new("off"), ShowForcedSubtitles: new(false),
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
 	}
 
-	// The update response and the next list must agree; both serve resolution.
-	var updated ProfileView
-	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("decoding update response: %v", err)
-	}
-	listed := profileFromList(t, listProfilesVia(t, handler), "profile-1")
+	// The update's view and the next list must agree; both serve resolution.
+	listed := profileFromList(t, listProfilesOf(t, handler), "profile-1")
 	if !reflect.DeepEqual(updated, listed) {
-		t.Errorf("update response and list disagree:\n update = %+v\n list   = %+v", updated, listed)
+		t.Errorf("update view and list disagree:\n update = %+v\n list   = %+v", updated, listed)
 	}
-
-	if listed.Language != "es" {
-		t.Errorf("language = %q, want %q", listed.Language, "es")
-	}
-	if listed.PreferredMetadataLanguage != "it" {
-		t.Errorf("preferred_metadata_language = %q, want %q", listed.PreferredMetadataLanguage, "it")
-	}
-	if listed.SubtitleLanguage != "ko" {
-		t.Errorf("subtitle_language = %q, want %q", listed.SubtitleLanguage, "ko")
-	}
-	if listed.SubtitleMode != "off" {
-		t.Errorf("subtitle_mode = %q, want %q", listed.SubtitleMode, "off")
-	}
-	if listed.ShowForcedSubtitles {
-		t.Error("show_forced_subtitles = true, want false")
+	if listed.Language != "es" || listed.PreferredMetadataLanguage != "it" || listed.SubtitleLanguage != "ko" ||
+		listed.SubtitleMode != "off" || listed.ShowForcedSubtitles {
+		t.Errorf("listed preferences = %+v, want the updated values", listed)
 	}
 	for key, want := range map[string]string{
 		settingskeys.PlaybackAudioLanguage:       `"es"`,
@@ -472,7 +392,6 @@ func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
 	if got := access.PreferredMetadataLanguage(context.Background(), store, "profile-1"); got != "it" {
 		t.Errorf("resolved metadata language = %q, want it instead of stale fr", got)
 	}
-
 }
 
 // TestListProfilesResolvesHouseholdInOneRead: the list serves several
@@ -500,7 +419,7 @@ func TestListProfilesResolvesHouseholdInOneRead(t *testing.T) {
 	store := &countingResolutionStore{UserStore: base}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 
-	resp := listProfilesVia(t, handler)
+	resp := listProfilesOf(t, handler)
 	if got := profileFromList(t, resp, "profile-1").SubtitleLanguage; got != "de" {
 		t.Errorf("profile-1 subtitle_language = %q, want %q", got, "de")
 	}

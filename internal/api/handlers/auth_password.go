@@ -2,12 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -23,46 +21,6 @@ type accountPasswordCapabilityResponse struct {
 type changePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
-}
-
-// HandleAccountPasswordCapability reports whether this authenticated account
-// and active profile may use local self-service password changes.
-func (h *AuthHandler) HandleAccountPasswordCapability(w http.ResponseWriter, r *http.Request) {
-	view, err := h.AccountPasswordCapability(r.Context(), apimw.GetClaims(r.Context()), requestProfileID(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, accountPasswordCapabilityResponse{
-		SchemaVersion:           1,
-		ChangePassword:          view.ChangePassword,
-		RequiresCurrentPassword: view.RequiresCurrentPassword,
-		MinimumPasswordLength:   view.MinimumPasswordLength,
-		MaximumPasswordBytes:    view.MaximumPasswordBytes,
-	})
-}
-
-// HandleChangePassword handles POST /auth/account/password. The password is
-// account-wide, so only the active primary profile may replace it. An admin
-// without a selected profile is also allowed, matching the app's acting-admin
-// policy, but selecting a secondary profile removes that authority.
-func (h *AuthHandler) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
-	claims := apimw.GetClaims(r.Context())
-	if err := h.AuthorizePasswordChange(r.Context(), claims, requestProfileID(r)); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	var req changePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ChangePassword(r.Context(), claims, req.CurrentPassword, req.NewPassword); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // AccountPasswordCapabilityView is the self-service password capability of

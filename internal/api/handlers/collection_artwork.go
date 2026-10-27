@@ -89,31 +89,6 @@ func storeBundledCollectionPosterIfS3Configured(
 	return storedPath, thumbhashStr, true, nil
 }
 
-// readCollectionImageMultipart reads a single image file from a multipart
-// request, validating MIME type and size.
-func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
-	file, header, err := r.FormFile(fieldName)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	switch header.Header.Get("Content-Type") {
-	case "image/jpeg", "image/png", "image/webp":
-	default:
-		return nil, fmt.Errorf("unsupported image type: %s", header.Header.Get("Content-Type"))
-	}
-	if header.Size > collectionImageMaxBytes {
-		return nil, fmt.Errorf("file exceeds 10 MB limit")
-	}
-
-	data := make([]byte, header.Size)
-	if _, err := io.ReadFull(file, data); err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	return data, nil
-}
-
 // invalidCollectionImage reports artwork the caller supplied that Silo cannot
 // use. The v2 routes render the 400 as a validation problem instead of a 500.
 func invalidCollectionImage(message string, cause error) *APIError {

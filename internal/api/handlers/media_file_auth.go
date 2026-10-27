@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -17,11 +16,6 @@ type MediaFileAuthorizer struct {
 	ItemAccess    PlaybackItemAccessChecker
 	EpisodeLookup PlaybackEpisodeLookup
 	ExtraLookup   PlaybackExtraLookup
-}
-
-// Authorize returns the media file when the caller may access it, or catalog.ErrItemNotFound.
-func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.MediaFile, error) {
-	return a.AuthorizeContext(r.Context(), fileID, requestAccessFilter(r))
 }
 
 // AuthorizeContext applies the same file and parent access policy without HTTP transport.

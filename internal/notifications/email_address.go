@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	netmail "net/mail"
 	"strings"
 	"time"
 
@@ -58,56 +57,6 @@ func (s *System) SetPublicURL(url string) {
 	if s != nil {
 		s.publicURL = strings.TrimRight(url, "/")
 	}
-}
-
-// RequestEmailAddress starts custom-address verification for the profile: it
-// validates and stores the pending address, then emails it a single-use
-// confirmation link. Notifications keep flowing to the previous destination
-// until the new address is verified. Child profiles are refused — a session
-// acting as a child profile must not be able to route the household's
-// viewing activity to an arbitrary address.
-func (s *System) RequestEmailAddress(ctx context.Context, userID int, profileID, address string) error {
-	if s == nil || s.EmailPrefs == nil {
-		return ErrEmailInvalidAddress
-	}
-	parsed, err := netmail.ParseAddress(strings.TrimSpace(address))
-	if err != nil || parsed.Address != strings.TrimSpace(address) {
-		return ErrEmailInvalidAddress
-	}
-	address = parsed.Address
-	profile := s.lookupProfile(ctx, userID, profileID)
-	if profile == nil || profile.IsChild {
-		return ErrEmailChildProfile
-	}
-	linkBase := s.emailLinkBase(ctx)
-	if linkBase == "" {
-		return ErrEmailNoLinkBase
-	}
-
-	token, tokenHash, err := newEmailToken()
-	if err != nil {
-		return err
-	}
-	expiresAt := time.Now().Add(emailVerifyTTL)
-	if err := s.EmailPrefs.RequestPendingAddress(ctx, userID, profileID, address,
-		tokenHash, expiresAt); err != nil {
-		return err
-	}
-
-	verifyURL := linkBase + "/api/v2/notifications/email/verify?token=" + token
-	brand := s.emailBrand.Load(ctx)
-	content := composeVerificationEmail(brand, profile.Name, verifyURL)
-	err = s.mailSender.Send(ctx, mail.Message{
-		To:       []string{address},
-		Subject:  content.Subject,
-		TextBody: content.Text,
-		HTMLBody: content.HTML,
-		Inline:   brand.InlineImages(),
-	})
-	if err != nil {
-		return fmt.Errorf("send verification email: %w", err)
-	}
-	return nil
 }
 
 // ClearEmailAddress removes the profile's verified address (and any

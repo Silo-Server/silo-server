@@ -80,7 +80,7 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
 - **One switch per library.** The chain editor shows the local entry as a
   pinned "Local metadata (NFO + artwork)" switch that sets every level's row at
   once and cannot be reordered. v2 marks the entry with
-  `ProviderChainEntry.local`; the frozen v1 shape is unchanged. Text and
+  `ProviderChainEntry.local`. Text and
   artwork come from the same provider, so the switch turns both on or off.
 
 ## Reading NFO files
@@ -617,7 +617,7 @@ when the item's sidecar discovery offers that exact source for that image type,
 so a file replaced since the list (a new fingerprint) must be picked again. It
 reads the file under the same checks, stores it under the same `local/...` key
 the processor would use, and publishes the fingerprinted source with the images
-lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
+lock like any other choice. Seasons and episodes keep provider-only
 choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
@@ -816,9 +816,8 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   there is not found.
 - No NFO writing, no music/audiobook/ebook NFO (those ecosystems use
   OPF/metadata.json — future builtin providers via the same registry).
-- Feature detection: the `nfo` capability's presence in
-  `GET /api/v1/libraries/provider-defaults` (see
-  `docs/architecture/v1-scope.md`); in v2 an entry with `local: true`.
+- Feature detection: an entry with `local: true` in
+  `GET /api/v2/libraries/provider-defaults`.
 - `<set>` (movie collections) is not mapped: `MetadataResult` has no
   collection field, so `nfoCommon` (`internal/metadata/nfo/nfo.go`) does not
   decode it.

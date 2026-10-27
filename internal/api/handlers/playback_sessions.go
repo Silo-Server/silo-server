@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -135,12 +134,6 @@ type playbackSessionsCapabilitiesResponse struct {
 	NodeRouting bool `json:"node_routing"`
 }
 
-// HandleGetSessionsCapabilities exposes additive feature support for the live
-// admin session payload (GET /admin/sessions/capabilities).
-func (h *AdminHandler) HandleGetSessionsCapabilities(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, AdminPlaybackSessionFeatures())
-}
-
 // AdminPlaybackSessionFeatures is shared by the frozen bridge and native projection.
 func AdminPlaybackSessionFeatures() playbackSessionsCapabilitiesResponse {
 	return playbackSessionsCapabilitiesResponse{
@@ -162,12 +155,6 @@ type playbackRoutingCapabilitiesResponse struct {
 	Workloads            []string `json:"workloads"`
 	ExecutionPreferences []string `json:"execution_preferences"`
 	EgressPreferences    []string `json:"egress_preferences"`
-}
-
-// HandleGetPlaybackRoutingCapabilities exposes the stable enum vocabulary
-// used by the atomic admin settings API.
-func (h *AdminHandler) HandleGetPlaybackRoutingCapabilities(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, AdminPlaybackRoutingCapabilities())
 }
 
 func AdminPlaybackRoutingCapabilities() playbackRoutingCapabilitiesResponse {

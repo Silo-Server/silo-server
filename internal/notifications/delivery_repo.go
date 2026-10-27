@@ -201,28 +201,6 @@ func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, p
 	return nil
 }
 
-// ListInbox returns inbox rows newest-first for the profile.
-func (r *DeliveryRepository) ListInbox(ctx context.Context, userID int, profileID string, unreadOnly bool, limit int, before *Cursor) ([]DeliveryRow, error) {
-	conditions := []string{"d.user_id = $1 AND d.profile_id = $2"}
-	args := []any{userID, profileID}
-	if unreadOnly {
-		conditions = append(conditions, "d.read_at IS NULL")
-	}
-	if before != nil {
-		args = append(args, before.CreatedAt, before.ID)
-		conditions = append(conditions, fmt.Sprintf("(d.created_at, d.id) < ($%d, $%d)", len(args)-1, len(args)))
-	}
-	args = append(args, limit)
-	query := deliveryRowSelect +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		fmt.Sprintf(" ORDER BY d.created_at DESC, d.id DESC LIMIT $%d", len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list inbox: %w", err)
-	}
-	return scanDeliveryRows(rows)
-}
-
 // ListSync returns rows ascending from the cursor for forward sync (the
 // mobile wake-fetch endpoint). A nil cursor returns the most recent page
 // (still ascending) so first-time callers get a cursor to persist.
@@ -449,19 +427,6 @@ func (r *DeliveryRepository) Exists(ctx context.Context, userID int, profileID, 
 		userID, profileID, id,
 	).Scan(&exists)
 	return exists, err
-}
-
-// MarkAllRead marks every unread delivery read for the profile.
-func (r *DeliveryRepository) MarkAllRead(ctx context.Context, userID int, profileID string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE notification_deliveries
-		SET read_at = now()
-		WHERE user_id = $1 AND profile_id = $2 AND read_at IS NULL`,
-		userID, profileID)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
 }
 
 // DeleteAllForProfile removes every delivery for a deleted profile (profiles

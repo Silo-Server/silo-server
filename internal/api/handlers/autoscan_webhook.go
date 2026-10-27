@@ -5,10 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/autoscan/arrwebhook"
@@ -20,56 +17,6 @@ import (
 const maxWebhookBodyBytes = 256 * 1024
 
 // --- Admin webhook endpoint management ---
-
-// HandleCreateSourceWebhook creates the source's webhook endpoint if missing
-// and returns the source view including the delivery URL.
-// POST /admin/autoscan/sources/{id}/webhook
-func (h *AutoscanHandler) HandleCreateSourceWebhook(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	source, err := h.repo.GetSource(r.Context(), id)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	if source.DeliveryMode != autoscan.DeliveryModeWebhook {
-		writeError(w, http.StatusBadRequest, "bad_request", "source is not in webhook delivery mode")
-		return
-	}
-	if _, _, err := h.repo.CreateWebhookEndpoint(r.Context(), id); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, h.sourceResponseWithWebhook(r.Context(), source))
-}
-
-// HandleRotateSourceWebhook replaces the endpoint's token; the old URL stops
-// working immediately.
-// POST /admin/autoscan/sources/{id}/webhook/rotate
-func (h *AutoscanHandler) HandleRotateSourceWebhook(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	source, err := h.repo.GetSource(r.Context(), id)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	if _, _, err := h.repo.RotateWebhookEndpoint(r.Context(), id); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, h.sourceResponseWithWebhook(r.Context(), source))
-}
-
-// HandleDeleteSourceWebhook removes the endpoint; future deliveries to its URL
-// return 404.
-// DELETE /admin/autoscan/sources/{id}/webhook
-func (h *AutoscanHandler) HandleDeleteSourceWebhook(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	if err := h.repo.DeleteWebhookEndpoint(r.Context(), id); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
 
 const (
 	autoscanDeliveryAccepted      = "accepted"
@@ -84,25 +31,6 @@ const (
 // no-ops), so senders can't distinguish disabled sources from active ones.
 type webhookAccepted struct {
 	Status string `json:"status"`
-}
-
-// HandleWebhookDelivery accepts a Sonarr/Radarr webhook POST. The bearer token
-// in the path authenticates the delivery. Responses are deliberately coarse:
-// 404 for any unknown token (no existence hints), 202 for anything accepted —
-// including test events, unsupported event types, and disabled sources — so
-// arr never marks a configured webhook unhealthy for a Silo-side state it
-// cannot act on. Actionable deliveries are durably queued before the 202, so
-// transient ingest failures are retried inside Silo rather than delegated to
-// arr (which does not replay failed notification events).
-//
-// The token, request URL, and body are never logged.
-func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeliverAutoscanWebhook(w, r, chi.URLParam(r, "token")); err != nil {
-		failure := autoscanDeliveryFailure(err)
-		writeError(w, failure.Status, failure.Code, failure.Message)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, webhookAccepted{Status: autoscanDeliveryAccepted})
 }
 
 // AutoscanDeliveryFailure carries safe delivery failure details to each transport.

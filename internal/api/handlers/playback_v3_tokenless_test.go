@@ -18,62 +18,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
-// The negotiated mode's whole promise is that nothing the client can see
-// carries a playback credential, so this asserts on the entire response body
-// rather than on the individual URLs a reader remembered to check.
-func TestHandleStartPlaybackV3HeaderAuthenticatedResponseCarriesNoStreamToken(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.eng.srt"), Language: "eng", Format: "srt"}}
-	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "subrip", Language: "fra"}}
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.JWTSecret = "test-stream-signing-secret"
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-
-	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
-	subtitleIndex := 0
-	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
-	start.SubtitleTrackIndex = &subtitleIndex
-
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	if strings.Contains(body, streamTokenParam+"=") {
-		t.Fatalf("header-authenticated response carries a stream token: %s", body)
-	}
-
-	var response playback.DecisionResponseV3
-	if err := json.Unmarshal([]byte(body), &response); err != nil || response.PlaybackPlan == nil {
-		t.Fatalf("response: err=%v body=%s", err, body)
-	}
-	urls := []string{response.PlaybackPlan.Stream.URL}
-	if artifact := response.PlaybackPlan.Subtitle.Artifact; artifact != nil {
-		urls = append(urls, artifact.URL)
-	}
-	for _, entry := range response.PlaybackPlan.Subtitle.Inventory {
-		if entry.URL != "" {
-			urls = append(urls, entry.URL)
-		}
-	}
-	if len(urls) < 3 {
-		t.Fatalf("response published %d URLs, want a stream plus subtitle artifact and inventory routes", len(urls))
-	}
-	for _, raw := range urls {
-		parsed, err := url.Parse(raw)
-		if err != nil || parsed.IsAbs() || parsed.Query().Get(streamTokenParam) != "" {
-			t.Fatalf("URL %q is not a tokenless API-local route (parse error %v)", raw, err)
-		}
-	}
-	if len(response.PlaybackPlan.Stream.Headers) != 0 {
-		t.Fatalf("plan persisted credential material in stream headers: %#v", response.PlaybackPlan.Stream.Headers)
-	}
-}
-
 // The call-site checks are defense in depth; the builders themselves must
 // refuse, so a future caller cannot mint a credential by forgetting to ask.
 func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T) {
@@ -332,49 +276,6 @@ func TestEscalateRefusedProgressiveRemuxV3LeavesExecutableRoutesAlone(t *testing
 	}
 }
 
-// software_video_decode_v1 is attempt-sticky like header-authenticated media: a
-// replan that sends an explicit feature list cannot drop it and silently
-// convert a direct route into a transcode.
-func TestHandleReplanPlaybackV3PinsAttemptStickyFeatures(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-	handler.JWTSecret = "test-stream-signing-secret"
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-
-	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3)
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
-
-	nextContext := start.ClientPlaybackContext
-	nextContext.Output.OutputContextID = "route-2"
-	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion:       playback.ProtocolV3,
-		ClientFeatures:        []string{playback.FeaturePlaybackPlanV3}, // explicit list dropping the opt-in
-		Operation:             playback.ReplanOperationOutputChangeV3,
-		PlaybackAttemptID:     start.PlaybackAttemptID,
-		ReplanRequestID:       "sticky-feature-replan-0001",
-		FailedPlanID:          started.PlaybackPlan.PlanID,
-		PlanAttemptID:         "sticky-feature-attempt-0001",
-		PlanAttemptKey:        started.PlaybackPlan.PlanAttemptKey,
-		AttemptCount:          1,
-		PositionSeconds:       12,
-		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
-		Capabilities:          start.Capabilities,
-		ClientPlaybackContext: nextContext,
-	})
-	if replanned.PlaybackPlan == nil {
-		t.Fatalf("replan = %#v", replanned)
-	}
-	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3) {
-		t.Fatalf("durable client features = %v, the software-decode opt-in was dropped", record.NormalizedRequest.ClientFeatures)
-	}
-}
-
 // Every client-facing proxy URL builder joins onto the proxy's ClientURL —
 // the public URL when one is set — while the backend URL stays what the
 // server and the stream-token tnode claim dial. A split-network proxy
@@ -435,5 +336,104 @@ func TestPlayableStartAudioV3JudgesTheEscalatedRoute(t *testing.T) {
 	settings := playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 	if got := handler.playableStartAudioV3(context.Background(), request, file, file, 0, settings); got != 0 {
 		t.Fatalf("start audio = %d, want the TrueHD default, which keeps 5.1 on the escalated route", got)
+	}
+}
+
+// The negotiated mode's whole promise is that nothing the client can see
+// carries a playback credential, so this asserts on the entire response body
+// rather than on the individual URLs a reader remembered to check.
+func TestStartPlaybackV2HeaderAuthenticatedResponseCarriesNoStreamToken(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.eng.srt"), Language: "eng", Format: "srt"}}
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "subrip", Language: "fra"}}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.JWTSecret = "test-stream-signing-secret"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	start := v3HandlerStartRequest()
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
+	subtitleIndex := 0
+	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
+	start.SubtitleTrackIndex = &subtitleIndex
+
+	rr := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, streamTokenParam+"=") {
+		t.Fatalf("header-authenticated response carries a stream token: %s", body)
+	}
+
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal([]byte(body), &response); err != nil || response.PlaybackPlan == nil {
+		t.Fatalf("response: err=%v body=%s", err, body)
+	}
+	urls := []string{response.PlaybackPlan.Stream.URL}
+	if artifact := response.PlaybackPlan.Subtitle.Artifact; artifact != nil {
+		urls = append(urls, artifact.URL)
+	}
+	for _, entry := range response.PlaybackPlan.Subtitle.Inventory {
+		if entry.URL != "" {
+			urls = append(urls, entry.URL)
+		}
+	}
+	if len(urls) < 3 {
+		t.Fatalf("response published %d URLs, want a stream plus subtitle artifact and inventory routes", len(urls))
+	}
+	for _, raw := range urls {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.IsAbs() || parsed.Query().Get(streamTokenParam) != "" {
+			t.Fatalf("URL %q is not a tokenless API-local route (parse error %v)", raw, err)
+		}
+	}
+	if len(response.PlaybackPlan.Stream.Headers) != 0 {
+		t.Fatalf("plan persisted credential material in stream headers: %#v", response.PlaybackPlan.Stream.Headers)
+	}
+}
+
+// software_video_decode_v1 is attempt-sticky like header-authenticated media: a
+// replan that sends an explicit feature list cannot drop it and silently
+// convert a direct route into a transcode.
+func TestReplanPlaybackV2PinsAttemptStickyFeatures(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.JWTSecret = "test-stream-signing-secret"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	start := v3HandlerStartRequest()
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3)
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
+
+	nextContext := start.ClientPlaybackContext
+	nextContext.Output.OutputContextID = "route-2"
+	replanned := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		ClientFeatures:        []string{playback.FeaturePlaybackPlanV3}, // explicit list dropping the opt-in
+		Operation:             playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "sticky-feature-replan-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "sticky-feature-attempt-0001",
+		PlanAttemptKey:        started.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:          1,
+		PositionSeconds:       12,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: nextContext,
+	})
+	if replanned.PlaybackPlan == nil {
+		t.Fatalf("replan = %#v", replanned)
+	}
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3) {
+		t.Fatalf("durable client features = %v, the software-decode opt-in was dropped", record.NormalizedRequest.ClientFeatures)
 	}
 }

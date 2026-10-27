@@ -1,10 +1,7 @@
 # Canonical Settings API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` settings routes are kept in
-> [Bridge: the frozen `/api/v1` settings routes](#bridge-the-frozen-apiv1-settings-routes) at the
-> end of this document and are retired after the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 The canonical settings API stores typed user preferences from the shared
 settings contract. Client implementations should discover the server contract
@@ -14,12 +11,10 @@ keys, scopes, enum members, or defaults.
 ## The stable surface
 
 Silo 1.0's stable settings surface is the `settings` section of the native `/api/v2` contract
-(`contracts/api/v2/openapi.json`, tag `settings`). It serves the same settings contract, the same
-stored rows and the same `internal/settingsresolve` semantics as the frozen v1 routes; what
-changes is the request and response envelope. Everything in this section is taken from the operation
-declarations in `internal/apiv2/settings.go` and the committed fixtures under
-`contracts/api/v2/fixtures/`; the ledger row for each v1 route is in
-`contracts/api/v2/migration.json` (`"section": "settings"`).
+(`contracts/api/v2/openapi.json`, tag `settings`). It serves the shared settings contract and
+resolves values with `internal/settingsresolve`. Everything in this section is taken from the
+operation declarations in `internal/apiv2/settings.go` and the committed fixtures under
+`contracts/api/v2/fixtures/`.
 
 All paths below are absolute. Errors are RFC 9457 problem documents; a rejected request member is
 `422` `validation_failed` with an `errors[]` entry whose `location` names the member
@@ -27,29 +22,28 @@ All paths below are absolute. Errors are RFC 9457 problem documents; a rejected 
 
 ### Operations
 
-| Operation                                | Method and path                                      | Replaces (v1)                                                     |
-| ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| `getSettingsContract`                    | `GET /api/v2/settings/contract`                      | `GET /settings/contract`, `GET /settings/manifest`                |
-| `getSettingsContractCapabilities`        | `GET /api/v2/settings/contract/capabilities`         | `GET /settings/capability`, `GET /settings/contract/capabilities` |
-| `getOverlayConfig`                       | `GET /api/v2/settings/overlay-config`                | `GET /settings/overlay-config`                                    |
-| `getEffectiveSubtitleAppearance`         | `GET /api/v2/settings/subtitle-appearance/effective` | `GET /settings/subtitle_appearance/effective`                     |
-| `updateSubtitleAppearanceDeviceOverride` | `PUT /api/v2/settings/device/subtitle-appearance`    | `PUT /settings/device/subtitle_appearance`                        |
-| `deleteSubtitleAppearanceDeviceOverride` | `DELETE /api/v2/settings/device/subtitle-appearance` | `DELETE /settings/device/subtitle_appearance`                     |
-| `listPluginSettings`                     | `GET /api/v2/settings/plugins`                       | `GET /settings/plugins`                                           |
-| `getPluginSettings`                      | `GET /api/v2/settings/plugins/{installation_id}`     | `GET /settings/plugins/{installation_id}`                         |
-| `updatePluginSettings`                   | `PUT /api/v2/settings/plugins/{installation_id}`     | `PUT /settings/plugins/{installation_id}`                         |
-| `listSettingValues`                      | `GET /api/v2/settings/values`                        | `GET /settings/values`                                            |
-| `listEffectiveSettings`                  | `GET /api/v2/settings/values/effective`              | `GET /settings/values/effective`                                  |
-| `resolveEffectiveSettings`               | `POST /api/v2/settings/values/effective`             | `POST /settings/values/effective`                                 |
-| `updateNavigationShortcut`               | `PUT /api/v2/settings/values/nav.shortcuts/item`     | `PUT /settings/values/nav.shortcuts/item`                         |
-| `getSettingValue`                        | `GET /api/v2/settings/values/{key}`                  | `GET /settings/values/{key}`                                      |
-| `updateSettingValue`                     | `PUT /api/v2/settings/values/{key}`                  | `PUT /settings/values/{key}`                                      |
-| `deleteSettingValue`                     | `DELETE /api/v2/settings/values/{key}`               | `DELETE /settings/values/{key}`                                   |
+| Operation                                | Method and path                                      |
+| ---------------------------------------- | ---------------------------------------------------- |
+| `getSettingsContract`                    | `GET /api/v2/settings/contract`                      |
+| `getSettingsContractCapabilities`        | `GET /api/v2/settings/contract/capabilities`         |
+| `getOverlayConfig`                       | `GET /api/v2/settings/overlay-config`                |
+| `getEffectiveSubtitleAppearance`         | `GET /api/v2/settings/subtitle-appearance/effective` |
+| `updateSubtitleAppearanceDeviceOverride` | `PUT /api/v2/settings/device/subtitle-appearance`    |
+| `deleteSubtitleAppearanceDeviceOverride` | `DELETE /api/v2/settings/device/subtitle-appearance` |
+| `listPluginSettings`                     | `GET /api/v2/settings/plugins`                       |
+| `getPluginSettings`                      | `GET /api/v2/settings/plugins/{installation_id}`     |
+| `updatePluginSettings`                   | `PUT /api/v2/settings/plugins/{installation_id}`     |
+| `listSettingValues`                      | `GET /api/v2/settings/values`                        |
+| `listEffectiveSettings`                  | `GET /api/v2/settings/values/effective`              |
+| `resolveEffectiveSettings`               | `POST /api/v2/settings/values/effective`             |
+| `updateNavigationShortcut`               | `PUT /api/v2/settings/values/nav.shortcuts/item`     |
+| `getSettingValue`                        | `GET /api/v2/settings/values/{key}`                  |
+| `updateSettingValue`                     | `PUT /api/v2/settings/values/{key}`                  |
+| `deleteSettingValue`                     | `DELETE /api/v2/settings/values/{key}`               |
 
-The untyped legacy routes (`/settings/`, `/settings/{key}`, `/settings/device/{key}`,
-`/settings/effective`) have no v2 successor; they are removed at 1.0 and were already listed in
-`docs/architecture/v1-scope.md`. The admin projection is not part of the settings section; it has its own v2
-operations, `listAdminUserSettingValues` (`GET /api/v2/admin/users/{id}/settings/values`),
+The untyped v1 settings routes had no v2 successor; see
+[v1-scope.md](architecture/v1-scope.md). The admin projection is not part of the settings
+section; it has its own operations, `listAdminUserSettingValues` (`GET /api/v2/admin/users/{id}/settings/values`),
 `setAdminUserSettingValue` (`PUT /api/v2/admin/users/{id}/settings/values/{key}`) and
 `deleteAdminUserSettingValue` (`DELETE /api/v2/admin/users/{id}/settings/values/{key}`).
 
@@ -59,8 +53,8 @@ overlay-config and plugin operations. `X-Profile-Token` is optional everywhere.
 
 ### Contract discovery and capabilities
 
-`GET /api/v2/settings/contract` returns the same canonical public manifest bytes and the same
-`ETag` the v1 routes send, with `Cache-Control: private, no-cache`. A conditional
+`GET /api/v2/settings/contract` returns the canonical public manifest bytes and their `ETag`,
+with `Cache-Control: private, no-cache`. A conditional
 `If-None-Match` GET is not carried yet; it lands with the foundation caching rules, so a v2
 client compares the `ETag` (or the capability document's `contract_etag`) itself and re-fetches.
 
@@ -101,10 +95,9 @@ is illustrative):
 The web client reads `api_version`, `manifest_revision` and `contract_etag` from this document, gates
 each vendored definition on `manifest_revision >= introduced_in` plus `supports_batched_effective`, and
 gates the shortcut editor on `supports_atomic_shortcuts`. Read `supports_idempotent_writes` with
-care: the server computes the flag for the v1 `X-Silo-Mutation-Id` replay, but no v2 write
-declares that header (see "Writes have no mutation id" below), so a v2 client must not rely on
-replay semantics while the flag is `true`. The web client masks the flag to `false` for exactly
-this reason.
+care: no settings write declares `X-Silo-Mutation-Id` (see "Writes have no mutation id" below),
+so a client must not rely on replay semantics while the flag is `true`. The web client masks the
+flag to `false` for exactly this reason.
 
 ### Query parameters are repeated, not comma-separated
 
@@ -124,15 +117,15 @@ GET /api/v2/settings/values/effective?keys=ui.theme&library_ids=3&library_ids=7
 
 `scope` is a required enum on `listSettingValues`, `getSettingValue`, `updateSettingValue` and
 `deleteSettingValue`: `account`, `profile`, `profile_client`, `profile_device`, `profile_library`
-or `profile_series`. The identity members keep their v1 names (`profile_id`, `device_id`,
-`library_id`, `series_id` as query parameters; `X-Silo-Client-Family`, `X-Silo-Device-Id`,
-`X-Silo-Device-Name`, `X-Silo-Device-Platform` as headers). Library ids and profile ids are
-string `ID`s on both sides; `updated_at` is an instant.
+or `profile_series`. The identity members are `profile_id`, `device_id`, `library_id` and
+`series_id` as query parameters, and `X-Silo-Client-Family`, `X-Silo-Device-Id`,
+`X-Silo-Device-Name` and `X-Silo-Device-Platform` as headers (see
+[Request identity headers](#request-identity-headers)). Library ids and profile ids are string
+`ID`s; `updated_at` is an instant.
 
 ### Collections use the `{items}` envelope
 
-The v1 envelopes `{values}`, `{settings}`, `{contexts}` and `{installations}` all become the
-common collection envelope `{items: [...]}`. The setting-value collections keep `revision` beside
+Every settings collection uses the common collection envelope `{items: [...]}`. The setting-value collections keep `revision` beside
 `items`. These collections are unpaginated — they are bounded by the requested keys or the
 installed plugins — so `page` is never present.
 
@@ -195,18 +188,18 @@ contexts in one store read; use it for a grid or list instead of one GET per ite
 and each context is `{context_id, library_id | series_id}` with `library_id` as a string `ID`.
 The response preserves the requested key order, including repeated keys. Each `context_id` is an
 opaque caller token: whitespace is retained, and uniqueness is checked on the exact token. Empty
-or whitespace-only tokens are rejected. v1 retains its existing trimmed, deduplicated behavior.
+or whitespace-only tokens are rejected.
 
 The batch resolves for the acting profile and declared device, so the operation declares only the
 device and client-family headers: the `profile_id`, `device_id`, `library_ids` and `series_ids`
-query parameters of the single-shot GET are not accepted here (v1 parsed and then ignored them).
+query parameters of the single-shot GET are not accepted here.
 
 `contexts` is bounded at 100 entries (`maxItems`), not the 200 the seam's content-id budget might
 suggest. The seam bounds the *ids* in one request at 200 — the same budget the single-shot GET
 spends on `library_ids` plus `series_ids` — and a context may name both a `library_id` and a
 `series_id`, so declaring 200 contexts would advertise a capacity the seam refuses as soon as
 more than 100 contexts name both. Halving the declared bound keeps every valid context shape
-inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
+inside one request and leaves the store query untouched; a 101st context is a 422 at
 `body.contexts`.
 
 A repeated key returns its stored value once per mention, and the batch returns it again in every
@@ -289,17 +282,15 @@ An empty `contexts` list is refused at the schema (`resolve_effective_settings_c
 
 ### Unknown keys are `422`, not `404`
 
-A key the settings contract does not define is request input, not a missing resource, so v2
-answers `422` `validation_failed` at the key's declared location: `query.keys` on the list and
-effective GETs, `body.keys` on the batch POST, `path.key` on the single-key operations. v1
-answered `404` `unknown_setting`. The same rule covers the whole-document refusal of
-`nav.shortcuts` on `updateSettingValue` and `deleteSettingValue` (v1: `400`
-`atomic_update_required`) and every other rejected request member (v1: `400`).
+A key the settings contract does not define is request input, not a missing resource, so the
+server answers `422` `validation_failed` at the key's declared location: `query.keys` on the list
+and effective GETs, `body.keys` on the batch POST, `path.key` on the single-key operations. The
+same rule covers the whole-document refusal of `nav.shortcuts` on `updateSettingValue` and
+`deleteSettingValue` and every other rejected request member.
 
 `404` is kept for a real missing resource: `getSettingValue` and `deleteSettingValue` when nothing
 is stored at the scope, a `profile_id`, `device_id` or `library_id` that names nothing, and a
-plugin installation id that names nothing (numeric or not; identifiers are opaque, where v1
-answered `400` for a non-numeric id).
+plugin installation id that names nothing (numeric or not; identifiers are opaque).
 
 `GET /api/v2/settings/values/effective?keys=no.such` (`list_effective_settings_unknown_key.json`):
 
@@ -322,24 +313,23 @@ answered `400` for a non-numeric id).
 
 ### Writes have no mutation id
 
-`updateSettingValue` and `updateNavigationShortcut` declare no `X-Silo-Mutation-Id` header; a v2
-client sends none, and the v1 idempotent replay (`X-Silo-Idempotent-Replay`,
-`409 mutation_id_conflict`) does not exist on v2. The reason is sequencing, not a change of
-design: idempotent replay is a foundation concern for every v2 mutation, and the foundation
-mutation-retry work owns it. Until it lands, a v2 client retries a write as a plain desired-state
+`updateSettingValue` and `updateNavigationShortcut` declare no `X-Silo-Mutation-Id` header; a
+client sends none, and there is no idempotent replay. The reason is sequencing: idempotent replay
+is a foundation concern for every v2 mutation, and the foundation mutation-retry work owns it.
+Until it lands, a client retries a write as a plain desired-state
 `PUT`: the same body converges on the same stored value, and the shortcut mutation is still
 atomic on the server (an already-satisfied mutation is a successful no-op that does not advance
 the revision). Once the header is declared on both writes, the web client's compile-time guard
-flips and `supports_idempotent_writes` becomes meaningful on v2.
+flips and `supports_idempotent_writes` becomes meaningful.
 
 `updateSettingValue` accepts `{value}`, validated and normalized against the key's `value_schema`
-(a refusal is `422` at `body.value`; v1: `400 invalid_value`), and answers `200` with the same
+(a refusal is `422` at `body.value`), and answers `200` with the same
 stored row `getSettingValue` serves. `deleteSettingValue` answers `204`.
 
-`updateNavigationShortcut` accepts `{item, present}`; both are required at the schema (v1
-answered `400` when `present` was missing). `item` is an extension bag whose members the
-contract's `navigation-shortcuts.json` schema fixes. The response is the stored `nav.shortcuts`
-row as a `SettingValue`, exactly as v1.
+`updateNavigationShortcut` accepts `{item, present}`; both are required at the schema. `item` is
+an extension bag whose members the contract's `navigation-shortcuts.json` schema fixes. The
+response is the stored `nav.shortcuts` row as a `SettingValue`. See
+[Atomic navigation shortcuts](#atomic-navigation-shortcuts) for the mutation rules.
 
 ```http
 PUT /api/v2/settings/values/nav.shortcuts/item
@@ -351,21 +341,19 @@ Content-Type: application/json
 
 ### Device override and plugin writes answer `200` with the document
 
-`PUT /api/v2/settings/device/subtitle-appearance` takes the same `{value}` body as v1 (the
-appearance as a JSON document in a string; only JSON validity is checked) and answers `200` with
-the resolved `EffectiveSubtitleAppearance` — the same document
-`GET /api/v2/settings/subtitle-appearance/effective` serves — where v1 answered `204`.
+`PUT /api/v2/settings/device/subtitle-appearance` takes a `{value}` body (the appearance as a
+JSON document in a string; only JSON validity is checked) and answers `200` with the resolved
+`EffectiveSubtitleAppearance`, the same document
+`GET /api/v2/settings/subtitle-appearance/effective` serves.
 `X-Silo-Device-Id` is a required declared header on both device-override mutations (a missing id
-is `422` at `header.X-Silo-Device-Id`; v1: `400`); `DELETE` still answers `204`, including when no
-override existed. The device headers keep the v1 clamps (128/120/40) as declared bounds, so an
-over-long value is a `422` where v1 truncated it.
+is `422` at `header.X-Silo-Device-Id`); `DELETE` answers `204`, including when no override
+existed. The device headers declare length bounds (128/120/40), so an over-long value is a `422`.
 
 `PUT /api/v2/settings/plugins/{installation_id}` takes `{values}`, an extension bag of strings
 whose keys the plugin's `user_config_schema` defines; a refusal by the plugin is `422` at
 `body.values`. It answers `200` with the same `{installation, values}` document
-`getPluginSettings` serves (v1: `204`). `values` is `{}` rather than null when the account has
-none. The v1 `admin_form` member of an installation is not carried: it is an administrator-form
-descriptor no user-settings client renders.
+`getPluginSettings` serves. `values` is `{}` rather than null when the account has none. An
+installation carries no administrator-form descriptor; no user-settings client renders one.
 
 ```http
 PUT /api/v2/settings/plugins/3
@@ -445,27 +433,6 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
 }
 ```
 
-### Migrating from v1
-
-| v1                                                                               | v2                                                                              |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `GET /settings/manifest` or `/settings/contract`                                 | `GET /api/v2/settings/contract` (same bytes and `ETag`; no `If-None-Match` yet) |
-| `GET /settings/capability`                                                       | `GET /api/v2/settings/contract/capabilities` (nine settings members plus the common capability fields)       |
-| `?keys=a,b`, `?library_ids=1,2`, `?series_ids=x,y`                               | `?keys=a&keys=b`, `?library_ids=1&library_ids=2`, `?series_ids=x&series_ids=y`  |
-| `{values: [...], revision}`, `{settings: [...], revision}`                       | `{items: [...], revision}`                                                      |
-| `{contexts: [...], revision}` (batch POST)                                       | `{items: [{context_id, settings: [...]}], revision}`                            |
-| `{installations: [...]}`                                                         | `{items: [...]}`                                                                |
-| `404 unknown_setting`                                                            | `422 validation_failed` at `query.keys`, `body.keys` or `path.key`              |
-| `400 bad_request` / `400 invalid_value` / `400 atomic_update_required`           | `422 validation_failed` at the member's declared location                       |
-| `X-Silo-Mutation-Id`, `X-Silo-Idempotent-Replay`, `409 mutation_id_conflict`     | Not declared; retry the plain `PUT`                                             |
-| `PUT /settings/device/subtitle_appearance` → `204`                               | `PUT /api/v2/settings/device/subtitle-appearance` → `200` effective appearance  |
-| `PUT /settings/plugins/{id}` → `204`                                             | `PUT /api/v2/settings/plugins/{id}` → `200 {installation, values}`              |
-| Numeric `library_id`, `profile_id`, installation `id`                            | String `ID`s                                                                    |
-| `updated_at` as stored text                                                      | RFC 3339 instant                                                                |
-| `admin_form` on a plugin installation                                            | Not carried                                                                     |
-| `/settings/`, `/settings/{key}`, `/settings/device/{key}`, `/settings/effective` | Removed; use the typed operations above                                         |
-
-
 ## Public branding
 
 Branding remains public so it can render before sign-in:
@@ -491,22 +458,14 @@ preserve the branding content-security policy and `nosniff`, including SVG favic
 A valid kind without a configured asset returns `404`; missing asset storage returns
 `503`. Assets use the raw HTTP registry rather than JSON encoding.
 
-The frozen v1 routes and administrator asset upload/delete operations are unchanged.
-
 The web client has one theme, Cinema Dark. The only customization is the
 administrator's accent color (`branding.accent_color`), which the web client
 reads from the branding document and applies to the primary action color, the
 focus ring and the sidebar accent, turning the labels on those surfaces white
 when white reads better on the accent. A stored value that is not a `#rgb` or
 `#rrggbb` hex color is ignored, as email ignores it. Email buttons, the shell's `theme-color` and
-the web app manifest use it too. The v2 branding document has no default theme
-or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
-The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
-`default_theme` and light logo URLs, and `/theme/admin-css` still reports the
-stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps those
-settings for v1 alone; nothing else reads them. The v1 `/theme/catalog`,
-`/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
-`theme.catalog_url` its default, until v1 retires.
+the web app manifest use it too. The branding document has no default theme
+or light-theme logo URLs, and the API has no theme overrides or theme catalog.
 
 ### Retired theme settings
 
@@ -541,7 +500,7 @@ the account's or the profile's library limit, or removed by a policy override,
 stay out either way: the viewer scope reports the hidden libraries the policy
 would otherwise allow (`hidden_library_ids` in the scope decision), and the list
 adds only those. `supports_include_hidden` on the capability response advertises
-the parameter. The frozen v1 route keeps the default behavior.
+the parameter.
 
 `GET /api/v2/user/libraries/capabilities` exposes `available` under the same
 authority rules. Both operations remain registered when the service is absent;
@@ -549,9 +508,8 @@ discovery returns `available: false`, and listing returns `dependency_unavailabl
 The bundled web keeps numeric library IDs at its UI boundary, rejects unsafe
 numeric conversions, and fences responses/cache keys against account/profile
 changes. Apple and Android have existing library-discovery callers and require
-coordinated adoption before this migration row is ratified. The shared read
-preserves frozen v1 response shape and errors; Jellyfin's separate library
-projection is unchanged.
+coordinated adoption before this migration row is ratified. Jellyfin's separate
+library projection is unchanged.
 
 ### Administrator device metadata
 
@@ -581,8 +539,7 @@ settings mutation is added by these reads.
 
 `GET /api/v2/admin/devices/capabilities` returns `available` for the same
 administrator authority. Missing account/store dependencies produce
-`dependency_unavailable` from v2 metadata reads. The shared application read keeps
-frozen v1 shapes, errors and aggregation semantics. No Apple, Android or Jellyfin
+`dependency_unavailable` from the metadata reads. No Apple, Android or Jellyfin
 administrator-device metadata consumer was found.
 
 ### Browser OAuth login handshake
@@ -592,10 +549,8 @@ callback, completion codes, browser binding, PKCE and account linking) are
 specified in [auth-api.md](auth-api.md#oauth-sign-in-flows), with the rules
 behind them in
 [external-sign-in.md](architecture/external-sign-in.md#oauth-flows).
-Providers register the v2 callback URI
-(`/api/v2/auth/oauth/{install_id}/callback` on the public URL). The frozen v1
-init still issues its v1 callback URI (`/api/v1/auth/oauth/{install_id}/callback`),
-so a provider that serves v1 clients must register that one too.
+Providers register the callback URI `/api/v2/auth/oauth/{install_id}/callback`
+on the public URL, the only callback the server issues.
 
 ### External watch-state webhook receiver
 
@@ -605,12 +560,10 @@ resolved before reading the body; an ambient bearer token or profile does not
 replace this proof. Secret rotation immediately invalidates the previous URL.
 No browser Origin is required for these server-to-server deliveries.
 
-V2 limits the complete body to 10 MiB before provider parsing or watch-state
-side effects, including bodies with unknown or understated lengths. Oversize
-requests return a 413 `payload_too_large` problem. The bridge receivers
-(`/api/v1/webhook-sync/webhooks/{secret}` and `/api/v1/plex-sync/webhooks/{secret}`)
-enforce the same 10 MiB limit and answer an oversize delivery with 413
-`payload_too_large`. Multipart resources are cleaned up after parsing. The shared application processor retains explicit profile
+The receiver limits the complete body to 10 MiB before provider parsing or
+watch-state side effects, including bodies with unknown or understated lengths.
+Oversize requests return a 413 `payload_too_large` problem. Multipart resources
+are cleaned up after parsing. The shared application processor retains explicit profile
 mapping, provider normalization, watch-state behavior and delivery logging with
 bounded sanitized body excerpts. A processed delivery returns bodyless 204,
 including ignored, skipped or unmatched events. Malformed payloads return 400,
@@ -619,7 +572,7 @@ rejections retain delivery logs. This synchronous operation is non-retryable.
 Missing required fields or trailing data after the JSON document count as malformed;
 a well-formed notification of a type Silo does not use is ignored.
 
-Watch-state rules, shared by the v2 and bridge receivers:
+Watch-state rules:
 
 - An event changes only the Silo profile explicitly mapped to its external user.
   An unmapped user's event is skipped and is not replayed after mapping.
@@ -650,19 +603,16 @@ Watch-state rules, shared by the v2 and bridge receivers:
 A Plex connection's `base_url` follows the history import rule for server
 addresses: it must be on the public internet unless the account is an admin or
 an admin turned on `media_servers.allow_private_destinations`. Creating a
-connection with a refused address returns `422 validation_failed` (v1: 400
-`bad_request`), and a delivery whose metadata lookup is refused records that
+connection with a refused address returns `422 validation_failed`, and a delivery whose metadata lookup is refused records that
 message as the connection's last error. See
 [Outbound address guard](architecture/outbound-address-guard.md).
 
 Responses set `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 `GET /api/v2/webhook-sync/capabilities` exposes `available` and `max_body_bytes`.
-V2 connection list/create/update and secret rotation emit v2 receiver URLs.
-Existing external configurations continue to use their bridge URLs until updated;
-frozen v1 URL generation and response shapes remain unchanged. The bridge
-receiver runs the same provider parsing and watch-state rules as v2 (see above),
-so it rejects the same malformed deliveries and applies the same Jellyfin played
-marks.
+Connection list/create/update and secret rotation emit
+`/api/v2/webhook-sync/webhooks/{secret}` receiver URLs. An external server still
+configured with a retired `/api/v1/webhook-sync/...` or `/api/v1/plex-sync/...`
+URL gets `410 Gone` until it is given the current URL.
 The web management screen consumes the emitted URL. No native receiver or
 management caller was found; no Jellyfin-protocol endpoint needs migration.
 
@@ -685,12 +635,9 @@ The three routes require a verified active profile; progress is demo-restricted.
 `GET /api/v2/onboarding/capabilities` exposes `available` and `revision_guarded`.
 
 Both SQLite and PostgreSQL atomically check revisions on insertion/update.
-Database triggers advance the revision for bridge updates too, so a concurrent
-bridge write invalidates a v2 validator. Completed/skipped timestamps remain
-monotonic. The migration adds a revision column without changing existing state;
-frozen v1 POST payloads, timestamps, response shapes and ordering behavior remain
-unchanged. Bridge clients can still submit unordered progress during the bridge;
-the ordering guarantee applies to guarded v2 writers.
+Database triggers advance the revision on every write, so a concurrent write
+invalidates a held validator. Completed/skipped timestamps remain monotonic. The
+migration adds a revision column without changing existing state.
 
 Clients serialize intents for a captured account/profile, wait for each response
 before advancing/dismissing, and use only the acknowledged next ETag. Progress is
@@ -701,30 +648,12 @@ apply the same rule before these migration rows can be ratified. Jellyfin has no
 onboarding counterpart.
 
 
-## Bridge: the frozen `/api/v1` settings routes
+## Settings semantics
 
-The alpha surface below is frozen. Silo serves it through the pre-1.0 bridge window so
-existing clients keep working; Silo 1.0 then answers the whole `/api/v1` namespace with
-`410 Gone` and the `client_upgrade_required` problem code. No feature work lands here.
-Use [Migrating from v1](#migrating-from-v1) to move a caller to the stable operations.
-
-All paths in this section are relative to `/api/v1`.
-
-### Contract discovery
-
-| Method and path            | Purpose                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `GET /settings/manifest`   | Public client projection of the current manifest. Supports `If-None-Match`.                             |
-| `GET /settings/capability` | Contract API version, revision, remote scopes, supported client families, and batch/write capabilities. |
-
-`/settings/contract` and `/settings/contract/capabilities` are equivalent
-aliases. A client whose vendored contract is newer than the advertised server
-revision must hide definitions and features introduced after that revision.
-Navigation shortcut mutation controls additionally require
-`supports_atomic_shortcuts: true`. Revision-5 customization also requires
-`supports_batched_effective: true` and `supports_idempotent_writes: true` so
-batched resolution and replayed writes have the semantics the clients depend
-on. Any missing flag fails closed.
+These rules apply to the settings operations above and to the administrator
+projection. A client whose vendored contract is newer than the advertised
+`manifest_revision` must hide definitions and features introduced after that
+revision, and any capability flag it depends on that is missing fails closed.
 
 ### Request identity headers
 
@@ -734,10 +663,9 @@ resolving or writing an override.
 
 | Header                 | When required                                                                                               | Meaning                                                                                                                                     |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `X-Profile-Id`         | All `/settings/values` routes                                                                               | Active household profile.                                                                                                                   |
+| `X-Profile-Id`         | All `/api/v2/settings/values…` operations                                                                   | Active household profile.                                                                                                                   |
 | `X-Silo-Device-Id`     | A `profile_device` explicit request, or an effective request containing a key that permits `profile_device` | Stable exact-device identity.                                                                                                               |
 | `X-Silo-Client-Family` | Required for a `profile_client` explicit request; optional on effective reads                               | Closed like-client identity: `tv`, `mobile`, `tablet`, `desktop`, or `web`. A valid value includes the like-client layer; absence skips it. |
-| `X-Silo-Mutation-Id`   | Optional on `PUT`                                                                                           | Idempotency key for safe retries. Reusing it for a different identity or value returns a conflict.                                          |
 
 Client family is intentionally independent of the free-form
 `X-Silo-Device-Platform` display metadata. The server never guesses one from
@@ -766,21 +694,21 @@ carry them so a report can be tied to an exact build.
 | `X-Silo-Client-Build`   | 64    | Opaque per-platform build identifier (Android `versionCode`, Apple `CFBundleVersion`). Never parsed or compared. |
 | `X-Silo-Client-Channel` | 32    | Opaque distribution channel: `release`, `beta`, `sideload`, `dev`. Stored verbatim; `release` is not displayed.  |
 
-Values are trimmed and truncated to the clamp above — never rejected, on either
-route, because an identity label must not be able to fail a playback start. The
+Values are trimmed and truncated to the clamp above — never rejected, because an
+identity label must not be able to fail a playback start. The
 clamp counts characters, not bytes, matching `maxLength` in the v3 request
 schemas, and is applied where the request is read rather than where the session
 is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
 
-The `/api/v2` playback operations also declare `X-Client-Name`,
+The playback operations also declare `X-Client-Name`,
 `X-Client-Version`, `X-Client-Build`, and `X-Client-Channel`. A request with a
 non-blank `X-Client-Name` takes its whole identity from that set; a request
 without one takes it from the `X-Silo-Client*` set above when `X-Silo-Client` is
 non-blank. The two sets are never mixed field by field.
 
-Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
+`POST /api/v2/playback/start` accepts `client_playback_context.app_version`,
 `.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
 set the headers on every request. The headers win field by field when both are
 present, and the fallback applies **only to a client that sent `X-Silo-Client`**:
@@ -810,15 +738,14 @@ a phone or browser.
 
 ### Explicit values
 
-Use explicit endpoints to edit or clear one scope, without resolving inherited
-values:
+Use the explicit operations to edit or clear one scope, without resolving
+inherited values:
 
-- `GET /settings/values?keys=<csv>&scope=<scope>` returns every requested key
-  with `is_set`; unset rows remain in the response.
-- `GET /settings/values/{key}?scope=<scope>` returns one stored value or `404`.
-- `PUT /settings/values/{key}?scope=<scope>` accepts `{"value": <typed JSON>}`.
-- `DELETE /settings/values/{key}?scope=<scope>` removes the row so inheritance
-  applies again.
+- `listSettingValues` (`GET /api/v2/settings/values?keys=<key>&scope=<scope>`)
+  returns every requested key with `is_set`; unset rows remain in the response.
+- `getSettingValue` returns one stored value or `404`.
+- `updateSettingValue` accepts `{"value": <typed JSON>}`.
+- `deleteSettingValue` removes the row so inheritance applies again.
 
 `library_id` and `series_id` are query parameters for their matching scopes.
 An explicitly managed device may be named with `device_id`, subject to the
@@ -828,7 +755,7 @@ takes its family only from `X-Silo-Client-Family`.
 Example: share a TV menu between tvOS and Android TV clients.
 
 ```http
-PUT /api/v1/settings/values/nav.primary_menu?scope=profile_client
+PUT /api/v2/settings/values/nav.primary_menu?scope=profile_client
 Authorization: Bearer <token>
 X-Profile-Id: <profile-id>
 X-Silo-Client-Family: tv
@@ -865,15 +792,12 @@ client shows up correctly on the others:
 | `PUT` of `playback.auto_skip_intro`                                                                       | writes `playback.intro_skip_mode` at the same identity: `true → "always"`, `false → "ask"`                                                                                                              |
 | `PUT` of `playback.intro_skip_mode`                                                                       | writes `playback.auto_skip_intro` at the same identity: `"always" → true`, otherwise `false`                                                                                                            |
 | `DELETE` of either                                                                                        | removes the other at the same identity                                                                                                                                                                  |
-| `PUT`/`POST /profiles` with `auto_skip_intro`                                                             | writes both keys at `profile` scope                                                                                                                                                                     |
-| `PUT`/`DELETE` of the legacy `/settings/{key}` or `/settings/device/{key}` for `playback.auto_skip_intro` | writes or clears both keys at the scope that route owns                                                                                                                                                 |
+| Profile create or update with `auto_skip_intro`                                                           | writes both keys at `profile` scope                                                                                                                                                                     |
 | `PUT` or `DELETE` of either key at `profile` scope                                                        | sets `user_profiles.auto_skip_intro` to what the pair now resolves to — the written value, or the contract default once the row is cleared — so the profile DTO stays truthful for clients that read it |
 
-Everything in that table commits as one transaction — both rows, the legacy
-profile column, and the idempotency receipt when the request carries an
-`X-Silo-Mutation-Id` — on the keyed and unkeyed paths alike, and on `DELETE` as
-well as `PUT`. A request that fails changes nothing, and a replayed mutation id
-re-serves its receipt without writing anything again. The response is always the
+Everything in that table commits as one transaction — both rows and the legacy
+profile column — on `DELETE` as well as `PUT`. A request that fails changes
+nothing. The response is always the
 stored value of the key the request addressed; the companion row is not
 reported. Only the addressed key raises a `user_settings.changed` event and an
 audit record.
@@ -903,10 +827,9 @@ web clients. Self-service clients must mutate one destination at a time instead
 of replacing that shared document:
 
 ```http
-PUT /api/v1/settings/values/nav.shortcuts/item
+PUT /api/v2/settings/values/nav.shortcuts/item
 Authorization: Bearer <token>
 X-Profile-Id: <profile-id>
-X-Silo-Mutation-Id: <stable-uuid-for-this-intent>
 Content-Type: application/json
 
 {"item":{"type":"section","library_id":7,"section_id":"recent","label":"Recently Added"},"present":true}
@@ -930,39 +853,31 @@ successful no-op and does not increment the revision. Removing from a catalog
 that has never been stored returns `{"items":[]}` at revision `0` with no
 `updated_at`.
 
-Retry with the same `X-Silo-Mutation-Id`. A recorded retry returns the original
-response with `X-Silo-Idempotent-Replay: true`; reusing the id for a different
-semantic operation returns `409 mutation_id_conflict`. The mutation ID is
-serialized before the setting write, and the setting plus its replay receipt
-commit in one database transaction, so concurrent reuse cannot apply twice and
-a crash cannot persist only one half. A rare exhausted
-contention loop returns retryable `409 setting_update_conflict`. Malformed
-envelopes or unknown envelope fields return `400 bad_request`, while item
-schema failures (including unknown item fields) and cap failures return
-`400 invalid_value`.
+A retry resends the same desired state: an already-applied mutation is a no-op
+(see [Writes have no mutation id](#writes-have-no-mutation-id)). A rare exhausted
+contention loop returns a retryable `409` conflict. Malformed envelopes, unknown
+envelope fields, item schema failures (including unknown item fields) and cap
+failures return `422 validation_failed`.
 
-Ordinary session `PUT` and `DELETE` at
-`/settings/values/nav.shortcuts?scope=profile` are rejected with
-`400 atomic_update_required` so a whole-document mutation cannot erase
-concurrent item edits or reset the row revision. The admin endpoint retains
-whole-document `PUT` for explicit repair work, but rejects physical `DELETE`
-for the same revision-history reason. An admin clears the catalog with
+`updateSettingValue` and `deleteSettingValue` refuse `nav.shortcuts` with `422`
+at `path.key`, so a whole-document mutation cannot erase concurrent item edits
+or reset the row revision. The administrator `setAdminUserSettingValue` retains
+whole-document `PUT` for explicit repair work, but `deleteAdminUserSettingValue`
+refuses it for the same revision-history reason. An admin clears the catalog with
 `{"value":{"items":[]}}`, which advances the row revision, or replaces it with
 another validated document.
 
 ### Effective values
 
-- `GET /settings/values/effective?keys=<csv>` resolves several keys for the
-  request profile, device, and client family. Omitting `keys` resolves all
-  remote definitions.
-- `POST /settings/values/effective` resolves a bounded list of content contexts
-  in one store read. Use it for grids or lists rather than issuing one request
-  per item.
+- `listEffectiveSettings` resolves several keys for the request profile, device,
+  and client family. Omitting `keys` resolves all remote definitions.
+- `resolveEffectiveSettings` resolves a bounded list of content contexts in one
+  store read (see [Batch effective resolution](#batch-effective-resolution)).
 
 An effective request must include the device header when any requested
-definition permits an exact-device override. The family header is optional for
-backward compatibility: absence skips the `profile_client` layer, while a
-non-empty invalid family is rejected. First-party clients should send their
+definition permits an exact-device override. The family header is optional:
+absence skips the `profile_client` layer, while a non-empty invalid family is
+rejected. First-party clients should send their
 family so like-device preferences participate in resolution. Each response
 includes its source scope and source context; `client_family` is included for a
 family-scoped winner.
@@ -978,10 +893,9 @@ changes it (see [API contract](architecture/api-contract.md#self-service-device-
 optional `X-Silo-Device-Name` and `X-Silo-Device-Platform`, for the acting
 profile when the device:
 
-- resolves effective values (`GET` or `POST` of the effective route, v1 or v2);
+- resolves effective values (`listEffectiveSettings` or `resolveEffectiveSettings`);
 - starts playback (see [Playback API](playback-api.md#start));
-- writes one of its own `profile_device` values, or uses a legacy
-  device-setting route;
+- writes one of its own `profile_device` values;
 - creates a download.
 
 A request that names another device with `device_id`, or another profile with
@@ -996,14 +910,15 @@ device's next request retries it.
 
 ### Admin projection
 
-Admin routes are mounted behind the normal acting-admin authorization:
+Admin operations require acting-admin authorization:
 
-- `GET /admin/users/{id}/settings/values` lists every stored row across all
-  scopes.
-- `PUT /admin/users/{id}/settings/values/{key}?scope=<scope>` writes through the
-  same contract validation and normalization as the self-service endpoint.
-- `DELETE /admin/users/{id}/settings/values/{key}?scope=<scope>` clears the
-  selected row.
+- `listAdminUserSettingValues` (`GET /api/v2/admin/users/{id}/settings/values`)
+  lists every stored row across all scopes.
+- `setAdminUserSettingValue` (`PUT /api/v2/admin/users/{id}/settings/values/{key}?scope=<scope>`)
+  writes through the same contract validation and normalization as the
+  self-service operation.
+- `deleteAdminUserSettingValue` (`DELETE /api/v2/admin/users/{id}/settings/values/{key}?scope=<scope>`)
+  clears the selected row.
 
 Admin requests name profile/context identity with query parameters because the
 target user is not the admin's active session. In particular,
@@ -1011,15 +926,15 @@ target user is not the admin's active session. In particular,
 parameters; it does not use `X-Silo-Client-Family`.
 
 ```http
-PUT /api/v1/admin/users/42/settings/values/ui.card_presentation?scope=profile_client&profile_id=main&client_family=tv
+PUT /api/v2/admin/users/42/settings/values/ui.card_presentation?scope=profile_client&profile_id=main&client_family=tv
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {"value":{"poster_size":"large","caption":"title_metadata"}}
 ```
 
-The five accepted `client_family` values are also returned by the capability
-endpoint so admin tooling does not need to invent them.
+The five accepted `client_family` values are also returned by
+`getSettingsContractCapabilities` so admin tooling does not need to invent them.
 
 ### Artwork storage settings
 

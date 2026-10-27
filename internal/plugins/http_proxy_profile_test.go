@@ -75,7 +75,7 @@ func TestHTTPProxyUsesLaunchProfileWithoutRequestHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", nil)
 	req = req.WithContext(WithPluginAccessUser(req.Context(), true, false, 7, "profile-1"))
 	rec := httptest.NewRecorder()
-	proxy.ServeRoute(rec, req, 1, true, false)
+	proxy.serveRoute(rec, req, 1, true, false)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())

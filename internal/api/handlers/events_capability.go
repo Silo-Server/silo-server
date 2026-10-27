@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"net/http"
 	"slices"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -43,20 +41,6 @@ type eventsCapabilityResponse struct {
 	// the caller may actually subscribe to arrives as available_channels in the
 	// hello frame, which is role-filtered.
 	Channels []evt.EventChannel `json:"channels"`
-}
-
-// HandleCapability reports the events websocket's subscription capabilities.
-//
-// Per the v1 rules, new functionality is feature-detected rather than inferred
-// from a version. This follows the existing per-subsystem convention
-// (/notifications/capability, /playback/capability, /downloads/capability).
-//
-// A client that finds declared_channels false is talking to a server older than
-// its own expectations; the useful response is to tell the user to update the
-// server, not to silently fall back.
-func (h *EventsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.EventsCapability())
 }
 
 type EventsCapability = eventsCapabilityResponse
