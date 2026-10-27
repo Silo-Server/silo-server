@@ -380,11 +380,20 @@ func newStreamTelemetryViewCache(registry *streamtelemetry.Registry) *streamtele
 	return streamtelemetry.NewViewCache(registry, registry.ViewTTL(), slog.Default())
 }
 
-func resolvePluginCacheDir() string {
+// resolvePluginCacheDir returns the plugin cache root. The default sits in the
+// shared temp dir, where another local account could create it first and plant
+// plugin binaries, so it must be a private directory this user owns. A dir set
+// with SILO_PLUGIN_CACHE_DIR is the operator's to secure: container bind
+// mounts there are often owned by another uid on the host.
+func resolvePluginCacheDir() (string, error) {
 	if v := strings.TrimSpace(os.Getenv("SILO_PLUGIN_CACHE_DIR")); v != "" {
-		return v
+		return v, nil
 	}
-	return filepath.Join(os.TempDir(), "silo-plugins")
+	dir := filepath.Join(os.TempDir(), "silo-plugins")
+	if err := plugins.EnsurePrivateCacheRoot(dir); err != nil {
+		return "", fmt.Errorf("%w; set SILO_PLUGIN_CACHE_DIR to a directory only the Silo user can write", err)
+	}
+	return dir, nil
 }
 
 func buildBaseHandler(format string, level slog.Leveler, otelHandler slog.Handler) slog.Handler {
@@ -1201,7 +1210,11 @@ func main() {
 			srv.SetStreamTelemetry(streamTelemetryRegistry)
 			// Network access providers run on this proxy too, one instance per
 			// node with its own overlay identity; see newProxyPluginHost.
-			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
+			pluginCacheDir, cacheDirErr := resolvePluginCacheDir()
+			if cacheDirErr != nil {
+				log.Fatalf("plugin cache: %v", cacheDirErr)
+			}
+			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, pluginCacheDir)
 			srv.SetIngressTokens(proxyPlugins.broker.Registry)
 			srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
 			srv.SetNetworkAccessProviderHost(proxyPlugins.service)
@@ -1697,7 +1710,10 @@ func main() {
 	deps.NetworkAccess = networkAccess
 	deps.LocalTLSPin = lanTLS.Pin()
 	if deps.DB != nil {
-		pluginCacheDir := resolvePluginCacheDir()
+		pluginCacheDir, cacheDirErr := resolvePluginCacheDir()
+		if cacheDirErr != nil {
+			log.Fatalf("plugin cache: %v", cacheDirErr)
+		}
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
 		installationStore := plugins.NewInstallationStore(deps.DB)
 		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher)
