@@ -24,7 +24,9 @@ func TestSuggestionPageVoteChangesPreserveTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	_, err = pool.Exec(t.Context(), `CREATE TEMP TABLE watch_together_suggestions (
+	_, err = pool.Exec(t.Context(), `CREATE TEMP TABLE watch_together_rooms (id text PRIMARY KEY);
+ INSERT INTO watch_together_rooms VALUES ('room'),('other');
+ CREATE TEMP TABLE watch_together_suggestions (
  id text PRIMARY KEY, room_id text NOT NULL, suggester_user_id integer NOT NULL, suggester_profile_id text NOT NULL,
  content_id text NOT NULL,content_type text NOT NULL,title text NOT NULL,subtitle text NOT NULL,poster_url text NOT NULL,note text NOT NULL,vote_count integer NOT NULL,created_at timestamptz NOT NULL);
  CREATE TEMP TABLE watch_together_votes (suggestion_id text NOT NULL,voter_user_id integer NOT NULL,voter_profile_id text NOT NULL,created_at timestamptz DEFAULT now(),PRIMARY KEY(suggestion_id,voter_user_id,voter_profile_id));`)
