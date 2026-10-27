@@ -1765,7 +1765,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, notificationSeriesFixtureCases()...)
 	cases = append(cases, notificationSeriesMuteFixtureCases()...)
 	cases = append(cases, seasonalThemeFixtureCases()...)
-	return append(cases, personalListMembershipFixtureCases()...)
+	cases = append(cases, personalListMembershipFixtureCases()...)
+	return append(cases, adminCatalogItemsFixtureCases()...)
 }
 
 // personalListMembershipFixtureCases covers the favorites and watchlist
@@ -2191,6 +2192,7 @@ func fixtureDeps() Dependencies {
 	deps.SubtitleReads = &fakeSubtitleReads{}
 	deps.AdminSubtitleList = &fakeAdminSubtitleList{}
 	deps.AdminPlaybackHistory = &fakeAdminPlaybackHistory{}
+	deps.AdminCatalogItems = &fakeAdminCatalogItems{}
 	deps.AdminSubtitleMetadata = fixtureAdminSubtitleMetadata()
 	deps.AdminSubtitleProviderConfiguration = fixtureAdminProviderConfiguration()
 	deps.SubtitleAICancel = &fakeSubtitleAICancel{}

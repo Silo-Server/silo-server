@@ -2949,6 +2949,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if adminHandler != nil {
 		v2deps.AdminUnmatchedFiles = adminHandler
 	}
+	if itemRepo != nil {
+		v2deps.AdminCatalogItems = itemRepo
+	}
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler
 	}

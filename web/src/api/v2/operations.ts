@@ -121,7 +121,9 @@ export const v2Operations = {
   "GET /api/v2/admin/autoscan/sources/{id}/rewrite-suggestions":
     "getAdminAutoscanRewriteSuggestions",
   "GET /api/v2/admin/autoscan/status": "getAdminAutoscanStatus",
+  "GET /api/v2/admin/catalog/capabilities": "getAdminCatalogCapabilities",
   "GET /api/v2/admin/catalog/import-sources": "listCatalogImportSources",
+  "GET /api/v2/admin/catalog/items": "listAdminCatalogItems",
   "GET /api/v2/admin/catalog/local-import-sources": "listLocalCatalogImportSources",
   "GET /api/v2/admin/catalog/search/status": "getAdminCatalogSearchStatus",
   "GET /api/v2/admin/collection-groups/{group_id}/collections/order":

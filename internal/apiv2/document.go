@@ -678,6 +678,7 @@ func registerAll(reg *Registry) {
 	registerAdminCatalogSplit(reg)
 	registerAdminCatalogMatch(reg)
 	registerAdminCatalogUnmatched(reg)
+	registerAdminCatalogItems(reg)
 	registerAdminCatalogImages(reg)
 	registerProfileSections(reg)
 	registerCatalogItems(reg)

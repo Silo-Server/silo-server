@@ -745,6 +745,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/catalog/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover the administrator catalog reads this server offers. */
+    get: operations["getAdminCatalogCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/catalog/export": {
     parameters: {
       query?: never;
@@ -839,6 +856,23 @@ export interface paths {
     };
     /** List a bounded page of catalog import sources. Local sources use path order; storage sources use the storage continuation order. */
     get: operations["listCatalogImportSources"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/catalog/items": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the movies, series and episodes present in enabled libraries, with their files, in content_id order. Each page is one consistent read; later pages read the live catalog. */
+    get: operations["listAdminCatalogItems"];
     put?: never;
     post?: never;
     delete?: never;
@@ -13733,6 +13767,24 @@ export interface components {
        */
       vcs_time?: string;
     };
+    AdminCatalogCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description listAdminCatalogItems is served */
+      item_listing: boolean;
+      /**
+       * Format: int64
+       * @description Most content_ids one listAdminCatalogItems request accepts
+       */
+      item_listing_max_content_ids: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
     AdminCatalogExportRequest: {
       library_ids?: string[];
     };
@@ -13745,6 +13797,103 @@ export interface components {
       path_rewrites: components["schemas"]["CatalogImportPathRewrite"][];
       /** Format: uri-reference */
       remote_url?: string;
+    };
+    AdminCatalogItem: {
+      /**
+       * Format: date-time
+       * @description When Silo first saw the item: the earliest first-seen time across its libraries, or its first-seen time in library_id when that filter is set. Not a change cursor; metadata and file changes do not move it
+       */
+      added_at: string;
+      /** @example movie-tmdb-949 */
+      content_id: string;
+      /**
+       * Format: int64
+       * @description An episode's number in its season; absent otherwise
+       */
+      episode_number?: number;
+      imdb_id?: string;
+      /** @description Every enabled library the item is present in, whatever library_id filters */
+      library_ids: string[];
+      /**
+       * Format: int64
+       * @description An episode's season; absent otherwise
+       */
+      season_number?: number;
+      /** @description An episode's series content_id; absent otherwise */
+      series_id?: string;
+      /** @description An episode's series title; absent otherwise */
+      series_title?: string;
+      /**
+       * @description Metadata match state of a movie or series; absent for an episode
+       * @example matched
+       */
+      status?: string;
+      /** @description Episode title for an episode; empty when the episode has none */
+      title: string;
+      tmdb_id?: string;
+      tvdb_id?: string;
+      /** @enum {string} */
+      type: "movie" | "series" | "episode";
+      /** @description Each present file in an enabled library, ordered by file_id. Empty for a series, never null */
+      versions: components["schemas"]["AdminCatalogItemVersion"][];
+      /**
+       * Format: int64
+       * @description Release year; an episode's air-date year. Absent when unknown
+       */
+      year?: number;
+    };
+    AdminCatalogItemCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminCatalogItem"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    AdminCatalogItemVersion: {
+      /** @description The selected audio track carries Dolby Atmos */
+      atmos: boolean;
+      /**
+       * Format: int64
+       * @example 8
+       */
+      audio_channels?: number;
+      /**
+       * Format: int64
+       * @description Overall file bitrate in kilobits per second
+       */
+      bitrate_kbps?: number;
+      /** @example truehd */
+      codec_audio?: string;
+      /** @example hevc */
+      codec_video?: string;
+      /** @example mkv */
+      container?: string;
+      /**
+       * @description Absent when the file was not probed
+       * @enum {string}
+       */
+      dynamic_range?: "sdr" | "hdr10" | "hdr10_plus" | "hlg" | "dolby_vision" | "hdr_unknown";
+      /**
+       * @description Edition label, such as Director's Cut
+       * @example Extended
+       */
+      edition?: string;
+      /**
+       * @description Opaque identifier
+       * @example 120
+       */
+      file_id: string;
+      /**
+       * Format: int64
+       * @description Bytes
+       */
+      file_size: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      /** @example 2160p */
+      resolution?: string;
     };
     AdminCatalogPublished: {
       /**
@@ -40950,6 +41099,138 @@ export interface operations {
       };
     };
   };
+  getAdminCatalogCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCatalogCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   exportAdminCatalog: {
     parameters: {
       query?: never;
@@ -41664,6 +41945,125 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CollectionAdminCatalogSource"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminCatalogItems: {
+    parameters: {
+      query?: {
+        /** @description Only items whose added_at is at or after this instant */
+        added_after?: string;
+        /** @description Only these items, one content_ids parameter per id; ids that are not present movies, series or episodes are left out */
+        content_ids?: string[];
+        /** @description Opaque cursor from page.next_cursor; valid only with the filters that produced it */
+        cursor?: string;
+        /** @description Only items present in this library; added_at and added_after then use the item's first-seen time in this library */
+        library_id?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Only items of this type */
+        type?: "movie" | "series" | "episode";
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCatalogItemCollection"];
         };
       };
       /** @description Bad Request */
