@@ -14,7 +14,19 @@ install -d -o silo -g silo /config/silo /config/silo/artwork /config/silo/compat
 install -d -o postgres -g postgres -m 0750 /config/postgres
 install -d -o redis -g redis -m 0750 /config/redis
 install -d -o meilisearch -g meilisearch -m 0750 /config/meilisearch
-own_tree silo silo /config/silo
+# Local artwork can put millions of files under /config/silo, too many to walk
+# on every start. Walk it when the silo account's ids differ from the last
+# walk's, or when an entry in the top two levels is owned wrong, as in a
+# restored or copied-in directory. The install above already fixed the owners
+# of the four directories themselves. Delete the marker to force a walk.
+owner_marker=/config/silo/.omnibus-owner
+silo_ids="$(id -u silo):$(id -g silo)"
+if [[ "$(cat "$owner_marker" 2>/dev/null)" != "$silo_ids" ]] ||
+  [[ -n "$(find /config/silo -mindepth 1 -maxdepth 2 \( ! -user silo -o ! -group silo \) -print -quit)" ]]; then
+  own_tree silo silo /config/silo
+  printf '%s\n' "$silo_ids" > "$owner_marker"
+  chown silo:silo "$owner_marker"
+fi
 install -d -o postgres -g postgres -m 2775 /run/postgresql
 # Silo's transcode and prepared-download defaults live under /tmp. Mount them
 # to keep them across container recreation.
