@@ -367,6 +367,9 @@ type CapabilityInfo struct {
 	// capability declares it can look an item up by, from its manifest's
 	// lookup_provider_ids. See extractLookupProviderIDs.
 	LookupProviderIDs []string
+	// LookupImages reports that the capability also serves artwork by those
+	// keys (lookup_images). See extractLookupImages.
+	LookupImages bool
 	// BulkLookupLimit is how many concurrent lookups the capability can combine
 	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
 	// into the bulk enrichment pass. See extractBulkLookupLimit.
@@ -595,6 +598,23 @@ func extractLookupProviderIDs(metadataJSON []byte) []string {
 	return out
 }
 
+// extractLookupImages parses a capability's lookup_images: true opens
+// GetImages to the keys in lookup_provider_ids, as GetMetadata already is. An
+// artwork source with no IDs of its own, fanart.tv for one, declares it so the
+// host asks it for images by TMDB, IMDb or TVDB ID. Anything other than JSON
+// true leaves images gated on the provider's own ID.
+func extractLookupImages(metadataJSON []byte) bool {
+	raw, ok := capabilityMetadataField(metadataJSON, "lookup_images")
+	if !ok {
+		return false
+	}
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return false
+	}
+	return enabled
+}
+
 // maxBulkLookupLimit caps a declared bulk_lookup_limit, so a plugin cannot ask
 // the host for unbounded concurrency.
 const maxBulkLookupLimit = 200
@@ -795,6 +815,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+		c.LookupImages = extractLookupImages(metadataJSON)
 		c.defaultEnabled = extractDefaultEnabled(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 		c.RatingSources = extractRatingSources(metadataJSON)
@@ -907,7 +928,7 @@ func providersFromCapabilities(ctx context.Context, caps []CapabilityInfo, resol
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.RatingSources, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.LookupImages, c.RatingSources, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -978,6 +999,7 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 		return info
 	}
 	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+	info.LookupImages = extractLookupImages(metadataJSON)
 	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 	info.RatingSources = extractRatingSources(metadataJSON)
 	return info

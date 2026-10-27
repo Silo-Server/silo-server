@@ -13,6 +13,13 @@ the top level or inside the SDK's `metadata` envelope; the top level wins.
   `["imdb", "tmdb"]`. The host calls `GetMetadata` when the item carries any of
   them, even without an ID of the provider's own. In that case `provider_id` is
   empty and the plugin reads `provider_ids`.
+- `lookup_images` is `true` for an artwork source, such as fanart.tv, that has
+  no IDs of its own. The host then also calls `GetImages` by the
+  `lookup_provider_ids` keys, for item artwork and season-scoped galleries.
+  Without it, `GetImages`, `GetSeasons` and `GetEpisodes` run only on the
+  provider's own ID, so a ratings source such as MDBList is never asked for
+  artwork. Images still compete in provider-chain order: the provider's art
+  wins only where it ranks above the primary provider in a library's chain.
 - `bulk_lookup_limit` is a positive integer: how many concurrent `GetMetadata`
   calls the provider combines into one upstream request. Declaring it opts the
   provider into the bulk enrichment pass below. Values above 200 are capped at
