@@ -26800,6 +26800,7 @@
               "format": "int64",
               "type": "integer"
             },
+            "maxProperties": 32,
             "type": "object"
           },
           "subtitles": {

@@ -2,6 +2,7 @@ package playback
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"reflect"
 	"strconv"
@@ -3628,6 +3629,22 @@ func TestPlanPlaybackV3CodecChannelCeiling(t *testing.T) {
 				t.Fatalf("audio = %q %v, want %q %d", recipe.AudioCodec, recipe.AudioChannels, test.wantCodec, test.wantChannels)
 			}
 		})
+	}
+}
+
+// Codec spellings of one codec merge to its lowest ceiling, and a ceiling
+// outranks a spelling that leaves it unset.
+func TestStartRequestV3NormalizesCodecChannelCeilings(t *testing.T) {
+	request := validStartRequestV3()
+	hls := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.MaxChannelsByCodec = map[string]int{"aac": 2, "AAC": 0, "E-AC-3": 6, "eac3": 4, "ec-3": -1}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	if _, err := request.NormalizeAndValidate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	got := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3].MaxChannelsByCodec
+	if want := map[string]int{"aac": 2, "eac3": 4}; !maps.Equal(got, want) {
+		t.Fatalf("max_channels_by_codec = %v, want %v", got, want)
 	}
 }
 

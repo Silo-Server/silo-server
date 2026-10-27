@@ -678,7 +678,7 @@ type DeliveryCapabilityV3 struct {
 	// converted, and an AAC conversion stays within the "aac" entry. Keys are
 	// codec names as in audio_decode_codecs; a value of zero or less means
 	// unset. Honored when the server advertises codec_channel_ceilings_v1.
-	MaxChannelsByCodec map[string]int                 `json:"max_channels_by_codec,omitempty"`
+	MaxChannelsByCodec map[string]int                 `json:"max_channels_by_codec,omitempty" maxProperties:"32"`
 	HDRDetails         *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
 	Subtitles          DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
 	Features           []string                       `json:"features"`
@@ -1463,8 +1463,9 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				if codec == "" || len(codec) > 64 || channels > 64 {
 					return errors.New("invalid delivery max_channels_by_codec")
 				}
-				// Spellings that name one codec keep the lowest ceiling.
-				if existing, seen := byCodec[codec]; !seen || channels < existing {
+				// Spellings that name one codec keep the lowest ceiling; a
+				// ceiling beats an unset value (zero or less).
+				if existing, seen := byCodec[codec]; !seen || channels > 0 && (existing <= 0 || channels < existing) {
 					byCodec[codec] = channels
 				}
 			}
