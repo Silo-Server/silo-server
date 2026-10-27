@@ -433,13 +433,35 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	}
 	// A copy that knew nothing about the device expires first. A later copy
 	// that did not get further still records the facts, and a third, with
-	// other values, replaces none of them. An admin terminate recorded with an
-	// earlier end does not replace the latest reason; a stop after the
-	// expiry does.
+	// other values, replaces none of them. A stop after the expiry replaces
+	// its reason; an admin terminate and a delayed expiry recorded with
+	// earlier ends do not replace the stop.
 	finalize(600, 10*time.Minute, AdminPlaybackHistoryEntry{EndReason: PlaybackEndExpired})
 	finalize(500, 9*time.Minute, AdminPlaybackHistoryEntry{DeviceID: "tv-1", DevicePlatform: "tvOS", ClientName: "Silo tvOS", ClientVersion: "2.1.0", VideoDecision: "direct", AudioDecision: "transcode"})
 	finalize(700, 12*time.Minute, AdminPlaybackHistoryEntry{DeviceID: "tv-2", DevicePlatform: "iOS", ClientName: "Other", ClientVersion: "9", VideoDecision: "transcode", AudioDecision: "direct", EndReason: PlaybackEndStopped})
 	finalize(700, 11*time.Minute, AdminPlaybackHistoryEntry{EndReason: PlaybackEndTerminated})
+	// The same holds when the stop got no further, so ended_at never moved
+	// past the expiry.
+	stalled := "stalled-" + suffix
+	for _, f := range []struct {
+		ended  time.Duration
+		reason PlaybackEndReason
+	}{{10 * time.Minute, PlaybackEndExpired}, {12 * time.Minute, PlaybackEndStopped}, {11 * time.Minute, PlaybackEndExpired}} {
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: stalled, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(f.ended).Format(time.RFC3339Nano),
+			WatchedSeconds: 300, EndReason: f.reason,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stalledReason string
+	if err = pool.QueryRow(ctx, `SELECT end_reason FROM admin_playback_history WHERE session_id=$1`, stalled).Scan(&stalledReason); err != nil {
+		t.Fatal(err)
+	}
+	if stalledReason != string(PlaybackEndStopped) {
+		t.Errorf("stalled play end_reason = %s, want stopped: a delayed earlier expiry must not replace a later stop", stalledReason)
+	}
 	// A play recorded before any of these facts existed.
 	legacy := "legacy-" + suffix
 	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)

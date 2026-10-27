@@ -88,8 +88,9 @@ type AdminPlaybackHistoryEntry struct {
 // The device, client and stream decisions are filled once: a finalization
 // records any the row lacks, whether or not it advanced the counters, and
 // never replaces one. The end reason is the latest finalization's: one that
-// ended no earlier than the row replaces it, and one without a reason
-// leaves it.
+// ended no earlier than the finalization that recorded the current reason
+// replaces it, and one without a reason leaves it. That order is kept apart
+// from ended_at, which only moves when a finalization gets further.
 type PlaybackAdminStore interface {
 	RecordHistory(ctx context.Context, entry AdminPlaybackHistoryEntry) error
 	DeleteSession(ctx context.Context, sessionID string) error
@@ -126,9 +127,10 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			(session_id, user_id, profile_id, profile_name, media_item_id, media_file_id,
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip,
 			 start_position_seconds, played_seconds, paused_seconds, measured, measured_since, measured_until,
-			 device_id, device_platform, client_name, client_version, video_decision, audio_decision, end_reason)
+			 device_id, device_platform, client_name, client_version, video_decision, audio_decision,
+			 end_reason, end_reason_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24, $25, $26)
+			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
@@ -186,8 +188,8 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 	// The upsert above only touches a row this finalization advances. This
 	// one runs whether or not it did, so a copy that knows a fact the row
 	// lacks still records it. It runs in the batch's implicit transaction,
-	// after the upsert, so ended_at is already this finalization's when it
-	// ended last.
+	// after the upsert.
+	const laterReason = `$8::text IS NOT NULL AND (end_reason_at IS NULL OR $9::timestamptz >= end_reason_at)`
 	batch.Queue(`
 		UPDATE admin_playback_history SET
 			device_id = COALESCE(device_id, $2),
@@ -196,7 +198,8 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			client_version = COALESCE(client_version, $5),
 			video_decision = COALESCE(video_decision, $6),
 			audio_decision = COALESCE(audio_decision, $7),
-			end_reason = CASE WHEN $8::text IS NOT NULL AND $9::timestamptz >= ended_at THEN $8 ELSE end_reason END
+			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
+			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END
 		WHERE session_id = $1 AND (
 			(device_id IS NULL AND $2::text IS NOT NULL)
 			OR (device_platform IS NULL AND $3::text IS NOT NULL)
@@ -204,7 +207,7 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			OR (client_version IS NULL AND $5::text IS NOT NULL)
 			OR (video_decision IS NULL AND $6::text IS NOT NULL)
 			OR (audio_decision IS NULL AND $7::text IS NOT NULL)
-			OR ($8::text IS NOT NULL AND $9::timestamptz >= ended_at AND end_reason IS DISTINCT FROM $8))
+			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz)))
 	`,
 		entry.SessionID,
 		nullableString(entry.DeviceID),
