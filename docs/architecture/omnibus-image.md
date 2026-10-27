@@ -75,8 +75,14 @@ superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
 migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
 uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the Compose
-stack, so text sorts the same in both. `init-postgres` rewrites
-`conf.d/00-omnibus.conf` on every start; `P## Search settings
+stack. That image's glibc can differ from this one's, so a data directory moved
+between them reports a collation version mismatch and needs its text indexes
+rebuilt; moving an install between the two goes through `pg_dump` and
+`pg_restore` instead. `init-postgres` rewrites `conf.d/00-omnibus.conf` on
+every start and makes sure `postgresql.conf` includes `conf.d`;
+`POSTGRES_TUNE` writes `postgresql.auto.conf`, which loads after it.
+
+## Search settings
 
 With `ENABLE_MEILISEARCH=true`, `init-config` exports `SILO_SEARCH_PROVIDER`,
 `SILO_MEILISEARCH_URL`, and `SILO_MEILISEARCH_API_KEY` for the bundled instance,

@@ -16,7 +16,8 @@ if [[ -s "$PGDATA/PG_VERSION" ]]; then
     cat >&2 <<MSG
 /config/postgres/data was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR.
 Start the previous image, dump the silo database with pg_dump, move the old data
-directory aside, then start this image and restore the dump. See docs/omnibus-image.md.
+directory aside, then start this image and restore the dump. The user manual's
+omnibus image page describes the steps.
 MSG
     exit 1
   fi
@@ -31,6 +32,12 @@ else
   s6-setuidgid postgres initdb -D "$PGDATA" -U silo \
     --encoding=UTF8 --locale=en_US.UTF-8 \
     --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+fi
+
+# The image's settings live in conf.d. A data directory this image did not
+# create, such as one moved from another PostgreSQL container, lacks the line
+# that loads them.
+if ! grep -q "^include_dir = 'conf.d'" "$PGDATA/postgresql.conf"; then
   printf "\ninclude_dir = 'conf.d'\n" >> "$PGDATA/postgresql.conf"
 fi
 
