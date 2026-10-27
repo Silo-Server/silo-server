@@ -166,6 +166,7 @@ func TestTranscribeOmitsVADFilterForStrictHostedEndpoints(t *testing.T) {
 		"https://openrouter.ai.example.test":   true,
 		"https://myorg.openai.azure.com":       false,
 		"https://api.groq.com/openai":          false,
+		"https://api.x.ai/v1":                  true,
 		"http://192.168.1.10:8000":             true,
 		"https://whisper.example.com":          true,
 		"https://api.deepinfra.com/v1/openai":  true,
