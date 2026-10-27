@@ -209,6 +209,11 @@ more than 100 contexts name both. Halving the declared bound keeps every valid c
 inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
 `body.contexts`.
 
+A repeated key returns its stored value once per mention, and the batch returns it again in every
+context. The stored values in one `resolveEffectiveSettings` or `listSettingValues` response are
+therefore bounded at 16 MiB in total; a request past that bound is a 422 at `body.keys`
+(`query.keys` on `listSettingValues`).
+
 ```http
 POST /api/v2/settings/values/effective
 X-Profile-Id: <profile-id>
