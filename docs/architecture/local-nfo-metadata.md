@@ -627,7 +627,8 @@ artwork storage: under the same `local/...` keys as cached sidecar art, with
 the image's digest as the key discriminator. It is published with the images
 lock, and its source is `upload://sha256:<hex>`, one of the non-provider
 schemes image caching, artwork reconcile and the ladder backfill never try to
-download. The list offers the upload as a local choice only while the item
+download. A storage reconcile that resets cached artwork in bulk still checks
+each upload's object and clears the row only when the object is gone. The list offers the upload as a local choice only while the item
 shows it; applying another image replaces it, and revision GC reclaims it
 after the grace period like any displaced revision. Its only record is the
 item's artwork columns, so there is no upload table to keep in step with
