@@ -565,6 +565,14 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 		{name: "server channel", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
 			return BuildServerChannelDiscordContent(digestContentGroups(10), false)
 		}},
+		// A request overview is client-supplied up to the ~1 MiB body cap;
+		// clipping it must not cost time proportional to its length.
+		{name: "request with a 1 MiB overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
+			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
+				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
+				Overview: strings.Repeat(digestOverview, 2000),
+			})
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
