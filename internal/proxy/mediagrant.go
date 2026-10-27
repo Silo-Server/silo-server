@@ -43,7 +43,7 @@ type proxyGrantLookup interface {
 // (not revoked, not expired) and its authority. Implemented by
 // *auth.SessionRepository.
 type loginSessionValidator interface {
-	ActiveSession(ctx context.Context, sessionID string) (auth.SessionAuthority, bool, error)
+	ActiveSession(ctx context.Context, sessionID string, userID int) (auth.SessionAuthority, bool, error)
 }
 
 // grantErrorResponse mirrors the API's error body so a client sees one error
@@ -93,7 +93,7 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 		writeGrantError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
 		return nil, false
 	}
-	authority, valid, err := s.loginSessions.ActiveSession(r.Context(), claims.SessionID)
+	authority, valid, err := s.loginSessions.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil {
 		// The session could not be checked, which says nothing about the
 		// credential: a retryable 503, never a 401 that signs the client out.

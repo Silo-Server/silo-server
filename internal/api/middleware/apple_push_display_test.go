@@ -24,7 +24,7 @@ type fakeSessionValidator struct {
 	err    error
 }
 
-func (f *fakeSessionValidator) ActiveSession(_ context.Context, id string) (auth.SessionAuthority, bool, error) {
+func (f *fakeSessionValidator) ActiveSession(_ context.Context, id string, _ int) (auth.SessionAuthority, bool, error) {
 	if f.err != nil {
 		return auth.SessionAuthority{}, false, f.err
 	}
