@@ -176,6 +176,10 @@
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB
 
+# A storage reconcile's bulk reset keeps an uploaded image whose object
+# survived; nothing could fetch it again.
+./internal/metadata TestArtworkReconcileBulkResetVerifiesUploadsDB
+
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
 ./internal/metadata TestLadderBackfillCandidatesDB
