@@ -295,6 +295,56 @@ func upsertArtworkRevision(
 	return nil
 }
 
+// lockedArtworkAssignments returns ON CONFLICT DO UPDATE assignments for one
+// artwork slot of table: columns[0] is the slot's path, the rest its source and
+// thumbhash. While lockedSQL holds and the stored slot shows an image, the
+// stored columns stay, so a refresh that read the row before an admin
+// published artwork cannot write its older copy back. An empty slot still
+// fills, as the refresh merge does under the lock.
+//
+// DO UPDATE sees the conflicting row's latest version, but a subquery in
+// lockedSQL reads the statement's snapshot; lockArtworkRowsForUpsert keeps a
+// publication that commits while the upsert waits from slipping past it.
+func lockedArtworkAssignments(table, lockedSQL string, columns ...string) string {
+	assignments := make([]string, len(columns))
+	for i, column := range columns {
+		assignments[i] = fmt.Sprintf("%[3]s = CASE WHEN %[2]s AND COALESCE(%[1]s.%[4]s, '') <> '' THEN %[1]s.%[3]s ELSE EXCLUDED.%[3]s END",
+			table, lockedSQL, column, columns[0])
+	}
+	return strings.Join(assignments, ",\n\t\t\t")
+}
+
+// imagesLockedSQL holds when the locked_fields column named by lockedFields
+// has FieldImages locked.
+func imagesLockedSQL(lockedFields string) string {
+	return fmt.Sprintf("%d = ANY(%s)", fieldImagesLocked, lockedFields)
+}
+
+// seriesImagesLockedSQL holds when the series of the table row being written
+// has FieldImages locked, which is where an admin pick of a season poster or
+// episode still sets the lock.
+func seriesImagesLockedSQL(table string) string {
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM media_items WHERE content_id = %s.series_id AND %s)",
+		table, imagesLockedSQL("media_items.locked_fields"))
+}
+
+// artworkUpsertTxOptions runs a season or episode upsert at READ COMMITTED, so
+// the upsert statement takes a snapshot after lockArtworkRowsForUpsert waited.
+var artworkUpsertTxOptions = pgx.TxOptions{IsoLevel: pgx.ReadCommitted}
+
+// lockArtworkRowsForUpsert locks the existing rows a season or episode upsert
+// is about to update, in content-id order. PublishArtworkSelection changes a
+// season or episode row and its series' images lock in one transaction, so
+// once these locks are held, the next statement's snapshot either includes a
+// publication of these rows or none can commit until the upsert does. Rows
+// are locked as the upsert would lock them anyway, child before series.
+func lockArtworkRowsForUpsert(ctx context.Context, tx pgx.Tx, query string, args ...any) error {
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("locking artwork rows: %w", err)
+	}
+	return nil
+}
+
 func compactArtworkObjectKeys(keys []string) []string {
 	seen := make(map[string]struct{}, len(keys))
 	result := make([]string, 0, len(keys))

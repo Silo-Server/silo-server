@@ -358,6 +358,11 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 	return episodes, nil
 }
 
+// episodeArtworkAssignments keeps an episode still an admin picked after the
+// writer read the episode; see lockedArtworkAssignments.
+var episodeArtworkAssignments = lockedArtworkAssignments("episodes", seriesImagesLockedSQL("episodes"),
+	"still_path", "still_source_path", "still_thumbhash")
+
 // Upsert inserts a new episode or updates all mutable fields if the
 // (series_id, season_number, episode_number) natural key already exists. The
 // stored content ID is preserved on update and written back to ep.ContentID.
@@ -418,9 +423,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
 			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
 			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
-			still_path = EXCLUDED.still_path,
-			still_source_path = EXCLUDED.still_source_path,
-			still_thumbhash = EXCLUDED.still_thumbhash,
+			` + episodeArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
@@ -428,29 +431,37 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		RETURNING content_id`
 
 	var storedContentID string
-	err := r.pool.QueryRow(ctx, query,
-		ep.ContentID,
-		ep.SeriesID,
-		seasonID,
-		ep.SeasonNumber,
-		ep.EpisodeNumber,
-		ep.Title,
-		ep.DefaultMetadataLanguage,
-		ep.Overview,
-		ep.AirDate,
-		ep.Runtime,
-		ep.RatingIMDB,
-		ep.RatingTMDB,
-		ep.ImdbID,
-		ep.TmdbID,
-		ep.TvdbID,
-		ep.StillPath,
-		ep.StillSourcePath,
-		ep.StillThumbhash,
-		ep.MetadataS3Path,
-		ep.MetadataEtag,
-		ep.MetadataSource,
-	).Scan(&storedContentID)
+	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+		if err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT 1 FROM episodes
+			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
+			FOR NO KEY UPDATE`, ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, query,
+			ep.ContentID,
+			ep.SeriesID,
+			seasonID,
+			ep.SeasonNumber,
+			ep.EpisodeNumber,
+			ep.Title,
+			ep.DefaultMetadataLanguage,
+			ep.Overview,
+			ep.AirDate,
+			ep.Runtime,
+			ep.RatingIMDB,
+			ep.RatingTMDB,
+			ep.ImdbID,
+			ep.TmdbID,
+			ep.TvdbID,
+			ep.StillPath,
+			ep.StillSourcePath,
+			ep.StillThumbhash,
+			ep.MetadataS3Path,
+			ep.MetadataEtag,
+			ep.MetadataSource,
+		).Scan(&storedContentID)
+	})
 	if err != nil {
 		return fmt.Errorf("upserting episode: %w", err)
 	}
@@ -491,7 +502,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		}
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, artworkUpsertTxOptions)
 	if err != nil {
 		return fmt.Errorf("begin bulk episode upsert: %w", err)
 	}
@@ -627,15 +638,21 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
 			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
 			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
-			still_path = EXCLUDED.still_path,
-			still_source_path = EXCLUDED.still_source_path,
-			still_thumbhash = EXCLUDED.still_thumbhash,
+			` + episodeArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
 		RETURNING content_id, season_number, episode_number`
 
+	if err := lockArtworkRowsForUpsert(ctx, tx, `
+		SELECT 1 FROM episodes
+		JOIN UNNEST($2::int[], $3::int[]) AS target(season_number, episode_number) USING (season_number, episode_number)
+		WHERE episodes.series_id = $1
+		ORDER BY episodes.content_id
+		FOR NO KEY UPDATE OF episodes`, seriesID, seasonNums, episodeNums); err != nil {
+		return err
+	}
 	rows, err := tx.Query(ctx, query,
 		contentIDs, epSeriesIDs, seasonIDs, seasonNums, episodeNums,
 		titles, defaultMetadataLanguages, overviews, airDates, runtimes,

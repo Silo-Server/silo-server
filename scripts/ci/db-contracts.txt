@@ -194,6 +194,11 @@
 ./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
 ./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
 
+# A refresh write keeps artwork an admin published after the refresh read the
+# item, season or episode, including a publication still committing.
+./internal/catalog TestRefreshKeepsArtworkPublishedAfterItsReadDB
+./internal/catalog TestRefreshWaitingOnAPublicationKeepsItDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
