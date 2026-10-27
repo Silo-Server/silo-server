@@ -918,15 +918,7 @@ func validateFileRoots(files []FileRecord, folderPaths map[int][]string, rewrite
 	for _, file := range files {
 		rewritten, matched := rewritePath(file.FilePath, rewrites)
 		rewritten = normalizePath(rewritten)
-		paths := folderPaths[file.MediaFolderID]
-		ok := false
-		for _, root := range paths {
-			if hasPathPrefix(rewritten, root) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
+		if !underAnyRoot(rewritten, folderPaths[file.MediaFolderID]) {
 			if matched {
 				unmatched = append(unmatched, rewritten)
 			} else {
@@ -947,6 +939,10 @@ func rewriteFileRecord(file FileRecord, rewrites []PathRewrite, folderPaths map[
 	if !filepath.IsAbs(file.FilePath) {
 		return FileRecord{}, fmt.Errorf("catalog seed file path %q is not absolute after rewrite", file.FilePath)
 	}
+	roots := folderPaths[file.MediaFolderID]
+	if !underAnyRoot(file.FilePath, roots) {
+		return FileRecord{}, &UnmatchedRootsError{Roots: []string{file.FilePath}}
+	}
 	for i := range file.ExternalSubtitles {
 		if file.ExternalSubtitles[i].Path == "" {
 			continue
@@ -956,16 +952,24 @@ func rewriteFileRecord(file FileRecord, rewrites []PathRewrite, folderPaths map[
 		if !filepath.IsAbs(file.ExternalSubtitles[i].Path) {
 			return FileRecord{}, fmt.Errorf("catalog seed subtitle path %q is not absolute after rewrite", file.ExternalSubtitles[i].Path)
 		}
-	}
-
-	paths := folderPaths[file.MediaFolderID]
-	for _, root := range paths {
-		if hasPathPrefix(file.FilePath, root) {
-			return file, nil
+		// Playback reads and serves a sidecar from its stored path, so one
+		// outside the library would hand any server-readable file to viewers.
+		// The scanner only records sidecars beside the video.
+		if !underAnyRoot(file.ExternalSubtitles[i].Path, roots) {
+			return FileRecord{}, &UnmatchedRootsError{Roots: []string{file.ExternalSubtitles[i].Path}}
 		}
 	}
 
-	return FileRecord{}, &UnmatchedRootsError{Roots: []string{file.FilePath}}
+	return file, nil
+}
+
+func underAnyRoot(path string, roots []string) bool {
+	for _, root := range roots {
+		if hasPathPrefix(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func importLibrary(ctx context.Context, tx pgx.Tx, library LibraryRecord, overwrite bool) (localID int, created bool, matched bool, err error) {
