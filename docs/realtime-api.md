@@ -183,8 +183,9 @@ absorbs the item's `files_changed`. To leave room in each connection's buffer fo
 other channels, the cluster publishes at most 32 of these changes every 100 ms,
 about 320 a second, so a large library's first scan arrives over minutes.
 Delivery is at most once, like every event on this socket. Changes still
-unpublished after a day are dropped. After a reconnect, re-list (with
-`added_after` for adds) rather than relying on the events.
+unpublished after a day are dropped. After a reconnect, re-list the whole
+catalog: `added_after` finds only new items, not file changes, metadata edits or
+removals.
 
 The v1 bridge socket does not carry `added`, `removed` or `files_changed`.
 

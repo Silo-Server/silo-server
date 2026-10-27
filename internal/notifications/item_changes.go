@@ -49,7 +49,9 @@ func (h *Hub) RunItemChangePublisher(ctx context.Context, outbox ItemChangeOutbo
 	}
 	timer := time.NewTimer(itemChangeIdlePoll)
 	defer timer.Stop()
-	failing := false
+	// Each failure is logged once until the next success, so an outage
+	// draining a backlog ten times a second logs one line.
+	claimFailing, publishFailing := false, false
 	for {
 		select {
 		case <-ctx.Done():
@@ -57,16 +59,28 @@ func (h *Hub) RunItemChangePublisher(ctx context.Context, outbox ItemChangeOutbo
 		case <-timer.C:
 		}
 		changes, more, err := outbox.Claim(ctx, itemChangeBatch, itemChangeDrainInterval, itemChangeRetention)
-		if err != nil && ctx.Err() == nil && !failing {
+		if err != nil && ctx.Err() == nil && !claimFailing {
 			slog.WarnContext(ctx, "catalog item change outbox: claim failed", "component", "notifications", "error", err)
 		}
-		failing = err != nil
+		claimFailing = err != nil
+		// The claimed rows are already gone: a change that fails to publish
+		// reaches only this server's own connections, if any.
+		var failed int
+		var publishErr error
 		for _, change := range changes {
 			payload := itemChangePayload{LibraryID: change.LibraryID, ContentID: change.ContentID, Change: change.Change}
 			if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), payload,
 				evt.PublishOptions{AdminOnly: true, V2Only: true}); err != nil {
-				slog.DebugContext(ctx, "catalog item change: publish failed", "component", "notifications", "content_id", change.ContentID, "error", err)
+				failed++
+				publishErr = err
 			}
+		}
+		if failed > 0 && ctx.Err() == nil && !publishFailing {
+			slog.WarnContext(ctx, "catalog item change: publish to other servers failed; mirrors recover by re-listing",
+				"component", "notifications", "failed", failed, "claimed", len(changes), "error", publishErr)
+		}
+		if len(changes) > 0 {
+			publishFailing = failed > 0
 		}
 		if more {
 			timer.Reset(itemChangeDrainInterval)
