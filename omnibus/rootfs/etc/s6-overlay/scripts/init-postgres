@@ -10,8 +10,24 @@ enabled postgres || exit 0
 export HOME=/config/postgres
 PGDATA=/config/postgres/data
 
+# /config/postgres belongs to the postgres account, so everything below it is
+# changed as that account: root following a symlink planted there would hand a
+# root-owned file to postgres. A data directory or version file that is itself
+# a link is not one this image wrote.
+if [[ -L "$PGDATA" || -L "$PGDATA/PG_VERSION" ]]; then
+  echo "$PGDATA or its PG_VERSION is a symbolic link; move the real data directory there" >&2
+  exit 1
+fi
+
 if [[ -s "$PGDATA/PG_VERSION" ]]; then
-  have="$(s6-setuidgid postgres cat "$PGDATA/PG_VERSION")"
+  # Read as root, before any ownership changes: a cluster another image wrote
+  # can belong to another uid, and a refused one is left as it was. Only a
+  # version number is ever printed.
+  have="$(head -c 16 "$PGDATA/PG_VERSION")"
+  if [[ ! "$have" =~ ^[0-9]+$ ]]; then
+    echo "$PGDATA/PG_VERSION does not hold a PostgreSQL major version number" >&2
+    exit 1
+  fi
   if [[ "$have" != "$PG_MAJOR" ]]; then
     cat >&2 <<MSG
 /config/postgres/data was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR.
@@ -21,9 +37,6 @@ omnibus image page describes the steps.
 MSG
     exit 1
   fi
-  # /config/postgres belongs to the postgres account, so everything below it
-  # is changed as that account: root following a symlink planted there would
-  # hand a root-owned file to postgres.
   own_tree postgres postgres "$PGDATA"
   s6-setuidgid postgres chmod 0700 "$PGDATA"
   # Nothing else runs PostgreSQL in this container, so a pid file here is
@@ -31,7 +44,11 @@ MSG
   s6-setuidgid postgres rm -f "$PGDATA/postmaster.pid"
 else
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
-  s6-setuidgid postgres mkdir -m 0700 "$PGDATA"
+  # The directory can already exist, empty: a bind mount, or a directory
+  # created ahead of the first start.
+  s6-setuidgid postgres mkdir -p "$PGDATA"
+  own_tree postgres postgres "$PGDATA"
+  s6-setuidgid postgres chmod 0700 "$PGDATA"
   s6-setuidgid postgres initdb -D "$PGDATA" -U silo \
     --encoding=UTF8 --locale=en_US.UTF-8 \
     --auth-local=peer --auth-host=scram-sha-256 >/dev/null
