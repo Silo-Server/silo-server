@@ -585,6 +585,24 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 	}
 }
 
+// TestTruncateWithEllipsisKeepsRuneBoundary covers the byte limit falling
+// inside a multibyte rune: the cut backs up to the rune start.
+func TestTruncateWithEllipsisKeepsRuneBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		limit int
+		want  string
+	}{
+		{value: strings.Repeat("é", 10), limit: 10, want: "ééé…"}, // cut at byte 7, inside "é"
+		{value: strings.Repeat("申", 10), limit: 10, want: "申申…"},  // cut at byte 7, inside "申"
+		{value: "abcdefghijk", limit: 10, want: "abcdefg…"},
+	} {
+		if got := truncateWithEllipsis(tc.value, tc.limit); got != tc.want {
+			t.Errorf("truncateWithEllipsis(%q, %d) = %q, want %q", tc.value, tc.limit, got, tc.want)
+		}
+	}
+}
+
 func checkDiscordDigest(t *testing.T, tc discordDigestCase, payload []byte) {
 	t.Helper()
 	var body struct {
