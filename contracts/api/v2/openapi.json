@@ -5895,6 +5895,7 @@
         "additionalProperties": false,
         "properties": {
           "path": {
+            "description": "Where the mount is; omitted for scoped API keys",
             "type": "string"
           },
           "role": {
@@ -6242,7 +6243,7 @@
             "type": "integer"
           },
           "error": {
-            "description": "Last attempt's failure, when there was one",
+            "description": "Last attempt's failure, when there was one; omitted for scoped API keys because it can quote file paths",
             "type": "string"
           },
           "failed_at": {
@@ -10919,10 +10920,15 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "summary": {
+            "description": "Nodes can be read through the path- and configuration-free summary collection.",
+            "type": "boolean"
           }
         },
         "required": [
           "drain",
+          "summary",
           "revision",
           "state",
           "allowed"
@@ -11170,6 +11176,34 @@
         ],
         "type": "object"
       },
+      "AdminNodeResources": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "$ref": "#/components/schemas/AdminResourceAttribution"
+          },
+          "gpu": {
+            "items": {
+              "$ref": "#/components/schemas/AdminGPUStats"
+            },
+            "type": "array"
+          },
+          "sampled_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "system": {
+            "$ref": "#/components/schemas/AdminSystemStats"
+          }
+        },
+        "required": [
+          "gpu"
+        ],
+        "type": "object"
+      },
       "AdminNodeSession": {
         "additionalProperties": false,
         "properties": {
@@ -11291,6 +11325,114 @@
         "required": [
           "undecodable",
           "items"
+        ],
+        "type": "object"
+      },
+      "AdminNodeSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "active_jobs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "drain_requested": {
+            "description": "An administrator asked this transcode node to drain.",
+            "type": "boolean"
+          },
+          "drain_state": {
+            "description": "What the node reported on its last health check.",
+            "enum": [
+              "none",
+              "draining",
+              "drained"
+            ],
+            "type": "string"
+          },
+          "egress_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "healthy": {
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_health_check": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_bandwidth_kbps": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_jobs": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/AdminNodeResources",
+            "description": "Resource sample stored at the last health check; absent when the node reported none."
+          },
+          "type": {
+            "enum": [
+              "proxy",
+              "transcode"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "enabled",
+          "healthy",
+          "active_jobs",
+          "group",
+          "max_jobs",
+          "max_bandwidth_kbps",
+          "egress_kbps",
+          "last_health_check",
+          "created_at",
+          "drain_requested",
+          "drain_state"
         ],
         "type": "object"
       },
@@ -25161,6 +25303,26 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminNode"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminNodeSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminNodeSummary"
             },
             "type": "array"
           },
@@ -94096,6 +94258,174 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/nodes/summary": {
+      "get": {
+        "operationId": "listAdminNodeSummaries",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminNodeSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Page nodes with their health, load and last resource sample, without addresses, paths or configuration overrides; no worker probe is performed.",
+        "tags": [
+          "admin-nodes"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },

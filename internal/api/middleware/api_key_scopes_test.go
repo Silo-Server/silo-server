@@ -14,6 +14,8 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 	users := []string{auth.ScopeAdminUsers}
 	groups := []string{auth.ScopeAdminAccessGroupsRead}
 	both := []string{auth.ScopeAdminUsers, auth.ScopeAdminAccessGroupsRead}
+	monitor := []string{auth.ScopeAdminMonitorRead}
+	control := []string{auth.ScopeAdminSessionsControl}
 
 	tests := []struct {
 		name   string
@@ -38,6 +40,31 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"summary denies diagnostics", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions", false},
 		{"summary denies control", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodDelete, "/api/v2/admin/sessions/session-a", false},
 		{"summary denies account editing", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodPut, "/api/v2/admin/users/42", false},
+		{"monitor sessions", monitor, http.MethodGet, "/api/v2/admin/sessions?limit=50", true},
+		{"monitor history", monitor, http.MethodGet, "/api/v2/admin/playback-history", true},
+		{"monitor activity stats", monitor, http.MethodGet, "/api/v2/admin/stats/top-activity", true},
+		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
+		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},
+		{"monitor download entries", monitor, http.MethodGet, "/api/v2/admin/downloads/entries", true},
+		{"monitor node summary", monitor, http.MethodGet, "/api/v2/admin/nodes/summary", true},
+		{"monitor events capabilities", monitor, http.MethodGet, "/api/v2/events/capabilities", true},
+		{"monitor denies node rows", monitor, http.MethodGet, "/api/v2/admin/nodes", false},
+		{"monitor denies node sessions", monitor, http.MethodGet, "/api/v2/admin/node-sessions", false},
+		{"monitor denies device setting values", monitor, http.MethodGet, "/api/v2/admin/devices/42/device-a", false},
+		{"monitor denies download storage", monitor, http.MethodGet, "/api/v2/admin/downloads/storage/files", false},
+		{"monitor denies user settings", monitor, http.MethodGet, "/api/v2/admin/users/42/settings/values", false},
+		{"monitor denies user keys", monitor, http.MethodGet, "/api/v2/admin/users/42/api-keys", false},
+		{"monitor denies login sessions", monitor, http.MethodGet, "/api/v2/admin/users/42/login-sessions", false},
+		{"monitor denies account editing", monitor, http.MethodPut, "/api/v2/admin/users/42", false},
+		{"monitor denies session control", monitor, http.MethodPost, "/api/v2/admin/sessions/session-a/stop", false},
+		{"monitor denies event sockets", monitor, http.MethodGet, "/api/v2/events/ws", false},
+		{"monitor denies stats overview", monitor, http.MethodGet, "/api/v2/admin/stats", false},
+		{"control terminates", control, http.MethodPost, "/api/v2/admin/sessions/session-a/terminate", true},
+		{"control messages", control, http.MethodPost, "/api/v2/admin/sessions/session-a/message", true},
+		{"control command capabilities", control, http.MethodGet, "/api/v2/admin/sessions/command-capabilities", true},
+		{"control denies session reads", control, http.MethodGet, "/api/v2/admin/sessions", false},
+		{"control denies nested session paths", control, http.MethodPost, "/api/v2/admin/sessions/a/b/stop", false},
+		{"control denies login session revocation", control, http.MethodDelete, "/api/v2/admin/users/42/login-sessions/7", false},
 		{"library discovery", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/user/libraries", true},
 		{"library capabilities", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/user/libraries/capabilities", true},
 		{"library denies storage metadata", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/libraries", false},
@@ -89,6 +116,17 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 				t.Fatalf("apiKeyScopesAllow(%v, %s %s) = %v, want %v", tt.scopes, tt.method, tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+// A monitoring key is read-only. The one write it may make is minting an
+// events socket ticket, which only opens a read-only stream.
+func TestAPIKeyMonitorScopeOnlyReads(t *testing.T) {
+	const ticketRoute = `^/api/v2/events/ws-ticket$`
+	for _, route := range apiKeyScopeRoutes[auth.ScopeAdminMonitorRead] {
+		if route.method != http.MethodGet && (route.method != http.MethodPost || route.pattern.String() != ticketRoute) {
+			t.Errorf("%s %s admits a write", route.method, route.pattern)
+		}
 	}
 }
 

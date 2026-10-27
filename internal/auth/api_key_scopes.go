@@ -26,6 +26,16 @@ const (
 	ScopeAdminAccessGroupsRead    = "admin:access-groups:read"
 	ScopeAdminSessionsSummaryRead = "admin:sessions:summary:read"
 	ScopeLibrariesRead            = "libraries:read"
+
+	// ScopeAdminMonitorRead covers read-only server monitoring for an outside
+	// tool: live sessions, playback history, activity stats, accounts and their
+	// devices, downloads, node and host health. It never reaches filesystem
+	// paths, storage keys, configuration or settings; the few monitored
+	// operations that carry such details withhold them from scoped keys.
+	ScopeAdminMonitorRead = "admin:monitor:read"
+	// ScopeAdminSessionsControl covers the administrator playback commands:
+	// pause, resume, stop, message and terminate a live session.
+	ScopeAdminSessionsControl = "admin:sessions:control"
 )
 
 // APIKeyScope is one scope a key may carry, paired with the description
@@ -50,6 +60,16 @@ func APIKeyScopeCatalog() []APIKeyScope {
 		{
 			Name:        ScopeAdminAccessGroupsRead,
 			Description: "Read access groups and their policies.",
+		},
+		{
+			Name: ScopeAdminMonitorRead,
+			Description: "Monitor the server read-only: live sessions, playback history, activity stats, " +
+				"accounts, devices, downloads, and node and host health. Never exposes filesystem paths, " +
+				"configuration, settings or credentials.",
+		},
+		{
+			Name:        ScopeAdminSessionsControl,
+			Description: "Pause, resume, stop, message and terminate live playback sessions.",
 		},
 	}
 }

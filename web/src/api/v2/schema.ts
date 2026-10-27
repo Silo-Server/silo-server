@@ -3203,6 +3203,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/nodes/summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Page nodes with their health, load and last resource sample, without addresses, paths or configuration overrides; no worker probe is performed. */
+    get: operations["listAdminNodeSummaries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/notifications/discord/test": {
     parameters: {
       query?: never;
@@ -14717,6 +14734,7 @@ export interface components {
       role: string;
     };
     AdminDiskStats: {
+      /** @description Where the mount is; omitted for scoped API keys */
       path?: string;
       role?: string;
       scratch?: boolean;
@@ -14873,7 +14891,7 @@ export interface components {
       episode_name?: string;
       /** Format: int64 */
       episode_number?: number;
-      /** @description Last attempt's failure, when there was one */
+      /** @description Last attempt's failure, when there was one; omitted for scoped API keys because it can quote file paths */
       error?: string;
       /**
        * Format: date-time
@@ -16688,6 +16706,8 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Nodes can be read through the path- and configuration-free summary collection. */
+      summary: boolean;
     };
     AdminNodeCreateBody: {
       group?: string;
@@ -16773,6 +16793,16 @@ export interface components {
       /** @enum {string} */
       status: "ok" | "error";
     };
+    AdminNodeResources: {
+      attribution?: components["schemas"]["AdminResourceAttribution"];
+      gpu: components["schemas"]["AdminGPUStats"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      sampled_at?: string;
+      system?: components["schemas"]["AdminSystemStats"];
+    };
     AdminNodeSession: {
       /**
        * @description Opaque identifier
@@ -16826,6 +16856,46 @@ export interface components {
        * @description Unreadable records in the source enumeration, before node filtering.
        */
       undecodable: number;
+    };
+    AdminNodeSummary: {
+      /** Format: int64 */
+      active_jobs: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** @description An administrator asked this transcode node to drain. */
+      drain_requested: boolean;
+      /**
+       * @description What the node reported on its last health check.
+       * @enum {string}
+       */
+      drain_state: "none" | "draining" | "drained";
+      /** Format: int64 */
+      egress_kbps: number;
+      enabled: boolean;
+      group: string | null;
+      healthy: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_health_check: string | null;
+      /** Format: int64 */
+      max_bandwidth_kbps: number | null;
+      /** Format: int64 */
+      max_jobs: number | null;
+      name: string;
+      /** @description Resource sample stored at the last health check; absent when the node reported none. */
+      resources?: components["schemas"]["AdminNodeResources"];
+      /** @enum {string} */
+      type: "proxy" | "transcode";
     };
     AdminNodeUpdateBody: {
       /** @description Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts. */
@@ -22088,6 +22158,12 @@ export interface components {
     CollectionAdminNode: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminNode"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminNodeSummary: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminNodeSummary"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -62312,6 +62388,116 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminNodeReloadOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminNodeSummaries: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminNodeSummary"];
         };
       };
       /** @description Bad Request */

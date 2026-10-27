@@ -7,8 +7,10 @@
 
 Server-administration operations under `/api/v2/admin`. Every `/api/v2/admin`
 operation requires an authenticated account with the server-wide `admin` role — the
-same authorization as `/api/v2/admin/sessions` — and none of them are part of
-the client-facing contract that third-party apps build against. Acting-administrator
+same authorization as `/api/v2/admin/sessions`. These operations are part of the
+`/api/v2` contract and its 1.0 additive-only lock, like every other native route.
+Player and viewer apps don't need them; administration and monitoring tools build
+on them, usually with a [scoped API key](api-keys-api.md#monitoring-and-session-control-scopes). Acting-administrator
 authority belongs to the account: a secondary profile on an administrator account does
 not inherit it. A few deliberately public reads outside `/api/v2/admin` (marked
 `public` in the route tables) are documented beside the admin writes they pair with.
@@ -897,7 +899,8 @@ is not an error. History and alerting are Prometheus's job — the same numbers
 are exposed as `streamapp_node_*` gauges on this process's dedicated opt-in `/metrics`
 endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
-paths themselves appear only here, behind admin auth.
+paths themselves appear only here, behind admin auth. A scoped API key receives
+the same document without disk `path` values.
 
 ## `GET /api/v2/admin/stream-telemetry/parity`
 
@@ -1734,6 +1737,19 @@ compatibility. Worker readiness and wire behavior remain owned by the worker
 protocol layer. No native client or Jellyfin caller consumes this administrator
 inventory operation.
 
+`GET /api/v2/admin/nodes/summary` (`listAdminNodeSummaries`) pages the same
+nodes, in the same order and with the same limits and cursor rules, as a
+monitoring view. Each item keeps `id`, `name`, `type`, `enabled`, `healthy`,
+`active_jobs`, `group`, `max_jobs`, `max_bandwidth_kbps`, `egress_kbps`,
+`last_health_check`, `created_at`, `drain_requested` and `drain_state`. It leaves
+out every address (`url`, `public_url`, `network_access`), configuration override,
+capability document and the configuration tag. In place of the opaque
+`last_stats` it carries `resources`: the node's last sample in the shape of
+`GET /api/v2/admin/system/resources` (`sampled_at`, `system`, `gpu`,
+`attribution`), without mount paths, build identity or download-storage
+measurements. `resources` is absent when the node reported no sample. Scoped API
+keys read nodes only through this operation.
+
 ## Server status detail
 
 `GET /api/v2/admin/server/status` (`getAdminServerStatus`) returns the API
@@ -1997,6 +2013,8 @@ error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
 `speed`, `updated_at`) of a running job, `progress_unavailable` when the worker
 cannot report progress, the `log_session_id` its FFmpeg output is logged under,
 and the download rows waiting on it with their account, profile, and device.
+A scoped API key receives items without `error`, because failure text can quote
+file paths.
 
 `POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
 take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
@@ -3002,7 +3020,8 @@ jobs, not prepared downloads stored on the node, which are unavailable while it
 is stopped.
 
 `GET /api/v2/admin/nodes/capabilities` (`getAdminNodeCapabilities`) advertises
-`drain: true`. The web nodes page shows `Draining · N transcodes left` and then
+`drain: true`, and `summary: true` when `GET /api/v2/admin/nodes/summary` is
+served. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 

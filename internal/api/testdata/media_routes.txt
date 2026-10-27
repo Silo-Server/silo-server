@@ -230,6 +230,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
@@ -1530,6 +1531,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
