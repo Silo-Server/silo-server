@@ -80,8 +80,10 @@ fi
 # pg_hba.conf belongs to the image too. A data directory from the official
 # PostgreSQL image trusts every local connection, which here would let any
 # account in the container sign in as the superuser.
-{
-  cat <<'HBA'
+# Without the network rule even with node access on: init-postgres-db adds it
+# once the role has its current password, so a rotated-out password never
+# reaches a remote login.
+(umask 077 && write_as postgres "$PGDATA/pg_hba.conf") <<'HBA'
 # Written by the Silo omnibus image on every start; edits do not survive.
 local   all          all                 peer
 host    all          all   127.0.0.1/32  scram-sha-256
@@ -90,8 +92,4 @@ local   replication  all                 peer
 host    replication  all   127.0.0.1/32  scram-sha-256
 host    replication  all   ::1/128       scram-sha-256
 HBA
-  if [[ -e "$STATE_DIR/postgres.network" ]]; then
-    printf 'host    silo         silo  all           scram-sha-256\n'
-  fi
-} | (umask 077 && write_as postgres "$PGDATA/pg_hba.conf")
 s6-setuidgid postgres chmod 0600 "$PGDATA/pg_hba.conf"
