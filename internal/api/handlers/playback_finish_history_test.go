@@ -424,7 +424,10 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	session := "facts-" + suffix
 	finalize := func(position float64, ended time.Duration, entry AdminPlaybackHistoryEntry) {
 		t.Helper()
-		entry.SessionID, entry.UserID, entry.ProfileID, entry.PlayMethod = session, account, "p-1", "direct_play"
+		if entry.SessionID == "" {
+			entry.SessionID = session
+		}
+		entry.UserID, entry.ProfileID, entry.PlayMethod = account, "p-1", "direct_play"
 		entry.StartedAt, entry.EndedAt = started.Format(time.RFC3339Nano), started.Add(ended).Format(time.RFC3339Nano)
 		entry.WatchedSeconds = position
 		if err := store.RecordHistory(ctx, entry); err != nil {
@@ -443,18 +446,9 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	// The same holds when the stop got no further, so ended_at never moved
 	// past the expiry.
 	stalled := "stalled-" + suffix
-	for _, f := range []struct {
-		ended  time.Duration
-		reason PlaybackEndReason
-	}{{10 * time.Minute, PlaybackEndExpired}, {12 * time.Minute, PlaybackEndStopped}, {11 * time.Minute, PlaybackEndExpired}} {
-		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
-			SessionID: stalled, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
-			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(f.ended).Format(time.RFC3339Nano),
-			WatchedSeconds: 300, EndReason: f.reason,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	finalize(300, 10*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndExpired})
+	finalize(300, 12*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndStopped})
+	finalize(300, 11*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndExpired})
 	var stalledReason string
 	if err = pool.QueryRow(ctx, `SELECT end_reason FROM admin_playback_history WHERE session_id=$1`, stalled).Scan(&stalledReason); err != nil {
 		t.Fatal(err)
