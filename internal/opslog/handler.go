@@ -237,7 +237,7 @@ var urlInText = regexp.MustCompile(`(?i)https?://\S+`)
 // punctuation cannot hold a credential. A token with no part that can hold
 // one is kept as written, the same rule logredact uses for requested URLs.
 func sanitizeURLToken(token string) string {
-	raw := strings.TrimRight(token, `"'),.:;>]}`)
+	raw := strings.TrimRight(token, `"'),.:;>]}!`)
 	if !logredact.URLMayHoldCredential(raw) {
 		return token
 	}
