@@ -83,18 +83,18 @@ func TestEventsSocketTicketDelegatesLoginOrMonitorKey(t *testing.T) {
 	if fake.calls != before {
 		t.Fatal("refused key minted")
 	}
-	allowed := func(token string) bool {
+	allowed := func(headers map[string]string) bool {
 		t.Helper()
 		var body struct {
 			Allowed *bool `json:"allowed"`
 		}
-		rec := do(t, h, http.MethodGet, Prefix+"/events/capabilities", "", bearer(token))
+		rec := do(t, h, http.MethodGet, Prefix+"/events/capabilities", "", headers)
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 200 || body.Allowed == nil {
 			t.Fatalf("capability: %d %s", rec.Code, rec.Body.String())
 		}
 		return *body.Allowed
 	}
-	if !allowed("sa_monitor") || allowed("sa_member") || allowed("sa_unscoped") {
+	if !allowed(bearer("sa_monitor")) || allowed(with(bearer("sa_monitor"), "X-Profile-Id", "p-owner")) || allowed(bearer("sa_member")) || allowed(bearer("sa_unscoped")) {
 		t.Fatal("capability allowed does not follow the key")
 	}
 }

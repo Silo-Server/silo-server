@@ -542,8 +542,12 @@ func TestEventsSocketV2AdmitsMonitorKey(t *testing.T) {
 		t.Fatalf("monitor key channels = %v", channels)
 	}
 	login := newSocketAuthorityValidator(f.sessions, users, f.viewer, apimw.NewActingAdminDecider(nil, nil))
-	if _, _, err := login(t.Context(), proof); !errors.Is(err, evt.ErrSocketTicket) {
-		t.Fatalf("login-only socket validator accepted a key: %v", err)
+	withSession := proof
+	withSession.SessionID = "session"
+	for _, keyProof := range []evt.SocketIdentity{proof, withSession} {
+		if _, _, err := login(t.Context(), keyProof); !errors.Is(err, evt.ErrSocketTicket) {
+			t.Fatalf("login-only socket validator accepted a key: %v", err)
+		}
 	}
 
 	accessChanged := func(name string) {

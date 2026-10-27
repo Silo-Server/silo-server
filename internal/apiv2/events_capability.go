@@ -47,13 +47,19 @@ func registerEventsCapability(reg *Registry) {
 
 // eventsSocketAllowed reports whether the caller may mint an events socket
 // ticket: a current login session, or an administrator's admin:monitor:read
-// API key sent with no profile.
+// API key sent with no profile. This operation resolves no profile, so the
+// header itself is read.
 func eventsSocketAllowed(ctx context.Context) bool {
 	if capabilityLoginAllowed(ctx) {
 		return true
 	}
 	claims := claimsFrom(ctx)
-	return claims != nil && claims.TokenType == auth.TokenTypeAPIKey && claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) && profileFrom(ctx) == ""
+	return claims != nil && claims.TokenType == auth.TokenTypeAPIKey && claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) && !declaresProfile(ctx)
 }
 
 func (c EventsCapabilities) capabilityState() string { return StateAvailable }
+
+func declaresProfile(ctx context.Context) bool {
+	r := requestFrom(ctx)
+	return r != nil && r.Header.Get(profileHeader) != ""
+}
