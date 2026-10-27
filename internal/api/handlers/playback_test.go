@@ -409,6 +409,62 @@ func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 	}
 }
 
+func TestV1ProgressAndStopRequireTheOwningProfile(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stop      bool
+		userID    int
+		profileID string
+		want      int
+	}{
+		{name: "progress from another account", userID: 2, profileID: "profile-1", want: http.StatusForbidden},
+		{name: "progress from a sibling profile", userID: 1, profileID: "profile-2", want: http.StatusForbidden},
+		{name: "progress from the owning profile", userID: 1, profileID: "profile-1", want: http.StatusNoContent},
+		{name: "stop from another account", stop: true, userID: 2, profileID: "profile-1", want: http.StatusForbidden},
+		{name: "stop from a sibling profile", stop: true, userID: 1, profileID: "profile-2", want: http.StatusForbidden},
+		{name: "stop from the owning profile", stop: true, userID: 1, profileID: "profile-1", want: http.StatusNoContent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := playback.NewSessionManager(0, 0)
+			manager.RegisterReconstructed(&playback.Session{
+				ID: "owned-session", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayDirect, Position: 10,
+			})
+			handler := NewPlaybackHandler(manager)
+
+			method, path, body, handle := http.MethodPost, "/api/v1/playback/owned-session/progress", `{"position":42}`, handler.HandleUpdateProgress
+			if test.stop {
+				method, path, body, handle = http.MethodDelete, "/api/v1/playback/owned-session", "", handler.HandleStopPlayback
+			}
+			req := httptest.NewRequest(method, path, strings.NewReader(body))
+			ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: test.userID, Role: "user", TokenType: auth.TokenTypeAccess})
+			ctx = apimw.SetProfileID(ctx, test.profileID)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("session_id", "owned-session")
+			rr := httptest.NewRecorder()
+			handle(rr, req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx)))
+			if rr.Code != test.want {
+				t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), test.want)
+			}
+
+			session, err := manager.GetSession("owned-session")
+			switch {
+			case test.want == http.StatusForbidden:
+				if err != nil || session.Position != 10 {
+					t.Fatalf("refused caller changed the session: %+v, %v", session, err)
+				}
+			case test.stop:
+				if !errors.Is(err, playback.ErrSessionNotFound) {
+					t.Fatalf("owner stop left the session: %+v, %v", session, err)
+				}
+			default:
+				if err != nil || session.Position != 42 {
+					t.Fatalf("owner progress not applied: %+v, %v", session, err)
+				}
+			}
+		})
+	}
+}
+
 func TestGetTranscodeSegment_CopyMPEGTSRecoveryUsesResolvedManifestNumberWithoutLookaheadDelay(t *testing.T) {
 	outputDir := t.TempDir()
 	ffmpegPath := filepath.Join(outputDir, "ffmpeg")

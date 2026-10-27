@@ -5039,7 +5039,7 @@ func resolveOptionalPluginAccessUser(
 	// account's current role rather than the token's.
 	// A remote-playback handoff only plays on its device; plugins are not
 	// part of that.
-	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID)
+	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active || authority.IsRemotePlayback() {
 		return false, false, 0, ""
 	}

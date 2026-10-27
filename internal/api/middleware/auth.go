@@ -26,13 +26,15 @@ const claimsKey contextKey = "claims"
 
 // SessionValidator checks a login session on every access-token request.
 // ActiveSession reports whether the session is still active (not revoked or
-// expired) and its authority: the current role of the account it belongs to
-// and, for a remote-playback handoff, the profile it is bound to. It is one
-// lookup; auth.SessionRepository implements it. It answers active=false with
-// no error for a missing, revoked or expired session; an error means the
-// session could not be checked, and the caller must not treat it as ended.
+// expired) and owned by userID, the account the token names, and returns its
+// authority: the current role of that account and, for a remote-playback
+// handoff, the profile it is bound to. It is one lookup;
+// auth.SessionRepository implements it. It answers active=false with no
+// error for a missing, revoked or expired session and for another account's
+// session; an error means the session could not be checked, and the caller
+// must not treat it as ended.
 type SessionValidator interface {
-	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string, userID int) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // TokenValidator validates a JWT token string and returns the parsed claims.
@@ -167,7 +169,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 			if err != nil {
 				writeCredentialCheckUnavailable(w, r, err)
 				return
@@ -244,7 +246,7 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 		claims.PasswordChangeRequired {
 		return nil
 	}
-	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active {
 		return nil
 	}
