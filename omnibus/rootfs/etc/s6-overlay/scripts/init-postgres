@@ -11,7 +11,7 @@ export HOME=/config/postgres
 PGDATA=/config/postgres/data
 
 if [[ -s "$PGDATA/PG_VERSION" ]]; then
-  have="$(<"$PGDATA/PG_VERSION")"
+  have="$(s6-setuidgid postgres cat "$PGDATA/PG_VERSION")"
   if [[ "$have" != "$PG_MAJOR" ]]; then
     cat >&2 <<MSG
 /config/postgres/data was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR.
@@ -21,14 +21,17 @@ omnibus image page describes the steps.
 MSG
     exit 1
   fi
+  # /config/postgres belongs to the postgres account, so everything below it
+  # is changed as that account: root following a symlink planted there would
+  # hand a root-owned file to postgres.
   own_tree postgres postgres "$PGDATA"
-  chmod 0700 "$PGDATA"
+  s6-setuidgid postgres chmod 0700 "$PGDATA"
   # Nothing else runs PostgreSQL in this container, so a pid file here is
   # always left over from an unclean stop.
-  rm -f "$PGDATA/postmaster.pid"
+  s6-setuidgid postgres rm -f "$PGDATA/postmaster.pid"
 else
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
-  install -d -o postgres -g postgres -m 0700 "$PGDATA"
+  s6-setuidgid postgres mkdir -m 0700 "$PGDATA"
   s6-setuidgid postgres initdb -D "$PGDATA" -U silo \
     --encoding=UTF8 --locale=en_US.UTF-8 \
     --auth-local=peer --auth-host=scram-sha-256 >/dev/null
@@ -38,16 +41,16 @@ fi
 # create, such as one moved from another PostgreSQL container, lacks the line
 # that loads them.
 if ! grep -q "^include_dir = 'conf.d'" "$PGDATA/postgresql.conf"; then
-  printf "\ninclude_dir = 'conf.d'\n" >> "$PGDATA/postgresql.conf"
+  printf "\ninclude_dir = 'conf.d'\n" | append_as postgres "$PGDATA/postgresql.conf"
 fi
 
-install -d -o postgres -g postgres -m 0755 "$PGDATA/conf.d"
-install -o postgres -g postgres -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"
+s6-setuidgid postgres install -d -m 0755 "$PGDATA/conf.d"
+s6-setuidgid postgres install -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"
 
 # pg_hba.conf belongs to the image too. A data directory from the official
 # PostgreSQL image trusts every local connection, which here would let any
 # account in the container sign in as the superuser.
-cat > "$PGDATA/pg_hba.conf" <<'HBA'
+(umask 077 && write_as postgres "$PGDATA/pg_hba.conf") <<'HBA'
 # Written by the Silo omnibus image on every start; edits do not survive.
 local   all          all                 peer
 host    all          all   127.0.0.1/32  scram-sha-256
@@ -56,5 +59,4 @@ local   replication  all                 peer
 host    replication  all   127.0.0.1/32  scram-sha-256
 host    replication  all   ::1/128       scram-sha-256
 HBA
-chown postgres:postgres "$PGDATA/pg_hba.conf"
-chmod 0600 "$PGDATA/pg_hba.conf"
+s6-setuidgid postgres chmod 0600 "$PGDATA/pg_hba.conf"

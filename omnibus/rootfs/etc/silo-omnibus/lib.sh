@@ -4,8 +4,10 @@
 STATE_DIR=/run/silo-omnibus
 CONTAINER_ENV=/run/s6/container_environment
 # Present while the image, not the deployment, chose Meilisearch for search.
+# Markers live in /config itself, which only root can write: these scripts run
+# as root and must not write where a service account could plant a symlink.
 # shellcheck disable=SC2034 # read by init-config and svc-search-marker
-SEARCH_MARKER=/config/meilisearch/silo-search-provider
+SEARCH_MARKER=/config/.silo-search-provider
 
 log() { printf '[omnibus] %s\n' "$*"; }
 warn() { printf '[omnibus] warning: %s\n' "$*" >&2; }
@@ -32,6 +34,12 @@ export_env() {
 own_tree() {
   find "$3" \( ! -user "$1" -o ! -group "$2" \) -exec chown -h "$1:$2" {} + 2>/dev/null || true
 }
+
+# write_as USER PATH, append_as USER PATH: write or append stdin to PATH as
+# USER. For files in a directory a service account owns: written as root, a
+# symlink that account planted at PATH would redirect the write.
+write_as() { s6-setuidgid "$1" tee "$2" >/dev/null; }
+append_as() { s6-setuidgid "$1" tee -a "$2" >/dev/null; }
 
 # notify_ready: tell s6 a longrun is ready on the fd named in notification-fd.
 notify_ready() { printf '\n' >&3; }

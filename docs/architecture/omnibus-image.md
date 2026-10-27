@@ -72,9 +72,15 @@ container's stop timeout bounds them.
 | Meilisearch | `meilisearch` | 997:997 | `/config/meilisearch` |
 
 The service ids are fixed in `omnibus/Dockerfile` so the data directories keep
-a valid owner across image updates. `init-config` hands `/config/silo` to the
+a valid owner across image updates. The init scripts run as root, and a service
+account can plant a symlink anywhere in its own directory, so they never write,
+chown, or chmod inside one as root: `/config` itself stays root's and holds the
+image's markers, and files in a service directory are written as its account
+(`write_as` in `lib.sh`). The `silo` role is the cluster superuser and can run
+programs as the `postgres` account, so this matters for `/config/postgres` as
+much as for `/config/silo`. `init-config` hands `/config/silo` to the
 `silo` account with a full walk only when its ids differ from the ones recorded
-in `/config/silo/.omnibus-owner` by the last walk, or when an entry in the top
+in `/config/.silo-owner` by the last walk, or when an entry in the top
 two levels is owned wrong; local artwork can hold millions of files. Deleting
 the marker forces a walk.
 
@@ -123,7 +129,7 @@ them as set by the environment
 ([admin settings API](../admin-settings-api.md)).
 
 When the image chose the provider, it leaves a marker,
-`/config/meilisearch/silo-search-provider`. On the first start with Meilisearch
+`/config/.silo-search-provider`. On the first start with Meilisearch
 off again, a marker makes `init-config` export `SILO_SEARCH_PROVIDER=postgres`
 and delete it. Search returns to PostgreSQL, and from the next start the
 administrator can choose a provider again. Without a marker the stored provider

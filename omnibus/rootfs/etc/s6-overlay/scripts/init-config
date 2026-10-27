@@ -8,28 +8,34 @@ source /etc/silo-omnibus/lib.sh
 
 install -d -m 0755 "$STATE_DIR"
 
-# One directory per service, each owned by that service's account.
-install -d -m 0755 /config
-install -d -o silo -g silo /config/silo /config/silo/artwork /config/silo/compat /config/silo/plugins
+# One directory per service, each owned by that service's account. /config
+# stays root's, so no service account can swap a service directory for a
+# symlink; inside one, files are written as its account, never as root.
+install -d -o root -g root -m 0755 /config
+install -d -o silo -g silo /config/silo
 install -d -o postgres -g postgres -m 0750 /config/postgres
 install -d -o redis -g redis -m 0750 /config/redis
 install -d -o meilisearch -g meilisearch -m 0750 /config/meilisearch
 # Local artwork can put millions of files under /config/silo, too many to walk
 # on every start. Walk it when the silo account's ids differ from the last
 # walk's, or when an entry in the top two levels is owned wrong, as in a
-# restored or copied-in directory. The install above already fixed the owners
-# of the four directories themselves. Delete the marker to force a walk.
-owner_marker=/config/silo/.omnibus-owner
+# restored or copied-in directory. Delete the marker to force a walk.
+owner_marker=/config/.silo-owner
 silo_ids="$(id -u silo):$(id -g silo)"
 if [[ "$(cat "$owner_marker" 2>/dev/null)" != "$silo_ids" ]] ||
   [[ -n "$(find /config/silo -mindepth 1 -maxdepth 2 \( ! -user silo -o ! -group silo \) -print -quit)" ]]; then
   own_tree silo silo /config/silo
   printf '%s\n' "$silo_ids" > "$owner_marker"
-  chown silo:silo "$owner_marker"
 fi
+s6-setuidgid silo mkdir -p /config/silo/artwork /config/silo/compat /config/silo/plugins
 install -d -o postgres -g postgres -m 2775 /run/postgresql
 # Silo's transcode and prepared-download defaults live under /tmp. Mount them
-# to keep them across container recreation.
+# to keep them across container recreation. Silo owns these entries, and /tmp's
+# sticky bit lets an owner replace its own, so drop a symlink in their place
+# before root touches them.
+for dir in /tmp/silo-transcode /tmp/silo-download-artifacts; do
+  [[ ! -L "$dir" ]] || rm -f "$dir"
+done
 install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
 # Mounted copies can hold files from an earlier PUID, or from the Compose
 # stack's root-run Silo, that Silo must be able to clean up.
@@ -78,11 +84,10 @@ if truthy "${ENABLE_MEILISEARCH:-false}"; then
   if [[ -n "${MEILI_MASTER_KEY:-}" ]]; then
     key="$MEILI_MASTER_KEY"
   elif [[ -s "$key_file" ]]; then
-    key="$(<"$key_file")"
+    key="$(s6-setuidgid meilisearch cat "$key_file")"
   else
     key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    (umask 077 && printf '%s\n' "$key" > "$key_file")
-    chown meilisearch:meilisearch "$key_file"
+    printf '%s\n' "$key" | (umask 077 && write_as meilisearch "$key_file")
     log "generated a Meilisearch master key at $key_file"
   fi
   (umask 077 && printf '%s' "$key" > "$STATE_DIR/meili-master-key")
