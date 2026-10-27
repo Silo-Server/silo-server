@@ -193,9 +193,10 @@ func (h *AdminHandler) mutateAIProviders(
 		return AdminAIProviderView{}, ErrAdminSettingsUnavailable
 	}
 	var (
-		view      AdminAIProviderView
-		changeErr error
-		changed   []string
+		view            AdminAIProviderView
+		changeErr       error
+		changed         []string
+		embeddingsMoved bool
 	)
 	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo, func(stored map[string]string, _ pgx.Tx) (map[string]string, error) {
 		registry, err := config.ParseAIProviderRegistry(stored[config.AIProvidersSettingKey])
@@ -225,6 +226,7 @@ func (h *AdminHandler) mutateAIProviders(
 			changeErr = fmt.Errorf("%w: %s", ErrAIProviderConflict, err.Error())
 			return nil, changeErr
 		}
+		embeddingsMoved = embeddingEndpointMoved(before, effective)
 		if provider, ok := registry.Find(viewID); ok {
 			view = aiProviderView(provider, effective)
 		}
@@ -239,6 +241,10 @@ func (h *AdminHandler) mutateAIProviders(
 	if err != nil {
 		return AdminAIProviderView{}, err
 	}
+	if embeddingsMoved {
+		// The engine and its endpoint are built at startup.
+		h.markServerRestartRequired("setting:" + config.EmbeddingProviderSettingKey)
+	}
 	for _, key := range changed {
 		if h.EventBus != nil {
 			_ = h.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
@@ -249,6 +255,17 @@ func (h *AdminHandler) mutateAIProviders(
 		}
 	}
 	return view, nil
+}
+
+// embeddingEndpointMoved reports whether a registry change moves the
+// recommendation embeddings to another endpoint, which applies at restart.
+// The embedding lock follows the model, not the address, so a move needs no
+// reset.
+func embeddingEndpointMoved(before, after map[string]string) bool {
+	key := config.EmbeddingProviderSettingKey
+	beforeURL, _ := config.ResolveAIEndpoint(before, key, config.AICapabilityEmbeddings)
+	afterURL, _ := config.ResolveAIEndpoint(after, key, config.AICapabilityEmbeddings)
+	return beforeURL != afterURL
 }
 
 // CheckAIProvider asks a provider draft for its models without saving it. A

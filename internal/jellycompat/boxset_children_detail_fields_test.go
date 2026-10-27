@@ -24,7 +24,7 @@ type detailLibrariesContentService struct {
 	detailCalls int
 }
 
-func (s *detailLibrariesContentService) GetItemDetailsByIDs(_ context.Context, _ *Session, contentIDs []string, _ *int) (map[string]*upstreamItemDetail, error) {
+func (s *detailLibrariesContentService) GetItemDetailsByIDs(_ context.Context, _ *Session, contentIDs []string, _ *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	s.detailCalls++
 	out := make(map[string]*upstreamItemDetail, len(contentIDs))
 	for _, id := range contentIDs {

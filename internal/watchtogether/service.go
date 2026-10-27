@@ -30,6 +30,9 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
+	// ErrSuggestionLimitReached refuses a new suggestion in a room that
+	// already holds maxRoomSuggestions.
+	ErrSuggestionLimitReached = errors.New("watch together room suggestion limit reached")
 	// ErrNotVoteWinner preserves the v1 winner-only promotion contract.
 	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
 	// ErrNoVotesCast is returned by VoteWinner when nobody has voted yet, so

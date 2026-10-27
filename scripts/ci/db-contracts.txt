@@ -181,6 +181,10 @@
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB
 
+# A storage reconcile's bulk reset keeps an uploaded image whose object
+# survived; nothing could fetch it again.
+./internal/metadata TestArtworkReconcileBulkResetVerifiesUploadsDB
+
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
 ./internal/metadata TestLadderBackfillCandidatesDB
@@ -322,6 +326,7 @@
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
 
 # Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair
 # discovery rows rank by in step with the 'tmdb' source.
@@ -570,3 +575,7 @@
 # A server set up before the setup wizard saved its marker sharing choice keeps
 # sharing by default; a database with no account waits for the wizard.
 ./migrations TestMarkersShareByDefaultExistingInstallsMigrationPostgres
+
+# A Watch Together room's suggestion cap holds when creators on two API servers
+# race on the v1 and v2 create paths.
+./internal/watchtogether TestSuggestionRoomLimitPG

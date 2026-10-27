@@ -631,6 +631,7 @@ export const v2Operations = {
   "POST /api/v2/admin/invite-codes": "createAdminInviteCode",
   "POST /api/v2/admin/invite-codes/{id}/top-up": "topUpAdminInviteCode",
   "POST /api/v2/admin/items/{id}/images/apply": "applyAdminItemImage",
+  "POST /api/v2/admin/items/{id}/images/upload": "uploadAdminItemImage",
   "POST /api/v2/admin/items/{id}/match/apply": "applyAdminItemMatch",
   "POST /api/v2/admin/items/{id}/match/search": "searchAdminItemMatches",
   "POST /api/v2/admin/items/{id}/merge": "mergeAdminItem",

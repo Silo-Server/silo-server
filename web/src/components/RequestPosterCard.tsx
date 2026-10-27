@@ -224,15 +224,10 @@ function ExternalTitleCard({
   badge?: ReactNode;
   /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
   cornerAction?: ReactNode;
-  /** Request details below the caption. Shown whatever the caption setting; pass null for none. */
+  /** Request details below the caption; pass null for none. */
   children?: ReactNode;
 }) {
   const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  // Unlike a library card, a TMDB title always names its type and year under
-  // a caption: a movie and a series can share a title, and the viewer is
-  // choosing which one to request.
-  const showMetadata = showCaption;
   const meta = [formatMediaType(mediaType), year].filter(Boolean).join(" · ");
   const label = `${title} (${meta})`;
 
@@ -269,21 +264,15 @@ function ExternalTitleCard({
           </div>
         ) : null}
       </div>
-      {showCaption || children ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          {showCaption ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
-              {title}
-            </ViewTransitionLink>
-          ) : null}
-          {showMetadata ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
-              {meta}
-            </ViewTransitionLink>
-          ) : null}
-          {children}
-        </div>
-      ) : null}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+          {title}
+        </ViewTransitionLink>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
+          {meta}
+        </ViewTransitionLink>
+        {children}
+      </div>
     </div>
   );
 }

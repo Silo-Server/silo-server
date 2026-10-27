@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -868,25 +869,39 @@ func testAIProviders(t *testing.T, providers ...config.AIProvider) string {
 // A check draft selects a provider by id, so a stored key reaches only the
 // address saved with it. A draft cannot substitute its own registry.
 func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
-	t.Cleanup(func() { newAdminAISettingsCheckClient = originalFactory })
-	var captured llm.Config
+	originalAI, originalEmbeddings := newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient
+	t.Cleanup(func() {
+		newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient = originalAI, originalEmbeddings
+	})
+	var capturedAI llm.Config
+	var capturedEmbeddings embeddings.ClientConfig
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
+		capturedAI = cfg
 		return &fakeAISettingsCheckClient{transcribe: func(context.Context, llm.TranscribeRequest) (*llm.Transcription, error) {
 			return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 		}}
 	}
-	both := []config.AICapability{config.AICapabilityChat, config.AICapabilitySpeech}
+	newAdminEmbeddingsSettingsCheckClient = func(cfg embeddings.ClientConfig) embeddingsSettingsCheckClient {
+		capturedEmbeddings = cfg
+		return &fakeEmbeddingsSettingsCheckClient{embed: func(context.Context, []string) ([][]float32, error) {
+			return [][]float32{make([]float32, 8)}, nil
+		}}
+	}
+	both := []config.AICapability{config.AICapabilityChat, config.AICapabilityEmbeddings, config.AICapabilitySpeech}
 	stored := map[string]string{
 		config.AIProvidersSettingKey: testAIProviders(t,
 			config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://saved.example.test", APIKey: "saved-secret", Capabilities: both},
 			config.AIProvider{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", APIKey: "other-secret", Capabilities: both},
 		),
-		config.AITextProviderSettingKey:   "saved",
-		config.AISpeechProviderSettingKey: "saved",
-		"ai.chat_model":                   "chat-model",
-		"ai.asr_model":                    "whisper-model",
+		config.AITextProviderSettingKey:    "saved",
+		config.AISpeechProviderSettingKey:  "saved",
+		config.EmbeddingProviderSettingKey: "saved",
+		"ai.chat_model":                    "chat-model",
+		"ai.asr_model":                     "whisper-model",
+		"recommendations.embedding_model":  "embed-model",
+		// Rows older builds wrote are no longer read.
+		"recommendations.embedding_base_url":   "https://legacy.example.test",
+		"recommendations.embedding_auth_token": "legacy-secret",
 	}
 	forged := testAIProviders(t, config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://attacker.example.test", Capabilities: both})
 	for _, tc := range []struct {
@@ -899,9 +914,13 @@ func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
 		{name: "speech uses the bound provider", kind: "ai_transcription", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
 		{name: "speech draft switches provider", kind: "ai_transcription", values: map[string]string{config.AISpeechProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
 		{name: "speech draft registry ignored", kind: "ai_transcription", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings use the bound provider", kind: "recommendations_embedding", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft switches provider", kind: "recommendations_embedding", values: map[string]string{config.EmbeddingProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "embeddings draft registry ignored", kind: "recommendations_embedding", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft legacy endpoint ignored", kind: "recommendations_embedding", values: map[string]string{"recommendations.embedding_base_url": "https://attacker.example.test"}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			captured = llm.Config{}
+			capturedAI, capturedEmbeddings = llm.Config{}, embeddings.ClientConfig{}
 			handler := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: maps.Clone(stored)}}
 			dirty := make([]string, 0, len(tc.values))
 			for key := range tc.values {
@@ -912,9 +931,12 @@ func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
 			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || !response.Success {
 				t.Fatalf("response = %+v, %v", response, err)
 			}
-			gotURL, gotKey := captured.BaseURL, captured.APIKey
-			if tc.kind == "ai_transcription" {
-				gotURL, gotKey = captured.ASRBaseURL, captured.ASRAPIKey
+			gotURL, gotKey := capturedAI.BaseURL, capturedAI.APIKey
+			switch tc.kind {
+			case "ai_transcription":
+				gotURL, gotKey = capturedAI.ASRBaseURL, capturedAI.ASRAPIKey
+			case "recommendations_embedding":
+				gotURL, gotKey = capturedEmbeddings.BaseURL, capturedEmbeddings.APIKey
 			}
 			if gotURL != tc.wantURL || gotKey != tc.wantKey {
 				t.Fatalf("checked %q with %q, want %q with %q", gotURL, gotKey, tc.wantURL, tc.wantKey)

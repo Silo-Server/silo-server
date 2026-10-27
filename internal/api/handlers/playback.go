@@ -1596,6 +1596,14 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	h.handleStartPlaybackV3(w, r, body)
 }
 
+// ownsPlaybackSession reports whether the authenticated account and acting
+// profile own session. Profiles on one account share a user ID, so checking
+// the account alone would let a sibling profile move or stop another
+// profile's playback and write its watch history.
+func ownsPlaybackSession(ctx context.Context, session *playback.Session) bool {
+	return session.UserID == apimw.GetUserID(ctx) && session.ProfileID == apimw.GetProfileID(ctx)
+}
+
 // HandleUpdateProgress handles POST /playback/{session_id}/progress.
 func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
@@ -1619,7 +1627,7 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
 		return
 	}
-	if session.UserID != userID {
+	if !ownsPlaybackSession(r.Context(), session) {
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
@@ -1689,7 +1697,7 @@ func (h *PlaybackHandler) HandleStopPlayback(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
 		return
 	}
-	if session.UserID != userID {
+	if !ownsPlaybackSession(r.Context(), session) {
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
@@ -1886,6 +1894,10 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	h.touchSessionActivity(sessionID)
 
 	manifest, err := transcodeSession.BuildPlaybackManifest("segment/", r.URL.RawQuery)
+	if errors.Is(err, playback.ErrManifestQueryTooLong) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Playlist request query is too long")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "build transcode manifest", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode manifest not ready")
@@ -2214,7 +2226,9 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	stToken := r.URL.Query().Get("st")
 	// Strip the signed stream token ("st") before forwarding/logging: it is a
 	// 24h bearer reconstruction descriptor exposing media path + recipe claims.
-	// Other query params are preserved.
+	// Other query params are preserved, including an account "token" the node
+	// echoes into segment URIs for players that cannot send headers, so log
+	// targetURL only through logredact.
 	query := r.URL.Query()
 	query.Del("st")
 	if encoded := query.Encode(); encoded != "" {
@@ -2264,7 +2278,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 			slog.WarnContext(r.Context(), "transcode node unreachable from the relay", "component", "api", "error", logredact.SanitizeText(err.Error()), "url", logredact.SanitizeURL(targetURL), "playback_session_id", sessionID)
 			return fmt.Errorf("%w: %w", errTranscodeNodeUnreachable, err)
 		}
-		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", logredact.SanitizeURLError(err), "url", logredact.SanitizeURL(targetURL), "playback_session_id", sessionID)
 		writeTranscodeNodeUnavailable(w)
 		return nil
 	}
@@ -2289,7 +2303,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	if validToken != "" && resp.StatusCode == http.StatusOK && strings.HasSuffix(path, ".m3u8") {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			slog.ErrorContext(r.Context(), "read transcode node manifest", "component", "api", "error", readErr, "url", targetURL, "playback_session_id", sessionID)
+			slog.ErrorContext(r.Context(), "read transcode node manifest", "component", "api", "error", readErr, "url", logredact.SanitizeURL(targetURL), "playback_session_id", sessionID)
 			writeTranscodeNodeUnavailable(w)
 			return nil
 		}

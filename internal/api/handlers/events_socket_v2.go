@@ -255,7 +255,7 @@ func originMatches(origin *url.URL, expected string) bool {
 }
 
 type eventsSessionValidator interface {
-	ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error)
+	ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error)
 }
 
 // NewEventsSocketV2 reuses the current account, session and viewer authorities.
@@ -304,7 +304,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		// refetching and reconnecting.
 		// A remote-playback session's ticket names its bound profile; its
 		// role is "user" whatever the account's role is.
-		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID)
+		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID, identity.UserID)
 		if err != nil || !valid {
 			return ctx, nil, evt.ErrSocketTicket
 		}

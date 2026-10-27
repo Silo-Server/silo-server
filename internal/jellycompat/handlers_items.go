@@ -1358,6 +1358,11 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := parseItemsQuery(r, h.codec)
+	// Latest returns a bare array with no total, so Limit=0 asks for nothing.
+	if query.countOnly {
+		writeJSON(w, http.StatusOK, []baseItemDTO{})
+		return
+	}
 
 	// Jellyfin's /Items/Latest auto-infers item types from the parent
 	// library's collection type when no explicit IncludeItemTypes is given.
@@ -1440,7 +1445,7 @@ func (h *ItemsHandler) buildLatestItemDTOs(ctx context.Context, session *Session
 
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
-		detailsByID = h.batchListItemDetails(ctx, session, contentIDs, libraryIDPtr(query.parentLibraryID))
+		detailsByID = h.batchListItemDetails(ctx, session, contentIDs, libraryIDPtr(query.parentLibraryID), query.requestedFields)
 	}
 
 	items := make([]baseItemDTO, 0, len(listItems))
@@ -2431,7 +2436,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 	items = sliceBaseItems(items, query.startIndex, query.limit)
 	pageIDs = slicePageIDs(pageIDs, query.startIndex, query.limit)
 	if query.needsDetailFields {
-		detailsByID := h.batchListItemDetails(r.Context(), session, pageIDs, nil)
+		detailsByID := h.batchListItemDetails(r.Context(), session, pageIDs, nil, query.requestedFields)
 		for i := range items {
 			if i >= len(pageIDs) {
 				break
@@ -2515,7 +2520,7 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 		items = append(items, h.mapper.episodeFromUpstream(modelEpisodeToUpstream(ep, ep.SeriesID), favorites[ep.ContentID], progress[ep.ContentID]))
 	}
 	if query.needsDetailFields {
-		details := h.batchListItemDetails(r.Context(), session, ids, nil)
+		details := h.batchListItemDetails(r.Context(), session, ids, nil, query.requestedFields)
 		for i, ep := range episodes {
 			if detail := details[ep.ContentID]; detail != nil {
 				items[i] = h.mapper.itemFromDetailWithFields(*detail, favorites[ep.ContentID], progress[ep.ContentID], query.requestedFields)
@@ -2618,14 +2623,16 @@ func (h *ItemsHandler) handleLibraryItem(w http.ResponseWriter, r *http.Request,
 // by the caller — matching the historical per-item GetItemDetail error → list
 // fallback behavior. Individually-unresolvable ids (e.g. season rows, which the
 // item-detail batch path does not handle) are simply absent and likewise fall
-// back to list rendering rather than a per-item detail fetch. Returns nil for an
+// back to list rendering rather than a per-item detail fetch. fields is the
+// request's Fields, which the caller must also map the details with: the batch
+// leaves out members no mapping of those fields reads. Returns nil for an
 // empty input, and when the batch fails after ctx is done, since each per-item
 // lookup would fail on the same context.
-func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) map[string]*upstreamItemDetail {
+func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int, fields map[string]bool) map[string]*upstreamItemDetail {
 	if len(contentIDs) == 0 {
 		return nil
 	}
-	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID); err == nil {
+	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, detailBatchOptions{Fields: fields}); err == nil {
 		return details
 	}
 	if ctx.Err() != nil {
@@ -2684,7 +2691,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID))
+		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID), query.requestedFields)
 	}
 
 	items := make([]baseItemDTO, 0, len(result.Items))
@@ -2914,7 +2921,7 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID))
+		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID), query.requestedFields)
 	}
 
 	items := make([]baseItemDTO, 0, len(result.Items))
@@ -2979,7 +2986,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 
 	items := make([]baseItemDTO, 0, len(query.specificIDs))
 	savedMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
-	details, err := h.specificItemDetails(r.Context(), session, query.specificIDs, libraryIDPtr(query.parentLibraryID))
+	details, err := h.specificItemDetails(r.Context(), session, query.specificIDs, libraryIDPtr(query.parentLibraryID), query.requestedFields)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -3052,9 +3059,10 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 // batch serves the movies, series, and episodes; GetItemDetail serves what the
 // batch leaves out, such as seasons, or every id when the batch fails. An id
 // GetItemDetail answers 404 for is left out, and any other error fails the
-// list.
-func (h *ItemsHandler) specificItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]*upstreamItemDetail, error) {
-	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID)
+// list. fields is the request's Fields, as for batchListItemDetails; the
+// details keep their subtitle defaults, which the Ids list renders.
+func (h *ItemsHandler) specificItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int, fields map[string]bool) ([]*upstreamItemDetail, error) {
+	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, detailBatchOptions{Fields: fields, SubtitleDefaults: true})
 	if batchErr != nil {
 		batch = nil
 	}
@@ -3589,7 +3597,7 @@ func (h *ItemsHandler) upgradeProgressPageToDetail(ctx context.Context, session 
 	for i := 0; i < limit; i++ {
 		upgradeIDs = append(upgradeIDs, page[i].contentID)
 	}
-	detailsByID := h.batchListItemDetails(ctx, session, upgradeIDs, libraryID)
+	detailsByID := h.batchListItemDetails(ctx, session, upgradeIDs, libraryID, query.requestedFields)
 	for i := 0; i < limit; i++ {
 		detail, ok := detailsByID[page[i].contentID]
 		if !ok || detail == nil {

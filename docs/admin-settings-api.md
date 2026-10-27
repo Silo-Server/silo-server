@@ -70,8 +70,12 @@ provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
 An administrator connects each AI provider once, and each AI job selects a
 provider from that list: `ai.text_provider_id` for text translation (used while
-`ai.auth_mode` is `api_key`) and `ai.speech_provider_id` for speech-to-text. The
-model settings (`ai.chat_model`, `ai.asr_model`) are unchanged. A binding must
+`ai.auth_mode` is `api_key`), `ai.speech_provider_id` for speech-to-text, and
+`recommendations.embedding_provider_id` for recommendation embeddings (applied
+at restart, like every `recommendations.*` setting). The model settings
+(`ai.chat_model`, `ai.asr_model`, `recommendations.embedding_model`) are
+unchanged, except that `recommendations.embedding_model` no longer has a
+default. A binding must
 name a stored provider that serves the job's capability; settings writes that
 break this rule return `400`. The ChatGPT plan is not a stored provider; it is
 selected with `ai.auth_mode: chatgpt` and serves text only.
@@ -80,8 +84,11 @@ The registry is the encrypted, internal setting `ai.providers`. Generic settings
 reads, writes, secret-status lists, revision validators, and connection-check
 drafts exclude it; the operations below are its only administrative boundary.
 `ai.base_url`, `ai.api_key`, `ai.asr_base_url`, `ai.asr_api_key`,
-`subtitle_ai.base_url`, and `subtitle_ai.api_key` are retired: the server no
-longer reads them and rejects writes to them. On first start, a server moves the
+`subtitle_ai.base_url`, `subtitle_ai.api_key`,
+`recommendations.embedding_base_url`, `recommendations.embedding_auth_token`,
+`recommendations.openai_model`, `recommendations.openai_api_key`, and
+`recommendations.embedding_provider` are retired: the server no longer reads
+them and rejects writes to them. On first start, a server moves the
 endpoints those keys held into providers and binds each job to the provider that
 serves the endpoint and key it used, then leaves the old rows in place.
 Transcription no longer falls back to the text endpoint. A stored endpoint
@@ -104,7 +111,9 @@ The following operations require an acting administrator:
   switches at once. The type is fixed. An omitted `api_key` keeps the stored
   key and an empty one clears it. A `base_url` on another host needs `api_key`
   in the same request, so a stored key never follows a provider elsewhere
-  unasked. Removing a capability a job uses returns `409`.
+  unasked. Removing a capability a job uses returns `409`. Moving the
+  embedding provider to another address marks a restart as required; the
+  embedding lock follows the model, so the move needs no reset.
 - `DELETE /api/v2/admin/ai/providers/{id}` discards a provider and its key. A
   provider a job uses returns `409`; an idle text binding to it is cleared.
 - `POST /api/v2/admin/ai/providers/check` lists a draft provider's models

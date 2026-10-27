@@ -332,6 +332,9 @@ func buildLatestBrowseParams(query itemsQuery) url.Values {
 	// vs "created_at" which forces a full-library top-N heapsort.
 	params.Set("sort", "recently_added")
 	params.Set("order", "desc")
+	// Latest returns a bare array, so a total would be discarded. Counting it
+	// with an unplayed filter scanned the whole library: 27–42 s on a large one.
+	params.Set("include_total", "false")
 	return params
 }
 

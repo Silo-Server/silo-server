@@ -1752,6 +1752,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			&handlers.PoolFolderLookup{Pool: deps.DB},
 			deps.MetadataService,
 		)
+		adminMatchHandler.EventBus = deps.EventBus
 	}
 
 	// Build admin split/merge handler for repairing wrong version groupings.
@@ -1788,6 +1789,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			detailSvc,
 		)
 		adminImageHandler.EventsHub = deps.EventsHub
+		adminImageHandler.EventBus = deps.EventBus
 	}
 
 	var adminIntroHandler *handlers.AdminIntroHandler
@@ -5039,7 +5041,7 @@ func resolveOptionalPluginAccessUser(
 	// account's current role rather than the token's.
 	// A remote-playback handoff only plays on its device; plugins are not
 	// part of that.
-	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID)
+	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active || authority.IsRemotePlayback() {
 		return false, false, 0, ""
 	}

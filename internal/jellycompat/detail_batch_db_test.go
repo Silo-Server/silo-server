@@ -60,16 +60,16 @@ func (c *detailCallCounter) GetItemDetail(ctx context.Context, session *Session,
 	return c.ContentService.GetItemDetail(ctx, session, contentID, libraryID)
 }
 
-func (c *detailCallCounter) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+func (c *detailCallCounter) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, opts detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	c.batch++
-	return c.ContentService.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID)
+	return c.ContentService.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, opts)
 }
 
 // perItemDetails fails every batch, so handlers fetch each detail with
 // GetItemDetail: the way NextUp and Ids lookups did before they batched.
 type perItemDetails struct{ ContentService }
 
-func (perItemDetails) GetItemDetailsByIDs(context.Context, *Session, []string, *int) (map[string]*upstreamItemDetail, error) {
+func (perItemDetails) GetItemDetailsByIDs(context.Context, *Session, []string, *int, detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	return nil, errors.New("batch disabled")
 }
 

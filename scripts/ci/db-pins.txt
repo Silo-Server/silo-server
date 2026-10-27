@@ -76,6 +76,13 @@
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
+# Jellyfin Items/Latest with MediaSources: a fixed number of statements per
+# page, and every card identical to its single-item detail rendering.
+./internal/jellycompat TestLatestStatementBudgetDB
+./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals

@@ -404,8 +404,6 @@ var adminSettingDefaults = map[string]string{
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
-	"recommendations.embedding_base_url":         "http://ollama:11434",
-	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
 	"recommendations.taste_profiles_cron":        "0 4 * * *",
 	"recommendations.cowatch_cron":               "30 4 * * *",
@@ -876,11 +874,13 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	case legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
 		legacySubtitleURLSetting, legacySubtitleKeySetting:
 		return "", fmt.Errorf("%s was replaced by AI providers; connect the provider in AI Services", key)
-	case AITextProviderSettingKey, AISpeechProviderSettingKey:
+	case legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting, legacyOpenAIEmbeddingModel,
+		legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; choose the embedding provider on Recommendations", key)
+	case AITextProviderSettingKey, AISpeechProviderSettingKey, EmbeddingProviderSettingKey:
 		return value, nil
 
-	case "recommendations.embedding_base_url",
-		"server.public_url", "jellyfin_compat.public_url",
+	case "server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)

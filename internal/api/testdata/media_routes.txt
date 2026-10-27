@@ -174,6 +174,7 @@ GET /api/v2/admin/ips	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
+POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
@@ -1473,6 +1474,7 @@ GET /api/v2/admin/ips	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
+POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media

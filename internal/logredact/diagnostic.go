@@ -36,6 +36,7 @@ func SanitizeRequestURL(raw string) string {
 	u.RawQuery = SanitizeQuery(u.RawQuery)
 	u.Fragment = ""
 	u.RawFragment = ""
+	redactURLPath(u)
 	return u.String()
 }
 
@@ -90,10 +91,9 @@ func sanitizeDiagnosticValue(value any) any {
 	case string:
 		// Playback responses contain token-bearing relative and absolute URLs
 		// under ordinary keys such as DirectStreamUrl and MediaSources[].Path.
-		// Credentials can only sit in a query, fragment or userinfo; without
-		// those, keep the value verbatim so on-disk file paths are not
-		// re-encoded as URLs.
-		if looksLikeDiagnosticURL(v) && strings.ContainsAny(v, "?#@") {
+		// A value with no part that can hold a credential is kept verbatim
+		// so on-disk file paths are not re-encoded as URLs.
+		if looksLikeDiagnosticURL(v) && URLMayHoldCredential(v) {
 			return SanitizeRequestURL(v)
 		}
 	}

@@ -2866,6 +2866,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		manifest, err = session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	}
+	if errors.Is(err, playback.ErrManifestQueryTooLong) {
+		http.Error(w, "playlist request query too long", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "get manifest", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)

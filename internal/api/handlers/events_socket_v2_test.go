@@ -135,7 +135,7 @@ type socketSessionFixture struct {
 	remoteProfile string
 }
 
-func (s *socketSessionFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+func (s *socketSessionFixture) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
 	if !s.valid {
 		return auth.SessionAuthority{}, false, nil
 	}

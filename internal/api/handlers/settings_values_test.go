@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1562,6 +1563,66 @@ func TestEffectiveContextsPreservesV2TokensAndLegacyNormalization(t *testing.T) 
 	}
 	if len(legacy.Contexts) != 1 || legacy.Contexts[0].ContextID != "row-1" || len(legacy.Contexts[0].Settings) != 1 {
 		t.Fatalf("v1 normalization changed: %+v", legacy.Contexts)
+	}
+}
+
+// TestV2SettingReadsBoundRepeatedValueBytes: v2 answers a repeated key once
+// per mention, and the batch once per context too, so a large stored document
+// must not be copied into one response without limit.
+func TestV2SettingReadsBoundRepeatedValueBytes(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	ctx := t.Context()
+	key := settingskeys.UiLibraryPageState
+	// A schema-valid 128 KiB document: 32 libraries at the search length bound.
+	libraries := make(map[string]map[string]string, 32)
+	for i := range 32 {
+		libraries[strconv.Itoa(i+1)] = map[string]string{"search": strings.Repeat("a", 4096)}
+	}
+	doc, err := json.Marshal(map[string]any{"version": 1, "libraries": libraries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: key, Scope: settingscontract.ScopeProfileDevice, ProfileID: "profile-1", DeviceID: "device-1",
+	}, doc); err != nil {
+		t.Fatalf("seeding document: %v", err)
+	}
+	device := NewDeviceMetadata("device-1", "", "")
+	contexts := make([]EffectiveContextRequest, 100)
+	for i := range contexts {
+		contexts[i] = EffectiveContextRequest{ContextID: strconv.Itoa(i), SeriesID: "s" + strconv.Itoa(i)}
+	}
+	batch := func(repeats int) error {
+		_, err := handler.ResolveEffectiveSettingContexts(ctx, 1, EffectiveSettingsQuery{
+			Keys: slices.Repeat([]string{key}, repeats), ActiveProfileID: "profile-1", Device: device,
+		}, contexts)
+		return err
+	}
+	list := func(repeats int) error {
+		_, err := handler.ListSettingValues(ctx, 1, slices.Repeat([]string{key}, repeats), SettingIdentityRequest{
+			Scope: string(settingscontract.ScopeProfileDevice), ActiveProfileID: "profile-1", Device: device,
+		})
+		return err
+	}
+
+	for name, tc := range map[string]struct {
+		read     func(repeats int) error
+		repeats  int
+		rejected bool
+	}{
+		"batch within budget":         {read: batch, repeats: 1},
+		"batch repeating past budget": {read: batch, repeats: 200, rejected: true},
+		"list within budget":          {read: list, repeats: 100},
+		"list repeating past budget":  {read: list, repeats: 200, rejected: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.read(tc.repeats)
+			var apiErr *APIError
+			rejected := errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest && apiErr.Field == settingFieldKeys
+			if rejected != tc.rejected || (!rejected && err != nil) {
+				t.Fatalf("err = %v, want rejected on keys = %v", err, tc.rejected)
+			}
+		})
 	}
 }
 

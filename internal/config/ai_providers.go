@@ -17,7 +17,8 @@ import (
 
 // AI provider registry. An administrator connects each AI provider once, in
 // ai.providers, and every AI job picks a provider from it by id: text through
-// ai.text_provider_id, speech-to-text through ai.speech_provider_id. The
+// ai.text_provider_id, speech-to-text through ai.speech_provider_id, and
+// recommendation embeddings through recommendations.embedding_provider_id. The
 // ChatGPT plan is not stored here; it keeps its own credential bundle and is
 // selected with ai.auth_mode.
 const (
@@ -26,12 +27,17 @@ const (
 	AIProvidersSettingKey      = "ai.providers"
 	AITextProviderSettingKey   = "ai.text_provider_id"
 	AISpeechProviderSettingKey = "ai.speech_provider_id"
+	// EmbeddingProviderSettingKey is read once at startup, like every
+	// recommendations.* setting: the engine and its embedding lock are built
+	// then.
+	EmbeddingProviderSettingKey = "recommendations.embedding_provider_id"
 )
 
 // Default addresses of the provider types that have one.
 const (
 	openAIBaseURL     = "https://api.openai.com"
 	openRouterBaseURL = "https://openrouter.ai/api/v1"
+	geminiBaseURL     = "https://generativelanguage.googleapis.com"
 	groqBaseURL       = "https://api.groq.com/openai"
 	ollamaBaseURL     = "http://ollama:11434"
 	speachesBaseURL   = "http://speaches:8000"
@@ -41,8 +47,9 @@ const (
 const aiAuthModeChatGPT = "chatgpt"
 
 // aiProvidersVersion is the newest legacy conversion PlanAIProviderConversion
-// knows. Version 1 moved the text and speech endpoints into the registry.
-const aiProvidersVersion = 1
+// knows. Version 1 moved the text and speech endpoints into the registry;
+// version 2 moved the recommendation embedding endpoint.
+const aiProvidersVersion = 2
 
 const (
 	maxAIProviders         = 32
@@ -99,7 +106,7 @@ var AIProviderTypes = []AIProviderTypeSpec{
 	{
 		// Chat goes through Gemini's OpenAI-compatible surface; embeddings use
 		// the native API, which the embedding client recognizes by host.
-		Type: AIProviderGemini, Label: "Google Gemini", DefaultBaseURL: "https://generativelanguage.googleapis.com",
+		Type: AIProviderGemini, Label: "Google Gemini", DefaultBaseURL: geminiBaseURL,
 		Capabilities: []AICapability{AICapabilityChat, AICapabilityEmbeddings}, KeyRequired: true, chatPath: "/v1beta/openai",
 	},
 	{
@@ -325,8 +332,9 @@ func (r AIProviderRegistry) Validate() error {
 type AIJob string
 
 const (
-	AIJobText   AIJob = "text"
-	AIJobSpeech AIJob = "speech"
+	AIJobText       AIJob = "text"
+	AIJobSpeech     AIJob = "speech"
+	AIJobEmbeddings AIJob = "embeddings"
 )
 
 // aiProviderBindings maps each job to its binding setting and the capability
@@ -339,6 +347,7 @@ var aiProviderBindings = []struct {
 }{
 	{AIJobText, AITextProviderSettingKey, AICapabilityChat, "text model"},
 	{AIJobSpeech, AISpeechProviderSettingKey, AICapabilitySpeech, "speech-to-text"},
+	{AIJobEmbeddings, EmbeddingProviderSettingKey, AICapabilityEmbeddings, "recommendation embeddings"},
 }
 
 // Label names the job in messages.
@@ -453,6 +462,9 @@ func PlanAIProviderConversion(stored map[string]string) (writes map[string]strin
 	if registry.Version < 1 {
 		convertLegacyTextAndSpeech(c)
 	}
+	if registry.Version < 2 {
+		convertLegacyEmbeddings(c)
+	}
 	registry.Version = aiProvidersVersion
 	c.writes[AIProvidersSettingKey] = registry.Encode()
 	return c.writes, c.unconverted, nil
@@ -492,6 +504,65 @@ func convertLegacyTextAndSpeech(c *aiConversion) {
 		return
 	}
 	c.bind(AISpeechProviderSettingKey, c.adopt(textURLSetting, textBaseURL, speechKey, AICapabilitySpeech))
+}
+
+// Legacy recommendation embedding settings, including the OpenAI-only keys an
+// earlier build used before the embedding endpoint was configurable.
+const (
+	legacyEmbeddingURLSetting      = "recommendations.embedding_base_url"
+	legacyEmbeddingTokenSetting    = "recommendations.embedding_auth_token"
+	legacyEmbeddingModelSetting    = "recommendations.embedding_model"
+	legacyOpenAIEmbeddingModel     = "recommendations.openai_model"
+	legacyOpenAIEmbeddingToken     = "recommendations.openai_api_key"
+	legacyEmbeddingProviderSetting = "recommendations.embedding_provider"
+	// legacyDefaultEmbeddingModel is the model older builds used when none
+	// was stored.
+	legacyDefaultEmbeddingModel = "all-minilm"
+	// openAIDefaultEmbeddingModel is the model an OpenAI embedding endpoint
+	// converted without one gets.
+	openAIDefaultEmbeddingModel = "text-embedding-3-small"
+)
+
+// convertLegacyEmbeddings binds embeddings to a provider at exactly the
+// endpoint the legacy settings resolved to, so the embedding lock, which
+// records that endpoint, still accepts it. A server that never stored an
+// endpoint used the built-in Ollama default; it is converted only if it
+// actually ran recommendations, which left a lock or the switch on.
+func convertLegacyEmbeddings(c *aiConversion) {
+	stored := c.stored
+	if strings.TrimSpace(stored[EmbeddingProviderSettingKey]) != "" {
+		return
+	}
+	legacyOpenAI := stored[legacyOpenAIEmbeddingModel] != "" || stored[legacyOpenAIEmbeddingToken] != "" ||
+		stored[legacyEmbeddingProviderSetting] == string(AIProviderOpenAI)
+	baseURL := strings.TrimSpace(stored[legacyEmbeddingURLSetting])
+	model := firstNonEmpty(stored[legacyEmbeddingModelSetting], stored[legacyOpenAIEmbeddingModel])
+	switch {
+	case baseURL != "":
+	case legacyOpenAI:
+		baseURL = openAIBaseURL
+	case strings.TrimSpace(stored["recommendations.embedding_lock"]) != "" ||
+		AdminSettingEnabled("recommendations.enabled", stored["recommendations.enabled"]):
+		baseURL = ollamaBaseURL
+	default:
+		return
+	}
+	if model == "" {
+		model = legacyDefaultEmbeddingModel
+		// The old default was an Ollama model even on OpenAI, where it never
+		// worked; OpenAI gets its own small model so embeddings can run.
+		if baseURL == openAIBaseURL || stored[legacyEmbeddingProviderSetting] == string(AIProviderOpenAI) {
+			model = openAIDefaultEmbeddingModel
+		}
+	}
+	id := c.adopt(legacyEmbeddingURLSetting, baseURL, firstNonEmpty(stored[legacyEmbeddingTokenSetting], stored[legacyOpenAIEmbeddingToken]), AICapabilityEmbeddings)
+	if id == "" {
+		return
+	}
+	c.writes[EmbeddingProviderSettingKey] = id
+	if strings.TrimSpace(stored[legacyEmbeddingModelSetting]) != model {
+		c.writes[legacyEmbeddingModelSetting] = model
+	}
 }
 
 // adoptAIProvider returns the id of a provider that serves capability at exactly

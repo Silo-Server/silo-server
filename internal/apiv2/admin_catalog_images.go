@@ -6,9 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -17,6 +20,7 @@ import (
 type AdminCatalogImagesService interface {
 	GetAdminItemImages(context.Context, string) (handlers.AdminItemImagesView, error)
 	ApplyAdminItemImage(context.Context, string, handlers.AdminItemImageRequest) (handlers.AdminItemImageResult, error)
+	UploadAdminItemImage(context.Context, string, string, []byte) (handlers.AdminItemImageResult, error)
 }
 type AdminImagesInput struct {
 	ID string `path:"id" minLength:"1" maxLength:"512"`
@@ -37,6 +41,14 @@ type AdminImageApplyInput struct {
 		Type        string `json:"type" minLength:"1" maxLength:"100"`
 		ProviderID  string `json:"provider_id,omitempty" maxLength:"512"`
 	}
+}
+type AdminImageUploadForm struct {
+	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster only."`
+	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp,application/octet-stream" required:"true" doc:"The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when its bytes are a JPEG, PNG or WebP image."`
+}
+type AdminImageUploadInput struct {
+	ID      string `path:"id" minLength:"1" maxLength:"512"`
+	RawBody huma.MultipartFormFiles[AdminImageUploadForm]
 }
 type AdminImageApplied struct {
 	ContentID  string `json:"content_id"`
@@ -146,13 +158,41 @@ func registerAdminCatalogImages(reg *Registry) {
 		}
 		return &AdminImageApplyOutput{Body: AdminImageApplied{ContentID: out.ContentID, StoredPath: out.StoredPath, Thumbhash: out.Thumbhash, ImageURL: out.ImageURL, Revision: out.Revision}}, nil
 	})
+	upload := Operation{Operation: humaOp("POST", Prefix+"/admin/items/{id}/images/upload", "uploadAdminItemImage", "admin-catalog", "Store an uploaded image as local artwork, then publish it like an applied image."), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, MaxBodyBytes: maxPosterBytes + posterFormOverhead}
+	Register(reg, upload, func(ctx context.Context, in *AdminImageUploadInput) (*AdminImageApplyOutput, error) {
+		if reg.deps.AdminCatalogImages == nil {
+			return nil, unavailable("image selection")
+		}
+		form := in.RawBody.Data()
+		if form == nil || !form.Image.IsSet {
+			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: "an image file is required"})
+		}
+		defer func() { _ = form.Image.Close() }()
+		tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
+		if form.Image.Size > metadata.MaxUploadedImageBytes {
+			return nil, tooLarge
+		}
+		data, err := io.ReadAll(io.LimitReader(form.Image, metadata.MaxUploadedImageBytes+1))
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "Could not read the image.")
+		}
+		if len(data) > metadata.MaxUploadedImageBytes {
+			return nil, tooLarge
+		}
+		out, err := reg.deps.AdminCatalogImages.UploadAdminItemImage(ctx, in.ID, form.Type, data)
+		if err != nil {
+			return nil, collectionProblem(err)
+		}
+		return &AdminImageApplyOutput{Body: AdminImageApplied{ContentID: out.ContentID, StoredPath: out.StoredPath, Thumbhash: out.Thumbhash, ImageURL: out.ImageURL, Revision: out.Revision}}, nil
+	})
 }
 
 // ItemImageEntry is the native transport projection, independent of handler views.
 type ItemImageEntry struct {
 	ProviderID  string  `json:"provider_id"`
 	URL         string  `json:"url" doc:"Preview of the image: a fetchable URL, a data: URI, or the provider's value as given; not validated as a URI"`
-	OriginalURL string  `json:"original_url" doc:"The provider's image URL, or file:// and the unescaped path of a local image; not validated as a URI. Send it unchanged to apply the image"`
+	OriginalURL string  `json:"original_url" doc:"The provider's image URL, file:// and the unescaped path of a local image, or upload:// and the SHA-256 of an uploaded image the item shows; not validated as a URI. Send it unchanged to apply the image"`
 	Type        string  `json:"type"`
 	Language    string  `json:"language" doc:"Language of text in the image as the provider reports it, usually ISO 639-1 (TMDB uses xx for none); empty when textless or unknown"`
 	Width       int     `json:"width"`
