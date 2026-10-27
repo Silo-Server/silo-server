@@ -141,6 +141,47 @@ profile. The handshake's `X-Profile-Id` decides administrator access but binds
 nothing, so a bridge socket opened with that header and no ticket is unbound and
 receives no `user_state`, including its own profile's.
 
+### Catalog item changes
+
+On the `catalog` channel, `catalog.item.changed` reports a change to one item.
+Every subscriber receives `change: "metadata_updated"`. An administrator connected through the v2 handshake
+also receives three changes that describe what the administrator catalog
+listing (`listAdminCatalogItems`, see
+[admin-catalog-api.md](admin-catalog-api.md#catalog-item-listing)) returns:
+
+| `change` | When |
+| --- | --- |
+| `added` | The item gained a membership in `library_id` |
+| `removed` | The item lost its membership in `library_id` |
+| `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), or changed what the listing shows (path, size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
+
+```json
+{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
+```
+
+`content_id` names a movie, series or episode; books, podcasts and their
+episodes produce none of these. Changes are per library: an item in two
+libraries that leaves one gets `removed` for that library and stays in the
+listing with the other in `library_ids`. A content ID change is `removed` for
+the old ID and `added` for the new one. The events carry ids only. A consumer
+fetches the named items with the listing's `content_ids` filter (up to 200 per
+request) and treats an id the listing no longer returns as gone. Turning a
+library off or on sends no per-item changes; it changes `library_ids` and which
+items the listing returns, so re-list after a `catalog.library.changed`.
+
+Database triggers record these changes from every code path that writes library
+memberships or files, so a rescan that rewrites rows without changing what they
+show sends nothing. The server merges what is waiting per item and library: an
+add and a removal that cancel out send nothing, and an `added` or `removed`
+absorbs the item's `files_changed`. To leave room in each connection's buffer for
+other channels, the cluster publishes at most 32 of these changes every 100 ms,
+about 320 a second, so a large library's first scan arrives over minutes.
+Delivery is at most once, like every event on this socket. Changes still
+unpublished after a day are dropped. After a reconnect, re-list (with
+`added_after` for adds) rather than relying on the events.
+
+The v1 bridge socket does not carry `added`, `removed` or `files_changed`.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the

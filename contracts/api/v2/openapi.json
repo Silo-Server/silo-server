@@ -3276,6 +3276,10 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "item_change_events": {
+            "description": "catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators",
+            "type": "boolean"
+          },
           "item_listing": {
             "description": "listAdminCatalogItems is served",
             "type": "boolean"
@@ -3303,6 +3307,7 @@
         "required": [
           "item_listing",
           "item_listing_max_content_ids",
+          "item_change_events",
           "revision",
           "state",
           "allowed"

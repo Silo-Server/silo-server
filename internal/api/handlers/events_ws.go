@@ -303,7 +303,9 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 
 // serveWebSocket runs one events connection. When accessChanged closes, the
 // loop tells the client its access changed and closes the connection with
-// EventsCloseAccessChanged; a nil channel never fires.
+// EventsCloseAccessChanged; a nil channel never fires. Only the v2 handshake
+// passes one: the bridge socket never sends access_changed, and never
+// receives V2Only events either.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -472,7 +474,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 			if !ok {
 				return
 			}
-			if _, subscribed := subscriptions[env.Channel]; !subscribed {
+			if _, subscribed := subscriptions[env.Channel]; !subscribed || (env.V2Only && accessChanged == nil) {
 				continue
 			}
 			if !allowsEventForClaims(claims, boundProfileID, env) {

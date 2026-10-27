@@ -1527,6 +1527,12 @@ func main() {
 		deps.WatchProviderRegistry = watchProviderRegistry
 	}
 
+	// Every API server drains the catalog item change outbox; a row in the
+	// database spaces the drains out across the cluster.
+	if mode == "integrated" || mode == "api" {
+		go realtimeHub.RunItemChangePublisher(appCtx, catalog.NewItemChangeOutbox(pool))
+	}
+
 	// Initialize node pools for integrated/api modes.
 	if mode == "integrated" || mode == "api" {
 		nodeRepo := nodepool.NewRepository(pool)

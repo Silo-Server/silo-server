@@ -13892,6 +13892,8 @@ export interface components {
     AdminCatalogCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators */
+      item_change_events: boolean;
       /** @description listAdminCatalogItems is served */
       item_listing: boolean;
       /**

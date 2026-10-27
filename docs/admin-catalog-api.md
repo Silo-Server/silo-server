@@ -94,10 +94,17 @@ viewer has no language preference (the file's default track, else its first);
 a file-level value
 fills a field that track lacks. Fields the scanner has not probed are absent.
 
-`GET /api/v2/admin/catalog/capabilities` reports `item_listing` and
-`item_listing_max_content_ids`. The listing has no Apple, Android, or Jellyfin
-compatibility callers; Jellyfin clients read the catalog through their own
-item queries.
+To keep a mirror current between full passes, subscribe to the `catalog` channel
+of the v2 events socket. Administrators receive `catalog.item.changed` with
+`change` `added`, `removed` or `files_changed`, carrying ids only (see
+[realtime-api.md](realtime-api.md#catalog-item-changes)); fetch the named items
+with `content_ids`, and drop any the listing no longer returns.
+
+`GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
+`item_listing_max_content_ids`, and `item_change_events`, true when the socket
+carries those changes. The listing and the events have no Apple, Android, or
+Jellyfin compatibility callers; Jellyfin clients read the catalog through their
+own item queries.
 
 ## Export and import
 

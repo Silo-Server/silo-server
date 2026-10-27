@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/gorilla/websocket"
@@ -616,4 +617,63 @@ func TestEventsSocketV2ClosesWhenKeyRevoked(t *testing.T) {
 			return
 		}
 	}
+}
+
+// TestV2OnlyEventsSkipTheBridgeSocket: the v1 bridge socket is frozen, so an
+// event published for v2 connections only, such as the per-item
+// catalog.item.changed changes, reaches a v2 connection but never the bridge.
+func TestV2OnlyEventsSkipTheBridgeSocket(t *testing.T) {
+	publish := func(t *testing.T, hub *evt.Hub) {
+		t.Helper()
+		for _, p := range []struct {
+			change string
+			opts   evt.PublishOptions
+		}{
+			{"added", evt.PublishOptions{V2Only: true}},
+			{"metadata_updated", evt.PublishOptions{}},
+		} {
+			if err := hub.PublishJSON(t.Context(), evt.ChannelCatalog, "catalog.item.changed",
+				map[string]any{"content_id": "movie-1", "change": p.change}, p.opts); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("bridge", func(t *testing.T) {
+		hub := evt.NewHub("test", &cache.NoopEventBus{})
+		_, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "admin"}, "?channels=catalog")
+		readFrame("hello")
+		readFrame("subscribed")
+		readFrame("snapshot")
+		publish(t, hub)
+		if event := readFrame("event"); !strings.Contains(string(event["data"]), `"metadata_updated"`) {
+			t.Fatalf("bridge socket received a v2-only event: %s", event["data"])
+		}
+	})
+
+	t.Run("v2", func(t *testing.T) {
+		h, _ := socketTestHandler()
+		server := httptest.NewServer(h)
+		defer server.Close()
+		ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
+		dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+		conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?channels=catalog", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
+		defer func() { _ = resp.Body.Close() }()
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"hello", "subscribed", "snapshot"} {
+			if _, body, err := conn.ReadMessage(); err != nil || !strings.Contains(string(body), `"type":"`+want+`"`) {
+				t.Fatalf("%s: %s %v", want, body, err)
+			}
+		}
+		publish(t, h.Events.hub)
+		if _, body, err := conn.ReadMessage(); err != nil || !strings.Contains(string(body), `"change":"added"`) {
+			t.Fatalf("v2 socket missed the v2-only event: %s %v", body, err)
+		}
+	})
 }

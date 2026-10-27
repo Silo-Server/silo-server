@@ -83,6 +83,7 @@ type AdminCatalogCapabilities struct {
 	Capability
 	ItemListing           bool `json:"item_listing" doc:"listAdminCatalogItems is served"`
 	ItemListingContentIDs int  `json:"item_listing_max_content_ids" doc:"Most content_ids one listAdminCatalogItems request accepts"`
+	ItemChangeEvents      bool `json:"item_change_events" doc:"catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int
@@ -100,6 +101,7 @@ func registerAdminCatalogItems(reg *Registry) {
 			Capability:            Capability{State: configuredCapabilityState(served)},
 			ItemListing:           served,
 			ItemListingContentIDs: adminCatalogItemsMaxContentIDs,
+			ItemChangeEvents:      served,
 		}}, nil
 	})
 

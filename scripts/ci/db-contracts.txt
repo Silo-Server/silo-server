@@ -601,3 +601,8 @@
 # A Watch Together room's suggestion cap holds when creators on two API servers
 # race on the v1 and v2 create paths.
 ./internal/watchtogether TestSuggestionRoomLimitPG
+
+# The catalog item change outbox: what each membership and file write queues
+# (and what routine scan writes do not), key moves, coalescing, the cluster-wide
+# drain spacing, and retention.
+./internal/catalog TestCatalogItemChangeOutboxDB
