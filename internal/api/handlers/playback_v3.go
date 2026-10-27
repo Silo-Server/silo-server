@@ -1979,8 +1979,11 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackPreflightOperationError(err)
 	}
 	timings.mark("file_preflight")
+	// preferredAudio is that choice before the refinement, which a later
+	// switch to another version refines again on that version.
+	preferredAudio := audioIndex
 	if serverAudio && settingsErr == nil {
-		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, audioIndex, settings)
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, requestedFile, audioIndex, settings)
 		timings.mark("audio_capabilities")
 	}
 	// The viewer's intent on the requested file, before any version fallback
@@ -2041,7 +2044,13 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if limitErr != nil {
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
 	}
+	bufferedBase := effectiveFile
 	effectiveFile, req, audioIndex = h.lowerBufferedVersion(r, req, effectiveFile, audioIndex, settings)
+	if serverAudio && settingsErr == nil && effectiveFile != bufferedBase {
+		// A track refined on the requested file means little on another
+		// version: refine the preference again on the one that plays.
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, effectiveFile, remapAudioIndexV3(requestedFile, effectiveFile, preferredAudio), settings)
+	}
 	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
 	planned, fallbackWarnings := h.planStartV3(r, req, requestedFile, alternateBase, effectiveFile, audioIndex, settings, lowerVersion)
 	req, effectiveFile, audioIndex = planned.request, planned.file, planned.audioIndex
@@ -3863,11 +3872,13 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	return normalizeAudioTrackIndex(file, chosen), playback.SavedAudioTrackChosen(file.AudioTracks, seriesPref, chosen), nil
 }
 
-// playableStartAudioV3 refines a preference-chosen start track by planning the
-// requested file once per candidate (playback.PreferUnconvertedAudioTrackV3):
-// a same-language track this request plays unconverted replaces one it would
-// convert. The plan for the chosen track alone settles most starts.
-func (h *PlaybackHandler) playableStartAudioV3(ctx context.Context, req playback.StartRequestV3, file *models.MediaFile, chosen int, settings playback.PlannerSettingsV3) int {
+// playableStartAudioV3 refines a preference-chosen start track by planning
+// file, the version that plays, once per candidate
+// (playback.PreferUnconvertedAudioTrackV3): a same-language track this request
+// plays unconverted replaces one it would convert. Each plan takes the
+// escalation the start applies to a progressive remux with no route. The plan
+// for the chosen track alone settles most starts.
+func (h *PlaybackHandler) playableStartAudioV3(ctx context.Context, req playback.StartRequestV3, requestedFile, file *models.MediaFile, chosen int, settings playback.PlannerSettingsV3) int {
 	if file == nil || len(file.AudioTracks) < 2 {
 		return chosen
 	}
@@ -3875,11 +3886,19 @@ func (h *PlaybackHandler) playableStartAudioV3(ctx context.Context, req playback
 	dvRPUStrippable := h.lazyDVRPUStrippableV3(ctx, file)
 	subtitles := h.downloadedSubtitleInventoryV3(ctx, file)
 	return playback.PreferUnconvertedAudioTrackV3(file, chosen, func(index int) playback.StartAudioOutcomeV3 {
-		result, _ := h.planPlaybackWithCapabilitiesV3(ctx, playback.PlannerInputV3{
-			Request: req, RequestedFile: file, EffectiveFile: file, ServerBitrateCapKbps: serverBitrateCapV3(ctx),
+		input := playback.PlannerInputV3{
+			Request: req, RequestedFile: requestedFile, EffectiveFile: file, ServerBitrateCapKbps: serverBitrateCapV3(ctx),
 			AudioTrackIndex: index, Settings: settings, Registry: registry, DVRPUStrippable: dvRPUStrippable,
 			Now: time.Now(), AdditionalSubtitles: subtitles,
-		})
+		}
+		result, capabilityErr := h.planPlaybackWithCapabilitiesV3(ctx, input)
+		if capabilityErr != nil {
+			return playback.StartAudioOutcomeV3{}
+		}
+		result, escalateErr := h.escalateRefusedProgressiveRemuxV3(ctx, headerAuthenticatedMediaV3(req.ClientFeatures), func() playback.PlannerInputV3 { return input }, result)
+		if escalateErr != nil {
+			return playback.StartAudioOutcomeV3{}
+		}
 		return playback.StartAudioOutcomeFromResultV3(result)
 	})
 }
