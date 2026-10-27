@@ -165738,7 +165738,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delegate the current login session for one realtime handshake.",
+        "summary": "Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake.",
         "tags": [
           "realtime"
         ],

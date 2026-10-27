@@ -56,6 +56,22 @@ func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
 	if _, err := store.Mint(t.Context(), invalid); err == nil {
 		t.Fatal("sessionless proof minted")
 	}
+	// An API-key proof names the key at a revision and nothing else.
+	key := SocketIdentity{UserID: 7, Role: "admin", APIKeyID: 3, APIKeyRevision: 9, AccessExpiresAt: time.Now().Add(time.Minute)}
+	if _, err := store.Mint(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*SocketIdentity){
+		"key with a session":   func(i *SocketIdentity) { i.SessionID = "session" },
+		"key with a profile":   func(i *SocketIdentity) { i.ProfileID = "profile" },
+		"key with no revision": func(i *SocketIdentity) { i.APIKeyRevision = 0 },
+	} {
+		invalid := key
+		change(&invalid)
+		if _, err := store.Mint(t.Context(), invalid); err == nil {
+			t.Fatal(name, "minted")
+		}
+	}
 }
 
 // Deployments hold every audience's tickets under one Redis prefix; sharing

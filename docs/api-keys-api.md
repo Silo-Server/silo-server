@@ -183,6 +183,11 @@ cached aggregate, so a polling tool cannot force the aggregate queries.
 
 Unscoped keys and login sessions keep the full documents.
 
+The scope also admits one write, `POST /api/v2/events/ws-ticket`, which opens
+the realtime events socket for the `sessions` and `catalog` channels for up to
+four hours. The key's revision and scope are rechecked every 15 seconds; see
+[API-key handshake](realtime-api.md#api-key-handshake).
+
 `admin:sessions:control` admits `POST /api/v2/admin/sessions/{session_id}/`
 `pause`, `resume`, `stop`, `message` and `terminate`, plus
 `GET /api/v2/admin/sessions/command-capabilities`. It grants no reads beyond

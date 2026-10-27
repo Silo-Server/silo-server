@@ -8219,7 +8219,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Delegate the current login session for one realtime handshake. */
+    /** Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake. */
     post: operations["createEventsSocketTicket"];
     delete?: never;
     options?: never;

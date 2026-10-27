@@ -15,6 +15,11 @@ import (
 const SocketTicketTTL = 30 * time.Second
 const SocketMaxLifetime = 5 * time.Minute
 
+// APIKeySocketMaxLifetime caps an events socket an API key opens. A key has
+// no access token to expire with, and the socket's periodic recheck of the
+// key, its scope and its account is what ends it early.
+const APIKeySocketMaxLifetime = 4 * time.Hour
+
 // Socket ticket audiences. Every socket that shares this store shape holds
 // its tickets under one Redis prefix, so the audience a ticket was minted for
 // is what keeps it from opening a different socket.
@@ -23,7 +28,9 @@ const (
 	SocketAudienceAdminLogs = "admin_logs"
 )
 
-// SocketIdentity is a delegated login-session proof, never an independent login.
+// SocketIdentity is a delegated login-session proof, never an independent login,
+// or, for the events socket only, the proof of one API key (APIKeyID set, no
+// SessionID or profile).
 // ProfileToken retains the PIN proof captured when the ticket was requested.
 // Neither it nor the opaque ticket may be included in logs or socket messages.
 type SocketIdentity struct {
@@ -43,6 +50,31 @@ type SocketIdentity struct {
 	// Audience is the socket the ticket opens. The store stamps it at mint
 	// and refuses a ticket minted for another audience at consume.
 	Audience string `json:"audience"`
+	// APIKeyID and APIKeyRevision name the key, and the configuration
+	// revision it had at mint, for a ticket an API key minted.
+	APIKeyID       int64 `json:"api_key_id,omitempty"`
+	APIKeyRevision int64 `json:"api_key_revision,omitempty"`
+}
+
+// MaxLifetime is how long a socket opened with this identity may stay open.
+func (i SocketIdentity) MaxLifetime() time.Duration {
+	if i.APIKeyID != 0 {
+		return APIKeySocketMaxLifetime
+	}
+	return SocketMaxLifetime
+}
+
+// holdsAuthority reports whether the identity names exactly one credential:
+// a login session with the viewer scope it was minted under, or an API key
+// at a known revision, which stands in for the scope.
+func (i SocketIdentity) holdsAuthority() bool {
+	if i.UserID <= 0 {
+		return false
+	}
+	if i.APIKeyID != 0 {
+		return i.APIKeyID > 0 && i.APIKeyRevision > 0 && i.SessionID == "" && i.ProfileID == ""
+	}
+	return i.SessionID != "" && i.AccessFingerprint != ""
 }
 
 var ErrSocketTicket = errors.New("invalid or unavailable realtime credential")
@@ -61,7 +93,7 @@ func NewSocketTicketStore(client *redis.Client, audience string) *SocketTicketSt
 
 func (s *SocketTicketStore) Mint(ctx context.Context, identity SocketIdentity) (string, error) {
 	now := time.Now()
-	if s.audience == "" || identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.AccessExpiresAt.After(now) {
+	if s.audience == "" || !identity.holdsAuthority() || !identity.AccessExpiresAt.After(now) {
 		return "", ErrSocketTicket
 	}
 	identity.Audience = s.audience
@@ -127,7 +159,7 @@ func (s *SocketTicketStore) Consume(ctx context.Context, ticket string) (SocketI
 		s.mu.Unlock()
 	}
 	now := time.Now()
-	if identity.Audience == "" || identity.Audience != s.audience || identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.TicketExpiresAt.After(now) || !identity.AccessExpiresAt.After(now) {
+	if identity.Audience == "" || identity.Audience != s.audience || !identity.holdsAuthority() || !identity.TicketExpiresAt.After(now) || !identity.AccessExpiresAt.After(now) {
 		return SocketIdentity{}, ErrSocketTicket
 	}
 	return identity, nil

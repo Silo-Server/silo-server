@@ -2,6 +2,9 @@
 
 `GET /api/v2/events/capabilities` describes the shared event subscription
 protocol. It requires an authenticated account; no active profile is required.
+`allowed` is true for a current access-token login session and for an
+administrator's `admin:monitor:read` API key sent with no profile, the callers
+that may mint an events socket ticket.
 When the event service is unavailable, the capability response remains `200` with `state: not_configured` and `allowed: false`.
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
@@ -23,8 +26,9 @@ native realtime discovery operation.
 ## Session-bound socket handshake
 
 `POST /api/v2/events/ws-ticket` delegates a current access-token login session
-for one connection. API keys and credentials without a bounded access-token
-expiry cannot mint this proof. A profile is optional; when present, its ownership
+for one connection. Credentials without a bounded access-token expiry cannot
+mint this proof, and an API key mints only as described in
+[API-key handshake](#api-key-handshake). A profile is optional; when present, its ownership
 and PIN proof must validate. The ticket is opaque, expires within 30 seconds,
 and binds the account, login session, account role, profile proof and resolved
 access policy. The response includes `ticket`, `expires_in`,
@@ -48,6 +52,9 @@ Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
 Without Redis, tickets are process-local and require affinity to the minting
 node; restarting that node invalidates them. This store is distinct from the
 bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
+The events and admin log stream sockets keep their tickets under one Redis
+prefix, so each ticket names the socket it was minted for and the other socket
+refuses it.
 
 Admission rechecks the current session, enabled account, account role and viewer
 policy/PIN proof. An admin account receives the administrator channels only while
@@ -69,6 +76,35 @@ grace period, inbound frame limits, snapshots, ping/pong and delivery filtering.
 The handshake version does not rewrite another domain's event payload.
 Web consumers capture account/profile authority before minting and discard
 connection results and frames after that authority changes.
+
+### API-key handshake
+
+A monitoring tool authenticates with an API key instead of a login session. An
+API key holding the `admin:monitor:read` scope may call
+`POST /api/v2/events/ws-ticket` with no `X-Profile-Id`; any other key, and a
+monitoring key that sends a profile, is refused with `403 permission_denied`.
+The key's account must be an enabled administrator that the acting-admin
+decision admits with no profile (API keys are exempt from the household
+profile requirement, as at the HTTP admin routes). The ticket binds the key, its
+account, its configuration revision and the events socket, and the response
+carries `max_connection_seconds` (14400). The handshake is the same as for a
+login session.
+
+A key connection may subscribe to `sessions` and `catalog` only; the hello
+frame's `available_channels` lists exactly those, and other declared channels
+come back rejected. Jobs and scans carry artifact URLs, request payloads and
+library paths, which the monitoring scope never reads. The admin log stream,
+playback-control, Watch Together and Apple push sockets stay login-only.
+
+The connection ends after four hours. Every 15 seconds it rechecks that the key
+exists with the same owner and revision, still holds `admin:monitor:read`, and
+that its account is enabled, still an administrator, and still admitted by the
+acting-admin decision. Deleting the key or disabling the account closes the
+connection. Editing the key (any change to its scopes, label or rate tier
+advances its revision), demoting the account, or an acting-admin refusal sends
+`access_changed` (see [Access changes](#access-changes)); the tool mints a new
+ticket, which a key that lost the scope or an account that lost the admin role
+cannot do.
 
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
