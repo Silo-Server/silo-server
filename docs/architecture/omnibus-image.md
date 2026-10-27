@@ -39,15 +39,20 @@ order:
 
 1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`.
 2. `init-adduser` maps the `silo` account onto `PUID` and `PGID` and adds it to
-   the groups of any passed-in GPU devices.
+   the groups of any passed-in GPU devices. A device owned by group 0 is
+   skipped, so Silo, which never runs as root here, cannot open it. Unprivileged
+   LXC containers present passed-through devices that way unless the host gives
+   them a group (on Proxmox, `gid=` on the `devN` entry).
 3. `init-config` lays out `/config`, decides which bundled services run, and
    exports the connection settings Silo reads for them: `DATABASE_URL`,
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
    `REDIS_URL` turns the matching bundled service off. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
    a deployment's own database keeps Silo's default, tuning off.
-4. `init-postgres` creates the cluster on first start; `svc-postgres` runs it;
-   `init-postgres-db` creates the `silo` database. `svc-redis` and
+4. `init-postgres` creates the cluster on first start and writes the image's
+   settings and `pg_hba.conf` on every start; `svc-postgres` runs it;
+   `init-postgres-db` creates the `silo` database and rebuilds
+   collation-dependent indexes after a C library change. `svc-redis` and
    `svc-meilisearch` start alongside. A service that is off reports ready and
    sleeps, so the dependency graph stays fixed.
 5. `svc-silo` runs Silo once the database exists and the enabled services
@@ -67,7 +72,18 @@ container's stop timeout bounds them.
 | Meilisearch | `meilisearch` | 997:997 | `/config/meilisearch` |
 
 The service ids are fixed in `omnibus/Dockerfile` so the data directories keep
-a valid owner across image updates. `init-adduser` refuses a `PUID` that
+a valid owner across image updates. `init-config` hands `/config/silo` to the
+`silo` account with a full walk only when its ids differ from the ones recorded
+in `/config/silo/.omnibus-owner` by the last walk, or when an entry in the top
+two levels is owned wrong; local artwork can hold millions of files. Deleting
+the marker forces a walk.
+
+Silo reaches its state through `/var/lib/silo`, a link to `/config/silo`, so
+paths stored in the database keep working. Local artwork storage is the
+exception: Silo records it by its resolved root, and refuses to start when that
+changes. A catalog that stored local artwork under another image's
+`/var/lib/silo/artwork` resolves to `/config/silo/artwork` here and does not
+open; S3 artwork is unaffected. `init-adduser` refuses a `PUID` that
 another account holds: the kernel would report that account's name for Silo's
 processes, and PostgreSQL's peer authentication maps the process's user name to
 the database role.
@@ -77,12 +93,19 @@ superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
 migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
 uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the Compose
-stack. That image's glibc can differ from this one's, so a data directory moved
-between them reports a collation version mismatch and needs its text indexes
-rebuilt; moving an install between the two goes through `pg_dump` and
-`pg_restore` instead. `init-postgres` rewrites `conf.d/00-omnibus.conf` on
-every start and makes sure `postgresql.conf` includes `conf.d`;
-`POSTGRES_TUNE` writes `postgresql.auto.conf`, which loads after it.
+stack. Each database records the C library collation version it was built
+under, and an index on text sorted under another version can miss rows. On
+every start `init-postgres-db` compares the recorded version with the running
+one, and for each database that differs it rebuilds the indexes on libc
+collations and runs `ALTER DATABASE ... REFRESH COLLATION VERSION`. That covers
+a data directory from the Compose stack's image, which is Debian 12 (glibc
+2.36) where this one has 2.41, and a later move of this image to a newer Debian
+release. The rebuild runs before Silo starts, so a large catalog's first start
+takes longer. `init-postgres` rewrites `conf.d/00-omnibus.conf` and
+`pg_hba.conf` on every start and makes sure `postgresql.conf` includes
+`conf.d`; `POSTGRES_TUNE` writes `postgresql.auto.conf`, which loads after it.
+Rewriting `pg_hba.conf` matters for a data directory from the official
+PostgreSQL image, whose file trusts every local connection.
 
 ## Search settings
 
