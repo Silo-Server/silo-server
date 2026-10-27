@@ -12973,6 +12973,8 @@ export interface components {
       password_reset_link: boolean;
       /** @description Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override */
       policy_defaults: boolean;
+      /** @description Whether listAdminUserProfiles returns each profile's avatar, avatar_url and avatar_source as listProfiles does */
+      profile_avatars: boolean;
       /** @description Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit */
       profile_limits: boolean;
       /** @description Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout */
@@ -13034,6 +13036,22 @@ export interface components {
       id: string;
     };
     AdminAccountProfile: {
+      /**
+       * @description Avatar reference; empty when none
+       * @example preset:fox
+       */
+      avatar: string;
+      /**
+       * @example preset
+       * @enum {string}
+       */
+      avatar_source: "none" | "preset" | "upload";
+      /**
+       * Format: uri-reference
+       * @description Where to fetch the avatar; absent when there is none to fetch
+       * @example /avatars/presets/fox.png
+       */
+      avatar_url?: string;
       /**
        * @description Opaque identifier
        * @example 1

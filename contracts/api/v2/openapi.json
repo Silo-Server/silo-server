@@ -1487,6 +1487,10 @@
             "description": "Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override",
             "type": "boolean"
           },
+          "profile_avatars": {
+            "description": "Whether listAdminUserProfiles returns each profile's avatar, avatar_url and avatar_source as listProfiles does",
+            "type": "boolean"
+          },
           "profile_limits": {
             "description": "Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit",
             "type": "boolean"
@@ -1534,6 +1538,7 @@
           "account_downloads",
           "request_usage",
           "policy_defaults",
+          "profile_avatars",
           "profile_sections",
           "revision",
           "state",
@@ -1719,6 +1724,32 @@
       "AdminAccountProfile": {
         "additionalProperties": false,
         "properties": {
+          "avatar": {
+            "description": "Avatar reference; empty when none",
+            "examples": [
+              "preset:fox"
+            ],
+            "type": "string"
+          },
+          "avatar_source": {
+            "enum": [
+              "none",
+              "preset",
+              "upload"
+            ],
+            "examples": [
+              "preset"
+            ],
+            "type": "string"
+          },
+          "avatar_url": {
+            "description": "Where to fetch the avatar; absent when there is none to fetch",
+            "examples": [
+              "/avatars/presets/fox.png"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -1744,7 +1775,9 @@
         "required": [
           "id",
           "name",
-          "last_seen_at"
+          "last_seen_at",
+          "avatar",
+          "avatar_source"
         ],
         "type": "object"
       },
@@ -42063,8 +42096,6 @@
         "required": [
           "id",
           "name",
-          "avatar",
-          "avatar_source",
           "has_pin",
           "is_child",
           "is_primary",
@@ -42085,7 +42116,9 @@
           "allowed_library_ids",
           "max_playback_quality",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "avatar",
+          "avatar_source"
         ],
         "type": "object"
       },

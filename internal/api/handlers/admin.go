@@ -188,6 +188,11 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// ProfileAvatars resolves the avatar on admin profile listings the way
+	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
+	ProfileAvatars interface {
+		ResolveAvatar(ctx context.Context, ref string) (source, url string)
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request

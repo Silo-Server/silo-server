@@ -33,9 +33,11 @@ type AdminAccountView struct {
 
 // AdminProfileView is one household profile on an account. LastSeenAt is the
 // latest time any device registration reported the profile; nil when none has.
+// The avatar fields match ProfileView's.
 type AdminProfileView struct {
-	ID, Name   string
-	LastSeenAt *time.Time
+	ID, Name                        string
+	Avatar, AvatarURL, AvatarSource string
+	LastSeenAt                      *time.Time
 }
 
 func (h *AdminHandler) AdminAccountCapabilities() (bool, bool) {
@@ -405,13 +407,21 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name)}
+		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar}
+		view.AvatarSource, view.AvatarURL = h.resolveProfileAvatar(ctx, row.Avatar)
 		if at, ok := lastSeen[row.ID]; ok {
 			view.LastSeenAt = &at
 		}
 		result = append(result, view)
 	}
 	return result, nil
+}
+
+func (h *AdminHandler) resolveProfileAvatar(ctx context.Context, ref string) (source, url string) {
+	if h.ProfileAvatars == nil {
+		return resolveProfileAvatar(ctx, nil, 0, ref)
+	}
+	return h.ProfileAvatars.ResolveAvatar(ctx, ref)
 }
 
 // profileLastSeen is the latest device registration time per profile. A
