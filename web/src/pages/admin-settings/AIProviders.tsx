@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   useAIProviderModels,
+  useAIProviders,
   useCheckAIProvider,
   useCreateAIProvider,
   useDeleteAIProvider,
@@ -30,7 +31,7 @@ import {
   type AIProviderDraft,
   type AIProviderType,
 } from "@/hooks/queries/admin/aiProviders";
-import { AI_CAPABILITY_LABELS, hostLabel } from "@/lib/aiProviders";
+import { AI_CAPABILITY_LABELS, hostLabel, providerOptions } from "@/lib/aiProviders";
 import { cn } from "@/lib/utils";
 
 import {
@@ -98,6 +99,7 @@ export function ModelField({
   kind,
   value,
   onChange,
+  onCommit,
   placeholder,
 }: {
   label: string;
@@ -106,6 +108,8 @@ export function ModelField({
   kind: AICapability;
   value: string;
   onChange: (value: string) => void;
+  /** Called when the field loses focus, for pages that save each field. */
+  onCommit?: () => void;
   placeholder?: string;
 }) {
   const inputID = useId();
@@ -129,6 +133,7 @@ export function ModelField({
         list={listID}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onCommit}
         placeholder={placeholder}
         autoComplete="off"
         spellCheck={false}
@@ -156,12 +161,12 @@ function draftOf(provider: AIProvider): AIProviderDraft {
   };
 }
 
-function draftForType(type: AIProviderType): AIProviderDraft {
+function draftForType(type: AIProviderType, capability: AICapability): AIProviderDraft {
   return {
     type: type.type,
     name: type.label,
     base_url: type.default_base_url,
-    capabilities: type.capabilities.length > 0 ? type.capabilities : ["chat"],
+    capabilities: type.capabilities.length > 0 ? type.capabilities : [capability],
   };
 }
 
@@ -330,17 +335,23 @@ const CHATGPT_TYPE = "chatgpt";
 
 /**
  * Connects a provider in two steps: what kind it is, then where it is and its
- * key. `types` is never empty while the dialog is open.
+ * key. `types` is never empty while the dialog is open. `capability` is what a
+ * new custom endpoint is assumed to serve until the administrator says
+ * otherwise.
  */
-function AddAIProviderDialog({
+export function AddAIProviderDialog({
   open,
   onOpenChange,
   types,
+  capability = "chat",
+  onCreated,
   onChooseChatGPT,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   types: AIProviderType[];
+  capability?: AICapability;
+  onCreated?: (provider: AIProvider) => void;
   onChooseChatGPT?: () => void;
 }) {
   return (
@@ -350,6 +361,8 @@ function AddAIProviderDialog({
         {open ? (
           <AddAIProviderSteps
             types={types}
+            capability={capability}
+            onCreated={onCreated}
             onChooseChatGPT={onChooseChatGPT}
             onDone={() => onOpenChange(false)}
           />
@@ -361,10 +374,14 @@ function AddAIProviderDialog({
 
 function AddAIProviderSteps({
   types,
+  capability,
+  onCreated,
   onChooseChatGPT,
   onDone,
 }: {
   types: AIProviderType[];
+  capability: AICapability;
+  onCreated?: (provider: AIProvider) => void;
   onChooseChatGPT?: () => void;
   onDone: () => void;
 }) {
@@ -393,14 +410,17 @@ function AddAIProviderSteps({
             <CapabilityChips capabilities={type.capabilities} />
           </DialogTitle>
           <DialogDescription>
-            Nothing uses the provider until a job selects it under Models.
+            {onCreated
+              ? "Once added, it is selected here."
+              : "Nothing uses the provider until a job selects it under Models."}
           </DialogDescription>
         </DialogHeader>
         <ProviderPanel
           type={type}
-          initial={draftForType(type)}
+          initial={draftForType(type, capability)}
           onDone={onDone}
           onBack={() => setStep("type")}
+          onCreated={onCreated}
         />
       </>
     );
@@ -459,6 +479,7 @@ function ProviderPanel({
   initial,
   onDone,
   onBack,
+  onCreated,
 }: {
   provider?: AIProvider;
   type: AIProviderType;
@@ -466,6 +487,7 @@ function ProviderPanel({
   onDone: () => void;
   /** Returns to the type choice of the add dialog. */
   onBack?: () => void;
+  onCreated?: (provider: AIProvider) => void;
 }) {
   const [draft, setDraft] = useState<AIProviderDraft>(initial);
   const [test, setTest] = useState<ProviderTestState | undefined>();
@@ -520,8 +542,13 @@ function ProviderPanel({
         await update.mutateAsync({ id: provider.id, draft });
         toast.success(`${draft.name} saved.`);
       } else {
-        await create.mutateAsync(draft);
-        toast.success(`${draft.name} connected. Choose it for a job under Models.`);
+        const created = await create.mutateAsync(draft);
+        if (onCreated) {
+          onCreated(created);
+          toast.success(`${draft.name} connected.`);
+        } else {
+          toast.success(`${draft.name} connected. Choose it for a job under Models.`);
+        }
       }
       onDone();
     } catch (error) {
@@ -665,5 +692,73 @@ function ProviderPanel({
         />
       ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Embedding provider
+// ---------------------------------------------------------------------------
+
+const ADD_PROVIDER = "add";
+/** Releases the embedding provider, so it can be removed once nothing uses it. */
+const NO_EMBEDDING_PROVIDER = "none";
+
+/**
+ * Chooses the provider recommendation embeddings use, and connects a new one
+ * in place. Providers that cannot serve embeddings stay listed, disabled, so
+ * an administrator sees why a connected provider is not offered.
+ */
+export function EmbeddingProviderField({
+  value,
+  onChange,
+  disabled,
+  restartRequired,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  restartRequired?: boolean;
+}) {
+  const list = useAIProviders();
+  const [adding, setAdding] = useState(false);
+  const providers = list.data?.providers ?? [];
+  const types = (list.data?.types ?? []).filter(
+    (type) => type.capabilities.length === 0 || type.capabilities.includes("embeddings"),
+  );
+  const unable = providers
+    .filter((provider) => !provider.capabilities.includes("embeddings"))
+    .map((provider) => ({
+      value: provider.id,
+      label: `${provider.name} (no embedding models)`,
+      disabled: true,
+    }));
+  return (
+    <>
+      <SettingField
+        label="Embedding provider"
+        type="select"
+        value={value || NO_EMBEDDING_PROVIDER}
+        disabled={disabled || list.isLoading}
+        restartRequired={restartRequired}
+        description="Connected in AI Services. ChatGPT plans do not include embedding models."
+        onChange={(next) => {
+          if (next === ADD_PROVIDER) setAdding(true);
+          else onChange(next === NO_EMBEDDING_PROVIDER ? "" : next);
+        }}
+        options={[
+          { value: NO_EMBEDDING_PROVIDER, label: "None" },
+          ...providerOptions(providers, "embeddings", value),
+          ...unable.filter((option) => option.value !== value),
+          ...(types.length > 0 ? [{ value: ADD_PROVIDER, label: "Connect a provider..." }] : []),
+        ]}
+      />
+      <AddAIProviderDialog
+        open={adding}
+        onOpenChange={setAdding}
+        types={types}
+        capability="embeddings"
+        onCreated={(provider) => onChange(provider.id)}
+      />
+    </>
   );
 }

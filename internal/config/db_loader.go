@@ -473,29 +473,24 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.JellyfinCompat.PlaybackSessionTTL = playbackSessionTTL
 
+	// AI provider registry: AI jobs resolve their endpoints from it below.
+	aiProviders, err := ParseAIProviderRegistry(m[AIProvidersSettingKey])
+	if err != nil {
+		return nil, err
+	}
+
 	// Recommendations
 	recsEnabled, err := boolOr(m, "recommendations.enabled", false)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Recommendations.Enabled = recsEnabled
-	legacyOpenAIConfigured := m["recommendations.openai_model"] != "" || m["recommendations.openai_api_key"] != "" || m["recommendations.embedding_provider"] == "openai"
-	cfg.Recommendations.EmbeddingBaseURL = stringOr(m, "recommendations.embedding_base_url", func() string {
-		if legacyOpenAIConfigured {
-			return "https://api.openai.com"
-		}
-		return "http://ollama:11434"
-	}())
-	cfg.Recommendations.EmbeddingModel = stringOr(m, "recommendations.embedding_model", func() string {
-		if model := m["recommendations.openai_model"]; model != "" {
-			return model
-		}
-		if m["recommendations.embedding_provider"] == "openai" {
-			return "text-embedding-3-small"
-		}
-		return "all-minilm"
-	}())
-	cfg.Recommendations.EmbeddingAuthToken = stringOr(m, "recommendations.embedding_auth_token", stringOr(m, "recommendations.openai_api_key", ""))
+	// The embedding endpoint and key come from the provider the binding
+	// names; with none, recommendations have no embedding model to run.
+	cfg.Recommendations.EmbeddingProviderID = strings.TrimSpace(m[EmbeddingProviderSettingKey])
+	cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingAuthToken, _ = aiProviders.Resolve(
+		cfg.Recommendations.EmbeddingProviderID, AICapabilityEmbeddings)
+	cfg.Recommendations.EmbeddingModel = strings.TrimSpace(m["recommendations.embedding_model"])
 	cfg.Recommendations.EmbeddingsCron = stringOr(m, "recommendations.embeddings_cron", "0 3 * * *")
 	cfg.Recommendations.EmbeddingsJobTimeout, err = durationOr(m, "recommendations.embeddings_job_timeout", 24*time.Hour)
 	if err != nil {
@@ -519,10 +514,6 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// ASR), resolved from the provider each job selects in ai.providers. A
 	// binding to a missing provider leaves that job unconfigured; settings
 	// validation refuses to store one.
-	aiProviders, err := ParseAIProviderRegistry(m[AIProvidersSettingKey])
-	if err != nil {
-		return nil, err
-	}
 	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
 	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])

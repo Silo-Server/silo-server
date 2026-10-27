@@ -101,11 +101,18 @@ func (e *Engine) EmbedMissing(ctx context.Context) (EmbedCounts, error) {
 	return e.embed(ctx, nil, false)
 }
 
+// ErrNoEmbeddingProvider ends an embedding run on a server whose
+// recommendations have no embedding provider and model chosen.
+var ErrNoEmbeddingProvider = errors.New("no embedding provider is chosen; choose one on Recommendations")
+
 // embed runs EmbedAll, or EmbedMissing without includeTextStale. With held,
 // the embeddings job's cluster lock, the run stops with errJobLockLost before
 // storing vectors once held's session has closed: another server's run or an
 // embeddings reset may hold the lock by then.
 func (e *Engine) embed(ctx context.Context, held clusterLock, includeTextStale bool) (EmbedCounts, error) {
+	if !e.embeddingConfigured() {
+		return EmbedCounts{}, ErrNoEmbeddingProvider
+	}
 	b := e.newBackfill()
 	b.held = held
 	err := b.run(ctx, includeTextStale)
@@ -115,7 +122,18 @@ func (e *Engine) embed(ctx context.Context, held clusterLock, includeTextStale b
 // NeedsEmbedding reports whether any item has no embedding or one from
 // another model.
 func (e *Engine) NeedsEmbedding(ctx context.Context) (bool, error) {
-	ids, err := e.repo.ItemsNeedingEmbedding(ctx, e.cfg.EmbeddingModel, "", 1)
+	// With nothing to embed with, the catch-up stays idle rather than
+	// failing every few minutes; the nightly run reports the missing provider.
+	if !e.embeddingConfigured() {
+		return false, nil
+	}
+	model := e.cfg.EmbeddingModel
+	if lock, err := e.repo.GetEmbeddingLock(ctx); err != nil {
+		return false, err
+	} else if lock != nil && SameEmbeddingModel(lock.Model, model) {
+		model = lock.Model
+	}
+	ids, err := e.repo.ItemsNeedingEmbedding(ctx, model, "", 1)
 	if err != nil {
 		return false, err
 	}
@@ -299,9 +317,14 @@ type embedBackfill struct {
 }
 
 func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
-	lock, err := checkEmbeddingLockConfig(ctx, b.db, b.baseURL, b.model)
+	lock, err := checkEmbeddingLockConfig(ctx, b.db, b.model)
 	if err != nil {
 		return err
+	}
+	if lock != nil {
+		// Stored vectors keep the lock's name for the model, so a provider
+		// that spells it with a vendor prefix does not re-embed every item.
+		b.model = lock.Model
 	}
 	b.refused.useLock(lock)
 	// The vectors stored are committed, however the run ends.
@@ -731,7 +754,7 @@ func (b *embedBackfill) ensureLock(ctx context.Context, vector []float32) error 
 		}
 		b.lock = lock
 	}
-	return b.lock.Validate(b.baseURL, b.model, len(vector))
+	return b.lock.Validate(b.model, len(vector))
 }
 
 // checkStorableVector rejects a vector the embeddings table cannot hold.
@@ -746,8 +769,8 @@ func checkStorableVector(vector []float32) error {
 }
 
 // checkEmbeddingLockConfig fails when an embedding lock exists for another
-// base URL or model.
-func checkEmbeddingLockConfig(ctx context.Context, store embeddingLockReader, baseURL, model string) (*EmbeddingLock, error) {
+// model.
+func checkEmbeddingLockConfig(ctx context.Context, store embeddingLockReader, model string) (*EmbeddingLock, error) {
 	lock, err := store.GetEmbeddingLock(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load embedding lock: %w", err)
@@ -755,7 +778,7 @@ func checkEmbeddingLockConfig(ctx context.Context, store embeddingLockReader, ba
 	if lock == nil {
 		return nil, nil
 	}
-	return lock, lock.ValidateConfig(baseURL, model)
+	return lock, lock.ValidateConfig(model)
 }
 
 // runStopError returns the error that ends the run after a failed embed call,

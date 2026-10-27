@@ -2808,6 +2808,11 @@ func main() {
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
+		// A rotated embedding provider key applies at once; a new endpoint
+		// or model waits for the restart that rebuilds the engine.
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			recEngine.ApplyEmbeddingCredential(updated.Recommendations)
+		})
 
 		var err error
 		recWorker, err = recommendations.NewWorker(

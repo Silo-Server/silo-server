@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { AudioLines, Languages } from "lucide-react";
+import { AudioLines, Languages, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 
@@ -47,6 +47,8 @@ const TEXT_AI_KEYS = [
   "ai.reasoning_effort",
 ] as const;
 const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
+/** Shown here, chosen on Recommendations next to the embedding lock. */
+const EMBEDDING_KEYS = ["recommendations.embedding_provider_id", "recommendations.embedding_model"];
 /**
  * Pre-`ai.*` keys still read as a fallback, so a server configured before the
  * rename keeps its model and job limit until the modern key is saved.
@@ -73,6 +75,7 @@ const KEYS: string[] = Array.from(
   new Set([
     ...TEXT_AI_KEYS,
     ...SPEECH_AI_KEYS,
+    ...EMBEDDING_KEYS,
     ...LEGACY_AI_KEYS,
     ...AI_FEATURE_KEYS,
     ...AI_ADVANCED_KEYS,
@@ -472,6 +475,32 @@ function SpeechModelTile({
 }
 
 /**
+ * Recommendation embeddings as a read-only row. Changing the provider or model
+ * can require resetting every stored embedding, so the choice is made on
+ * Recommendations, beside the embedding lock and the reset.
+ */
+function EmbeddingsSummaryRow({ provider, model }: { provider?: AIProvider; model: string }) {
+  const ready = provider !== undefined && model.trim() !== "";
+  return (
+    <ProviderTile
+      name="Embeddings"
+      tagline="Recommendations and semantic search"
+      logo={<Sparkles className="text-muted-foreground size-4" aria-hidden="true" />}
+      state={ready ? "connected" : "not_connected"}
+      statePill={ready ? "Configured" : undefined}
+      meta={
+        ready ? `${model} · ${provider.name}` : "Choose a provider and a model on Recommendations"
+      }
+      headerActions={
+        <Button asChild type="button" size="sm" variant="outline">
+          <Link to="/admin/recommendations">Manage</Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/**
  * The ChatGPT plan as a provider row. Its sign-in lives with the text model,
  * the only job a plan can serve, so Manage opens that tile.
  */
@@ -741,8 +770,8 @@ export default function AISettings() {
       <SettingsPageHeader title="AI Services" />
 
       <p className="text-muted-foreground text-xs">
-        Connect each AI provider once. Text and speech-to-text each choose a provider and a model
-        from this list.
+        Connect each AI provider once. Text, speech-to-text, and recommendation embeddings each
+        choose a provider and a model from this list.
       </p>
       <FieldGroup label="Providers">
         <div className="py-3.5">
@@ -807,6 +836,14 @@ export default function AISettings() {
               expanded={expandedTile === "speech" || speechDirty}
               onExpand={() => setExpandedTile("speech")}
               onCollapse={() => setExpandedTile(null)}
+            />
+            <EmbeddingsSummaryRow
+              provider={providers.find(
+                (provider) =>
+                  provider.id === value("recommendations.embedding_provider_id") &&
+                  provider.capabilities.includes("embeddings"),
+              )}
+              model={value("recommendations.embedding_model")}
             />
           </ProviderTileGrid>
         </div>
@@ -956,16 +993,6 @@ export default function AISettings() {
           </TuningScope>
         </AdvancedSection>
       </FieldGroup>
-
-      <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-        Recommendation embeddings use their own models.
-        <Link
-          to="/admin/recommendations"
-          className="text-primary inline-flex shrink-0 items-center gap-1 font-medium hover:underline"
-        >
-          Open Recommendations
-        </Link>
-      </p>
 
       <SaveBar
         dirtyCount={form.dirtyCount}

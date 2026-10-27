@@ -633,6 +633,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "translation",
       "transcription",
       "subtitle translation",
+      "embeddings",
       "integrations",
     ],
     settings: settingIndex(
@@ -646,6 +647,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Model",
       "Reasoning level",
       "Speech-to-text",
+      "Embeddings",
       "Features",
       "Translate subtitles",
       "Create subtitles from audio",

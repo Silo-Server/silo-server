@@ -294,6 +294,7 @@ type jellyfinCompatConfigRaw struct {
 // RecommendationsConfig holds AI recommendation engine settings.
 type RecommendationsConfig struct {
 	Enabled                bool    `yaml:"-"`
+	EmbeddingProviderID    string  `yaml:"-"` // resolved into EmbeddingBaseURL and EmbeddingAuthToken
 	EmbeddingBaseURL       string  `yaml:"-"`
 	EmbeddingModel         string  `yaml:"-"`
 	EmbeddingAuthToken     string  `yaml:"-"`

@@ -3,6 +3,7 @@ package recommendations
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 )
@@ -40,20 +41,30 @@ func ParseEmbeddingLock(raw string) (*EmbeddingLock, error) {
 	return &lock, nil
 }
 
-// Validate ensures the lock matches the provided embedding configuration.
-func (l EmbeddingLock) ValidateConfig(baseURL, model string) error {
-	if l.BaseURL != "" && l.BaseURL != baseURL {
-		return fmt.Errorf("recommendations reset required: embedding base URL changed from %q to %q", l.BaseURL, baseURL)
+// SameEmbeddingModel reports whether two model names name one model. A
+// gateway such as OpenRouter prefixes the vendor (google/gemini-embedding-001),
+// and the same model returns the same vectors whichever provider serves it.
+func SameEmbeddingModel(a, b string) bool {
+	bare := func(model string) string {
+		model = strings.TrimSpace(model)
+		return model[strings.LastIndex(model, "/")+1:]
 	}
-	if l.Model != "" && l.Model != model {
+	return bare(a) == bare(b)
+}
+
+// ValidateConfig ensures the lock accepts the configured model. The embedding
+// space belongs to the model, so a different provider serving the same model
+// is accepted; the vector size is still checked once one is returned.
+func (l EmbeddingLock) ValidateConfig(model string) error {
+	if l.Model != "" && !SameEmbeddingModel(l.Model, model) {
 		return fmt.Errorf("recommendations reset required: embedding model changed from %q to %q", l.Model, model)
 	}
 	return nil
 }
 
 // Validate ensures the lock matches the provided embedding configuration.
-func (l EmbeddingLock) Validate(baseURL, model string, sourceDimensions int) error {
-	if err := l.ValidateConfig(baseURL, model); err != nil {
+func (l EmbeddingLock) Validate(model string, sourceDimensions int) error {
+	if err := l.ValidateConfig(model); err != nil {
 		return err
 	}
 	if l.SourceDimensions != 0 && l.SourceDimensions != sourceDimensions {

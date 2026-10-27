@@ -16,7 +16,7 @@ func aiProviderFixture(t *testing.T, values map[string]string) *AdminHandler {
 			config.AIProvider{ID: "box", Type: config.AIProviderCustom, Name: "Box", BaseURL: "https://box.example.test", APIKey: "box-secret",
 				Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilitySpeech}},
 			config.AIProvider{ID: "spare", Type: config.AIProviderCustom, Name: "Spare", BaseURL: "https://spare.example.test",
-				Capabilities: []config.AICapability{config.AICapabilityChat}},
+				Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilityEmbeddings}},
 		),
 	}
 	for key, value := range values {
@@ -53,6 +53,17 @@ func TestAIProviderMutationsProtectJobsAndKeys(t *testing.T) {
 				return err
 			},
 			wantErr: ErrAIProviderConflict,
+		},
+		{
+			name: "move the embeddings provider while embeddings are locked to its model",
+			values: map[string]string{
+				config.EmbeddingProviderSettingKey: "spare",
+				"recommendations.embedding_lock":   `{"base_url":"https://spare.example.test","model":"m","source_dimensions":8}`,
+			},
+			mutate: func(h *AdminHandler) error {
+				_, err := h.UpdateAIProvider(t.Context(), "spare", AdminAIProviderInput{BaseURL: &newHost})
+				return err
+			},
 		},
 		{
 			name:   "move a keyed provider without its key",

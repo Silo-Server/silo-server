@@ -31,9 +31,14 @@ substitute a registry; they choose providers by id.
 
 The registry's `version` records which conversions of older settings have run.
 Version 1 moved `ai.base_url`/`ai.api_key` (and their `subtitle_ai.*`
-predecessors) and `ai.asr_base_url`/`ai.asr_api_key` into providers. A converted
-provider resolves to exactly the endpoint and key the legacy settings gave its
-job: a known type is chosen only when its endpoint for that job equals the
+predecessors) and `ai.asr_base_url`/`ai.asr_api_key` into providers. Version 2
+moved `recommendations.embedding_base_url`/`embedding_auth_token` and the older
+`recommendations.openai_*` and `recommendations.embedding_provider` keys; a
+server that never stored an embedding endpoint but ran recommendations (the
+switch is on or a lock exists) gets a provider at the old built-in Ollama
+default, and its model is written to `recommendations.embedding_model`, which
+no longer has a default. A converted provider resolves to exactly the
+endpoint and key the legacy settings gave its job: a known type is chosen only when its endpoint for that job equals the
 stored URL, anything else becomes a custom provider at that URL, and providers
 with the same type, URL, and key are merged. The legacy rows are left in place,
 unread, so an older build still runs against the same database.
