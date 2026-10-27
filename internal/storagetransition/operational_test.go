@@ -152,6 +152,43 @@ func TestLocalPrivateOnlyTransitionMovesOperationalDataToBucket(t *testing.T) {
 	}
 }
 
+// The active store can keep the identity recorded under another path to its
+// directory. A private-only transition opens the artwork target afresh, by
+// its resolved path; that is still the active location, so the artwork
+// identity and objects stay as they are.
+func TestPrivateOnlyTransitionKeepsAliasedArtworkIdentity(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: localRootObjects()}
+	reopened := &memoryStore{identity: "local|" + filepath.Join(state, "artwork"), objects: map[string][]byte{}}
+	targetPrivate := &memoryStore{identity: "s3|https://s3|private|", objects: map[string][]byte{}}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork"), "s3.private_bucket": "private"})
+	service := testService(settings, source)
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return reopened, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return targetPrivate }
+
+	value, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := value.(Result); result.TargetIdentity != source.Identity() {
+		t.Fatalf("target identity = %q, want the recorded %q", result.TargetIdentity, source.Identity())
+	}
+	if len(reopened.objects) != 0 {
+		t.Fatalf("artwork copied onto its own directory: %v", reopened.objects)
+	}
+	if got := settings.values[blobstore.IdentitySettingKey]; got != "" && got != source.Identity() {
+		t.Fatalf("recorded artwork identity = %q, want it left as %q", got, source.Identity())
+	}
+}
+
 func TestEmptyPrivateOnlyTransitionLeavesArtworkLocationEditable(t *testing.T) {
 	for _, assetWrittenBeforeCommit := range []bool{false, true} {
 		name := "no asset write"
