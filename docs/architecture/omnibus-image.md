@@ -107,7 +107,8 @@ collations and runs `ALTER DATABASE ... REFRESH COLLATION VERSION`. That covers
 a data directory from the Compose stack's image, which is Debian 12 (glibc
 2.36) where this one has 2.41, and a later move of this image to a newer Debian
 release. The rebuild runs before Silo starts, so a large catalog's first start
-takes longer. `init-postgres` rewrites `conf.d/00-omnibus.conf` and
+takes longer. A database that does not accept connections cannot be rebuilt,
+so it keeps its recorded version and logs a warning on each start. `init-postgres` rewrites `conf.d/00-omnibus.conf` and
 `pg_hba.conf` on every start and makes sure `postgresql.conf` includes
 `conf.d`; `POSTGRES_TUNE` writes `postgresql.auto.conf`, which loads after it.
 Rewriting `pg_hba.conf` matters for a data directory from the official

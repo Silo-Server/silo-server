@@ -28,9 +28,14 @@ changed="$(psql_silo -d postgres -c 'SELECT datname, datallowconn FROM pg_databa
   WHERE datcollversion <> pg_database_collation_actual_version(oid)')"
 while IFS='|' read -r db connectable; do
   [[ -n "$db" ]] || continue
-  if [[ "$connectable" == t ]]; then
-    log "the C library collation version changed; rebuilding the text indexes in database $db"
-    psql_silo -d "$db" <<'SQL'
+  # The version is only refreshed after the rebuild, so a database that cannot
+  # be rebuilt keeps reporting the mismatch rather than hiding stale indexes.
+  if [[ "$connectable" != t ]]; then
+    warn "database $db does not accept connections, so its text indexes were not rebuilt for the new C library collation version"
+    continue
+  fi
+  log "the C library collation version changed; rebuilding the text indexes in database $db"
+  psql_silo -d "$db" <<'SQL'
 SELECT DISTINCT format('REINDEX INDEX %s', s.indexrelid::regclass)
 FROM (SELECT indexrelid, indcollation[k] AS coll
       FROM pg_index, generate_subscripts(indcollation, 1) AS k) s
@@ -38,6 +43,5 @@ JOIN pg_collation c ON c.oid = s.coll
 WHERE c.collprovider IN ('d', 'c') AND c.collname NOT IN ('C', 'POSIX')
 \gexec
 SQL
-  fi
   psql_silo -d postgres -v name="$db" <<<'ALTER DATABASE :"name" REFRESH COLLATION VERSION'
 done <<<"$changed"
