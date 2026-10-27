@@ -569,31 +569,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 		if !ok || mi == nil {
 			continue
 		}
-		item := sectionItemResponse{
-			ContentID:              mi.ContentID,
-			Type:                   mi.Type,
-			Title:                  mi.Title,
-			Year:                   mi.Year,
-			Genres:                 mi.Genres,
-			Keywords:               mi.Keywords,
-			Status:                 mi.Status,
-			RatingIMDB:             mi.RatingIMDB,
-			RatingTMDB:             mi.RatingTMDB,
-			RatingRTCritic:         mi.RatingRTCritic,
-			RatingRTAudience:       mi.RatingRTAudience,
-			OriginalLanguage:       mi.OriginalLanguage,
-			Overview:               mi.Overview,
-			PosterThumbhash:        mi.PosterThumbhash,
-			BackdropThumbhash:      mi.BackdropThumbhash,
-			PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
-			BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
-		}
-		if item.Genres == nil {
-			item.Genres = []string{}
-		}
-		if item.Keywords == nil {
-			item.Keywords = []string{}
-		}
+		item := sectionItemFromMediaItem(mi)
 		urls := artwork[mi.ContentID]
 		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
 		if enrichment.overlays != nil {

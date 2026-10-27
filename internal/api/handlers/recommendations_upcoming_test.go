@@ -338,3 +338,47 @@ func mustCalendarDate(value string) time.Time {
 func testStringPtr(value string) *string {
 	return &value
 }
+
+// Recommendation cards carry the catalog fields the poster badges read
+// (content rating, advisory age, studio, runtime, network, airing status), as
+// Home and library section cards do.
+func TestRecommendationCardsCarryBadgeMetadata(t *testing.T) {
+	t.Parallel()
+
+	movie := &models.MediaItem{
+		ContentID: "movie-1", Type: "movie", Title: "Movie One", Status: "matched",
+		Runtime: 117, Studios: []string{"Northlight Pictures"}, ContentRating: "PG-13",
+		AdvisoryAge: new(13), AdvisorySource: "commonsense",
+	}
+	series := &models.MediaItem{
+		ContentID: "series-1", Type: "series", Title: "Series One", Status: "matched",
+		Networks: []string{"Harbor TV"}, ContentRating: "TV-14", ShowStatus: "Continuing",
+	}
+	handler := NewRecommendationsHandler(nil, stubRecommendationsReader{
+		discoverRows: []recommendations.ForYouRow{{
+			Type:  "cluster",
+			Label: "For You",
+			Items: []recommendations.ScoredItem{{MediaItemID: "movie-1"}, {MediaItemID: "series-1"}},
+		}},
+	}, nil, nil, nil, false)
+	handler.Fetcher = stubDiscoverFetcher{items: []*models.MediaItem{movie, series}}
+
+	view, err := handler.Discover(context.Background(), 7, "profile-1", catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	rows := view.Rows
+	if len(rows) != 1 || len(rows[0].Items) != 2 {
+		t.Fatalf("rows = %+v, want one row with two cards", rows)
+	}
+	watchTonight := handler.buildSectionItem(movie, nil, nil, sectionItemImageURLs{})
+	for _, card := range []sectionItemResponse{rows[0].Items[0], watchTonight} {
+		if card.ContentRating != "PG-13" || card.AdvisoryAge == nil || *card.AdvisoryAge != 13 || card.AdvisorySource != "commonsense" ||
+			card.Runtime != 117 || len(card.Studios) != 1 || card.Studios[0] != "Northlight Pictures" {
+			t.Errorf("movie card = rating %q, advisory %v/%q, runtime %d, studios %v", card.ContentRating, card.AdvisoryAge, card.AdvisorySource, card.Runtime, card.Studios)
+		}
+	}
+	if card := rows[0].Items[1]; card.ContentRating != "TV-14" || card.ShowStatus != "Continuing" || len(card.Networks) != 1 || card.Networks[0] != "Harbor TV" {
+		t.Errorf("series card = rating %q, show status %q, networks %v", card.ContentRating, card.ShowStatus, card.Networks)
+	}
+}
