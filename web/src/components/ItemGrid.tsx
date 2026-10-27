@@ -168,17 +168,26 @@ export default function ItemGrid(props: ItemGridProps) {
   const showsItems = !loading && totalItems > 0;
   const restoreVersion = useSyncExternalStore(subscribeScrollRestoration, scrollRestorationVersion);
 
+  // A row past the current extent may still be on its way: an estimated
+  // total only reaches it once the page holding it loads, and the page starts
+  // its visible range there so that page is the one being fetched. Once that
+  // page is in, the list ended sooner than it did when the row was saved.
+  const restoreAnchor = pendingGridRestore();
+  const restorePageLoaded =
+    !restoreAnchor ||
+    hasStaticItems(props) ||
+    pages.has(Math.floor(restoreAnchor.index / pageSize));
+
   // Back or Forward to this page: put the saved row back at the top, at the
   // same depth into it. The restore stays in force until the page settles,
-  // so this re-runs as rows arrive. A row past the current extent goes as far
-  // as the list reaches for now: the list may have shrunk, or its estimated
-  // runway grows toward the row once the rows near its end are reported.
+  // so this re-runs as rows arrive.
   useLayoutEffect(() => {
     const anchor = pendingGridRestore();
     // Until the wrapper mounts, the scroll margin doesn't yet count the page
     // content above the grid.
     if (!anchor || !showsItems || !anchorEl) return;
     const savedRow = Math.floor(anchor.index / columnCount);
+    if (savedRow >= rowCount && !restorePageLoaded) return;
     const row = Math.min(savedRow, rowCount - 1);
     // The saved offset was taken at the last mount's measured pitch, which
     // can be taller than this mount's; past this row it would be the next.
@@ -187,7 +196,16 @@ export default function ItemGrid(props: ItemGridProps) {
       behavior: "instant",
     });
     restoreLanded();
-  }, [restoreVersion, showsItems, anchorEl, columnCount, rowCount, rowHeight, virtualizer]);
+  }, [
+    restoreVersion,
+    restorePageLoaded,
+    showsItems,
+    anchorEl,
+    columnCount,
+    rowCount,
+    rowHeight,
+    virtualizer,
+  ]);
 
   useImperativeHandle(
     gridRef,

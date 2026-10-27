@@ -3,8 +3,10 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowseItem } from "@/api/types";
 import {
+  awaitingGridRestore,
   enterHistoryEntry,
   isRestorePending,
+  recordGridAnchor,
   resetScrollRestoration,
 } from "@/lib/scrollRestoration";
 import ItemGrid, { type ItemGridHandle } from "./ItemGrid";
@@ -141,5 +143,46 @@ describe("ItemGrid scroll anchoring", () => {
     expect(getByRole("list").querySelector('[data-id="item-160"]')).not.toBeNull();
     act(() => vi.advanceTimersByTime(1000));
     expect(isRestorePending()).toBe(false);
+  });
+
+  describe("restoring a row past the list's current extent", () => {
+    // Row 150, 19px in; the list's estimated total first covers rows 0-99.
+    function returnToRow150() {
+      enterHistoryEntry("list", false);
+      recordGridAnchor(150 * 340 + 19, { index: 300, offset: 19 });
+      enterHistoryEntry("detail", false);
+      enterHistoryEntry("list", true);
+    }
+    const props = { pageSize: 100, onVisibleRangeChange: vi.fn() };
+    const firstPage = new Map([[0, items.slice(0, 100)]]);
+
+    it("waits for the page that holds the row", () => {
+      returnToRow150();
+      const { rerender } = render(<ItemGrid {...props} totalItems={200} pages={firstPage} />);
+
+      expect(awaitingGridRestore()).toBe(true);
+      expect(props.onVisibleRangeChange).not.toHaveBeenCalled();
+
+      rerender(
+        <ItemGrid
+          {...props}
+          totalItems={400}
+          pages={new Map([...firstPage, [3, items.slice(300, 400)]])}
+        />,
+      );
+
+      expect(awaitingGridRestore()).toBe(false);
+      expect(window.scrollY).toBe(150 * 340 + 19);
+    });
+
+    it("stops at the end once that page shows the list got shorter", () => {
+      returnToRow150();
+      const { rerender } = render(<ItemGrid {...props} totalItems={200} pages={firstPage} />);
+
+      rerender(<ItemGrid {...props} totalItems={200} pages={new Map([...firstPage, [3, []]])} />);
+
+      expect(awaitingGridRestore()).toBe(false);
+      expect(window.scrollY).toBe(99 * 300);
+    });
   });
 });
