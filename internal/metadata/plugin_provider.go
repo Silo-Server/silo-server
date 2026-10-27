@@ -403,7 +403,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 // MDBList has no artwork, so it is not asked.
 func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]RemoteImage, error) {
 	providerID := req.ProviderIDs[p.capabilityID]
-	if providerID == "" && !(p.lookupImages && p.hasLookupProviderID(req.ProviderIDs)) {
+	if providerID == "" && (!p.lookupImages || !p.hasLookupProviderID(req.ProviderIDs)) {
 		return nil, nil
 	}
 
