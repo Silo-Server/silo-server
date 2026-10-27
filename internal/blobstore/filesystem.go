@@ -19,7 +19,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type Filesystem struct{ root string }
+type Filesystem struct {
+	root string
+	// identity, when set, is the recorded identity of a root that resolves to
+	// this directory by another path (see SameLocalRoot).
+	identity string
+}
 
 func NewFilesystem(root string) (*Filesystem, error) {
 	abs, err := resolveRoot(root)
@@ -538,8 +543,34 @@ func (f *Filesystem) Probe(ctx context.Context) error {
 }
 
 // Identity is the absolute root, so two mounts of different directories never
-// share a catalog by accident.
-func (f *Filesystem) Identity() string { return BackendLocal + "|" + f.root }
+// share a catalog by accident. A store opened on a directory the catalog
+// recorded under another path keeps the recorded identity instead.
+func (f *Filesystem) Identity() string {
+	if f.identity != "" {
+		return f.identity
+	}
+	return BackendLocal + "|" + f.root
+}
+
+// SameLocalRoot reports whether two local identities name the same existing
+// directory. The paths can differ when a symlink was added to, or removed from,
+// the path after the identity was recorded: an image that keeps its state
+// under a linked directory resolves a root the regular image recorded at
+// another path. Identities name storage, not paths, so callers that compare
+// them treat such a pair as one location.
+func SameLocalRoot(a, b string) bool {
+	rootA, okA := strings.CutPrefix(a, BackendLocal+"|")
+	rootB, okB := strings.CutPrefix(b, BackendLocal+"|")
+	if !okA || !okB || rootA == "" || rootB == "" {
+		return false
+	}
+	if rootA == rootB {
+		return true
+	}
+	infoA, errA := os.Stat(rootA)
+	infoB, errB := os.Stat(rootB)
+	return errA == nil && errB == nil && infoA.IsDir() && infoB.IsDir() && os.SameFile(infoA, infoB)
+}
 
 var _ Store = (*Filesystem)(nil)
 

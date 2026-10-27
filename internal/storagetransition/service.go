@@ -2356,6 +2356,11 @@ func (s *Service) targetIdentities(values map[string]string) (assets, private st
 		if err != nil {
 			return "", "", err
 		}
+		// The active store may carry the identity recorded under another path
+		// to the same directory; that is still the active location.
+		if s.source != nil && blobstore.SameLocalRoot(assets, s.source.Identity()) {
+			assets = s.source.Identity()
+		}
 	} else {
 		store, openErr := s.openPublic(values)
 		if openErr != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -552,6 +554,29 @@ func TestStartRejectsTargetEqualToActiveStorage(t *testing.T) {
 				t.Fatalf("Start error = %v, want the unchanged target rejected", err)
 			}
 		})
+	}
+}
+
+// The active store can carry the identity recorded under another path to the
+// same directory. Naming that directory by its current path is still the
+// active location, not a move onto itself.
+func TestStartRejectsActiveDirectoryReachedByAnotherPath(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork")}
+	settings := &memorySettings{values: clone(current)}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: map[string][]byte{}}
+	service := New(nil, settings, memoryJobs{}, source, nil)
+	_, err := startStaged(t, service, settings, PolicyMigrateAll, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(state, "artwork")})
+	if err == nil || !strings.Contains(err.Error(), "same as active storage") {
+		t.Fatalf("Start error = %v, want the same directory rejected as unchanged", err)
 	}
 }
 

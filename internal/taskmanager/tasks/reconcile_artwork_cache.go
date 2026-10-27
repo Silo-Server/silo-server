@@ -335,7 +335,7 @@ func (t *ReconcileArtworkCacheTask) checkConfiguredStore(current map[string]stri
 	if err != nil {
 		return fmt.Errorf("reading configured artwork location: %w", err)
 	}
-	if known && identity != t.identity {
+	if known && identity != t.identity && !blobstore.SameLocalRoot(identity, t.identity) {
 		return ErrArtworkReconcileStaleStore
 	}
 	return nil

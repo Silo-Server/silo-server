@@ -102,11 +102,11 @@ two levels is owned wrong; local artwork can hold millions of files. Deleting
 the marker forces a walk.
 
 Silo reaches its state through `/var/lib/silo`, a link to `/config/silo`, so
-paths stored in the database keep working. Local artwork storage is the
-exception: Silo records it by its resolved root, and refuses to start when that
-changes. A catalog that stored local artwork under another image's
-`/var/lib/silo/artwork` resolves to `/config/silo/artwork` here and does not
-open; S3 artwork is unaffected. `init-adduser` refuses a `PUID` that
+paths stored in the database keep working. Local artwork storage is recorded by
+its resolved root, so a catalog that stored artwork under another image's
+`/var/lib/silo/artwork` resolves to `/config/silo/artwork` here; Silo
+recognizes that as the same directory and keeps the recorded identity (see
+[Storage identity](blob-storage.md#storage-identity)). `init-adduser` refuses a `PUID` that
 another account holds: the kernel would report that account's name for Silo's
 processes, and PostgreSQL's peer authentication maps the process's user name to
 the database role.
