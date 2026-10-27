@@ -622,7 +622,7 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 			}
 		}
 	}
-	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
+	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
 	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
@@ -635,7 +635,9 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 // finalizer runs the history writer), the history writer directly from a
 // session synthesized from the attempt row otherwise. The deny marker is
 // written in both cases. It returns the watch-history id when one was made.
-func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3) string {
+// reason is the end reason of the stop that won the row: a replayed stop can
+// finish an administrator's or an expiry's.
+func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) string {
 	h.StreamDeny.Deny(ctx, sessionID)
 	position, paused := 0.0, false
 	if accepted != nil {
@@ -647,7 +649,7 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 				slog.WarnContext(ctx, "failed to apply final playback position", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}
 		}
-		result, err := h.stopPlaybackSessionWithResult(ctx, session, PlaybackEndStopped)
+		result, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
 		if err == nil {
 			return result.HistoryID
 		}
@@ -658,7 +660,14 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 		// Lost the race with another stop of the live session; fall through to
 		// the row-synthesized writer so the final sample is still recorded.
 	}
-	return h.persistStopAndHistory(ctx, h.attemptSessionV2(ctx, record, position, paused)).HistoryID
+	// No copy here to finalize: the copy on another replica, if any, finds
+	// the attempt stopped and is dropped without history, so the admin log
+	// is written from the attempt row and the live row that copy synced.
+	session := h.attemptSessionV2(ctx, record, position, paused)
+	historyID := h.persistStopAndHistory(ctx, session).HistoryID
+	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	h.recordAdminStopHistory(ctx, session, reason)
+	return historyID
 }
 
 // attemptSessionV2 synthesizes the session the v1 writers read when this
@@ -845,6 +854,20 @@ func (h *PlaybackHandler) markAttemptStoppedByAdmin(ctx context.Context, session
 	}
 	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
 	h.forgetProgressSideEffectLock(sessionID)
+}
+
+// endReasonForStop is the end reason a winning stop id records: the
+// server-minted ids name who ended the attempt, and any other id is the
+// client's own stop.
+func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
+	switch stopID {
+	case adminStopID(sessionID):
+		return PlaybackEndTerminated
+	case expiredStopID(sessionID):
+		return PlaybackEndExpired
+	default:
+		return PlaybackEndStopped
+	}
 }
 
 func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {

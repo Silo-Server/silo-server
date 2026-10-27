@@ -69,7 +69,7 @@ type AdminPlaybackHistoryEntry struct {
 	ClientVersion        *string  `json:"client_version" nullable:"true" doc:"App version the client reported; null when unknown"`
 	VideoDecision        *string  `json:"video_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown"`
 	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
-	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, or aborted by the server. Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
+	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
 }
 
 // TransformSchema admits null in the nullable enums: JSON Schema applies the

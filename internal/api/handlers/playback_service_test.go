@@ -236,19 +236,57 @@ func TestStopPlaybackV2FirstStopWinsAndLaterStopsReplay(t *testing.T) {
 	assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
 }
 
+// TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow covers a stop that
+// reaches a replica without the session's copy: the row stops, and the admin
+// log records the play from the attempt row, started when the attempt was.
 func TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow(t *testing.T) {
 	f := newPlaybackServiceFixture(t)
+	admin := &recordingPlaybackAdminStore{}
+	f.handler.AdminStore = admin
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
 	if err := f.manager.StopSession(f.session.ID); err != nil {
 		t.Fatal(err)
 	}
 	stopID := uuid.NewString()
-	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID})
-	if err != nil || view.Outcome != PlaybackOutcomeStopped || view.StopID != stopID || view.Accepted != nil {
+	position := 900.0
+	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID, Sequence: 1, Position: &position})
+	if err != nil || view.Outcome != PlaybackOutcomeStopped || view.StopID != stopID {
 		t.Fatalf("view = %+v, %v", view, err)
 	}
 	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
 	if err != nil || record.StoppedAt == nil {
 		t.Fatalf("row not stopped: %+v %v", record, err)
+	}
+	if len(admin.history) != 1 {
+		t.Fatalf("admin history = %+v, want one row", admin.history)
+	}
+	row := admin.history[0]
+	if row.EndReason != PlaybackEndStopped || row.WatchedSeconds != 900 || row.StartedAt != record.CreatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("admin row = reason %q at %v started %s, want stopped at 900 started %s", row.EndReason, row.WatchedSeconds, row.StartedAt, record.CreatedAt)
+	}
+}
+
+// TestReplayedStopFinishesTheWinningStopsEnd covers a stop that replays an
+// administrator stop whose finalizer never finished: the play is recorded
+// as terminated, the end that won the row, not as the client's stop.
+func TestReplayedStopFinishesTheWinningStopsEnd(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	admin := &recordingPlaybackAdminStore{}
+	f.handler.AdminStore = admin
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+	if err := f.manager.StopSession(f.session.ID); err != nil {
+		t.Fatal(err)
+	}
+	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	if _, _, err := store.StopAttempt(context.Background(), f.session.ID, adminStopID(f.session.ID), &playback.ProgressSampleV3{Sequence: 1, Position: 600}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+	if err != nil || view.Outcome != PlaybackOutcomeReplayed {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndTerminated || admin.history[0].WatchedSeconds != 600 {
+		t.Fatalf("admin history = %+v, want one terminated row at 600", admin.history)
 	}
 }
 

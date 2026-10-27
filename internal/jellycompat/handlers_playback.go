@@ -296,6 +296,12 @@ type sessionFinisher interface {
 	FinishSession(ctx context.Context, sessionID string) error
 }
 
+// detachedFinisher records the end of a play this replica no longer holds a
+// native copy of (playback.SessionManager.FinishDetached).
+type detachedFinisher interface {
+	FinishDetached(ctx context.Context, s playback.Session)
+}
+
 // PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
 // shared admin live-session table (playback_sessions_sync). Without it, compat
 // session starts and stops only become visible on the periodic reconciler

@@ -1907,7 +1907,15 @@ func (h *PlaybackHandler) cleanupPlaySession(
 		// finish hook records the play in watch and admin history. Mid-play
 		// replacements keep using StopSession.
 		if finisher, ok := h.sessionMgr.(sessionFinisher); ok {
-			_ = finisher.FinishSession(ctx, playSession.UpstreamSessionID)
+			err := finisher.FinishSession(ctx, playSession.UpstreamSessionID)
+			// The stop reached a replica without the native copy. Record the
+			// play from the stop's snapshot; the copy elsewhere, if any, is
+			// recorded under the same history rows when it goes.
+			if detached, ok := h.sessionMgr.(detachedFinisher); ok && errors.Is(err, playback.ErrSessionNotFound) && upstreamSession != nil {
+				snapshot := *upstreamSession
+				snapshot.IsJellyfinCompat = true
+				detached.FinishDetached(ctx, snapshot)
+			}
 		} else {
 			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 		}
@@ -2597,6 +2605,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 	}
 
+	// replaced is this replica's copy of the upstream session a method switch
+	// retires. Its play ends once the switch has moved the play off it.
+	var replaced *playback.Session
 	var playMethod playback.PlayMethod
 	transcodeAudio := source.TranscodeAudio
 	switch method {
@@ -2619,6 +2630,8 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		if current, err := h.sessionMgr.GetSession(oldUpstreamSessionID); err == nil {
 			transcodeNodeURL = current.TranscodeNodeURL
 			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
+			snapshot := *current
+			replaced = &snapshot
 		}
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
@@ -2680,6 +2693,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}); updateErr != nil {
 		_ = h.sessionMgr.StopSession(session.ID)
 		if errors.Is(updateErr, errUpstreamReplaced) {
+			// Another request moved the play off the session this one
+			// replaced, so that session's play is over all the same.
+			h.finishReplacedUpstream(ctx, replaced)
 			// Adopt the winner only when it serves the same play method;
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
@@ -2696,6 +2712,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 		return nil, updateErr
 	}
+	h.finishReplacedUpstream(ctx, replaced)
 	updated, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -2703,6 +2720,18 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	h.syncSessionsNow(ctx, "compat_start")
 	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
+}
+
+// finishReplacedUpstream records the end of an upstream session a method
+// switch replaced, after the switch has moved the play off it. The play goes
+// on under the new session, so only the admin log records the old one.
+func (h *PlaybackHandler) finishReplacedUpstream(ctx context.Context, replaced *playback.Session) {
+	if replaced == nil {
+		return
+	}
+	if finisher, ok := h.sessionMgr.(detachedFinisher); ok {
+		finisher.FinishDetached(playback.WithEndReason(context.WithoutCancel(ctx), playback.EndReasonReplaced), *replaced)
+	}
 }
 
 func (h *PlaybackHandler) recordCompatProgressPersistence(playSessionID string, disabled bool) {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,13 +27,15 @@ const (
 	// went quiet.
 	PlaybackEndExpired PlaybackEndReason = "expired"
 	// PlaybackEndAborted: the server abandoned the play, because its media
-	// went missing or a replacement transport failed to commit. Aborts do not
-	// record history yet.
+	// went missing or a replacement transport failed to commit.
 	PlaybackEndAborted PlaybackEndReason = "aborted"
+	// PlaybackEndReplaced: a Jellyfin client switched play method, and the
+	// play continues under a new session.
+	PlaybackEndReplaced PlaybackEndReason = playback.EndReasonReplaced
 )
 
 // PlaybackEndReasons lists every reason in its published order.
-var PlaybackEndReasons = []PlaybackEndReason{PlaybackEndStopped, PlaybackEndTerminated, PlaybackEndExpired, PlaybackEndAborted}
+var PlaybackEndReasons = []PlaybackEndReason{PlaybackEndStopped, PlaybackEndTerminated, PlaybackEndExpired, PlaybackEndAborted, PlaybackEndReplaced}
 
 // userInitiated reports a stop someone asked for, the viewer or an
 // administrator. It retires the session for good: its recovery card is
@@ -224,6 +227,46 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 	}
 
 	return nil
+}
+
+// LiveSession reads the shared live row for sessionID: the facts the replica
+// holding the session last synced. ErrSessionNotFound when there is none.
+func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string) (*playback.Session, error) {
+	if s == nil || s.pool == nil {
+		return nil, playback.ErrSessionNotFound
+	}
+	var live playback.Session
+	var playMethod string
+	var startedAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
+			COALESCE(play_method, ''), started_at, COALESCE(HOST(client_ip), ''),
+			COALESCE(client_name, ''), COALESCE(client_version, ''), COALESCE(client_build, ''),
+			COALESCE(client_channel, ''), COALESCE(client_user_agent, ''),
+			COALESCE(device_id, ''), COALESCE(device_platform, ''),
+			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
+			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE)
+		FROM playback_sessions_sync WHERE session_id = $1`, sessionID).Scan(
+		&live.UserID, &live.ProfileID, &live.MediaFileID, &live.RequestedMediaFileID,
+		&playMethod, &startedAt, &live.ClientIP,
+		&live.ClientName, &live.ClientVersion, &live.ClientBuild,
+		&live.ClientChannel, &live.ClientUserAgent,
+		&live.DeviceID, &live.DevicePlatform,
+		&live.TranscodeAudio, &live.TargetVideoCodec,
+		&live.Position, &live.IsJellyfinCompat,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading live playback session: %w", err)
+	}
+	live.ID = sessionID
+	live.PlayMethod = playback.PlayMethod(playMethod)
+	if startedAt != nil {
+		live.StartedAt = *startedAt
+	}
+	return &live, nil
 }
 
 func (s *PGPlaybackAdminStore) DeleteSession(ctx context.Context, sessionID string) error {

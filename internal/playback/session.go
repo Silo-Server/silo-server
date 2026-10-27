@@ -1810,6 +1810,48 @@ func (m *SessionManager) FinishSession(ctx context.Context, sessionID string) er
 	return nil
 }
 
+// FinishDetached runs the finish hooks for a play this replica no longer
+// holds: one ended on another replica's copy, or a copy this replica already
+// removed. The caller supplies the snapshot; registered sessions are left as
+// they are. ctx carries the end reason (WithEndReason) and marks the snapshot
+// as detached (IsDetachedFinish), so the hooks can fill what it lacks from
+// shared state.
+func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
+	m.mu.RLock()
+	hooks := append([]func(context.Context, *Session){}, m.finishHooks...)
+	m.mu.RUnlock()
+	ctx = context.WithValue(ctx, detachedFinishKey{}, true)
+	for _, hook := range hooks {
+		hook(ctx, &s)
+	}
+}
+
+// EndReasonReplaced is the end reason of a session another one replaced
+// mid-play: a Jellyfin client switched play method.
+const EndReasonReplaced = "replaced"
+
+type endReasonKey struct{}
+type detachedFinishKey struct{}
+
+// WithEndReason tells the finish hooks why the play ended. Without it a
+// finished play ended because its client stopped it.
+func WithEndReason(ctx context.Context, reason string) context.Context {
+	return context.WithValue(ctx, endReasonKey{}, reason)
+}
+
+// EndReasonFromContext is the reason WithEndReason recorded, or "".
+func EndReasonFromContext(ctx context.Context) string {
+	reason, _ := ctx.Value(endReasonKey{}).(string)
+	return reason
+}
+
+// IsDetachedFinish reports whether a finish hook runs for a FinishDetached
+// snapshot rather than a copy this replica held.
+func IsDetachedFinish(ctx context.Context) bool {
+	detached, _ := ctx.Value(detachedFinishKey{}).(bool)
+	return detached
+}
+
 // GetSession returns the session with the given ID, or ErrSessionNotFound.
 func (m *SessionManager) GetSession(sessionID string) (*Session, error) {
 	m.mu.RLock()

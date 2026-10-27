@@ -17619,10 +17619,10 @@ export interface components {
        */
       duration_seconds: number | null;
       /**
-       * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, or aborted by the server. Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
+       * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
        * @enum {string|null}
        */
-      end_reason: "stopped" | "terminated" | "expired" | "aborted" | null;
+      end_reason: "stopped" | "terminated" | "expired" | "aborted" | "replaced" | null;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

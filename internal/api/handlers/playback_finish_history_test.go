@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -506,5 +507,151 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	}
 	if old := rows[0]; old.DeviceID != nil || old.ClientName != nil || old.VideoDecision != nil || old.EndReason != nil || old.Measured || old.StartPositionSeconds != nil || old.ClientIP != nil {
 		t.Errorf("legacy row = %+v, want unknown facts as nil", old)
+	}
+}
+
+// liveRowAdminStore is the admin log with one shared live row, which a
+// replica synced before the play ended somewhere without its copy.
+type liveRowAdminStore struct {
+	recordingPlaybackAdminStore
+	live *playback.Session
+}
+
+func (s *liveRowAdminStore) LiveSession(_ context.Context, sessionID string) (*playback.Session, error) {
+	if s.live == nil || s.live.ID != sessionID {
+		return nil, playback.ErrSessionNotFound
+	}
+	live := *s.live
+	return &live, nil
+}
+
+// TestEveryEndRecordsTheAdminLog covers ends that wrote no admin history: an
+// abort, a Jellyfin method switch, and a stop that reached a replica without
+// the session's copy. Each records one row with its reason; a replaced play
+// adds no watch history, since it continues under the session that replaced
+// it, and a detached snapshot takes its start and client from the live row.
+func TestEveryEndRecordsTheAdminLog(t *testing.T) {
+	started := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	live := compatFinishSession()
+	live.StartedAt, live.ClientName, live.DeviceID = started, "Jellyfin Web", "browser-1"
+	for _, tc := range []struct {
+		name        string
+		end         func(r finishHistoryReplica, held *playback.Session)
+		wantReason  PlaybackEndReason
+		wantWatched int
+		wantClient  string
+	}{{
+		name: "abort",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			if err := r.handler.abortPlaybackSession(context.Background(), held); err != nil {
+				t.Fatal(err)
+			}
+		},
+		wantReason: PlaybackEndAborted,
+	}, {
+		name: "method switch",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			_ = r.mgr.StopSession(held.ID)
+			r.mgr.FinishDetached(playback.WithEndReason(context.Background(), playback.EndReasonReplaced), *held)
+		},
+		wantReason: PlaybackEndReplaced,
+	}, {
+		name: "stop without the copy",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			_ = r.mgr.StopSession(held.ID)
+			// The stop's own snapshot: identity and the final position only.
+			r.mgr.FinishDetached(context.Background(), playback.Session{
+				ID: held.ID, UserID: held.UserID, ProfileID: held.ProfileID,
+				MediaFileID: held.MediaFileID, Position: held.Position, IsJellyfinCompat: true,
+			})
+		},
+		wantReason:  PlaybackEndStopped,
+		wantWatched: 1,
+		wantClient:  "Jellyfin Web",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			admin := &liveRowAdminStore{live: &live}
+			replica := newFinishHistoryReplica(store, admin, finishHistoryFile())
+			held := replica.holdCopy(t, compatFinishSession(), 1800)
+			tc.end(replica, held)
+
+			if len(admin.history) != 1 {
+				t.Fatalf("admin history = %+v, want one row", admin.history)
+			}
+			row := admin.history[0]
+			if row.EndReason != tc.wantReason || row.WatchedSeconds != 1800 {
+				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.WatchedSeconds, tc.wantReason)
+			}
+			if tc.wantClient != "" && (row.ClientName != tc.wantClient || row.DeviceID != "browser-1" || row.StartedAt != started.Format(time.RFC3339Nano)) {
+				t.Fatalf("admin row = client %q device %q started %s, want the live row's", row.ClientName, row.DeviceID, row.StartedAt)
+			}
+			if got := len(listFinishHistory(t, store)); got != tc.wantWatched {
+				t.Fatalf("watch history rows = %d, want %d", got, tc.wantWatched)
+			}
+		})
+	}
+	// A Jellyfin snapshot with no position never saw the play: it records
+	// nothing, whatever the reason.
+	store := newPlaybackTestStore(t)
+	admin := &liveRowAdminStore{}
+	replica := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	replica.mgr.FinishDetached(playback.WithEndReason(context.Background(), playback.EndReasonReplaced), compatFinishSession())
+	if len(admin.history) != 0 {
+		t.Fatalf("admin history = %+v, want none for a copy without progress", admin.history)
+	}
+}
+
+// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end reads
+// from the shared live row, including a row that never recorded a start.
+func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "live-row-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	synced, bare := "synced-"+suffix, "bare-"+suffix
+	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
+		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
+		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin)
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE)`,
+		synced, account, started); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id) VALUES ($1, $2)`, bare, account); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPGPlaybackAdminStore(pool, nil)
+	live, err := store.LiveSession(ctx, synced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
+		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
+		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
+		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true}
+	if live.StartedAt.Equal(started) {
+		live.StartedAt = started
+	}
+	if !reflect.DeepEqual(*live, want) {
+		t.Fatalf("live = %+v\nwant %+v", *live, want)
+	}
+	if live, err = store.LiveSession(ctx, bare); err != nil || !live.StartedAt.IsZero() || live.UserID != account {
+		t.Fatalf("bare row = %+v, %v; want the account and no start", live, err)
+	}
+	if _, err = store.LiveSession(ctx, "missing-"+suffix); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("missing row: err = %v, want ErrSessionNotFound", err)
 	}
 }

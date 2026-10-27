@@ -334,6 +334,7 @@
 # finalization, its end reason follows the latest one, and the history
 # window is inclusive below and exclusive above.
 ./internal/api/handlers TestAdminPlaybackHistoryFactsDB
+./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB

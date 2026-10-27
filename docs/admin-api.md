@@ -1542,9 +1542,12 @@ delivered on the transport the attempt ended on, with the live rows' values: `di
 first finalization that knows one records it and later ones never change it, even one
 that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
 client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
-(the liveness reaper ended it after the client went quiet) or `aborted` (the server
-abandoned it). Aborts do not record a history row yet, so `aborted` does not appear
-today. When an attempt is finalized more than once, for example expired and then
+(the liveness reaper ended it after the client went quiet), `aborted` (the server
+abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
+continues under a new session with its own row). Every end records a row, including a
+stop, close or abort handled by a server that did not hold the session's live copy;
+that row takes the start time, client and device from the shared live row when one is
+left. When an attempt is finalized more than once, for example expired and then
 rebuilt and stopped, the latest finalization's reason wins. Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
 is also null for a server teardown the client never recovered from (an encoder exit, a

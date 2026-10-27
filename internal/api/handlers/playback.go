@@ -1243,8 +1243,8 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 // reaper then marks its attempt stopped, so a client starts a new session
 // rather than resuming this one, and watch providers that mirror live
 // sessions hear this one ended. A Jellyfin play's upstream session is the
-// exception: jellycompat can revive it under the same id and sends that
-// play's own stop, so its expiry stays a plain pause.
+// exception: its client's Stopped report still finds the play after the
+// expiry and sends that play's own stop, so its expiry stays a plain pause.
 func (h *PlaybackHandler) finalizeExpiredSession(ctx context.Context, session *playback.Session) {
 	h.finalizeSessionStopWithResult(ctx, session, false, "", PlaybackEndExpired)
 }
@@ -1286,8 +1286,9 @@ func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *pla
 
 // notifyStoppedSession tells watch providers and the live admin view that the
 // session stopped. An expiry ends the attempt for good, except for a Jellyfin
-// play's upstream session: jellycompat can revive it under the same id and
-// sends that play's own stop, so its expiry stays a plain pause.
+// play's upstream session: its client's Stopped report still finds the play
+// after the expiry and sends that play's own stop, so its expiry stays a
+// plain pause.
 func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, reason PlaybackEndReason) {
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (reason.userInitiated() || stopResult.Completed) {
@@ -1324,11 +1325,7 @@ func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, se
 // recordStopHistory writes a stopped session to watch history and the admin
 // playback log. The admin log keeps one row per session.
 func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) watchstate.PlaybackStopResult {
-	// A Jellyfin session copy without a position never saw the play's
-	// progress: a start that failed to route, or a replica that only served
-	// media while another replica took the reports. It must not record the
-	// play in place of a copy that did.
-	if session.IsJellyfinCompat && session.Position <= 0 {
+	if compatCopyWithoutProgress(session) {
 		return watchstate.PlaybackStopResult{}
 	}
 	result := h.persistStopAndHistory(ctx, session)
@@ -1393,6 +1390,9 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
 	h.scrobbleAbortedSession(ctx, session)
+	// An abort writes no watch history, but the play happened: the admin log
+	// records it as aborted.
+	h.recordAdminStopHistory(ctx, session, PlaybackEndAborted)
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
@@ -1466,8 +1466,12 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 }
 
 // handleFinishedSession records a play that another playback frontend ended
-// through FinishSession. That frontend owns the rest of its stop: transcode
-// and transport teardown, watch-provider scrobbles, and the live-session sync.
+// through FinishSession or FinishDetached. That frontend owns the rest of its
+// stop: transcode and transport teardown, watch-provider scrobbles, and the
+// live-session sync. The end reason travels in ctx; without one the client
+// stopped the play. An aborted or replaced play goes to the admin log only:
+// it recorded no watch history before, and a replaced one continues under
+// the session that replaced it.
 func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *playback.Session) {
 	if h == nil || session == nil || session.ID == "" {
 		return
@@ -1476,7 +1480,98 @@ func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *pl
 		ctx = context.Background()
 	}
 	// Clients often drop the connection right after reporting a stop.
-	h.recordStopHistory(context.WithoutCancel(ctx), session, PlaybackEndStopped)
+	ctx = context.WithoutCancel(ctx)
+	reason := PlaybackEndReason(playback.EndReasonFromContext(ctx))
+	if reason == "" {
+		reason = PlaybackEndStopped
+	}
+	if playback.IsDetachedFinish(ctx) {
+		h.fillDetachedSession(ctx, session, time.Time{})
+	}
+	if reason == PlaybackEndAborted || reason == PlaybackEndReplaced {
+		if !compatCopyWithoutProgress(session) {
+			h.recordAdminStopHistory(ctx, session, reason)
+		}
+		return
+	}
+	h.recordStopHistory(ctx, session, reason)
+}
+
+// detachedFinisher runs the session manager's finish hooks for a play this
+// replica no longer holds (playback.SessionManager.FinishDetached).
+type detachedFinisher interface {
+	FinishDetached(ctx context.Context, s playback.Session)
+}
+
+// liveSessionReader reads the shared live row a replica synced for a
+// session, which outlives the replica's copy of it.
+type liveSessionReader interface {
+	LiveSession(ctx context.Context, sessionID string) (*playback.Session, error)
+}
+
+// fillDetachedSession completes a session synthesized for a play this
+// replica does not hold, so its admin history row carries what the play's
+// own copy would have: the start time, client, device and stream facts come
+// from the shared live row when one is left. Fields the snapshot already has
+// are kept. A start time still unknown after that is startedAt, then now.
+func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
+	if reader, ok := h.AdminStore.(liveSessionReader); ok && session.StartedAt.IsZero() {
+		live, err := reader.LiveSession(ctx, session.ID)
+		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
+		}
+		if live != nil && live.UserID == session.UserID {
+			fillEmptySessionFacts(session, live)
+		}
+	}
+	if session.StartedAt.IsZero() {
+		session.StartedAt = startedAt
+	}
+	if session.StartedAt.IsZero() {
+		session.StartedAt = time.Now()
+	}
+}
+
+func fillEmptySessionFacts(session, live *playback.Session) {
+	fill := func(dst *string, src string) {
+		if *dst == "" {
+			*dst = src
+		}
+	}
+	if session.StartedAt.IsZero() {
+		session.StartedAt = live.StartedAt
+	}
+	if session.PlayMethod == "" {
+		session.PlayMethod = live.PlayMethod
+		session.TranscodeAudio = live.TranscodeAudio
+		session.TargetVideoCodec = live.TargetVideoCodec
+	}
+	fill(&session.ClientIP, live.ClientIP)
+	fill(&session.ClientName, live.ClientName)
+	fill(&session.ClientVersion, live.ClientVersion)
+	fill(&session.ClientBuild, live.ClientBuild)
+	fill(&session.ClientChannel, live.ClientChannel)
+	fill(&session.ClientUserAgent, live.ClientUserAgent)
+	fill(&session.DeviceID, live.DeviceID)
+	fill(&session.DevicePlatform, live.DevicePlatform)
+	session.IsJellyfinCompat = session.IsJellyfinCompat || live.IsJellyfinCompat
+	if session.Position <= 0 {
+		session.Position = live.Position
+	}
+	if session.MediaFileID == 0 {
+		session.MediaFileID = live.MediaFileID
+	}
+	if session.RequestedMediaFileID == 0 {
+		session.RequestedMediaFileID = live.RequestedMediaFileID
+	}
+}
+
+// compatCopyWithoutProgress reports a Jellyfin session copy that never saw
+// the play's progress: a start that failed to route, or a replica that only
+// served media while another replica took the reports. It must not record
+// the play in place of a copy that did.
+func compatCopyWithoutProgress(session *playback.Session) bool {
+	return session.IsJellyfinCompat && session.Position <= 0
 }
 
 func playbackProgressTarget(file *models.MediaFile) string {
