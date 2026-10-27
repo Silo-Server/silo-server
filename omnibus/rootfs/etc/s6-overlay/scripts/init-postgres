@@ -19,16 +19,11 @@ if [[ -L "$PGDATA" || -L "$PGDATA/PG_VERSION" ]]; then
   exit 1
 fi
 
-if [[ -s "$PGDATA/PG_VERSION" && ! -f "$PGDATA/PG_VERSION" ]]; then
-  echo "$PGDATA/PG_VERSION is not a regular file" >&2
-  exit 1
-fi
-
-if [[ -s "$PGDATA/PG_VERSION" ]]; then
+if [[ -e "$PGDATA/PG_VERSION" ]]; then
   # Read as root, before any ownership changes: a cluster another image wrote
-  # can belong to another uid, and a refused one is left as it was. Only a
-  # version number is ever printed.
-  have="$(head -c 16 "$PGDATA/PG_VERSION")"
+  # can belong to another uid, and a refused one is left as it was. The read
+  # follows no link and never blocks, and only a version number is printed.
+  have="$(read_small "$PGDATA/PG_VERSION" | tr -d '\n')"
   if [[ ! "$have" =~ ^[0-9]+$ ]]; then
     echo "$PGDATA/PG_VERSION does not hold a PostgreSQL major version number" >&2
     exit 1
@@ -42,17 +37,14 @@ omnibus image page describes the steps.
 MSG
     exit 1
   fi
-  own_tree postgres postgres "$PGDATA"
-  s6-setuidgid postgres chmod 0700 "$PGDATA"
-  # A pid file left by an unclean stop can name a PID this container now uses
-  # for something else, which PostgreSQL would take for a live server. While
-  # nothing holds PG_LOCK no server is using this data directory anywhere, so
-  # the file is stale; while something does, leave it and refuse.
+  # Fail early, before changing anything, when another container's server
+  # holds the lock. svc-postgres takes it for good before touching the pid file.
   if ! s6-setuidgid postgres flock -n "$PG_LOCK" true; then
     echo "another PostgreSQL server is using $PGDATA; is a second container using this /config?" >&2
     exit 1
   fi
-  s6-setuidgid postgres rm -f "$PGDATA/postmaster.pid"
+  own_tree postgres postgres "$PGDATA"
+  s6-setuidgid postgres chmod 0700 "$PGDATA"
 else
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
   # The directory can already exist, empty: a bind mount, or a directory

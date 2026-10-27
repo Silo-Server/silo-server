@@ -68,12 +68,14 @@ container's stop timeout bounds them.
 
 `init-config` empties `/run/silo-omnibus` on every start, so no flag from a
 previous start of the same container outlives its setting. The PostgreSQL
-server holds a `flock(2)` lock on `/config/postgres/server.lock` for its life.
-`postmaster.pid` only guards servers in one PID namespace, so `init-postgres`
-deletes a left-over pid file only while nothing holds that lock, and a second
-container started on the same `/config` refuses to start PostgreSQL. Bundled
-Redis keeps an append-only file (`appendfsync everysec`): a snapshot alone can
-restore a playback session older than its revocation.
+server holds a `flock(2)` lock on `/config/.postgres.lock` for its life; the
+file is root's, so the `postgres` account cannot replace it. `postmaster.pid`
+only guards servers in one PID namespace, so `svc-postgres` deletes a left-over
+pid file only once it holds that lock, and a second container started on the
+same `/config` refuses to start PostgreSQL. Bundled Redis keeps an append-only
+file (`appendfsync everysec`), forced on the command line even with a
+`redis.conf`: a snapshot alone can restore a playback session older than its
+revocation. A host crash can still lose about a second of writes.
 
 ## Accounts and data
 

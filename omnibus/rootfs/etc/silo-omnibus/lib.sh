@@ -64,9 +64,15 @@ exec_clean() {
 # PG_LOCK is held, as a flock(2) lock, by the PostgreSQL server for its whole
 # life. postmaster.pid only guards against servers in one PID namespace; a
 # second container on the same /config sees a stale-looking pid file and would
-# start a second server on the same data directory.
-# shellcheck disable=SC2034 # used by init-postgres and svc-postgres
-PG_LOCK=/config/postgres/server.lock
+# start a second server on the same data directory. It lives in /config, which
+# only root writes, so the postgres account cannot swap it for a new file.
+# shellcheck disable=SC2034 # used by init-config, init-postgres, svc-postgres
+PG_LOCK=/config/.postgres.lock
+
+# read_small PATH: the first 16 bytes of PATH, read without following a link
+# and without blocking on a FIFO, for files root reads in a directory a service
+# account controls.
+read_small() { dd if="$1" bs=16 count=1 iflag=nofollow,nonblock status=none 2>/dev/null; }
 
 # silo_port: the port Silo listens on. Silo reads /config/silo/.env without
 # overriding variables already set, so PORT from the container wins, then a
