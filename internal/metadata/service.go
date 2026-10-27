@@ -2170,8 +2170,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			) {
 				continue
 			}
-			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
-				"provider", p.Slug(), "error", err)
+			if isRoutineEnrichmentError(p, err) {
+				slog.DebugContext(ctx, "metadata: enrichment provider cannot answer now", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			} else {
+				slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			}
 			continue
 		}
 		if isIdentityHinter {
