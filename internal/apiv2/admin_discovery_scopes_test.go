@@ -65,12 +65,15 @@ type fixedResourceSampler nodemetrics.Snapshot
 func (s fixedResourceSampler) Snapshot() nodemetrics.Snapshot { return nodemetrics.Snapshot(s) }
 
 // A monitoring key reads the same operations as an administrator, minus the
-// deployment layout: mount paths, raw preparation failures, and node
-// addresses, overrides and health-blob extras.
+// deployment layout (mount paths, raw preparation failures, and node
+// addresses, overrides and health-blob extras) and the power to force
+// aggregate refreshes.
 func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.AdminResourceSampler = fixedResourceSampler{Available: true, System: &nodemetrics.SystemStats{Cores: 4, Disks: []nodemetrics.DiskStats{{Path: "/srv/secret-media", Role: "library-0", TotalGB: 10}}}}
 	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
+	insights := new(dashboardInsightsStub)
+	deps.AdminDashboardInsights = insights
 	deps.AdminNodesRead = &adminNodesReadStub{nodes: []*nodepool.Node{{
 		ID: 3, Name: "gpu-01", Type: "transcode", URL: "http://10.0.0.9:8090", Healthy: true, CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DownloadArtifactDirOverride: new("/srv/secret-artifacts"),
 		LastStats: json.RawMessage(`{"system":{"cores":8,"disks":[{"path":"/srv/secret-scratch","role":"scratch","total_gb":5}]},"build":{"revision":"secret-build"},"artifacts":{"dir":"/srv/secret-artifacts"}}`),
@@ -95,6 +98,14 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 		t.Fatal("node summary lost its resource sample", rec.Body.String())
 	}
 	requireProblem(t, do(t, h, "GET", Prefix+"/admin/nodes", "", bearer("sa_monitor")), TypePermissionDenied)
+
+	// A scoped key reads cached aggregates; it cannot force the queries.
+	if rec := do(t, h, "GET", Prefix+"/admin/stats/top-activity?refresh=true", "", bearer("sa_monitor")); rec.Code != 200 || insights.refresh {
+		t.Fatal("monitor key refreshed the aggregate", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, "GET", Prefix+"/admin/stats/top-activity?refresh=true", "", bearer("sa_admin")); rec.Code != 200 || !insights.refresh {
+		t.Fatal("administrator refresh ignored", rec.Code, rec.Body.String())
+	}
 
 	// Unscoped administrators keep the full documents.
 	for path, want := range map[string]string{"/admin/system/resources": "/srv/secret-media", "/admin/downloads/preparations": "No space left", "/admin/nodes": "/srv/secret-artifacts"} {

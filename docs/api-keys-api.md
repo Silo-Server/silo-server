@@ -177,6 +177,9 @@ sessions. Three monitored reads withhold details from scoped keys:
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
 
+The stats reads ignore `refresh` for scoped keys and answer from the shared
+cached aggregate, so a polling tool cannot force the aggregate queries.
+
 Unscoped keys and login sessions keep the full documents.
 
 `admin:sessions:control` admits `POST /api/v2/admin/sessions/{session_id}/`

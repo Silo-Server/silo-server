@@ -78938,6 +78938,7 @@ export interface operations {
     parameters: {
       query?: {
         limit?: number;
+        /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;
       };
       header?: {
@@ -79047,7 +79048,7 @@ export interface operations {
     parameters: {
       query?: {
         hours?: number;
-        /** @description Invalidate the cached aggregate before reading. */
+        /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;
       };
       header?: {
@@ -79157,7 +79158,7 @@ export interface operations {
     parameters: {
       query?: {
         hours?: number;
-        /** @description Invalidate the cached aggregate before reading. */
+        /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;
       };
       header?: {
@@ -79268,6 +79269,7 @@ export interface operations {
       query?: {
         days?: number;
         limit?: number;
+        /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;
       };
       header?: {

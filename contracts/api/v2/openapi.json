@@ -119297,11 +119297,13 @@
             }
           },
           {
+            "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
             "explode": false,
             "in": "query",
             "name": "refresh",
             "schema": {
               "default": false,
+              "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
               "type": "boolean"
             }
           }
@@ -119460,13 +119462,13 @@
             }
           },
           {
-            "description": "Invalidate the cached aggregate before reading.",
+            "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
             "explode": false,
             "in": "query",
             "name": "refresh",
             "schema": {
               "default": false,
-              "description": "Invalidate the cached aggregate before reading.",
+              "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
               "type": "boolean"
             }
           }
@@ -119625,13 +119627,13 @@
             }
           },
           {
-            "description": "Invalidate the cached aggregate before reading.",
+            "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
             "explode": false,
             "in": "query",
             "name": "refresh",
             "schema": {
               "default": false,
-              "description": "Invalidate the cached aggregate before reading.",
+              "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
               "type": "boolean"
             }
           }
@@ -119802,11 +119804,13 @@
             }
           },
           {
+            "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
             "explode": false,
             "in": "query",
             "name": "refresh",
             "schema": {
               "default": false,
+              "description": "Invalidate the cached aggregate before reading; ignored for scoped API keys.",
               "type": "boolean"
             }
           }
