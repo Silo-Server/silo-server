@@ -521,21 +521,12 @@ func validateStreamLimits(maxStreams, maxTranscodes *int) error {
 	return nil
 }
 
-// actorIsScopedAPIKey reports whether the request is authenticated by an API
-// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
-// an unscoped key already acts with its owner's full authority, and a JWT
-// actor is the admin themselves.
-func actorIsScopedAPIKey(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && len(claims.APIKeyScopes) > 0
-}
-
 // rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
 // account, which it could then log into for an unscoped session. Provisioning
 // ordinary accounts — password included — stays in scope. It reports whether
 // it wrote a response.
 func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
-	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
+	if !apimw.IsScopedAPIKey(r.Context()) || role != roleAdmin {
 		return false
 	}
 	writeError(w, http.StatusForbidden, "insufficient_scope",
@@ -548,7 +539,7 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 // the administrator's password and obtain an unrestricted login session.
 // Callers check the account locked by the mutation transaction.
 func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
-	if !actorIsScopedAPIKey(ctx) {
+	if !apimw.IsScopedAPIKey(ctx) {
 		return nil
 	}
 	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
@@ -571,7 +562,7 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	id int,
 	req *updateUserRequest,
 ) (*models.User, bool) {
-	if !actorIsScopedAPIKey(r.Context()) {
+	if !apimw.IsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
 	target, blocked := h.loadTargetUser(w, r, id)

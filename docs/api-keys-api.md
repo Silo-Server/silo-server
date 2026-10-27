@@ -151,8 +151,10 @@ capability documents remain additive.
 ## Monitoring and session control scopes
 
 Two scopes serve an outside monitoring tool, such as a dashboard that watches
-playback and keeps its own history. Both require a key owned by an administrator
-account; on any other account the key is refused with `403 permission_denied`.
+playback and keeps its own history. Every admin operation they admit requires a
+key owned by an administrator account; on any other account it answers
+`403 permission_denied`. `/events/capabilities` is not an admin operation and
+answers any owner.
 
 `admin:monitor:read` admits these reads, all `GET`:
 
@@ -165,8 +167,8 @@ account; on any other account the key is refused with `403 permission_denied`.
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
 | Hosts and nodes | `/admin/system/resources`, `/admin/system/resources/capabilities`, `/admin/nodes/summary`, `/admin/nodes/capabilities`, `/admin/server/status` |
 
-The scope never returns filesystem paths, storage keys, configuration, settings or
-credentials. Operations that carry them stay outside it: item files, download
+The scope never returns filesystem paths, node addresses, storage keys, setting
+values or credentials. Operations that carry them stay outside it: item files, download
 storage, settings, logs, API keys, audit, per-device setting values and node
 sessions. Three monitored reads withhold details from scoped keys:
 

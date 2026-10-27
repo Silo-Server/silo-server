@@ -48,12 +48,12 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+/profiles$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 	},
-	// Monitoring reads only. Operations that carry paths, storage keys,
-	// configuration or settings stay off this list (item files, storage,
-	// settings, logs, API keys, audit, per-device setting values, node
-	// sessions), and node rows are read through their path- and config-free
-	// summary. Host resources and download preparations withhold paths and
-	// failure text from scoped keys in their handlers.
+	// Monitoring reads only. Operations that carry paths, node addresses,
+	// storage keys, setting values or credentials stay off this list (item
+	// files, storage, settings, logs, API keys, audit, per-device setting
+	// values, node sessions), and node rows are read through their summary.
+	// Host resources and download preparations withhold paths and failure
+	// text from scoped keys in their handlers.
 	auth.ScopeAdminMonitorRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},

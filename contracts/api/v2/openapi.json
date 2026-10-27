@@ -10922,7 +10922,7 @@
             "type": "string"
           },
           "summary": {
-            "description": "Nodes can be read through the path- and configuration-free summary collection.",
+            "description": "Nodes can be read through GET /admin/nodes/summary, without addresses, paths or configuration overrides.",
             "type": "boolean"
           }
         },

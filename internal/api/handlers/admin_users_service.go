@@ -132,7 +132,7 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err := validateAdminPassword(input.User.Password); err != nil {
 		return 0, err
 	}
-	if actorIsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
+	if apimw.IsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
 		return 0, apiError(403, "insufficient_scope", "A scoped API key may not create an admin account")
 	}
 	if input.User.Role == roleAdmin {

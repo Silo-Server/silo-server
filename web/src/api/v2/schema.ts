@@ -16706,7 +16706,7 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
-      /** @description Nodes can be read through the path- and configuration-free summary collection. */
+      /** @description Nodes can be read through GET /admin/nodes/summary, without addresses, paths or configuration overrides. */
       summary: boolean;
     };
     AdminNodeCreateBody: {

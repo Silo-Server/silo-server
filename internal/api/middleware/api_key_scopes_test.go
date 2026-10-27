@@ -2,8 +2,12 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -119,8 +123,9 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 	}
 }
 
-// A monitoring key is read-only. The one write it may make is minting an
-// events socket ticket, which only opens a read-only stream.
+// A monitoring key is read-only. The one write this test admits is minting an
+// events socket ticket (POST /api/v2/events/ws-ticket), which only opens a
+// read-only stream; that row lands with key-minted socket tickets.
 func TestAPIKeyMonitorScopeOnlyReads(t *testing.T) {
 	const ticketRoute = `^/api/v2/events/ws-ticket$`
 	for _, route := range apiKeyScopeRoutes[auth.ScopeAdminMonitorRead] {
@@ -207,5 +212,105 @@ func TestAPIKeyScopesCannotManageV2Credentials(t *testing.T) {
 				t.Fatal("unscoped key lost its existing account-level access")
 			}
 		})
+	}
+}
+
+// The monitor scope promises never to return filesystem paths, node
+// addresses or raw failure text. This walks every response schema the scope
+// can reach in the committed OpenAPI document, so a field added to one of
+// those operations has to be withheld from scoped keys and listed here, or
+// kept out of the scope. It also catches allowlist rows that match no
+// operation.
+func TestAPIKeyMonitorScopeResponsesCarryNoDeploymentDetails(t *testing.T) {
+	raw, err := os.ReadFile("../../../contracts/api/v2/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	denied := map[string]bool{"path": true, "file_path": true, "dir": true, "url": true, "public_url": true, "origin": true, "hostname": true, "storage_key": true, "error": true, "last_stats": true, "download_artifact_dir_override": true}
+	// Fields a handler withholds from scoped keys.
+	withheld := map[string]bool{"AdminDiskStats.path": true, "AdminDownloadPreparation.error": true}
+
+	var walk func(owner string, schema json.RawMessage, seen map[string]bool, report func(string))
+	walk = func(owner string, schema json.RawMessage, seen map[string]bool, report func(string)) {
+		var s struct {
+			Ref                  string                     `json:"$ref"`
+			Properties           map[string]json.RawMessage `json:"properties"`
+			Items                json.RawMessage            `json:"items"`
+			AdditionalProperties json.RawMessage            `json:"additionalProperties"`
+			AllOf, AnyOf, OneOf  []json.RawMessage
+		}
+		if json.Unmarshal(schema, &s) != nil {
+			return
+		}
+		if s.Ref != "" {
+			name := strings.TrimPrefix(s.Ref, "#/components/schemas/")
+			if !seen[name] {
+				seen[name] = true
+				walk(name, doc.Components.Schemas[name], seen, report)
+			}
+			return
+		}
+		for field, sub := range s.Properties {
+			if denied[field] && !withheld[owner+"."+field] {
+				report(owner + "." + field)
+			}
+			walk(owner, sub, seen, report)
+		}
+		for _, sub := range append(append(append([]json.RawMessage{s.Items, s.AdditionalProperties}, s.AllOf...), s.AnyOf...), s.OneOf...) {
+			if len(sub) > 0 && sub[0] == '{' {
+				walk(owner, sub, seen, report)
+			}
+		}
+	}
+
+	scopes := []string{auth.ScopeAdminMonitorRead}
+	matched := map[string]bool{}
+	for path, operations := range doc.Paths {
+		concrete := regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(path, "42")
+		for method, operation := range operations {
+			request := httptest.NewRequest(strings.ToUpper(method), concrete, nil)
+			if !apiKeyScopesAllow(scopes, request) {
+				continue
+			}
+			for _, route := range apiKeyScopeRoutes[auth.ScopeAdminMonitorRead] {
+				if route.method == request.Method && route.pattern.MatchString(concrete) {
+					matched[route.method+" "+route.pattern.String()] = true
+				}
+			}
+			var op struct {
+				Responses map[string]struct {
+					Content map[string]struct {
+						Schema json.RawMessage `json:"schema"`
+					} `json:"content"`
+				} `json:"responses"`
+			}
+			if err := json.Unmarshal(operation, &op); err != nil {
+				t.Fatal(err)
+			}
+			for status, response := range op.Responses {
+				if !strings.HasPrefix(status, "2") {
+					continue
+				}
+				for _, content := range response.Content {
+					walk("", content.Schema, map[string]bool{}, func(field string) {
+						t.Errorf("%s %s returns %s to a monitor key", strings.ToUpper(method), path, field)
+					})
+				}
+			}
+		}
+	}
+	for _, route := range apiKeyScopeRoutes[auth.ScopeAdminMonitorRead] {
+		if !matched[route.method+" "+route.pattern.String()] {
+			t.Errorf("%s %s matches no operation", route.method, route.pattern)
+		}
 	}
 }

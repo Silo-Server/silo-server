@@ -417,6 +417,14 @@ func SetClaims(ctx context.Context, claims *auth.Claims) context.Context {
 	return context.WithValue(ctx, claimsKey, claims)
 }
 
+// IsScopedAPIKey reports whether a scoped API key authenticated the request.
+// Unscoped keys and login sessions are not constrained: an unscoped key acts
+// with its owner's full authority, and a login session is the owner.
+func IsScopedAPIKey(ctx context.Context) bool {
+	claims := GetClaims(ctx)
+	return claims != nil && len(claims.APIKeyScopes) > 0
+}
+
 // GetClaims retrieves the JWT claims from the context. Returns nil if no
 // claims are present (caller should handle this case).
 func GetClaims(ctx context.Context) *auth.Claims {

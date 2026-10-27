@@ -26,7 +26,7 @@ type AdminNodeDrainOutput struct{ Body AdminNodeDrain }
 type AdminNodeCapabilities struct {
 	Capability
 	Drain   bool `json:"drain" doc:"Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows."`
-	Summary bool `json:"summary" doc:"Nodes can be read through the path- and configuration-free summary collection."`
+	Summary bool `json:"summary" doc:"Nodes can be read through GET /admin/nodes/summary, without addresses, paths or configuration overrides."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int
@@ -56,7 +56,7 @@ func registerAdminNodeDrain(reg *Registry) {
 		if reg.deps.AdminNodeDrain == nil {
 			state = StateNotConfigured
 		}
-		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: true}}, nil
+		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil}}, nil
 	})
 
 	op := func(suffix, id, summary string) Operation {
