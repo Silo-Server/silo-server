@@ -45,7 +45,8 @@ JOIN pg_class ic ON ic.oid = i.indexrelid
 JOIN pg_am am ON am.oid = ic.relam
 WHERE EXISTS (SELECT FROM unnest(i.indcollation::oid[]) AS k(coll)
               JOIN pg_collation c ON c.oid = k.coll
-              WHERE c.collprovider IN ('d', 'c') AND c.collname NOT IN ('C', 'POSIX'))
+              WHERE c.collprovider IN ('d', 'c')
+                AND NOT (c.collnamespace = 'pg_catalog'::regnamespace AND c.collname IN ('C', 'POSIX')))
    OR ((i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AND am.amname NOT IN ('hnsw', 'ivfflat'))
 \gexec
 SQL
