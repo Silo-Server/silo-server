@@ -15,6 +15,14 @@ import (
 const SocketTicketTTL = 30 * time.Second
 const SocketMaxLifetime = 5 * time.Minute
 
+// Socket ticket audiences. Every socket that shares this store shape holds
+// its tickets under one Redis prefix, so the audience a ticket was minted for
+// is what keeps it from opening a different socket.
+const (
+	SocketAudienceEvents    = "events"
+	SocketAudienceAdminLogs = "admin_logs"
+)
+
 // SocketIdentity is a delegated login-session proof, never an independent login.
 // ProfileToken retains the PIN proof captured when the ticket was requested.
 // Neither it nor the opaque ticket may be included in logs or socket messages.
@@ -32,25 +40,31 @@ type SocketIdentity struct {
 	// DeviceID is the minting request's X-Silo-Device-Id, which the
 	// acting-admin decision reads as the HTTP admin gate does.
 	DeviceID string `json:"device_id,omitempty"`
+	// Audience is the socket the ticket opens. The store stamps it at mint
+	// and refuses a ticket minted for another audience at consume.
+	Audience string `json:"audience"`
 }
 
 var ErrSocketTicket = errors.New("invalid or unavailable realtime credential")
 
 type SocketTicketStore struct {
-	redis   *redis.Client
-	mu      sync.Mutex
-	tickets map[string]SocketIdentity
+	redis    *redis.Client
+	audience string
+	mu       sync.Mutex
+	tickets  map[string]SocketIdentity
 }
 
-func NewSocketTicketStore(client *redis.Client) *SocketTicketStore {
-	return &SocketTicketStore{redis: client, tickets: make(map[string]SocketIdentity)}
+// NewSocketTicketStore mints and consumes tickets for one socket audience.
+func NewSocketTicketStore(client *redis.Client, audience string) *SocketTicketStore {
+	return &SocketTicketStore{redis: client, audience: audience, tickets: make(map[string]SocketIdentity)}
 }
 
 func (s *SocketTicketStore) Mint(ctx context.Context, identity SocketIdentity) (string, error) {
 	now := time.Now()
-	if identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.AccessExpiresAt.After(now) {
+	if s.audience == "" || identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.AccessExpiresAt.After(now) {
 		return "", ErrSocketTicket
 	}
+	identity.Audience = s.audience
 	identity.TicketExpiresAt = now.Add(SocketTicketTTL)
 	if identity.AccessExpiresAt.Before(identity.TicketExpiresAt) {
 		identity.TicketExpiresAt = identity.AccessExpiresAt
@@ -113,7 +127,7 @@ func (s *SocketTicketStore) Consume(ctx context.Context, ticket string) (SocketI
 		s.mu.Unlock()
 	}
 	now := time.Now()
-	if identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.TicketExpiresAt.After(now) || !identity.AccessExpiresAt.After(now) {
+	if identity.Audience == "" || identity.Audience != s.audience || identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.TicketExpiresAt.After(now) || !identity.AccessExpiresAt.After(now) {
 		return SocketIdentity{}, ErrSocketTicket
 	}
 	return identity, nil

@@ -37,7 +37,7 @@ func testSocketTicketSingleUse(t *testing.T, mint, consume *SocketTicketStore) {
 	}
 }
 func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
-	store := NewSocketTicketStore(nil)
+	store := NewSocketTicketStore(nil, SocketAudienceEvents)
 	testSocketTicketSingleUse(t, store, store)
 	ticket, err := store.Mint(t.Context(), socketIdentity())
 	if err != nil {
@@ -55,5 +55,27 @@ func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
 	invalid.SessionID = ""
 	if _, err := store.Mint(t.Context(), invalid); err == nil {
 		t.Fatal("sessionless proof minted")
+	}
+}
+
+// Deployments hold every audience's tickets under one Redis prefix; sharing
+// the memory map stands in for it.
+func TestSocketTicketRefusedOutsideItsAudience(t *testing.T) {
+	events := NewSocketTicketStore(nil, SocketAudienceEvents)
+	logs := NewSocketTicketStore(nil, SocketAudienceAdminLogs)
+	logs.tickets = events.tickets
+	ticket, err := events.Mint(t.Context(), socketIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.Consume(t.Context(), ticket); err == nil {
+		t.Fatal("events ticket opened the log stream")
+	}
+	ticket, err = logs.Mint(t.Context(), socketIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := logs.Consume(t.Context(), ticket); err != nil || got.Audience != SocketAudienceAdminLogs {
+		t.Fatalf("own audience: %+v %v", got, err)
 	}
 }

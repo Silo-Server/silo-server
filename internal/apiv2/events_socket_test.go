@@ -62,7 +62,7 @@ func eventsSocketFixtureCases() []fixtureCase {
 
 func TestEventsSocketUpgradeThroughV2Router(t *testing.T) {
 	deps := pilotDeps(nil, nil)
-	store := evt.NewSocketTicketStore(nil)
+	store := evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents)
 	socket := &handlers.EventsSocketV2{Events: handlers.NewEventsHandler(evt.NewHub("v2-router-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		return ctx, &auth.Claims{UserID: proof.UserID, Role: "user", SessionID: proof.SessionID}, nil
 	}}

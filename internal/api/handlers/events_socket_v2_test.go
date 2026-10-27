@@ -27,7 +27,7 @@ func (v *socketValidity) fail(err error) { v.err.Store(&err) }
 
 func socketTestHandler() (*EventsSocketV2, *socketValidity) {
 	validity := new(socketValidity)
-	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil), checkInterval: time.Millisecond * 10}
+	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents), checkInterval: time.Millisecond * 10}
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		if err := validity.err.Load(); err != nil {
 			return ctx, nil, *err
