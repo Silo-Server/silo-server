@@ -758,13 +758,18 @@ func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
 // repeat is refused past maxManifestQueryBytes instead of multiplied.
 func TestPlaybackManifestRefusesAnOversizedQuery(t *testing.T) {
 	session := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}}
-	query := "st=" + strings.Repeat("a", maxManifestQueryBytes)
-	for name, build := range map[string]func(string, string) ([]byte, error){
-		"BuildPlaybackManifest":              session.BuildPlaybackManifest,
-		"BuildSourceAlignedPlaybackManifest": session.BuildSourceAlignedPlaybackManifest,
+	for _, query := range []string{
+		"st=" + strings.Repeat("a", maxManifestQueryBytes),
+		// Under the bound as sent, over it once each quote is escaped.
+		"st=" + strings.Repeat(`"`, maxManifestQueryBytes/2),
 	} {
-		if _, err := build("segment/", query); !errors.Is(err, ErrManifestQueryTooLong) {
-			t.Errorf("%s error = %v, want ErrManifestQueryTooLong", name, err)
+		for name, build := range map[string]func(string, string) ([]byte, error){
+			"BuildPlaybackManifest":              session.BuildPlaybackManifest,
+			"BuildSourceAlignedPlaybackManifest": session.BuildSourceAlignedPlaybackManifest,
+		} {
+			if _, err := build("segment/", query); !errors.Is(err, ErrManifestQueryTooLong) {
+				t.Errorf("%s(%d-byte query) error = %v, want ErrManifestQueryTooLong", name, len(query), err)
+			}
 		}
 	}
 }

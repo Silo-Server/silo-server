@@ -45,12 +45,17 @@ const maxManifestQueryBytes = 16 * 1024
 var manifestQueryEscaper = strings.NewReplacer(`"`, "%22", "\r", "%0D", "\n", "%0A")
 
 // manifestQuery returns rawQuery in the form a playlist's URIs repeat, or
-// ErrManifestQueryTooLong.
+// ErrManifestQueryTooLong. The bound applies to the escaped form, the one
+// repeated, since escaping triples each quote.
 func manifestQuery(rawQuery string) (string, error) {
 	if len(rawQuery) > maxManifestQueryBytes {
 		return "", ErrManifestQueryTooLong
 	}
-	return manifestQueryEscaper.Replace(rawQuery), nil
+	query := manifestQueryEscaper.Replace(rawQuery)
+	if len(query) > maxManifestQueryBytes {
+		return "", ErrManifestQueryTooLong
+	}
+	return query, nil
 }
 
 // minRewrittenURISavings is the per-URI saving below which a playlist the
