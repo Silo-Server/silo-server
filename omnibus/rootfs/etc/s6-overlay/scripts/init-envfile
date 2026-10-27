@@ -6,6 +6,10 @@ set -euo pipefail
 # shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
 source /etc/silo-omnibus/lib.sh
 
+# The container environment holds SECRET_KEY. Only root, which runs these
+# scripts and drops privileges per service, needs to read it.
+chmod 0700 "$CONTAINER_ENV"
+
 for f in "$CONTAINER_ENV"/FILE__*; do
   [[ -e "$f" ]] || continue
   name="${f##*/FILE__}"

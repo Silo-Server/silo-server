@@ -8,5 +8,5 @@ if ! enabled postgres; then
   exec sleep infinity
 fi
 export HOME=/config/postgres
-exec s6-notifyoncheck -d -n 0 -w 1000 \
+exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
   s6-setuidgid postgres postgres -D /config/postgres/data

@@ -20,5 +20,5 @@ export HOME=/config/meilisearch
 : "${MEILI_LOG_LEVEL:=WARN}"
 MEILI_MASTER_KEY="$(<"$STATE_DIR/meili-master-key")"
 export MEILI_DB_PATH MEILI_DUMP_DIR MEILI_SNAPSHOT_DIR MEILI_HTTP_ADDR MEILI_ENV MEILI_NO_ANALYTICS MEILI_LOG_LEVEL MEILI_MASTER_KEY
-exec s6-notifyoncheck -d -n 0 -w 1000 \
+exec_clean '^MEILI_' s6-notifyoncheck -d -n 0 -w 1000 \
   s6-setuidgid meilisearch meilisearch

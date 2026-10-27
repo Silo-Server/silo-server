@@ -19,6 +19,10 @@ install -d -o postgres -g postgres -m 2775 /run/postgresql
 # Silo's transcode and prepared-download defaults live under /tmp. Mount them
 # to keep them across container recreation.
 install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
+# Mounted copies can hold files from an earlier PUID, or from the Compose
+# stack's root-run Silo, that Silo must be able to clean up.
+own_tree silo silo /tmp/silo-transcode
+own_tree silo silo /tmp/silo-download-artifacts
 
 # PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere.
 if [[ -z "${DATABASE_URL:-}" ]]; then
@@ -26,7 +30,8 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   export_env DATABASE_URL "postgres://silo@/silo?host=/run/postgresql&sslmode=disable"
   postgres_state="bundled"
 else
-  postgres_state="external ($DATABASE_URL)"
+  # Not the URL itself: it can carry a password.
+  postgres_state="external"
 fi
 
 # Redis: off by default. An explicit REDIS_URL always wins over the bundle.
@@ -44,7 +49,7 @@ fi
 # /config/meilisearch/master-key unless MEILI_MASTER_KEY is provided. Silo
 # connects to it through SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and
 # SILO_MEILISEARCH_API_KEY; a value the deployment sets itself wins.
-search_marker=/config/meilisearch/silo-search-provider
+user_provider="${SILO_SEARCH_PROVIDER:-}"
 if truthy "${ENABLE_MEILISEARCH:-false}"; then
   : > "$STATE_DIR/meilisearch.enabled"
   key_file=/config/meilisearch/master-key
@@ -59,23 +64,27 @@ if truthy "${ENABLE_MEILISEARCH:-false}"; then
     log "generated a Meilisearch master key at $key_file"
   fi
   (umask 077 && printf '%s' "$key" > "$STATE_DIR/meili-master-key")
-  if [[ -z "${SILO_SEARCH_PROVIDER:-}" ]]; then
+  if [[ -z "$user_provider" ]]; then
     export_env SILO_SEARCH_PROVIDER meilisearch
-    : > "$search_marker"
+    : > "$SEARCH_MARKER"
   fi
   [[ -n "${SILO_MEILISEARCH_URL:-}" ]] || export_env SILO_MEILISEARCH_URL "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}"
   [[ -n "${SILO_MEILISEARCH_API_KEY:-}" ]] || export_env SILO_MEILISEARCH_API_KEY "$key"
   meilisearch_state="bundled"
 else
-  # Turning the bundle off moves search back to PostgreSQL on the next start,
-  # once. The marker says this image chose Meilisearch, so a provider set any
-  # other way is left alone, and after this start the admin UI can change it.
-  if [[ -e "$search_marker" && -z "${SILO_SEARCH_PROVIDER:-}" ]]; then
+  # Turning the bundle off moves search back to PostgreSQL. The marker says
+  # this image chose Meilisearch, so a provider set any other way is left
+  # alone. svc-search-marker deletes it once Silo is up, which means Silo has
+  # stored the change; until then every start retries it. After that the admin
+  # UI can change the provider again.
+  if [[ -e "$SEARCH_MARKER" && -z "$user_provider" ]]; then
     export_env SILO_SEARCH_PROVIDER postgres
-    rm -f "$search_marker"
+    : > "$STATE_DIR/search-marker.retire"
   fi
   meilisearch_state="off"
 fi
+# A provider the deployment sets itself replaces the image's choice for good.
+[[ -z "$user_provider" ]] || rm -f "$SEARCH_MARKER"
 
 if [[ -n "${MODE:-}" && "$MODE" != "integrated" ]]; then
   warn "MODE=$MODE; the omnibus image runs one integrated node, other modes are not supported"
