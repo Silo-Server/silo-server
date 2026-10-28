@@ -2288,7 +2288,19 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 //
 // A session with a subtitle rendition answers its multivariant playlist, or
 // the media playlist rawQuery selects (see buildSubtitleRenditionPlaylist).
+//
+// A rawQuery longer than maxManifestQueryBytes is ErrManifestQueryTooLong.
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildPlaybackManifest(segPrefix, rawQuery)
+}
+
+// buildPlaybackManifest is BuildPlaybackManifest for a query manifestQuery
+// has already accepted.
+func (s *TranscodeSession) buildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
 	if s.HasSubtitleRendition() {
 		return s.buildSubtitleRenditionPlaylist(segPrefix, rawQuery)
 	}
@@ -2384,10 +2396,14 @@ const SourceTimelineQueryParam = "source_timeline"
 // first produced segment retains its source-time position. Synthetic manifests
 // already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	rawQuery, err := manifestQuery(rawQuery)
+	if err != nil {
+		return nil, err
+	}
 	if s.copyPlan != nil {
 		// A planned playlist starts at the source's beginning and doesn't
 		// depend on FFmpeg's progress or restarts.
-		return s.BuildPlaybackManifest(segPrefix, rawQuery)
+		return s.buildPlaybackManifest(segPrefix, rawQuery)
 	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
@@ -2395,7 +2411,7 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 	if restarting {
 		return nil, ErrManifestNotReady
 	}
-	manifest, err := s.BuildPlaybackManifest(segPrefix, rawQuery)
+	manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,10 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
+./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
+./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
+./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
@@ -178,9 +182,17 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# A re-cached sidecar leaves its old copy to the reference-checked revision
+# GC, which keeps a copy published again since the re-cache.
+./internal/metadata TestRecachedSidecarRetiresTheOldCopyThroughRevisionGCDB
+
 # With metadata.cache_images off, stored artwork goes back to its provider
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB
+
+# A storage reconcile's bulk reset keeps an uploaded image whose object
+# survived; nothing could fetch it again.
+./internal/metadata TestArtworkReconcileBulkResetVerifiesUploadsDB
 
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
@@ -190,6 +202,13 @@
 ./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
 ./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
 ./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
+
+# A refresh write keeps artwork an admin published after the refresh read the
+# item, season or episode, including a publication still committing and a row
+# another writer created and published in the meantime.
+./internal/catalog TestRefreshKeepsArtworkPublishedAfterItsReadDB
+./internal/catalog TestRefreshWaitingOnAPublicationKeepsItDB
+./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
@@ -255,6 +274,8 @@
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
+./internal/requests TestDiscoverLayoutDatabase
+./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
@@ -310,6 +331,18 @@
 # what admin watch totals count.
 ./internal/api/handlers TestAdminPlaybackWatchTimeDB
 
+# A play's device, client and stream decisions are filled once by any
+# finalization, its end reason follows the latest one, and the history
+# window is inclusive below and exclusive above.
+./internal/api/handlers TestAdminPlaybackHistoryFactsDB
+./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
+./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
+./internal/api/handlers TestPlaybackLifecycleTransitionsDB
+./internal/api/handlers TestNativeSessionsListLifecycleDB
+./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
+./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
+./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
+
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
@@ -323,6 +356,7 @@
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
 
 # Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair
 # discovery rows rank by in step with the 'tmdb' source.
@@ -528,6 +562,7 @@
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
+./internal/playback/planstore TestProgressCommitsLifecycleStateDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
@@ -571,3 +606,14 @@
 # A server set up before the setup wizard saved its marker sharing choice keeps
 # sharing by default; a database with no account waits for the wizard.
 ./migrations TestMarkersShareByDefaultExistingInstallsMigrationPostgres
+
+# A Watch Together room's suggestion cap holds when creators on two API servers
+# race on the v1 and v2 create paths.
+./internal/watchtogether TestSuggestionRoomLimitPG
+
+# The catalog item change outbox: what each membership and file write queues
+# (and what routine scan writes do not), key moves, coalescing, the cluster-wide
+# drain spacing, and retention.
+./internal/catalog TestCatalogItemChangeOutboxDB
+
+./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB

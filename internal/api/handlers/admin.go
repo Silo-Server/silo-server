@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -187,6 +188,11 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// ProfileAvatars resolves the avatar on admin profile listings the way
+	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
+	ProfileAvatars interface {
+		ResolveAvatar(ctx context.Context, ref string) (source, url string)
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -520,21 +526,12 @@ func validateStreamLimits(maxStreams, maxTranscodes *int) error {
 	return nil
 }
 
-// actorIsScopedAPIKey reports whether the request is authenticated by an API
-// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
-// an unscoped key already acts with its owner's full authority, and a JWT
-// actor is the admin themselves.
-func actorIsScopedAPIKey(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && len(claims.APIKeyScopes) > 0
-}
-
 // rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
 // account, which it could then log into for an unscoped session. Provisioning
 // ordinary accounts — password included — stays in scope. It reports whether
 // it wrote a response.
 func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
-	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
+	if !apimw.IsScopedAPIKey(r.Context()) || role != roleAdmin {
 		return false
 	}
 	writeError(w, http.StatusForbidden, "insufficient_scope",
@@ -547,7 +544,7 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 // the administrator's password and obtain an unrestricted login session.
 // Callers check the account locked by the mutation transaction.
 func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
-	if !actorIsScopedAPIKey(ctx) {
+	if !apimw.IsScopedAPIKey(ctx) {
 		return nil
 	}
 	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
@@ -570,7 +567,7 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	id int,
 	req *updateUserRequest,
 ) (*models.User, bool) {
-	if !actorIsScopedAPIKey(r.Context()) {
+	if !apimw.IsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
 	target, blocked := h.loadTargetUser(w, r, id)
@@ -1767,6 +1764,7 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 // server_settings store but is not part of the administrator settings API.
 var machineManagedSettingKeys = map[string]bool{
 	chatgpt.CredentialsKey:                      true,
+	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	config.MediaImageSweepCheckpointKey:         true,
@@ -2444,6 +2442,8 @@ var adminSettingDependencyGroups = [][]string{
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
 	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
+	// A provider binding is checked against the registry it names.
+	append([]string{config.AIProvidersSettingKey}, config.AIProviderBindingKeys()...),
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -3147,7 +3147,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
+			// A provider binding is checked against the registry the dependency
+			// group pulls in, as the batch write does.
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey ||
+				slices.Contains(config.AIProviderBindingKeys(), key) {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {

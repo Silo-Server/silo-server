@@ -2,8 +2,13 @@ package jellycompat
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -23,6 +28,14 @@ func TestLatestFastPathEligible(t *testing.T) {
 
 	if !latestFastPathEligible(paramsFor(base()), "movie") {
 		t.Fatalf("a plain first-page movies-library Latest should be eligible")
+	}
+	// Latest returns a bare array, so it never asks BrowseItems to count.
+	counted := base()
+	counted.enableTotalRecordCount = true
+	unplayed := false
+	counted.isPlayed = &unplayed
+	if got := paramsFor(counted).Get("include_total"); got != "false" {
+		t.Fatalf("Latest include_total = %q, want false", got)
 	}
 	if !latestFastPathEligible(paramsFor(base()), "series") {
 		t.Fatalf("a plain first-page series-library Latest should be eligible")
@@ -140,3 +153,17 @@ func (p *completedProgressStoreProvider) ForUser(context.Context, int) (userstor
 }
 
 func (p *completedProgressStoreProvider) Close() error { return nil }
+
+// TestLatestLimitZeroQueriesNothing: Latest has no total to report, so
+// Limit=0 answers an empty array without browsing (the stub's BrowseItems
+// panics).
+func TestLatestLimitZeroQueriesNothing(t *testing.T) {
+	h := NewItemsHandler(&stubContentService{}, nil, NewResourceIDCodec(), &config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/Items/Latest?Limit=0&IsPlayed=false&EnableTotalRecordCount=true", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token", ProfileID: "profile-1", StreamAppUserID: 1}))
+	rec := httptest.NewRecorder()
+	h.HandleLatest(rec, req)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("Limit=0 Latest = %d %q, want 200 []", rec.Code, rec.Body.String())
+	}
+}

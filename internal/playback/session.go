@@ -48,7 +48,11 @@ type Session struct {
 	ClientBuild                   string // opaque reported client build identifier, when available
 	ClientChannel                 string // opaque reported client distribution channel, when available
 	ClientUserAgent               string // trimmed request user agent for the playback session
-	IsJellyfinCompat              bool   // immutable origin identity for Jellyfin compatibility sessions
+	// DeviceID and DevicePlatform are the device the client declared when the
+	// session started (see ClientInfo); empty when it declared none.
+	DeviceID         string
+	DevicePlatform   string
+	IsJellyfinCompat bool // immutable origin identity for Jellyfin compatibility sessions
 	// RequireMediaAuthorization distinguishes v3 transports whose session ID is
 	// only a route identifier from legacy HLS transports where that UUID also
 	// acts as the bearer capability. Secure transports carry no reconstruction
@@ -257,7 +261,14 @@ type ClientInfo struct {
 	// against an enum so a new channel needs no server change.
 	Channel   string
 	UserAgent string
-	IsCompat  bool
+	// DeviceID and DevicePlatform name the device: the profile device
+	// registry's identity (X-Silo-Device-Id and X-Silo-Device-Platform) on the
+	// native API, the MediaBrowser DeviceId on a Jellyfin play. The platform
+	// is only ever what the client declared; it is never derived from the
+	// user agent.
+	DeviceID       string
+	DevicePlatform string
+	IsCompat       bool
 }
 
 // Normalized returns the identity with every field trimmed and clamped to the
@@ -273,6 +284,8 @@ func (c ClientInfo) Normalized() ClientInfo {
 	c.Build = normalizeClientMetadataValue(c.Build, 64)
 	c.Channel = normalizeClientMetadataValue(c.Channel, 32)
 	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, 512)
+	c.DeviceID = normalizeClientMetadataValue(c.DeviceID, 128)
+	c.DevicePlatform = normalizeClientMetadataValue(c.DevicePlatform, 40)
 	return c
 }
 
@@ -307,12 +320,14 @@ func (s *Session) ClientInfo() ClientInfo {
 		return ClientInfo{}
 	}
 	return ClientInfo{
-		Name:      s.ClientName,
-		Version:   s.ClientVersion,
-		Build:     s.ClientBuild,
-		Channel:   s.ClientChannel,
-		UserAgent: s.ClientUserAgent,
-		IsCompat:  s.IsJellyfinCompat,
+		Name:           s.ClientName,
+		Version:        s.ClientVersion,
+		Build:          s.ClientBuild,
+		Channel:        s.ClientChannel,
+		UserAgent:      s.ClientUserAgent,
+		DeviceID:       s.DeviceID,
+		DevicePlatform: s.DevicePlatform,
+		IsCompat:       s.IsJellyfinCompat,
 	}
 }
 
@@ -345,6 +360,7 @@ type SessionManager struct {
 	pausedGrace          time.Duration
 	expireHooks          []func(*Session)
 	finishHooks          []func(context.Context, *Session)
+	lifecycleHooks       []LifecycleHooks
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
 	// deliveryActivityReader reports media that another node served for a
@@ -691,6 +707,8 @@ func newSession(
 		ClientBuild:            clientInfo.Build,
 		ClientChannel:          clientInfo.Channel,
 		ClientUserAgent:        clientInfo.UserAgent,
+		DeviceID:               clientInfo.DeviceID,
+		DevicePlatform:         clientInfo.DevicePlatform,
 		IsJellyfinCompat:       clientInfo.IsCompat,
 		StartedAt:              now,
 		UpdatedAt:              now,
@@ -1791,6 +1809,102 @@ func (m *SessionManager) FinishSession(ctx context.Context, sessionID string) er
 		hook(ctx, &finished)
 	}
 	return nil
+}
+
+// LifecycleHooks hear a playback frontend announce a session's start and
+// report a pause without a progress sequence (Jellyfin, Audiobookshelf, the
+// v1 bridge), for the admin lifecycle events.
+type LifecycleHooks struct {
+	Started       func(ctx context.Context, s *Session, frontend string)
+	PauseReported func(ctx context.Context, sessionID string, paused bool)
+}
+
+// AddLifecycleHooks registers hooks for AnnounceStart and ReportPause.
+func (m *SessionManager) AddLifecycleHooks(hooks LifecycleHooks) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lifecycleHooks = append(m.lifecycleHooks, hooks)
+}
+
+// AnnounceStart tells the lifecycle hooks a frontend started this session.
+// frontend names the surface: native, bridge, jellyfin or abs.
+func (m *SessionManager) AnnounceStart(ctx context.Context, sessionID, frontend string) {
+	m.mu.RLock()
+	s, ok := m.sessions[sessionID]
+	var started Session
+	if ok {
+		started = *s
+	}
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	for _, hook := range hooks {
+		if hook.Started != nil {
+			hook.Started(ctx, &started, frontend)
+		}
+	}
+}
+
+// ReportPause tells the lifecycle hooks a client reported this pause state
+// without a progress sequence.
+func (m *SessionManager) ReportPause(ctx context.Context, sessionID string, paused bool) {
+	m.mu.RLock()
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	for _, hook := range hooks {
+		if hook.PauseReported != nil {
+			hook.PauseReported(ctx, sessionID, paused)
+		}
+	}
+}
+
+// FinishDetached runs the finish hooks for a play this replica no longer
+// holds: one ended on another replica's copy, or a copy this replica already
+// removed. The caller supplies the snapshot; registered sessions are left as
+// they are. ctx carries the end reason (WithEndReason) and marks the snapshot
+// as detached (IsDetachedFinish), so the hooks can fill what it lacks from
+// shared state.
+func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
+	m.mu.RLock()
+	hooks := append([]func(context.Context, *Session){}, m.finishHooks...)
+	m.mu.RUnlock()
+	ctx = context.WithValue(ctx, detachedFinishKey{}, true)
+	for _, hook := range hooks {
+		hook(ctx, &s)
+	}
+}
+
+// PositionUnknown marks a FinishDetached snapshot whose position nobody
+// reported: the finish hooks take it from shared state. An explicit zero is
+// a reported position and is kept.
+const PositionUnknown = -1
+
+// EndReasonReplaced is the end reason of a session another one replaced
+// mid-play: a Jellyfin client switched play method.
+const EndReasonReplaced = "replaced"
+
+type endReasonKey struct{}
+type detachedFinishKey struct{}
+
+// WithEndReason tells the finish hooks why the play ended. Without it a
+// finished play ended because its client stopped it.
+func WithEndReason(ctx context.Context, reason string) context.Context {
+	return context.WithValue(ctx, endReasonKey{}, reason)
+}
+
+// EndReasonFromContext is the reason WithEndReason recorded, or "".
+func EndReasonFromContext(ctx context.Context) string {
+	reason, _ := ctx.Value(endReasonKey{}).(string)
+	return reason
+}
+
+// IsDetachedFinish reports whether a finish hook runs for a FinishDetached
+// snapshot rather than a copy this replica held.
+func IsDetachedFinish(ctx context.Context) bool {
+	detached, _ := ctx.Value(detachedFinishKey{}).(bool)
+	return detached
 }
 
 // GetSession returns the session with the given ID, or ErrSessionNotFound.

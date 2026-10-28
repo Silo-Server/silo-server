@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 36
+const schemaVersion = 37
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -383,6 +383,23 @@ WHERE COALESCE(section_id, '') = ''
 			return fmt.Errorf("migration v36 failed: %w", err)
 		}
 		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 36"); err != nil {
+			return err
+		}
+	}
+	if version < 37 {
+		// The retired card caption choice; the Postgres store rewrites the
+		// same rows in 20261027002724_retire_card_caption_choice.sql. The
+		// revision moves so a client holding the old row re-reads it, and
+		// updated_at stays because nobody changed the setting.
+		if _, err := tx.ExecContext(context.Background(), `
+UPDATE user_setting_values
+SET value = json_set(value, '$.caption', 'title_metadata'),
+    revision = revision + 1
+WHERE key = 'ui.card_presentation'
+  AND json_extract(value, '$.caption') <> 'title_metadata'`); err != nil {
+			return fmt.Errorf("migration v37 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 37"); err != nil {
 			return err
 		}
 	}

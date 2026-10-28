@@ -1171,7 +1171,7 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
 		// Members may span libraries, so the detail fetch is not library-scoped.
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, nil)
+		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, nil, query.requestedFields)
 	}
 	items := make([]baseItemDTO, 0, len(listItems))
 	for _, item := range listItems {

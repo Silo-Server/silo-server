@@ -19,9 +19,49 @@ func NewSuggestionRepository(pool *pgxpool.Pool) *SuggestionRepository {
 	return &SuggestionRepository{pool: pool}
 }
 
+// MaxSuggestionCreateBodyBytes caps a suggestion create request body on both
+// the v1 and v2 routes; the v2 field limits total about 25 KiB.
+const MaxSuggestionCreateBodyBytes = 32 << 10
+
+// maxRoomSuggestions bounds one room's suggestion list. Every create, vote and
+// unvote reloads and broadcasts the whole list, on this node and through the
+// cluster refresh, so an unbounded room makes each small request cost the
+// room's total stored rows. Real rooms hold a handful of suggestions.
+const maxRoomSuggestions = 200
+
+// ensureSuggestionCapacity counts the room's suggestions inside tx. The caller
+// must already hold the room row FOR UPDATE: every creator takes that lock, so
+// creators on different API servers count each other's committed rows.
+func ensureSuggestionCapacity(ctx context.Context, tx pgx.Tx, roomID string) error {
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM watch_together_suggestions WHERE room_id = $1`, roomID).Scan(&count); err != nil {
+		return fmt.Errorf("count suggestions: %w", err)
+	}
+	if count >= maxRoomSuggestions {
+		return ErrSuggestionLimitReached
+	}
+	return nil
+}
+
 func (r *SuggestionRepository) CreateSuggestion(ctx context.Context, s Suggestion) (*Suggestion, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("suggestion repository unavailable")
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create suggestion tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := tx.QueryRow(ctx, `SELECT id FROM watch_together_rooms WHERE id = $1 FOR UPDATE`, s.RoomID).Scan(new(string)); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRoomNotFound
+		}
+		return nil, fmt.Errorf("lock suggestion room: %w", err)
+	}
+	if err := ensureSuggestionCapacity(ctx, tx, s.RoomID); err != nil {
+		return nil, err
 	}
 
 	const query = `
@@ -36,12 +76,18 @@ func (r *SuggestionRepository) CreateSuggestion(ctx context.Context, s Suggestio
 			vote_count, created_at
 	`
 
-	row := r.pool.QueryRow(ctx, query,
+	created, err := scanSuggestion(tx.QueryRow(ctx, query,
 		s.ID, s.RoomID, s.SuggesterUserID, s.SuggesterProfileID,
 		s.ContentID, s.ContentType, s.Title, s.Subtitle, s.PosterURL, s.Note,
 		s.VoteCount, s.CreatedAt,
-	)
-	return scanSuggestion(row)
+	))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create suggestion: %w", err)
+	}
+	return created, nil
 }
 
 func (r *SuggestionRepository) GetSuggestion(ctx context.Context, id string) (*Suggestion, error) {

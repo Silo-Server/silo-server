@@ -490,9 +490,36 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	}
 
 	pd.Chapters = normalizeChapters(raw.Chapters, pd.Duration)
-	pd.FormatTags = normalizeFormatTags(raw.Format.Tags)
+	pd.FormatTags = formatTags(raw)
 
 	return pd
+}
+
+// formatTags returns the file-level tags. Ogg (Vorbis, Opus) stores its
+// Vorbis comments per stream, so ffprobe reports a book's title, artist and
+// narrator on the audio stream and leaves format.tags empty; there the first
+// audio stream fills the keys format.tags lacks. Other containers' stream
+// tags (language, handler_name) describe the track, not the file.
+func formatTags(raw *ffprobeOutput) map[string]string {
+	tags := normalizeFormatTags(raw.Format.Tags)
+	if detectContainer(raw.Format.FormatName) != containerOgg {
+		return tags
+	}
+	for _, s := range raw.Streams {
+		if s.CodecType != "audio" {
+			continue
+		}
+		for k, v := range normalizeFormatTags(s.Tags) {
+			if _, ok := tags[k]; !ok {
+				if tags == nil {
+					tags = make(map[string]string, len(s.Tags))
+				}
+				tags[k] = v
+			}
+		}
+		break
+	}
+	return tags
 }
 
 const (
@@ -1171,6 +1198,7 @@ func containerForFile(formatName, filePath string) string {
 const (
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
+	containerOgg    = "ogg"
 )
 
 // detectContainer maps ffprobe format names to common container names.
@@ -1192,7 +1220,7 @@ func detectContainer(formatName string) string {
 		case "flv":
 			return "flv"
 		case "ogg":
-			return "ogg"
+			return containerOgg
 		case "wmv", "asf":
 			return "wmv"
 		}

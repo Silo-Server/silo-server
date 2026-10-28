@@ -116,6 +116,11 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 	return seasons, nil
 }
 
+// seasonArtworkAssignments keeps a season poster an admin picked after the
+// writer read the season; see lockedArtworkAssignments.
+var seasonArtworkAssignments = lockedArtworkAssignments("seasons", seriesImagesLockedSQL("seasons"),
+	"poster_path", "poster_source_path", "poster_thumbhash")
+
 // Upsert inserts a new season or updates all mutable fields if the
 // (series_id, season_number) natural key already exists. The stored content ID
 // is preserved on update and written back to s.ContentID.
@@ -135,31 +140,43 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
-			poster_path = EXCLUDED.poster_path,
-			poster_source_path = EXCLUDED.poster_source_path,
-			poster_thumbhash = EXCLUDED.poster_thumbhash,
+			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id`
+		RETURNING content_id, xmax = 0`
 
 	var storedContentID string
-	err := r.pool.QueryRow(ctx, query,
-		s.ContentID,
-		s.SeriesID,
-		s.SeasonNumber,
-		s.Title,
-		s.DefaultMetadataLanguage,
-		s.Overview,
-		s.AirDate,
-		s.PosterPath,
-		s.PosterSourcePath,
-		s.PosterThumbhash,
-		s.MetadataS3Path,
-		s.MetadataEtag,
-		s.MetadataSource,
-	).Scan(&storedContentID)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT content_id FROM seasons WHERE series_id = $1 AND season_number = $2 FOR NO KEY UPDATE`,
+				s.SeriesID, s.SeasonNumber)
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			if err := tx.QueryRow(ctx, query,
+				s.ContentID,
+				s.SeriesID,
+				s.SeasonNumber,
+				s.Title,
+				s.DefaultMetadataLanguage,
+				s.Overview,
+				s.AirDate,
+				s.PosterPath,
+				s.PosterSourcePath,
+				s.PosterThumbhash,
+				s.MetadataS3Path,
+				s.MetadataEtag,
+				s.MetadataSource,
+			).Scan(&storedContentID, &inserted); err != nil {
+				return err
+			}
+			return checkArtworkRowLocked(locked, storedContentID, inserted)
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("upserting season: %w", err)
 	}
@@ -229,37 +246,54 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
-			poster_path = EXCLUDED.poster_path,
-			poster_source_path = EXCLUDED.poster_source_path,
-			poster_thumbhash = EXCLUDED.poster_thumbhash,
+			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id, season_number`
-
-	rows, err := r.pool.Query(ctx, query,
-		contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
-		airDates, posterPaths, posterSourcePaths, posterThumbs,
-		metaS3Paths, metaEtags, metaSources,
-	)
-	if err != nil {
-		return fmt.Errorf("bulk upserting seasons: %w", err)
-	}
-	defer rows.Close()
+		RETURNING content_id, season_number, xmax = 0`
 
 	// Build a map to write back content IDs by season number.
 	returnedIDs := make(map[int32]string, len(seasons))
-	for rows.Next() {
-		var cid string
-		var sn int32
-		if err := rows.Scan(&cid, &sn); err != nil {
-			return fmt.Errorf("scanning bulk upsert season result: %w", err)
-		}
-		returnedIDs[sn] = cid
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating bulk upsert season results: %w", err)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT seasons.content_id FROM seasons
+			JOIN UNNEST($1::text[], $2::int[]) AS target(series_id, season_number) USING (series_id, season_number)
+			ORDER BY seasons.content_id
+			FOR NO KEY UPDATE OF seasons`, seriesIDs, seasonNums)
+			if err != nil {
+				return err
+			}
+			rows, err := tx.Query(ctx, query,
+				contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
+				airDates, posterPaths, posterSourcePaths, posterThumbs,
+				metaS3Paths, metaEtags, metaSources,
+			)
+			if err != nil {
+				return fmt.Errorf("bulk upserting seasons: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var cid string
+				var sn int32
+				var inserted bool
+				if err := rows.Scan(&cid, &sn, &inserted); err != nil {
+					return fmt.Errorf("scanning bulk upsert season result: %w", err)
+				}
+				if err := checkArtworkRowLocked(locked, cid, inserted); err != nil {
+					return err
+				}
+				returnedIDs[sn] = cid
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterating bulk upsert season results: %w", err)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return err
 	}
 
 	for _, s := range seasons {

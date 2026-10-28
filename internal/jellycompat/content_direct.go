@@ -777,13 +777,19 @@ func (s *directContentService) enrichDetailUserData(ctx context.Context, store u
 
 // GetItemDetailsByIDs is the batched form of GetItemDetail for a page of content
 // IDs. It returns upstream item details keyed by content ID, each identical to
-// what GetItemDetail would return for that id: the catalog detail is built by
-// the batched DetailService path (or GetEpisodeDetailsForSeries for episodes),
-// then run through the same compat-excluded-type guard, itemDetailToUpstream
-// conversion, and UserData enrichment. IDs that are excluded media types,
-// access-filtered, or otherwise unresolved are simply absent from the map so the
-// caller renders them from list data, mirroring GetItemDetail's error path.
-func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+// what GetItemDetail would return for that id in every member the compat
+// mapper reads: the catalog detail is built by the batched DetailService path
+// (or GetEpisodeDetailsForSeries for episodes), then run through the same
+// compat-excluded-type guard, itemDetailToUpstream conversion, and UserData
+// enrichment. IDs that are excluded media types, access-filtered, or otherwise
+// unresolved are simply absent from the map so the caller renders them from
+// list data, mirroring GetItemDetail's error path.
+//
+// fields is the request's Fields (nil means all). Parts of the detail no list
+// mapping shows are never built: a series' folder paths, which the compat
+// surface does not expose, a movie's effective subtitle defaults, and cast and
+// crew unless People is requested.
+func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, opts detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	out := make(map[string]*upstreamItemDetail, len(contentIDs))
 	if len(contentIDs) == 0 || s.detailSvc == nil {
 		return out, nil
@@ -793,7 +799,7 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 	details := make(map[string]*catalog.ItemDetail, len(contentIDs))
 
 	// Movies/series (and any other media_items rows) in one batched call.
-	itemDetails, err := s.detailSvc.GetItemDetailsByIDs(ctx, contentIDs, filter)
+	itemDetails, err := s.detailSvc.GetItemDetailsByIDsWithOptions(ctx, contentIDs, filter, compatDetailBatchOptions(opts))
 	if err != nil {
 		return nil, wrapCatalogError(err)
 	}
@@ -829,7 +835,14 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 	if len(details) == 0 {
 		return out, nil
 	}
+	s.addUpstreamDetailsWithUserData(ctx, session, details, out)
+	return out, nil
+}
 
+// addUpstreamDetailsWithUserData converts a page of catalog details to their
+// upstream form in out, with the viewer's UserData resolved for the whole page
+// at once. Compat-excluded media types are left out.
+func (s *directContentService) addUpstreamDetailsWithUserData(ctx context.Context, session *Session, details map[string]*catalog.ItemDetail, out map[string]*upstreamItemDetail) {
 	// Resolve the user store once for the whole page.
 	var store userstore.UserStore
 	if s.storeProvider != nil {
@@ -838,38 +851,42 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 		}
 	}
 
-	// Batch the leaf-item progress lookup. enrichDetailUserData issues
+	// Batch the progress lookup. enrichDetailUserData issues
 	// GetProgressWithCompletedHistory per item (two point queries each), so a
-	// 50-item page cost ~100 sequential round-trips. Movies/episodes own a
-	// progress row, so their played/position state is resolved here in a single
-	// ListProgressWithCompletedHistory call — semantically identical to the
-	// per-item path (absent id → nil, completed-history synthesized). Series own
-	// no progress row and need a per-series episode rollup, so they stay on the
-	// per-item enrichDetailUserData path in the loop below.
-	var leafProgress map[string]userstore.WatchProgress
-	leafBatchFailed := false
+	// 50-item page cost ~100 sequential round-trips. One
+	// ListProgressWithCompletedHistory call covers every id instead —
+	// semantically identical to the per-item path (absent id → nil,
+	// completed-history synthesized). A series owns no progress row of its own
+	// and is looked up only so a stray row still wins over its rollup, exactly
+	// as enrichDetailUserData lets it.
+	var pageProgress map[string]userstore.WatchProgress
+	progressBatchFailed := false
 	if store != nil {
-		leafIDs := make([]string, 0, len(details))
+		ids := make([]string, 0, len(details))
 		for id, detail := range details {
-			if isCompatExcludedMediaType(detail.Type) || strings.EqualFold(detail.Type, "series") {
+			if isCompatExcludedMediaType(detail.Type) {
 				continue
 			}
-			leafIDs = append(leafIDs, id)
+			ids = append(ids, id)
 		}
-		if len(leafIDs) > 0 {
-			if pm, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, leafIDs); err == nil {
-				leafProgress = pm
+		if len(ids) > 0 {
+			if pm, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, ids); err == nil {
+				pageProgress = pm
 			} else {
 				// A transient store error must not blank played/position state
 				// for the whole page at once: fall back to the per-item lookups
 				// below, which degrade one id at a time exactly like the
 				// pre-batch path did. Not once ctx is done: they would fail on
 				// it too.
-				leafBatchFailed = ctx.Err() == nil
-				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: batch leaf progress lookup failed", "component", "jellycompat",
-					"error", err, "leaf_count", len(leafIDs), "fallback", leafBatchFailed)
+				progressBatchFailed = ctx.Err() == nil
+				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: batch progress lookup failed", "component", "jellycompat",
+					"error", err, "item_count", len(ids), "fallback", progressBatchFailed)
 			}
 		}
+	}
+	var seriesRollups map[string]*catalog.SeasonUserData
+	if store != nil && !progressBatchFailed {
+		seriesRollups = s.batchSeriesRollups(ctx, store, session.ProfileID, details, pageProgress)
 	}
 
 	for id, detail := range details {
@@ -878,20 +895,79 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 		}
 		upstream := itemDetailToUpstream(detail)
 		if store != nil {
+			var wp *userstore.WatchProgress
+			if entry, ok := pageProgress[id]; ok {
+				wp = &entry
+			}
+			isSeries := strings.EqualFold(detail.Type, "series")
+			rollup, haveRollup := seriesRollups[id]
 			switch {
-			case strings.EqualFold(detail.Type, "series"), leafBatchFailed:
+			case progressBatchFailed:
+				s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
+			case isSeries && wp == nil && haveRollup:
+				upstream.UserData = rollup
+			case isSeries && wp == nil && ctx.Err() == nil:
+				// No batched rollup for this series: the store cannot compute
+				// one in SQL, or the batched query failed. Not once ctx is
+				// done: the per-series lookup would fail on it too.
 				s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
 			default:
-				var wp *userstore.WatchProgress
-				if entry, ok := leafProgress[id]; ok {
-					wp = &entry
-				}
 				upstream.UserData = seasonUserDataFromProgress(wp)
 			}
 		}
 		out[id] = &upstream
 	}
-	return out, nil
+}
+
+// compatDetailBatchOptions trims the batched catalog detail to what the
+// caller reads.
+func compatDetailBatchOptions(opts detailBatchOptions) catalog.ItemDetailBatchOptions {
+	return catalog.ItemDetailBatchOptions{
+		// itemFromDetailWithFields reads Cast and Crew only for People.
+		SkipCredits: opts.Fields != nil && !opts.Fields["people"],
+		// The compat surface never exposes a series' folder paths.
+		SkipFolderPaths:      true,
+		SkipSubtitleDefaults: !opts.SubtitleDefaults,
+	}
+}
+
+// batchSeriesRollups computes, in one query, the episode watch rollup
+// enrichDetailUserData would compute for each series on the page that has no
+// progress row of its own. A series whose rollup is absent from the result
+// (the store has no SQL rollup, or the query failed) is left for the per-item
+// path.
+func (s *directContentService) batchSeriesRollups(ctx context.Context, store userstore.UserStore, profileID string, details map[string]*catalog.ItemDetail, progress map[string]userstore.WatchProgress) map[string]*catalog.SeasonUserData {
+	rollupStore, ok := store.(userstore.SeriesEpisodeRollupStore)
+	if !ok || s.episodeRepo == nil {
+		return nil
+	}
+	seriesIDs := make([]string, 0, len(details))
+	for id, detail := range details {
+		if !strings.EqualFold(detail.Type, "series") {
+			continue
+		}
+		if _, owned := progress[id]; owned {
+			continue
+		}
+		seriesIDs = append(seriesIDs, id)
+	}
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	counts, err := rollupStore.SeriesEpisodeWatchCounts(ctx, profileID, seriesIDs)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "jellycompat: batch series watch rollup failed", "component", "jellycompat",
+			"error", err, "series_count", len(seriesIDs), "fallback", ctx.Err() == nil)
+		return nil
+	}
+	rollups := make(map[string]*catalog.SeasonUserData, len(seriesIDs))
+	for _, id := range seriesIDs {
+		// A series absent from counts has no available episodes; the
+		// zero-value counts give the same empty rollup enrichDetailUserData
+		// gives it.
+		rollups[id] = catalog.SeasonUserDataFromCounts(counts[id])
+	}
+	return rollups
 }
 
 // groupEpisodesBySeries maps the subset of contentIDs that are episodes to their

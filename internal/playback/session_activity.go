@@ -162,3 +162,30 @@ func (m *SessionManager) claimCompatExpiryLocked(now time.Time, activeIdle, paus
 	}
 	return result
 }
+
+// ClaimCompatExpiry runs the shared compatibility expiry claim for sessions
+// this replica may not hold: the cluster sweep ends a Jellyfin play no
+// replica holds through the same claim the reaper uses. ok is false when no
+// claimer is configured.
+func (m *SessionManager) ClaimCompatExpiry(ctx context.Context, candidates []SessionExpiryCandidate) (map[string]bool, bool, error) {
+	m.mu.RLock()
+	claimer := m.compatExpiryClaimer
+	m.mu.RUnlock()
+	if claimer == nil {
+		return nil, false, nil
+	}
+	claimed, err := claimer(ctx, candidates)
+	return claimed, true, err
+}
+
+// DeliveryActivity reads when a node last delivered media for each session,
+// for sessions this replica may not hold.
+func (m *SessionManager) DeliveryActivity(ctx context.Context, sessions []Session) (map[string]time.Time, error) {
+	m.mu.RLock()
+	reader := m.deliveryActivityReader
+	m.mu.RUnlock()
+	if reader == nil {
+		return nil, nil
+	}
+	return reader(ctx, sessions)
+}

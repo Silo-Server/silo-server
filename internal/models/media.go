@@ -748,6 +748,11 @@ type MediaItem struct {
 	// because some frozen v1 responses serialize MediaItem directly.
 	PosterIsEpisodeStill   *bool `json:"-"`
 	BackdropIsEpisodeStill *bool `json:"-"`
+	// ParentArtwork is transient presentation metadata on an episode card:
+	// its season's and series' own artwork, as raw paths before sizing or
+	// signing, set by the query that loads the card. nil when no such query
+	// loaded the item. json:"-" for the same frozen v1 responses.
+	ParentArtwork *EpisodeParentArtwork `json:"-"`
 	// Banner, thumb (landscape), clear art and disc art follow the poster,
 	// backdrop and logo slots. Clear art and disc art are cut-outs and, like
 	// the logo, carry no thumbhash. json:"-" for the same frozen v1 responses.
@@ -761,6 +766,18 @@ type MediaItem struct {
 	ClearArtSourcePath string `json:"-"`
 	DiscPath           string `json:"-"`
 	DiscSourcePath     string `json:"-"`
+}
+
+// EpisodeParentArtwork is an episode's season poster and its series' poster
+// and backdrop, so an episode card can draw a hero from series artwork rather
+// than the episode still. Seasons store no backdrop.
+type EpisodeParentArtwork struct {
+	SeriesPosterPath        string
+	SeriesPosterThumbhash   string
+	SeriesBackdropPath      string
+	SeriesBackdropThumbhash string
+	SeasonPosterPath        string
+	SeasonPosterThumbhash   string
 }
 
 // ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops

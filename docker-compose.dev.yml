@@ -106,7 +106,11 @@ services:
         air -c /tmp/air.docker.toml
     environment:
       MODE: integrated
+      # Keep the container listeners fixed. JF_PORT and ABS_PORT in .env are
+      # host-side published-port overrides.
       PORT: "8080"
+      JF_PORT: "8096"
+      ABS_PORT: "13378"
       DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins

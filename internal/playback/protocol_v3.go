@@ -163,6 +163,11 @@ const (
 // capabilities features list.
 const FeatureHLSVariableSubstitutionV3 = "hls_variable_substitution_v1"
 
+// FeatureCodecChannelCeilingsV3 tells a client that the server honors a
+// delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
+// features list.
+const FeatureCodecChannelCeilingsV3 = "codec_channel_ceilings_v1"
+
 // Worker transport features are protocol capabilities rather than media
 // transformations. They let route planning exclude an older worker before a
 // client is handed a URL that worker cannot serve.
@@ -268,7 +273,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -666,13 +671,20 @@ type DeliveryCapabilityV3 struct {
 	// player downmixes surround itself omits it. A source track above it is
 	// converted to AAC within the ceiling, on a video-copy remux when the
 	// video can be copied. Zero or less means unset.
-	MaxChannels       *int                           `json:"max_channels,omitempty"`
-	HDRDetails        *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
-	Subtitles         DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
-	Features          []string                       `json:"features"`
-	AuthHeaderRefresh bool                           `json:"auth_header_refresh"`
-	ValidatedClaims   []string                       `json:"validated_claims"`
-	Transformations   []TransformationV3             `json:"transformations"`
+	MaxChannels *int `json:"max_channels,omitempty"`
+	// MaxChannelsByCodec caps the channel count per audio codec, on top of
+	// MaxChannels: {"aac": 2} from a client that decodes AAC only in stereo
+	// but plays E-AC-3 5.1. A copied track above its codec's ceiling is
+	// converted, and an AAC conversion stays within the "aac" entry. Keys are
+	// codec names as in audio_decode_codecs; a value of zero or less means
+	// unset. Honored when the server advertises codec_channel_ceilings_v1.
+	MaxChannelsByCodec map[string]int                 `json:"max_channels_by_codec,omitempty" maxProperties:"32"`
+	HDRDetails         *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
+	Subtitles          DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
+	Features           []string                       `json:"features"`
+	AuthHeaderRefresh  bool                           `json:"auth_header_refresh"`
+	ValidatedClaims    []string                       `json:"validated_claims"`
+	Transformations    []TransformationV3             `json:"transformations"`
 }
 
 // ClientPlaybackContextV3 carries the client's execution context. Feature
@@ -1440,6 +1452,25 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 		}
 		if err := validateHDRCapabilitiesV3(delivery.HDRDetails); err != nil {
 			return err
+		}
+		if len(delivery.MaxChannelsByCodec) > 32 {
+			return errors.New("delivery capability exceeds supported size")
+		}
+		if len(delivery.MaxChannelsByCodec) > 0 {
+			byCodec := make(map[string]int, len(delivery.MaxChannelsByCodec))
+			for codec, channels := range delivery.MaxChannelsByCodec {
+				codec = normalizeCodecV3(codec)
+				if codec == "" || len(codec) > 64 || channels > 64 {
+					return errors.New("invalid delivery max_channels_by_codec")
+				}
+				// Spellings that name one codec keep the lowest ceiling; a
+				// ceiling beats an unset value (zero or less).
+				if existing, seen := byCodec[codec]; !seen || channels > 0 && (existing <= 0 || channels < existing) {
+					byCodec[codec] = channels
+				}
+			}
+			delivery.MaxChannelsByCodec = byCodec
+			ctx.Deliveries[name] = delivery
 		}
 		for _, values := range [][]string{delivery.Containers, delivery.VideoCodecs, delivery.AudioDecodeCodecs, delivery.AudioPassthroughCodecs, delivery.Features, delivery.ValidatedClaims} {
 			for _, value := range values {

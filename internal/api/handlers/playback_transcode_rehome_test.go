@@ -711,7 +711,7 @@ func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 		t.Fatal("did not write the recipe for the live route")
 	}
 
-	if _, err := f.handler.stopPlaybackSessionWithResult(context.Background(), f.session, true); err != nil {
+	if _, err := f.handler.stopPlaybackSessionWithResult(context.Background(), f.session, PlaybackEndStopped); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if _, ok := store.Get(context.Background(), rehomeTestTransport); ok {

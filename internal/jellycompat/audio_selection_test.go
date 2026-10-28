@@ -29,6 +29,19 @@ type testCompatSessionManager struct {
 	startCalls          int
 	beginTransportCalls []string
 	endTransportCalls   []string
+	// detached records FinishDetached snapshots with their end reason.
+	detached []compatDetachedEnd
+	// startErr fails StartSession.
+	startErr error
+}
+
+type compatDetachedEnd struct {
+	session playback.Session
+	reason  string
+}
+
+func (m *testCompatSessionManager) FinishDetached(ctx context.Context, s playback.Session) {
+	m.detached = append(m.detached, compatDetachedEnd{session: s, reason: playback.EndReasonFromContext(ctx)})
 }
 
 type compatAudioTrackCall struct {
@@ -59,6 +72,9 @@ func (s *failAfterMutationPlaybackStore) Update(id string, fn func(*PlaybackSess
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
 	m.startCalls++
+	if m.startErr != nil {
+		return nil, m.startErr
+	}
 	session := &playback.Session{
 		ID:             "upstream-started",
 		UserID:         userID,

@@ -68,6 +68,10 @@ type StreamHandler struct {
 	// session recipes (same instance), the only reconstruction source for a
 	// session whose URLs carry no stream token. May be nil.
 	SessionRecipeStore sessionRecipeStoreV3
+	// FinishOtherEnd is the PlaybackHandler's finisher for a stop an abort
+	// here took over (same instance). May be nil; the finish hook then
+	// records the stop's history without its provider event.
+	FinishOtherEnd func(ctx context.Context, claim nativeEndClaim, sessionID string)
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -831,8 +835,23 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {
 		return
 	}
+	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
-	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
+	// An earlier stop that won the row and never finished is finished as
+	// that stop by the playback handler, which has its writers.
+	if claim.owned && !claim.ownEnd(abortStopID(session.ID)) && h.FinishOtherEnd != nil {
+		h.FinishOtherEnd(ctx, claim, session.ID)
+		deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
+		return
+	}
+	// The playback handler's finish hook writes the play's history, as it
+	// does for every other end, unless another stop already owns it.
+	if finisher, ok := h.sessionMgr.(detachedFinisher); ok && claim.owned {
+		snapshot := *session
+		claim.applyAccepted(&snapshot)
+		finisher.FinishDetached(playback.WithEndReason(ctx, string(claim.reason(session.ID, PlaybackEndAborted))), snapshot)
+		claim.finish(ctx, session.ID, "")
+	}
 	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 

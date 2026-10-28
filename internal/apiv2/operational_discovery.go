@@ -23,10 +23,11 @@ type CompatConnectInfoOutput struct {
 type ImageCapabilities struct {
 	Capability
 	EpisodeStillProvenance bool                       `json:"episode_still_provenance" doc:"Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown"`
+	EpisodeParentArtwork   bool                       `json:"episode_parent_artwork" doc:"Episode cards may carry series_poster_url, series_backdrop_url and season_poster_url with their thumbhashes, sized by the poster and backdrop slots, on Home and library sections (including Continue Watching and Next Up), catalog browse and search, Watch Tonight, and episode detail (getCatalogItem). Seasons store no backdrop, so there is no season backdrop"`
 	ExtendedItemArtwork    bool                       `json:"extended_item_artwork" doc:"Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc"`
 	SeasonListArtworkParam string                     `json:"season_list_artwork_param" doc:"Season-list boolean query parameter; false omits poster URLs and thumbhashes"`
 	Param                  string                     `json:"param"`
-	SlotWidthParams        map[string]string          `json:"slot_width_params" doc:"Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is"`
+	SlotWidthParams        map[string]string          `json:"slot_width_params" doc:"Per-slot width query parameters, keyed by slot: poster (poster_url, series_poster_url, season_poster_url), backdrop (backdrop_url, backdrop_urls, series_backdrop_url), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is"`
 	Sizes                  []imagesize.Size           `json:"sizes"`
 	Widths                 map[string]ImageSizeWidths `json:"widths"`
 	OriginalMaxWidthPx     int                        `json:"original_max_width_px"`
@@ -77,6 +78,7 @@ func registerOperationalDiscovery(reg *Registry) {
 			}
 			return &ImageCapabilitiesOutput{Body: ImageCapabilities{
 				EpisodeStillProvenance: true,
+				EpisodeParentArtwork:   true,
 				ExtendedItemArtwork:    true,
 				SeasonListArtworkParam: view.SeasonListArtworkParam,
 				SlotWidthParams:        slotWidthParams,

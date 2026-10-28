@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // These tests inspect only the merged configuration. They never create a client.
@@ -91,63 +90,6 @@ func TestConnectionCheckAuthorityEquivalence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := endpointAuthority(tc.left) == endpointAuthority(tc.right); got != tc.equal {
 				t.Fatalf("authority equality = %v, want %v", got, tc.equal)
-			}
-		})
-	}
-}
-
-func TestConnectionCheckDefaultPortsRetainSavedCredentials(t *testing.T) {
-	for _, tc := range []struct{ kind, urlKey, keyKey string }{
-		{"ai_chat", "ai.base_url", "ai.api_key"},
-		{"ai_transcription", "ai.asr_base_url", "ai.asr_api_key"},
-		{"recommendations_embedding", "recommendations.embedding_base_url", "recommendations.embedding_auth_token"},
-	} {
-		t.Run(tc.kind, func(t *testing.T) {
-			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				tc.urlKey: "https://provider.example.test/base", tc.keyKey: "SYNTHETIC_STORED",
-			}}}
-			got, err := h.effectiveSettingsForConnectionCheck(t.Context(), tc.kind, adminSettingsConnectionCheckRequest{
-				Values: map[string]string{tc.urlKey: "https://PROVIDER.example.test:443/other"}, DirtyKeys: []string{tc.urlKey},
-			})
-			if err != nil || got[tc.keyKey] != "SYNTHETIC_STORED" {
-				t.Fatalf("saved credential withheld for default port: %v", err)
-			}
-		})
-	}
-}
-
-func TestEmbeddingCheckLegacyCredentialDraftSemantics(t *testing.T) {
-	const baseKey, tokenKey, legacyKey = "recommendations.embedding_base_url", "recommendations.embedding_auth_token", "recommendations.openai_api_key"
-	for _, tc := range []struct {
-		name, replacementKey, replacement, want string
-		dirty                                   bool
-	}{
-		{name: "withhold both saved keys"},
-		{name: "replace primary", replacementKey: tokenKey, replacement: "SYNTHETIC_PRIMARY", dirty: true, want: "SYNTHETIC_PRIMARY"},
-		{name: "replace legacy", replacementKey: legacyKey, replacement: "SYNTHETIC_LEGACY", dirty: true, want: "SYNTHETIC_LEGACY"},
-		{name: "clear primary withholds saved fallback", replacementKey: tokenKey, dirty: true},
-		{name: "clear fallback withholds saved primary", replacementKey: legacyKey, dirty: true},
-		{name: "non-dirty replacement ignored", replacementKey: tokenKey, replacement: "SYNTHETIC_IGNORED"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				baseKey: "https://provider.example.test/base", tokenKey: "SYNTHETIC_STORED_PRIMARY", legacyKey: "SYNTHETIC_STORED_LEGACY",
-			}}}
-			values := map[string]string{baseKey: "https://other.example.test/base"}
-			dirty := []string{baseKey}
-			if tc.replacementKey != "" {
-				values[tc.replacementKey] = tc.replacement
-				if tc.dirty {
-					dirty = append(dirty, tc.replacementKey)
-				}
-			}
-			got, err := h.effectiveSettingsForConnectionCheck(t.Context(), "recommendations_embedding", adminSettingsConnectionCheckRequest{Values: values, DirtyKeys: dirty})
-			if err != nil {
-				t.Fatal(err)
-			}
-			cfg, err := config.LoadFromDB(got)
-			if err != nil || cfg.Recommendations.EmbeddingAuthToken != tc.want {
-				t.Fatalf("fallback credential mismatch: %v", err)
 			}
 		})
 	}

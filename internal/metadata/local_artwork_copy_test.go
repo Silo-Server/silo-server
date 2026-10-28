@@ -16,13 +16,13 @@ import (
 
 // claimCountingImageCacheJobs counts drain claims.
 type claimCountingImageCacheJobs struct {
-	fakeLocalImageCacheJobs
+	fakeImageCacheJobs
 	claimCalls int
 }
 
 func (f *claimCountingImageCacheJobs) ClaimDue(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
 	f.claimCalls++
-	return f.fakeLocalImageCacheJobs.ClaimDue(ctx, workerID, limit)
+	return f.fakeImageCacheJobs.ClaimDue(ctx, workerID, limit)
 }
 
 // With metadata.cache_images off, draining caches nothing, local artwork
@@ -31,9 +31,7 @@ func (f *claimCountingImageCacheJobs) ClaimDue(ctx context.Context, workerID str
 func TestImageCacheProcessorDrainsNothingWithCachingOff(t *testing.T) {
 	root := t.TempDir()
 	job := localArtworkJob("file://" + writeLocalPoster(t, root))
-	jobs := &claimCountingImageCacheJobs{fakeLocalImageCacheJobs: fakeLocalImageCacheJobs{
-		fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
-	}}
+	jobs := &claimCountingImageCacheJobs{fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}}
 	items := &fakeItemArtworkUpdater{updated: true}
 	p := NewImageCacheProcessorWithTargets(jobs, &fakeByteImageCacher{}, nil, ImageCacheProcessorTargets{Items: items})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
@@ -63,7 +61,7 @@ func TestImageCacheProcessorRequeuesClaimedJobsWhenCachingTurnsOff(t *testing.T)
 		ID: 8, TargetType: ImageCacheTargetItem, TargetContentID: "movie-2", SourcePath: "https://img.example/p.jpg",
 		ProviderID: "tmdb", ProviderContentID: "2", ContentType: "movies", ImageType: ImageCacheImagePoster,
 	}
-	jobs := &fakeLocalImageCacheJobs{fakeImageCacheJobs: fakeImageCacheJobs{}}
+	jobs := &fakeImageCacheJobs{}
 	p := NewImageCacheProcessorWithTargets(jobs, &fakeByteImageCacher{}, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 	p.SetEnabled(false)
@@ -444,7 +442,7 @@ func TestImageCacheProcessorWaitsForWorkerBudget(t *testing.T) {
 		job.ID = i
 		claimed = append(claimed, job)
 	}
-	jobs := &fakeLocalImageCacheJobs{}
+	jobs := &fakeImageCacheJobs{}
 	cacher := &fakeByteImageCacher{}
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
@@ -508,7 +506,7 @@ func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
 		job.ID = i
 		claimed = append(claimed, job)
 	}
-	jobs := &fakeLocalImageCacheJobs{}
+	jobs := &fakeImageCacheJobs{}
 	cacher := &fakeByteImageCacher{}
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})

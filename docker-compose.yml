@@ -63,10 +63,11 @@ services:
     stop_grace_period: 2m
     environment:
       MODE: integrated
-      # Keep the container listeners fixed. PORT and JF_PORT in .env are
-      # host-side published-port overrides.
+      # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
+      # are host-side published-port overrides.
       PORT: "8080"
       JF_PORT: "8096"
+      ABS_PORT: "13378"
       # Master key for at-rest credential encryption. Required — the server
       # refuses to start without it. Generate with: openssl rand -base64 48
       # Back it up SEPARATELY from your database dumps; losing it makes encrypted

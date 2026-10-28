@@ -771,38 +771,6 @@ func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, j
 	return current, nil
 }
 
-// CurrentTargetCachedPath reports the cached image path currently stored on
-// the job's target row. The processor's local-artwork branch uses it to skip
-// unchanged art and to delete the stale hashed local/ prefix after a
-// successful re-cache. Returns ("", nil) when the row no longer exists or the
-// target type is unknown.
-func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error) {
-	if r == nil || r.pool == nil || job == nil {
-		return "", nil
-	}
-	query, args, ok := currentTargetCachedPathQuery(job)
-	if !ok {
-		return "", nil
-	}
-	var current string
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("reading current target cached path: %w", err)
-	}
-	return current, nil
-}
-
-// currentTargetCachedPathQuery reads the served path column beside the source
-// column currentTargetSourceQuery reads ("poster_source_path" ->
-// "poster_path", "source_path" -> "path").
-func currentTargetCachedPathQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
-	query, args, ok := currentTargetSourceQuery(job)
-	return strings.Replace(query, "source_path", "path", 1), args, ok
-}
-
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:

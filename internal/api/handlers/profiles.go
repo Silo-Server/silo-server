@@ -1082,6 +1082,12 @@ func (h *ProfileHandler) toProfileResponses(
 	return out
 }
 
+// ResolveAvatar is the avatar_source and avatar_url a profile's stored avatar
+// reference renders as, delivered through this handler's avatar store.
+func (h *ProfileHandler) ResolveAvatar(ctx context.Context, ref string) (source, url string) {
+	return resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, ref, h.AvatarResolver)
+}
+
 // profileResponseWith builds the DTO from a profile row and its already
 // resolved preferences.
 //
@@ -1091,7 +1097,7 @@ func (h *ProfileHandler) toProfileResponses(
 func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
 ) ProfileView {
-	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar, h.AvatarResolver)
+	avatarSource, avatarURL := h.ResolveAvatar(ctx, p.Avatar)
 	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,

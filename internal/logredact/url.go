@@ -3,6 +3,7 @@ package logredact
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,9 +11,62 @@ import (
 
 const invalidURLPlaceholder = "[invalid URL]"
 
+// tokenSegment matches a URL path segment holding a compact JWT, as signed
+// stream and download URLs do (/stream/direct/<token>, /downloads/file/<token>).
+// A JWT's header and claims are both JSON objects, so each base64url part
+// starts with "eyJ"; ordinary path segments do not have that shape.
+var tokenSegment = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
+
+// URLMayHoldCredential reports whether raw has a part that can carry a
+// credential: userinfo, a query, a fragment or a signed-token path segment.
+// A URL without one is safe to log as written.
+func URLMayHoldCredential(raw string) bool {
+	if strings.ContainsAny(raw, "@?#") {
+		return true
+	}
+	_, found := redactTokenSegments(raw)
+	return found
+}
+
+// redactTokenSegments replaces every slash-delimited segment of escaped that
+// holds a signed token with Placeholder and reports whether it found one.
+// escaped is an escaped path, or a URL with no query or fragment. Segments are
+// matched unescaped, so percent-encoding a token's characters does not hide it.
+func redactTokenSegments(escaped string) (string, bool) {
+	if !strings.Contains(escaped, "eyJ") && !strings.Contains(escaped, "%") {
+		return escaped, false
+	}
+	segments := strings.Split(escaped, "/")
+	found := false
+	for i, segment := range segments {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			decoded = segment
+		}
+		if tokenSegment.MatchString(decoded) {
+			segments[i] = Placeholder
+			found = true
+		}
+	}
+	return strings.Join(segments, "/"), found
+}
+
+// redactURLPath masks the signed-token segments of u's path in place.
+func redactURLPath(u *url.URL) {
+	escaped, found := redactTokenSegments(u.EscapedPath())
+	if !found {
+		return
+	}
+	// EscapedPath output always unescapes; were it not to, Path would be left
+	// empty and String would drop the path rather than print the token.
+	u.Path, _ = url.PathUnescape(escaped)
+	u.RawPath = escaped
+}
+
 // SanitizeURL returns a diagnostic-safe URL with credential-bearing
-// components removed. Malformed and non-hierarchical URLs fail closed rather
-// than returning any part of the untrusted input.
+// components removed and signed-token path segments masked. Malformed and
+// non-hierarchical URLs fail closed rather than returning any part of the
+// untrusted input.
 func SanitizeURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -23,6 +77,7 @@ func SanitizeURL(raw string) string {
 	parsed.ForceQuery = false
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
+	redactURLPath(parsed)
 	return parsed.String()
 }
 
@@ -88,9 +143,9 @@ func scrubRequestedURLs(message string, err error) string {
 	// Longest first, so a URL that prefixes another is not rewritten inside it.
 	sort.SliceStable(raws, func(a, b int) bool { return len(raws[a]) > len(raws[b]) })
 	for _, raw := range raws {
-		// Credentials can only sit in userinfo, query or fragment. Skipping
-		// other URLs keeps short or unusual values from rewriting plain text.
-		if !strings.ContainsAny(raw, "@?#") {
+		// Skipping URLs that cannot hold a credential keeps short or unusual
+		// values from rewriting plain text.
+		if !URLMayHoldCredential(raw) {
 			continue
 		}
 		clean := SanitizeURL(raw)

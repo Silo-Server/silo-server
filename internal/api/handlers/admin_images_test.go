@@ -95,6 +95,10 @@ func (f *imageServiceFake) ApplyLocalItemImage(context.Context, metadata.ApplyLo
 	return nil, errors.New("no local images")
 }
 
+func (f *imageServiceFake) ApplyUploadedItemImage(context.Context, metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
+	return nil, errors.New("no uploads")
+}
+
 func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 	tests := []struct {
 		name          string

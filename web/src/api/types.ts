@@ -2003,7 +2003,20 @@ export interface RequestDiscoverySection extends RequestMediaPage {
   next_page?: number;
 }
 
-export interface RequestDiscoveryResponse {
+/** One row of the Discover layout, in page order. */
+export interface RequestDiscoverRowRef {
+  key: string;
+  /**
+   * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
+   * studios, networks or genres for a brand row. The server may add more.
+   */
+  type: string;
+  title: string;
+}
+
+/** The Discover page: every row in order, and each title row's first page. */
+export interface RequestDiscoverLayout {
+  rows: RequestDiscoverRowRef[];
   sections: RequestDiscoverySection[];
 }
 

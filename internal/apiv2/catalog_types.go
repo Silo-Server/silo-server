@@ -71,6 +71,15 @@ type CatalogItem struct {
 	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
 	WorkTitle                  string              `json:"work_title,omitempty"`
 	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	// An episode card's parent artwork, so a client can draw a hero from the
+	// series backdrop without fetching the episode's detail. Seasons store no
+	// backdrop, so there is no season backdrop member.
+	SeriesPosterURL         string `json:"series_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it"`
+	SeriesPosterThumbhash   string `json:"series_poster_thumbhash,omitempty" doc:"On an episode card: the series poster's ThumbHash"`
+	SeriesBackdropURL       string `json:"series_backdrop_url,omitempty" format:"uri-reference" doc:"On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it"`
+	SeriesBackdropThumbhash string `json:"series_backdrop_thumbhash,omitempty" doc:"On an episode card: the series backdrop's ThumbHash"`
+	SeasonPosterURL         string `json:"season_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it"`
+	SeasonPosterThumbhash   string `json:"season_poster_thumbhash,omitempty" doc:"On an episode card: the season poster's ThumbHash"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -189,16 +198,22 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		ContentRating: v.ContentRating, AdvisoryAge: v.AdvisoryAge, AdvisorySource: v.AdvisorySource,
 		Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
-		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview,
+		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: calendarDatePtr(v.ReleaseDate), LastAirDate: calendarDatePtr(v.LastAirDate),
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
 		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
+		SeriesPosterURL: v.ParentArtwork.SeriesPosterURL, SeriesPosterThumbhash: v.ParentArtwork.SeriesPosterThumbhash,
+		SeriesBackdropURL: v.ParentArtwork.SeriesBackdropURL, SeriesBackdropThumbhash: v.ParentArtwork.SeriesBackdropThumbhash,
+		SeasonPosterURL: v.ParentArtwork.SeasonPosterURL, SeasonPosterThumbhash: v.ParentArtwork.SeasonPosterThumbhash,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
 		PendingTranslationLanguage: v.PendingTranslationLanguage, MachineTranslatedFields: v.MachineTranslatedFields,
 	}
 	if e := v.UpcomingEvent; e != nil {
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,
 			SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Badges: NonNil(e.Badges)}
+	}
+	if item.RatingTMDB == nil {
+		item.RatingTMDB = v.EpisodeRatingTMDB
 	}
 	return withShownRatings(item, sel)
 }
@@ -215,6 +230,9 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: calendarDatePtr(v.ReleaseDate), LastAirDate: calendarDatePtr(v.LastAirDate), AddedAt: instantPtr(v.AddedAt),
 		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
+		SeriesPosterURL: v.ParentArtwork.SeriesPosterURL, SeriesPosterThumbhash: v.ParentArtwork.SeriesPosterThumbhash,
+		SeriesBackdropURL: v.ParentArtwork.SeriesBackdropURL, SeriesBackdropThumbhash: v.ParentArtwork.SeriesBackdropThumbhash,
+		SeasonPosterURL: v.ParentArtwork.SeasonPosterURL, SeasonPosterThumbhash: v.ParentArtwork.SeasonPosterThumbhash,
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,

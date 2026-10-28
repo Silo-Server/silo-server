@@ -116,8 +116,6 @@ func TestEffectiveAdminSettingsProjectsRuntimeLegacyFallbacks(t *testing.T) {
 		"s3.operational_token_secret":     "legacy-token",
 		"s3.operational_token_param":      "signature",
 		"s3.operational_token_ttl":        "3600",
-		"subtitle_ai.base_url":            "https://legacy-ai.example.invalid",
-		"subtitle_ai.api_key":             "legacy-ai-key",
 		"subtitle_ai.chat_model":          "legacy-chat-model",
 		"subtitle_ai.max_concurrent_jobs": "7",
 		"ai.max_concurrent_jobs":          "0",
@@ -144,8 +142,6 @@ func TestEffectiveAdminSettingsProjectsRuntimeLegacyFallbacks(t *testing.T) {
 		"s3.private_key_prefix":   stored["s3.operational_key_prefix"],
 		"s3.private_access_key":   stored["s3.operational_access_key"],
 		"s3.private_secret_key":   stored["s3.operational_secret_key"],
-		"ai.base_url":             stored["subtitle_ai.base_url"],
-		"ai.api_key":              stored["subtitle_ai.api_key"],
 		"ai.chat_model":           stored["subtitle_ai.chat_model"],
 		"ai.max_concurrent_jobs":  stored["subtitle_ai.max_concurrent_jobs"],
 	}
