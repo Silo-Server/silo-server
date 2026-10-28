@@ -235,7 +235,8 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
    between servers or about to be ended by the cluster sweep. Keep it open and read
    `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every
    session announced by `session.started` (native or Jellyfin) gets one within its idle
-   grace plus one sweep interval (15 seconds) while an API server runs
+   grace plus one sweep interval (15 seconds) while an API server runs, longer only
+   while a backlog of more than 100 sessions per server drains
    ([playback lifecycle](architecture/playback-lifecycle.md)).
 
 Rows and entries without `lifecycle_seq` (sessions that started before the server

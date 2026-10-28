@@ -82,6 +82,8 @@ catalog is recorded without the item and duration only the file gave.
 **Guarantee.** Every session announced by `session.started` (native or Jellyfin) gets
 an admin history row with an `end_reason` and `lifecycle_seq` within its idle grace
 plus one sweep interval after its last activity, while at least one API server runs.
+Each sweep ends at most 100 sessions per server, oldest activity first, so a larger
+backlog (a server dying with many sessions) drains over the following sweeps.
 Lifecycle events themselves are at most once.
 
 ## Listing
