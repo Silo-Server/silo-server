@@ -83,7 +83,7 @@ func TestSectionCardKeepsProvenanceOfCachedArtwork(t *testing.T) {
 
 // An episode card takes its parent artwork from the row that loaded it, or
 // from the episode metadata lookup when its row didn't load any, and keeps it
-// off the frozen v1 wire.
+// off the frozen v1 wire along with its release date.
 func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 	parent := &models.EpisodeParentArtwork{SeriesPosterPath: "series/poster", SeriesPosterThumbhash: "sp", SeriesBackdropPath: "series/backdrop", SeriesBackdropThumbhash: "sb", SeasonPosterPath: "season/poster", SeasonPosterThumbhash: "ss"}
 	urls := sectionItemImageURLs{parents: episodeParentImageURLs{seriesPosterURL: "https://example.invalid/sp", seriesBackdropURL: "https://example.invalid/sb", seasonPosterURL: "https://example.invalid/ss"}}
@@ -93,7 +93,7 @@ func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 		item *models.MediaItem
 		meta *sections.SectionItemMeta
 	}{
-		"own row":       {&models.MediaItem{ContentID: "episode-1", Type: "episode", ParentArtwork: parent}, &sections.SectionItemMeta{}},
+		"own row":       {&models.MediaItem{ContentID: "episode-1", Type: "episode", ParentArtwork: parent, ReleaseDate: new("2021-06-11")}, &sections.SectionItemMeta{}},
 		"metadata only": {&models.MediaItem{ContentID: "episode-1", Type: "episode"}, &sections.SectionItemMeta{ParentArtwork: parent}},
 	} {
 		card := h.toSectionItemResponse(sections.SectionNextUp, tc.item, tc.meta, nil, nil, urls, "")
@@ -101,7 +101,7 @@ func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 			t.Errorf("%s: parent artwork = %+v", name, card.ParentArtwork)
 		}
 		wire, err := json.Marshal(card)
-		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") {
+		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") || strings.Contains(string(wire), "release_date") {
 			t.Fatalf("%s: v1 leaks parent artwork: %s (%v)", name, wire, err)
 		}
 	}

@@ -16,6 +16,8 @@ import (
 // from the queries that already load them: the section episode query (Home,
 // Continue Watching, Next Up, Watch Tonight) and the listing card context
 // (browse and search). An episode without a season row has no season poster.
+// Section episode cards also carry the air date as their release date and
+// both ratings; an unaired, unrated episode carries none.
 func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -41,8 +43,10 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		t.Fatalf("seed season: %v", err)
 	}
 	for i, episode := range []struct{ id, seasonID string }{{withSeason, season}, {withoutSeason, ""}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title, overview, runtime, still_path)
-			VALUES ($1, $2, NULLIF($3, ''), 1, $4, 'Episode', '', 0, 'episode/still')`, episode.id, series, episode.seasonID, i+1); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title, overview, runtime, still_path, air_date, rating_imdb, rating_tmdb)
+			VALUES ($1, $2, NULLIF($3, ''), 1, $4, 'Episode', '', 0, 'episode/still',
+				CASE WHEN $3 = '' THEN NULL ELSE DATE '2021-06-11' END, CASE WHEN $3 = '' THEN NULL ELSE 7.9 END, CASE WHEN $3 = '' THEN NULL ELSE 8.39 END)`,
+			episode.id, series, episode.seasonID, i+1); err != nil {
 			t.Fatalf("seed episode: %v", err)
 		}
 	}
@@ -66,6 +70,10 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		}
 		if m := meta[item.ContentID].ParentArtwork; m == nil || *m != want[item.ContentID] {
 			t.Errorf("%s section meta parent artwork = %+v", item.ContentID, m)
+		}
+		aired := item.ContentID == withSeason
+		if aired != (item.ReleaseDate != nil && *item.ReleaseDate == "2021-06-11") || aired != (item.RatingIMDB != nil && *item.RatingIMDB == 7.9) || aired != (item.RatingTMDB != nil && *item.RatingTMDB == 8.39) {
+			t.Errorf("%s release date and ratings = %v, %v, %v", item.ContentID, item.ReleaseDate, item.RatingIMDB, item.RatingTMDB)
 		}
 	}
 

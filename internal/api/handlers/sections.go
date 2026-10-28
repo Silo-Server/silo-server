@@ -449,8 +449,11 @@ type sectionItemResponse struct {
 	PendingTranslationLanguage string   `json:"-"`
 	MachineTranslatedFields    []string `json:"-"`
 
-	// ParentArtwork reaches the v2 card only; v1 is frozen.
+	// ParentArtwork, ReleaseDate and LastAirDate reach the v2 card only;
+	// v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	ReleaseDate   *string                  `json:"-"`
+	LastAirDate   *string                  `json:"-"`
 }
 
 type resolvedSectionResponse struct {
@@ -1817,6 +1820,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		RatingRTAudience:       item.RatingRTAudience,
 		OriginalLanguage:       item.OriginalLanguage,
 		Overview:               item.Overview,
+		ReleaseDate:            item.ReleaseDate,
+		LastAirDate:            item.LastAirDate,
 		PosterThumbhash:        item.PosterThumbhash,
 		BackdropThumbhash:      item.BackdropThumbhash,
 		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,

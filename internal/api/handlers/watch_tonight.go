@@ -481,6 +481,8 @@ func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayM
 		RatingRTAudience:       mi.RatingRTAudience,
 		OriginalLanguage:       mi.OriginalLanguage,
 		Overview:               mi.Overview,
+		ReleaseDate:            mi.ReleaseDate,
+		LastAirDate:            mi.LastAirDate,
 		PosterThumbhash:        mi.PosterThumbhash,
 		BackdropThumbhash:      mi.BackdropThumbhash,
 		PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
