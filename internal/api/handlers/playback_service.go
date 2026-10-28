@@ -682,7 +682,13 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
-	return h.recordStopHistory(ctx, session, reason).HistoryID, nil
+	result := h.recordStopHistory(ctx, session, reason)
+	// The copy on another replica is dropped without telling providers, so
+	// the end recorded here does.
+	if reason != PlaybackEndAborted {
+		h.notifyStoppedSession(ctx, session, result, reason)
+	}
+	return result.HistoryID, nil
 }
 
 // endSessionAsAdmin ends a session an administrator stopped or terminated,
@@ -699,8 +705,13 @@ func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID strin
 	switch {
 	case claim.store != nil:
 		historyID, err := h.finishStop(ctx, claim.record, sessionID, claim.receipt.Accepted, claim.reason(sessionID, PlaybackEndTerminated))
+		if err != nil {
+			// The teardown failed before the writers ran: leave the end
+			// unfinalized, so its lease lapses and a retry can finish it.
+			return err
+		}
 		claim.finish(ctx, sessionID, historyID)
-		return err
+		return nil
 	case claim.owned:
 		return h.stopPlaybackSessionByID(ctx, sessionID, PlaybackEndTerminated)
 	default:
@@ -967,17 +978,58 @@ func claimNativeEnd(ctx context.Context, planStore playback.PlanStoreV3, deny *p
 	if receipt.Finalized {
 		return nativeEndClaim{}
 	}
-	claimed, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(stopFinalizationLease))
-	if err != nil {
-		// Unknown outcome: write the end as before rather than risk no
-		// caller writing it.
-		slog.WarnContext(ctx, "failed to claim playback stop finalization", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		return claim
-	}
-	if !claimed {
+	if !claimStopFinalization(ctx, store, sessionID, receipt.StopID) {
 		return nativeEndClaim{}
 	}
 	return nativeEndClaim{store: store, record: record, receipt: receipt, owned: true}
+}
+
+// claimStopFinalization claims a stopped attempt's finalization lease. A
+// claim whose reply was lost may have committed, so an error is resolved by
+// reading the receipt back: the lease this call asked for is unique to it.
+// A claim it cannot confirm is not taken; its lease lapses and a later end
+// or the replayed stop finalizes the attempt.
+func claimStopFinalization(ctx context.Context, store playback.ProgressStoreV3, sessionID, stopID string) bool {
+	// The store keeps microseconds, so compare the lease at that precision.
+	lease := time.Now().Add(stopFinalizationLease).Truncate(time.Microsecond)
+	var err error
+	for range 3 {
+		var claimed bool
+		if claimed, err = store.ClaimStopFinalization(ctx, sessionID, lease); err == nil {
+			return claimed
+		}
+		if receipt, _, readErr := store.StopAttempt(ctx, sessionID, stopID, nil); readErr == nil {
+			return !receipt.Finalized && receipt.FinalizingUntil.Equal(lease)
+		}
+	}
+	slog.WarnContext(ctx, "failed to claim playback stop finalization", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+	return false
+}
+
+// ownEnd reports whether the claim finalizes the end its caller made, as
+// opposed to an earlier stop that won the row and never finished, which the
+// caller must finish with that stop's own writers (finishOtherEnd).
+func (c nativeEndClaim) ownEnd(stopID string) bool {
+	return c.store == nil || c.receipt.StopID == stopID
+}
+
+// finishOtherEnd finalizes the earlier stop a claim took over, from the
+// attempt row with that stop's reason and accepted sample.
+func (h *PlaybackHandler) finishOtherEnd(ctx context.Context, claim nativeEndClaim, sessionID string) {
+	historyID, err := h.finishStop(ctx, claim.record, sessionID, claim.receipt.Accepted, claim.reason(sessionID, PlaybackEndStopped))
+	if err != nil {
+		slog.WarnContext(ctx, "failed to finish an earlier playback stop", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+		return
+	}
+	claim.finish(ctx, sessionID, historyID)
+}
+
+// applyAccepted moves a session snapshot to the final sample its attempt
+// accepted, which can be newer than the snapshot.
+func (c nativeEndClaim) applyAccepted(session *playback.Session) {
+	if c.store != nil && c.receipt.Accepted != nil {
+		session.Position, session.IsPaused = c.receipt.Accepted.Position, c.receipt.Accepted.IsPaused
+	}
 }
 
 // reason is the end reason of the stop that won the row, which can be an

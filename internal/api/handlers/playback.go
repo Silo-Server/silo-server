@@ -1489,7 +1489,13 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 		h.closeTranscodeForSession(session)
 		return
 	}
-	result := h.finalizeSessionStopWithResult(ctx, session, false, "", claim.reason(session.ID, PlaybackEndExpired))
+	if !claim.ownEnd(expiredStopID(session.ID)) {
+		h.finishOtherEnd(ctx, claim, session.ID)
+		h.closeTranscodeForSession(session)
+		return
+	}
+	claim.applyAccepted(session)
+	result := h.finalizeSessionStopWithResult(ctx, session, false, "", PlaybackEndExpired)
 	claim.finish(ctx, session.ID, result.HistoryID)
 }
 

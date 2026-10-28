@@ -835,10 +835,14 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
 	// The playback handler's finish hook writes the admin log for the play,
 	// as it does for every other end, unless another stop already owns it.
-	if finisher, ok := h.sessionMgr.(detachedFinisher); ok && claim.owned {
-		finisher.FinishDetached(playback.WithEndReason(ctx, string(claim.reason(session.ID, PlaybackEndAborted))), *session)
+	// An earlier stop that won the row and never finished is left to lapse
+	// and be finished as that stop; this handler has none of its writers.
+	if finisher, ok := h.sessionMgr.(detachedFinisher); ok && claim.owned && claim.ownEnd(abortStopID(session.ID)) {
+		snapshot := *session
+		claim.applyAccepted(&snapshot)
+		finisher.FinishDetached(playback.WithEndReason(ctx, string(PlaybackEndAborted)), snapshot)
+		claim.finish(ctx, session.ID, "")
 	}
-	claim.finish(ctx, session.ID, "")
 	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 
