@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -73,8 +74,9 @@ type Refresher struct {
 	Layout    LayoutReader
 	Snapshots snapshotStore
 	TMDB      ListTMDB
-	// FetchMDBList reads an MDBList feed; nil reads the public /json feed.
-	FetchMDBList func(ctx context.Context, url string, limit int) ([]MDBListEntry, error)
+	// FetchMDBList reads an MDBList feed with the query parameters an order
+	// adds (nil for the list's own order); nil reads the public /json feed.
+	FetchMDBList func(ctx context.Context, url string, limit int, query url.Values) ([]MDBListEntry, error)
 	Now          func() time.Time
 	logger       *slog.Logger
 }
@@ -250,7 +252,7 @@ func (r *Refresher) fetch(ctx context.Context, row Row, limit int) ([]Card, erro
 		}
 		return cards, nil
 	case TypeMDBList:
-		entries, err := r.fetchMDBList(ctx, row.List.URL, limit)
+		entries, err := r.fetchMDBList(ctx, row.List.URL, limit, mdblistFeedOrders[row.List.Order])
 		if err != nil {
 			return nil, err
 		}
@@ -260,11 +262,11 @@ func (r *Refresher) fetch(ctx context.Context, row Row, limit int) ([]Card, erro
 	}
 }
 
-func (r *Refresher) fetchMDBList(ctx context.Context, url string, limit int) ([]MDBListEntry, error) {
+func (r *Refresher) fetchMDBList(ctx context.Context, listURL string, limit int, query url.Values) ([]MDBListEntry, error) {
 	if r.FetchMDBList != nil {
-		return r.FetchMDBList(ctx, url, limit)
+		return r.FetchMDBList(ctx, listURL, limit, query)
 	}
-	return collectionutil.FetchMDBListJSON[MDBListEntry](ctx, collectionutil.MDBListHTTPClient(nil), url, limit)
+	return collectionutil.FetchMDBListJSONQuery[MDBListEntry](ctx, collectionutil.MDBListHTTPClient(nil), listURL, limit, query)
 }
 
 // mdblistCards looks each entry up on TMDB, keeping list order. MDBList

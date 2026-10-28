@@ -18,7 +18,7 @@ has). Its type decides where its titles come from:
 | `tmdb_chart` | A TMDB chart: trending (day or week; movies, series or both), popular, top rated, now playing, upcoming, airing today, on the air | `chart` |
 | `tmdb_discover` | A TMDB `/discover` query: genres (all of), excluded genres, keywords, companies, networks (series), countries of origin, streaming services in a region (each any of), original language, year range, lowest score and vote count, runtime, highest US rating, sort | `discover` |
 | `tmdb_list` | A public themoviedb.org list | `list` |
-| `mdblist` | A public mdblist.com list | `list` |
+| `mdblist` | A public mdblist.com list, in list order or newest added or released first | `list` |
 | `studios`, `networks`, `genres` | The fixed brand cards; each opens a browse page | none |
 
 Each type is a `discoverrows.Kind`: it checks and canonicalizes its spec,
@@ -38,6 +38,12 @@ Checks (`discoverrows.NormalizeLayout`):
   (`collectionutil.CanonicalMDBListURL`, `ParseTMDBListURL`) and is stored in
   canonical form. The fetch checks it again and follows only redirects that
   stay on mdblist.com, so a row cannot point the server at another host.
+- `list.order` is for `mdblist` rows only: `list` (stored absent),
+  `newest_added` or `newest_released`. MDBList's `/json` feed returns rank
+  order unless asked for a sort, whatever sort the owner saved for the list
+  page, and it does not report that saved sort, so the admin picks it. The
+  refresher sends `sort=added` or `sort=released` with `sortorder=asc`,
+  because MDBList inverts `sortorder` for date sorts.
 - Stored layouts are not checked again on read: tightening a rule changes what
   the next save accepts.
 
@@ -104,8 +110,9 @@ rows as the default layout has them, whatever the admin's layout says.
 
 TMDB and MDBList lists are read from a stored copy, never fetched while a
 viewer waits. `request_discover_list_snapshots` holds one copy per list source
-(`tmdb_list:<id>`, `mdblist:<canonical /json URL>`), so two rows showing one
-list share it and a title or limit change keeps it. A copy holds up to 200
+(`tmdb_list:<id>`, `mdblist:<canonical /json URL>`, with `?order=<order>`
+appended for an MDBList row in another order), so two rows showing one list in
+one order share it and a title or limit change keeps it. A copy holds up to 200
 cards in list order (TMDB ID, media type, title, overview, artwork, release
 date, votes); availability and request state are still looked up per viewer.
 MDBList entries carry no artwork, so each costs a TMDB lookup by TMDB ID (or

@@ -15110,6 +15110,11 @@ export interface components {
     };
     AdminDiscoverList: {
       /**
+       * @description mdblist only: list keeps the list's rank order (the default, stored as absent), newest_added puts the latest additions to the list first, newest_released the newest release dates first. A tmdb_list row keeps the list's order
+       * @enum {string}
+       */
+      order?: "list" | "newest_added" | "newest_released";
+      /**
        * Format: uri-reference
        * @description A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical
        * @example https://mdblist.com/lists/garycrawfordgc/top-watched-movies-of-the-week
@@ -18813,6 +18818,8 @@ export interface components {
       available: boolean;
       /** @description Whether the Requests Discover page's layout can be edited under /admin/request-discover */
       discover_layout: boolean;
+      /** @description Whether an mdblist Discover row takes list.order. Send it only when true */
+      discover_list_order: boolean;
       guarded_configuration: boolean;
       /** @description Opaque revision of this document */
       revision: string;

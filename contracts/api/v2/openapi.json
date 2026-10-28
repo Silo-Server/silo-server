@@ -6418,6 +6418,15 @@
       "AdminDiscoverList": {
         "additionalProperties": false,
         "properties": {
+          "order": {
+            "description": "mdblist only: list keeps the list's rank order (the default, stored as absent), newest_added puts the latest additions to the list first, newest_released the newest release dates first. A tmdb_list row keeps the list's order",
+            "enum": [
+              "list",
+              "newest_added",
+              "newest_released"
+            ],
+            "type": "string"
+          },
           "url": {
             "description": "A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical",
             "examples": [
@@ -16025,6 +16034,10 @@
             "description": "Whether the Requests Discover page's layout can be edited under /admin/request-discover",
             "type": "boolean"
           },
+          "discover_list_order": {
+            "description": "Whether an mdblist Discover row takes list.order. Send it only when true",
+            "type": "boolean"
+          },
           "guarded_configuration": {
             "type": "boolean"
           },
@@ -16052,6 +16065,7 @@
           "guarded_configuration",
           "routing",
           "discover_layout",
+          "discover_list_order",
           "revision",
           "state",
           "allowed"

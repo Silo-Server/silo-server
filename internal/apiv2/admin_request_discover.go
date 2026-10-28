@@ -62,7 +62,8 @@ type AdminDiscoverFilter struct {
 
 // AdminDiscoverList is a public list by URL.
 type AdminDiscoverList struct {
-	URL string `json:"url" maxLength:"2048" format:"uri-reference" doc:"A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical" example:"https://mdblist.com/lists/garycrawfordgc/top-watched-movies-of-the-week"`
+	URL   string `json:"url" maxLength:"2048" format:"uri-reference" doc:"A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical" example:"https://mdblist.com/lists/garycrawfordgc/top-watched-movies-of-the-week"`
+	Order string `json:"order,omitempty" enum:"list,newest_added,newest_released" doc:"mdblist only: list keeps the list's rank order (the default, stored as absent), newest_added puts the latest additions to the list first, newest_released the newest release dates first. A tmdb_list row keeps the list's order"`
 }
 
 // AdminDiscoverRowBody is one row of the Discover layout as an admin edits

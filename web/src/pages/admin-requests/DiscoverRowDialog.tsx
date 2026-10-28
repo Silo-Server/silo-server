@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
+import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import { useDiscoverRowPreview } from "@/hooks/queries/admin/requestDiscover";
 import { RowRefusedError, type DiscoverRowsAdapter } from "@/hooks/queries/admin/useDiscoverRows";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -36,7 +37,7 @@ import { chartSummary } from "@/lib/collections/tmdbSources";
 import { isValidTMDBListURL } from "@/lib/tmdbList";
 import { cn } from "@/lib/utils";
 
-import { DiscoverFilterFields } from "./DiscoverFilterFields";
+import { DiscoverFilterFields, Field, OptionSelect } from "./DiscoverFilterFields";
 import {
   DEFAULT_ROW_LIMIT,
   defaultTitle,
@@ -44,6 +45,9 @@ import {
   isBrandRow,
   isBuiltInRow,
   MAX_ROW_LIMIT,
+  MDBLIST_ORDERS,
+  mdblistOrder,
+  type MDBListOrder,
   missingStockRows,
   moreFilterCount,
   NEW_ROW_TYPES,
@@ -228,7 +232,7 @@ function SourceControl({
           const url = cleanMDBListLink(raw);
           setTypedLink(raw);
           setPickId(undefined);
-          onChange({ ...row, list: { url: isMDBListLink(url) ? url : "" } });
+          onChange({ ...row, list: { ...row.list, url: isMDBListLink(url) ? url : "" } });
         }}
       />
     );
@@ -260,6 +264,8 @@ function RowFields({
 }) {
   const nameId = useId();
   const hideId = useId();
+  // A server from before list orders refuses list.order, so the choice waits on its capability.
+  const listOrders = useAdminRequestCapabilities().data?.discover_list_order ?? false;
   const kind = ROW_KINDS[row.type];
   const brand = isBrandRow(row);
   // The server needs a name to preview a row, but the name doesn't change its
@@ -305,6 +311,27 @@ function RowFields({
               filter={row.discover}
               onChange={(discover) => onChange({ ...row, discover })}
             />
+          ) : null}
+          {row.type === "mdblist" && row.list && listOrders ? (
+            <Field
+              label="Order"
+              help="MDBList's feed doesn't carry the sort saved on the list's page. Pick the one it shows."
+            >
+              <OptionSelect
+                label="Order"
+                value={mdblistOrder(row)}
+                options={MDBLIST_ORDERS}
+                onChange={(order) =>
+                  onChange({
+                    ...row,
+                    list: {
+                      url: row.list?.url ?? "",
+                      order: order === "list" ? undefined : (order as MDBListOrder),
+                    },
+                  })
+                }
+              />
+            </Field>
           ) : null}
           {previewStrip}
         </>
@@ -428,7 +455,7 @@ export function DiscoverRowDialog({
     const limit = listPick.limit ? Math.min(listPick.limit, MAX_ROW_LIMIT) : row.limit;
     update({
       ...row,
-      list: { url: listPick.list.url },
+      list: { ...row.list, url: listPick.list.url },
       limit,
       title: titleTyped ? row.title : listPick.name,
     });

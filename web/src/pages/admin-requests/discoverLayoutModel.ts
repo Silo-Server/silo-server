@@ -79,7 +79,7 @@ export const ROW_KINDS: Readonly<
   },
   mdblist: {
     label: "MDBList list",
-    sentence: "A public list from mdblist.com, in list order.",
+    sentence: "A public list from mdblist.com.",
     icon: ListVideo,
     group: "new",
   },
@@ -300,6 +300,26 @@ function listState(row: DiscoverRow): DescriptionPart[] {
   }
 }
 
+/** The orders an MDBList row can show its list in; list order is stored absent. */
+export const MDBLIST_ORDERS = [
+  { value: "list", label: "List order" },
+  { value: "newest_added", label: "Newest added first" },
+  { value: "newest_released", label: "Newest released first" },
+] as const;
+
+export type MDBListOrder = (typeof MDBLIST_ORDERS)[number]["value"];
+
+/** An MDBList row's order, list order when it has none. */
+export function mdblistOrder(row: DiscoverRowBody): MDBListOrder {
+  return row.list?.order ?? "list";
+}
+
+/** A non-default order, as the row list's description line names it. */
+function orderPart(order: MDBListOrder): DescriptionPart[] {
+  if (order === "list") return [];
+  return [` · ${MDBLIST_ORDERS.find((option) => option.value === order)?.label ?? ""}`];
+}
+
 /** What a row shows, in the line under its name in the row list. */
 export function describeDiscoverRow(row: DiscoverRow): DescriptionPart[] {
   const parts: DescriptionPart[] = [];
@@ -309,6 +329,7 @@ export function describeDiscoverRow(row: DiscoverRow): DescriptionPart[] {
     parts.push(
       `${ROW_KINDS[row.type].label}: `,
       { strong: shownLink(row.list.url) },
+      ...orderPart(mdblistOrder(row)),
       ...listState(row),
     );
   else parts.push(ROW_KINDS[row.type].sentence.replace(/\.$/, ""));
