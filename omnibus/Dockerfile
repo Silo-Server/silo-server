@@ -24,7 +24,9 @@ ARG MEILISEARCH_AARCH64_SHA256=b7817c408620383b56e5b516df5bcf55ed1267dc755cadb79
 # Service accounts with fixed ids, created before the packages so the packages
 # reuse them. /config/<service> then keeps a valid owner across image updates
 # even if a later package takes the next free system id. The silo account is
-# the only one remapped at start (PUID and PGID).
+# the only one remapped at start (PUID and PGID). Its home is /nonexistent:
+# usermod -u re-owns every file in the account's home, and init-config already
+# hands /config/silo over when the ids change. The scripts set HOME themselves.
 RUN groupadd -r -g 999 postgres && \
     useradd -r -u 999 -g postgres -d /var/lib/postgresql -s /bin/bash -M postgres && \
     groupadd -r -g 998 redis && \
@@ -32,7 +34,7 @@ RUN groupadd -r -g 999 postgres && \
     groupadd -r -g 997 meilisearch && \
     useradd -r -u 997 -g meilisearch -d /config/meilisearch -s /usr/sbin/nologin -M meilisearch && \
     groupadd -g 911 silo && \
-    useradd -u 911 -g silo -d /config/silo -s /usr/sbin/nologin -M silo
+    useradd -u 911 -g silo -d /nonexistent -s /usr/sbin/nologin -M silo
 
 # PostgreSQL from the PostgreSQL apt repository, the same build the
 # pgvector/pgvector image in docker-compose.yml uses. create_main_cluster is
