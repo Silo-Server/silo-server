@@ -5,7 +5,7 @@
 # opens its bundled services to nodes with docker-compose.node-access.yml.
 services:
   silo:
-    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
     restart: unless-stopped
     # On stop a transcode node drains: it takes no new work and lets its
     # sessions finish for up to SILO_NODE_DRAIN_TIMEOUT (default 10m, 0 turns it
