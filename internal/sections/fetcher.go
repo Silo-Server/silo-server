@@ -43,7 +43,12 @@ type SectionItemMeta struct {
 	EpisodeStillPath *string
 	// ParentArtwork is the episode's season and series artwork, raw paths
 	// before sizing or signing; nil means unavailable metadata.
-	ParentArtwork     *models.EpisodeParentArtwork
+	ParentArtwork *models.EpisodeParentArtwork
+	// EpisodeAirDate (YYYY-MM-DD) and RatingTMDB reach the v2 episode card
+	// only. They stay off the item because frozen v1 responses serialize it
+	// (the admin section preview) or its rating_tmdb (section cards).
+	EpisodeAirDate    *string
+	RatingTMDB        *float64
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -3070,6 +3075,15 @@ func markEpisodeStillProvenance(item *models.MediaItem, stillPath string) {
 	item.BackdropIsEpisodeStill = new(stillPath != "" && item.BackdropPath == stillPath)
 }
 
+// episodeAirDate is an episode card's release date: its air date, as in the
+// episode catalog scope.
+func episodeAirDate(airDate *time.Time) *string {
+	if airDate == nil {
+		return nil
+	}
+	return new(airDate.Format(time.DateOnly))
+}
+
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
@@ -3137,6 +3151,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			airDate       *time.Time
 			stillPath     string
 			parent        models.EpisodeParentArtwork
+			ratingTMDB    *float64
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -3146,7 +3161,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.Overview,
 			&item.Runtime,
 			&item.RatingIMDB,
-			&item.RatingTMDB,
+			&ratingTMDB,
 			&item.PosterPath,
 			&item.PosterThumbhash,
 			&seasonNumber,
@@ -3172,15 +3187,12 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 		}
 		markEpisodeStillProvenance(&item, stillPath)
 		item.ParentArtwork = &parent
-		if airDate != nil {
-			// An episode card's release date is its air date, as in the
-			// episode catalog scope.
-			item.ReleaseDate = new(airDate.Format(time.DateOnly))
-		}
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
 			EpisodeStillPath: new(stillPath),
 			ParentArtwork:    &parent,
+			EpisodeAirDate:   episodeAirDate(airDate),
+			RatingTMDB:       ratingTMDB,
 			SeriesID:         &seriesID,
 			SeriesTitle:      seriesTitle,
 			SeasonNumber:     &seasonNumber,

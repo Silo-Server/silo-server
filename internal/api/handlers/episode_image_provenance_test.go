@@ -93,15 +93,18 @@ func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 		item *models.MediaItem
 		meta *sections.SectionItemMeta
 	}{
-		"own row":       {&models.MediaItem{ContentID: "episode-1", Type: "episode", ParentArtwork: parent, ReleaseDate: new("2021-06-11")}, &sections.SectionItemMeta{}},
+		"own row":       {&models.MediaItem{ContentID: "episode-1", Type: "episode", ParentArtwork: parent}, &sections.SectionItemMeta{EpisodeAirDate: new("2021-06-11"), RatingTMDB: new(8.39)}},
 		"metadata only": {&models.MediaItem{ContentID: "episode-1", Type: "episode"}, &sections.SectionItemMeta{ParentArtwork: parent}},
 	} {
 		card := h.toSectionItemResponse(sections.SectionNextUp, tc.item, tc.meta, nil, nil, urls, "")
 		if card.ParentArtwork != want {
 			t.Errorf("%s: parent artwork = %+v", name, card.ParentArtwork)
 		}
+		if tc.meta.EpisodeAirDate != nil && (card.ReleaseDate == nil || *card.ReleaseDate != "2021-06-11" || card.EpisodeRatingTMDB == nil || *card.EpisodeRatingTMDB != 8.39) {
+			t.Errorf("%s: v2 air date and TMDB rating = %v, %v", name, card.ReleaseDate, card.EpisodeRatingTMDB)
+		}
 		wire, err := json.Marshal(card)
-		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") || strings.Contains(string(wire), "release_date") {
+		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") || strings.Contains(string(wire), "release_date") || strings.Contains(string(wire), "8.39") {
 			t.Fatalf("%s: v1 leaks parent artwork: %s (%v)", name, wire, err)
 		}
 	}

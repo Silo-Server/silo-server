@@ -449,11 +449,25 @@ type sectionItemResponse struct {
 	PendingTranslationLanguage string   `json:"-"`
 	MachineTranslatedFields    []string `json:"-"`
 
-	// ParentArtwork, ReleaseDate and LastAirDate reach the v2 card only;
-	// v1 is frozen.
-	ParentArtwork EpisodeParentArtworkView `json:"-"`
-	ReleaseDate   *string                  `json:"-"`
-	LastAirDate   *string                  `json:"-"`
+	// ParentArtwork, ReleaseDate, LastAirDate and EpisodeRatingTMDB reach
+	// the v2 card only; v1 is frozen. EpisodeRatingTMDB is an episode's TMDB
+	// rating, kept apart from RatingTMDB so v1's rating_tmdb stays as it was.
+	ParentArtwork     EpisodeParentArtworkView `json:"-"`
+	ReleaseDate       *string                  `json:"-"`
+	LastAirDate       *string                  `json:"-"`
+	EpisodeRatingTMDB *float64                 `json:"-"`
+}
+
+// applyEpisodeCardMeta adds what the episode query loaded for the v2 card:
+// the air date as the release date and the TMDB rating.
+func (r *sectionItemResponse) applyEpisodeCardMeta(meta *sections.SectionItemMeta) {
+	if meta == nil {
+		return
+	}
+	if r.ReleaseDate == nil {
+		r.ReleaseDate = meta.EpisodeAirDate
+	}
+	r.EpisodeRatingTMDB = meta.RatingTMDB
 }
 
 type resolvedSectionResponse struct {
@@ -1850,6 +1864,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		resp.DurationSeconds = meta.DurationSeconds
 		resp.ProgressUpdatedAt = meta.ProgressUpdatedAt
 		resp.ItemSource = meta.ItemSource
+		resp.applyEpisodeCardMeta(meta)
 	}
 
 	if resp.Genres == nil {

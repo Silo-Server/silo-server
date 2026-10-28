@@ -212,6 +212,9 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,
 			SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Badges: NonNil(e.Badges)}
 	}
+	if item.RatingTMDB == nil {
+		item.RatingTMDB = v.EpisodeRatingTMDB
+	}
 	return withShownRatings(item, sel)
 }
 

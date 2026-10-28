@@ -71,9 +71,15 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		if m := meta[item.ContentID].ParentArtwork; m == nil || *m != want[item.ContentID] {
 			t.Errorf("%s section meta parent artwork = %+v", item.ContentID, m)
 		}
+		// The air date and TMDB rating ride on the metadata: the item stays
+		// as frozen v1 responses serialize it.
+		m := meta[item.ContentID]
 		aired := item.ContentID == withSeason
-		if aired != (item.ReleaseDate != nil && *item.ReleaseDate == "2021-06-11") || aired != (item.RatingIMDB != nil && *item.RatingIMDB == 7.9) || aired != (item.RatingTMDB != nil && *item.RatingTMDB == 8.39) {
-			t.Errorf("%s release date and ratings = %v, %v, %v", item.ContentID, item.ReleaseDate, item.RatingIMDB, item.RatingTMDB)
+		if aired != (m.EpisodeAirDate != nil && *m.EpisodeAirDate == "2021-06-11") || aired != (item.RatingIMDB != nil && *item.RatingIMDB == 7.9) || aired != (m.RatingTMDB != nil && *m.RatingTMDB == 8.39) {
+			t.Errorf("%s air date and ratings = %v, %v, %v", item.ContentID, m.EpisodeAirDate, item.RatingIMDB, m.RatingTMDB)
+		}
+		if item.ReleaseDate != nil || item.RatingTMDB != nil {
+			t.Errorf("%s item carries v2-only fields: %v, %v", item.ContentID, item.ReleaseDate, item.RatingTMDB)
 		}
 	}
 

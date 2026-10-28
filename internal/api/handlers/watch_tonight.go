@@ -268,6 +268,7 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		resp.Items = append(resp.Items, watchTonightItemResponse{
