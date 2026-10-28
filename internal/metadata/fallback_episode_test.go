@@ -304,15 +304,15 @@ func (r *fakeSeasonRepo) applyUpsertLocked(s *models.Season) {
 		s.ContentID = existing.ContentID
 	}
 	cp := *s
+	cp.WriteBackdrop = false
 	// Like SeasonRepository, only a write marked WriteBackdrop changes the
 	// stored backdrop.
-	if !cp.WriteBackdrop {
+	if !s.WriteBackdrop {
 		cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = "", "", ""
 		if ok {
 			cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = existing.BackdropPath, existing.BackdropSourcePath, existing.BackdropThumbhash
 		}
 	}
-	cp.WriteBackdrop = false
 	r.seasons[key] = &cp
 }
 

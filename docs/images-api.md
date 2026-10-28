@@ -286,13 +286,15 @@ without fetching the episode's detail, since an episode card's `backdrop_url`
 is usually the episode still. In Continue Watching and Next Up rows,
 `/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
 the series backdrop when the season has none, and keep the still only when
-neither exists. A season backdrop comes from a metadata provider that has
-one, or from an admin's pick, which locks the series' images. While they are
-unlocked, a refresh replaces the season backdrop with the provider's, or
-removes it when no provider has one.
-Frozen `/api/v1` cards keep the still. The poster fields follow `poster_width` and the
-backdrop field follows `backdrop_width`, like `poster_url` and `backdrop_url`
-on the same card.
+neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+`poster_width` and the backdrop field follows `backdrop_width`, like
+`poster_url` and `backdrop_url` on the same card.
+
+A season backdrop comes from a metadata provider that has one, or from an
+admin's pick, which locks the series' images. While they are unlocked,
+refreshing or identifying the series replaces the season backdrop with the
+provider's, or removes it when no provider has one. A pass that only fills
+missing metadata leaves a stored season backdrop alone.
 
 They appear on episode cards in Home and library sections (Continue Watching
 and Next Up included), catalog browse and search, Watch Tonight, and on episode

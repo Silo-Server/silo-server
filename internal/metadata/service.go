@@ -5745,7 +5745,9 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			PosterThumbhash:         providerSeason.PosterThumbhash,
 			MetadataSource:          "provider",
 		}
-		if backdropAuthority != seasonBackdropsKept {
+		// A fill-empty pass only fills an empty backdrop, as it does text.
+		fillOnly := mergeMode == MergeFillEmpty && existingSeason != nil && existingSeason.BackdropPath != ""
+		if backdropAuthority != seasonBackdropsKept && !fillOnly {
 			setProviderSeasonBackdrop(dbSeason, existingSeason, season.BackdropPath, imagesLocked, s.autoCacheImages.Load())
 		}
 		if existingSeason != nil {

@@ -21,11 +21,13 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		ContentID: "season-1", SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1",
 		BackdropPath: cachedA, BackdropSourcePath: sourceA, BackdropThumbhash: thumbhashA,
 	}
+	offer := func(path string) *string { return &path }
 	episode := EpisodeResult{ProviderIDs: map[string]string{"tvdb": "ep-1"}, SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot"}
 	for _, tc := range []struct {
 		name      string
 		authority seasonBackdropAuthority
 		language  string
+		fillEmpty bool
 		locked    bool
 		// offered is nil when the refresh brought no season record, only
 		// the season's episode.
@@ -33,16 +35,18 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		wantPath, wantSource   string
 		wantThumbhash, wantJob string
 	}{
-		{name: "same source keeps the cached copy", authority: seasonBackdropsAnswered, offered: ptr(sourceA),
+		{name: "same source keeps the cached copy", authority: seasonBackdropsAnswered, offered: offer(sourceA),
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA, wantJob: sourceA},
-		{name: "new source replaces the copy at once", authority: seasonBackdropsAnswered, offered: ptr(sourceB),
+		{name: "new source replaces the copy at once", authority: seasonBackdropsAnswered, offered: offer(sourceB),
 			wantPath: sourceB, wantSource: sourceB, wantJob: sourceB},
-		{name: "no backdrop offered clears it", authority: seasonBackdropsAnswered, offered: ptr("")},
-		{name: "a refresh missing a provider keeps it", authority: seasonBackdropsKept, offered: ptr(""),
+		{name: "no backdrop offered clears it", authority: seasonBackdropsAnswered, offered: offer("")},
+		{name: "a refresh missing a provider keeps it", authority: seasonBackdropsKept, offered: offer(""),
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
-		{name: "the images lock keeps it", authority: seasonBackdropsAnswered, locked: true, offered: ptr(sourceB),
+		{name: "the images lock keeps it", authority: seasonBackdropsAnswered, locked: true, offered: offer(sourceB),
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
-		{name: "a localization write keeps it", authority: seasonBackdropsAnswered, language: "de", offered: ptr(""),
+		{name: "a fill-empty refresh keeps it", authority: seasonBackdropsAnswered, fillEmpty: true, offered: offer(sourceB),
+			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
+		{name: "a localization write keeps it", authority: seasonBackdropsAnswered, language: "de", offered: offer(""),
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
 		{name: "a season known only by its episodes keeps it", authority: seasonBackdropsAnswered,
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
@@ -68,8 +72,12 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 			if language == "" {
 				language = "en"
 			}
+			mergeMode := MergeReplaceUnlocked
+			if tc.fillEmpty {
+				mergeMode = MergeFillEmpty
+			}
 			service.persistSeasonsAndEpisodes(withSeasonBackdropAuthority(context.Background(), tc.authority),
-				series, map[string]string{"tvdb": "9"}, "en", language, seasons, []EpisodeResult{episode}, MergeReplaceUnlocked)
+				series, map[string]string{"tvdb": "9"}, "en", language, seasons, []EpisodeResult{episode}, mergeMode)
 
 			got := seasonRepo.seasons[seasonKey(seriesID, 1)]
 			if got.BackdropPath != tc.wantPath || got.BackdropSourcePath != tc.wantSource || got.BackdropThumbhash != tc.wantThumbhash {
@@ -91,5 +99,3 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		})
 	}
 }
-
-func ptr(s string) *string { return &s }
