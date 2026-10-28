@@ -277,11 +277,14 @@ func (s *PGPlaybackAdminStore) HistoryEndReason(ctx context.Context, sessionID s
 	}
 	var reason *string
 	err := s.pool.QueryRow(ctx, `SELECT end_reason FROM admin_playback_history WHERE session_id = $1`, sessionID).Scan(&reason)
-	if errors.Is(err, pgx.ErrNoRows) || reason == nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("reading playback history end reason: %w", err)
+	}
+	if reason == nil {
+		return "", nil
 	}
 	return PlaybackEndReason(*reason), nil
 }
