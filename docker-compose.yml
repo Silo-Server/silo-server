@@ -109,6 +109,7 @@ services:
       # service, a different image, or an empty database.
       DATABASE_URL: ${DATABASE_URL:-}
       REDIS_URL: ${REDIS_URL:-}
+      SILO_SEARCH_PROVIDER: ${SILO_SEARCH_PROVIDER:-}
       SILO_MEILISEARCH_URL: ${SILO_MEILISEARCH_URL:-}
       SILO_IMAGE: ${SILO_IMAGE:-}
       SILO_OMNIBUS_IMAGE: ${SILO_OMNIBUS_IMAGE:-}
