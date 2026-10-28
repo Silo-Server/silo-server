@@ -46,6 +46,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"summary denies account editing", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodPut, "/api/v2/admin/users/42", false},
 		{"monitor sessions", monitor, http.MethodGet, "/api/v2/admin/sessions?limit=50", true},
 		{"monitor history", monitor, http.MethodGet, "/api/v2/admin/playback-history", true},
+		{"monitor history capabilities", monitor, http.MethodGet, "/api/v2/admin/playback-history/capabilities", true},
 		{"monitor activity stats", monitor, http.MethodGet, "/api/v2/admin/stats/top-activity", true},
 		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
 		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},

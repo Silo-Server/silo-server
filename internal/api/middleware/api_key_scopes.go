@@ -63,6 +63,7 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		// The one write: a ticket for the read-only events socket.
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/events/ws-ticket$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(playback-activity|top-activity|downloads)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
