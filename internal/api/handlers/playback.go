@@ -1515,14 +1515,16 @@ type liveSessionReader interface {
 // fillDetachedSession completes a session synthesized for a play this
 // replica does not hold, so its admin history row carries what the play's
 // own copy would have: the start time, client, device and stream facts come
-// from the shared live row when one is left. Fields the snapshot already has
-// are kept, and so is a reported position, zero included; only a
+// from the shared live row when one is left, whatever the snapshot already
+// carries (an Audiobookshelf close knows its start but not its client).
+// Fields the snapshot already has are kept, and so is a reported position,
+// zero included; only a
 // playback.PositionUnknown is filled. A snapshot that names no account (one
 // built from a Jellyfin play row, which keeps only a pseudo-account) takes
 // the live row's. A start time still unknown after that is startedAt, then
 // now.
 func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
-	if reader, ok := h.AdminStore.(liveSessionReader); ok && (session.StartedAt.IsZero() || session.Position < 0) {
+	if reader, ok := h.AdminStore.(liveSessionReader); ok {
 		live, err := reader.LiveSession(ctx, session.ID)
 		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)

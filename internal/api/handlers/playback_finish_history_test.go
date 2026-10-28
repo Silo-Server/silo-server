@@ -663,7 +663,7 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 // records nothing even when an older live row shows some.
 func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 	live := compatFinishSession()
-	live.StartedAt, live.Position = time.Now().Add(-time.Hour), 1500
+	live.StartedAt, live.Position, live.ClientName, live.DeviceID = time.Now().Add(-time.Hour), 1500, "Jellyfin Web", "browser-1"
 	for _, tc := range []struct {
 		name     string
 		position float64
@@ -683,5 +683,13 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 				t.Fatalf("row = %+v, want the live row's account and position", admin.history[0])
 			}
 		})
+	}
+	// A snapshot that knows its start (an Audiobookshelf close) still takes
+	// the client and device only the live row has.
+	admin := &liveRowAdminStore{live: &live}
+	replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
+	replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, UserID: live.UserID, ProfileID: live.ProfileID, MediaFileID: 42, Position: 600, StartedAt: live.StartedAt})
+	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].WatchedSeconds != 600 {
+		t.Fatalf("admin history = %+v, want the live row's client and device at the reported 600", admin.history)
 	}
 }
