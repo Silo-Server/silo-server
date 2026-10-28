@@ -261,14 +261,29 @@ func (c *Client) SearchMedia(ctx context.Context, mediaType, query string, page 
 	}
 }
 
-// DiscoverSection fetches one of Silo's request-discovery sections directly
-// from TMDB. It intentionally does not go through collection sync or
-// collection templates.
-func (c *Client) DiscoverSection(ctx context.Context, section string, page int) (*MediaPage, error) {
+// ChartParams names one of TMDB's charts, in the vocabulary of
+// GetCollectionPreset: trending (media type movie, tv or all; time window day
+// or week), popular and top_rated (movie or tv), now_playing and upcoming
+// (movie), airing_today and on_the_air (tv).
+type ChartParams struct {
+	Preset     string
+	MediaType  string
+	TimeWindow string
+}
+
+// ChartPage fetches one page of a TMDB chart with full results for the
+// request discovery surface. A trending chart over all media types drops the
+// people TMDB mixes in. Pages are cached like DiscoverPage.
+func (c *Client) ChartPage(ctx context.Context, params ChartParams, page int) (*MediaPage, error) {
+	_, mediaType, _, basePath, err := normalizeCollectionPreset(params.Preset, params.MediaType, params.TimeWindow)
+	if err != nil {
+		return nil, err
+	}
 	if page <= 0 {
 		page = 1
 	}
-	cacheKey := "discover_section:" + section + ":" + strconv.Itoa(page)
+	path := basePath + "?page=" + strconv.Itoa(page)
+	cacheKey := "chart:" + path
 	if c.discoverSectionCache != nil {
 		if cached, ok := c.discoverSectionCache.Get(cacheKey); ok {
 			return cloneMediaPage(cached), nil
@@ -281,7 +296,7 @@ func (c *Client) DiscoverSection(ctx context.Context, section string, page int) 
 				return cached, nil
 			}
 		}
-		page, err := c.fetchDiscoverSection(ctx, section, page)
+		page, err := c.fetchChartPage(ctx, mediaType, path)
 		if err != nil {
 			return nil, err
 		}
@@ -296,54 +311,31 @@ func (c *Client) DiscoverSection(ctx context.Context, section string, page int) 
 	}
 	pageValue, ok := value.(*MediaPage)
 	if !ok {
-		return nil, fmt.Errorf("tmdb: invalid cached discovery section response")
+		return nil, errors.New("tmdb: invalid cached chart response")
 	}
 	return cloneMediaPage(pageValue), nil
 }
 
-func (c *Client) fetchDiscoverSection(ctx context.Context, section string, page int) (*MediaPage, error) {
-	values := url.Values{}
-	values.Set("page", strconv.Itoa(page))
-
-	switch section {
-	case "trending_movies":
+func (c *Client) fetchChartPage(ctx context.Context, mediaType, path string) (*MediaPage, error) {
+	switch mediaType {
+	case "movie":
 		var resp paginatedResponse[mediaMovieResponse]
-		if err := c.doGet(ctx, "/trending/movie/week?"+values.Encode(), &resp); err != nil {
+		if err := c.doGet(ctx, path, &resp); err != nil {
 			return nil, err
 		}
 		return normalizeMoviePage(resp), nil
-	case "trending_series":
+	case "tv":
 		var resp paginatedResponse[mediaTVResponse]
-		if err := c.doGet(ctx, "/trending/tv/week?"+values.Encode(), &resp); err != nil {
-			return nil, err
-		}
-		return normalizeTVPage(resp), nil
-	case "popular_movies":
-		var resp paginatedResponse[mediaMovieResponse]
-		if err := c.doGet(ctx, "/movie/popular?"+values.Encode(), &resp); err != nil {
-			return nil, err
-		}
-		return normalizeMoviePage(resp), nil
-	case "popular_series":
-		var resp paginatedResponse[mediaTVResponse]
-		if err := c.doGet(ctx, "/tv/popular?"+values.Encode(), &resp); err != nil {
-			return nil, err
-		}
-		return normalizeTVPage(resp), nil
-	case "upcoming_movies":
-		var resp paginatedResponse[mediaMovieResponse]
-		if err := c.doGet(ctx, "/movie/upcoming?"+values.Encode(), &resp); err != nil {
-			return nil, err
-		}
-		return normalizeMoviePage(resp), nil
-	case "on_air_series":
-		var resp paginatedResponse[mediaTVResponse]
-		if err := c.doGet(ctx, "/tv/on_the_air?"+values.Encode(), &resp); err != nil {
+		if err := c.doGet(ctx, path, &resp); err != nil {
 			return nil, err
 		}
 		return normalizeTVPage(resp), nil
 	default:
-		return nil, fmt.Errorf("tmdb: invalid discovery section: %q", section)
+		var resp paginatedResponse[mediaMultiSearchResponse]
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMultiSearchPage(resp), nil
 	}
 }
 
@@ -366,18 +358,7 @@ func normalizeMoviePage(resp paginatedResponse[mediaMovieResponse]) *MediaPage {
 		Results:      make([]MediaResult, 0, len(resp.Results)),
 	}
 	for _, item := range resp.Results {
-		page.Results = append(page.Results, MediaResult{
-			ID:           item.ID,
-			MediaType:    "movie",
-			Title:        item.Title,
-			Overview:     item.Overview,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ReleaseDate:  item.ReleaseDate,
-			Year:         releaseYear(item.ReleaseDate),
-			Popularity:   item.Popularity,
-			VoteAverage:  item.VoteAverage,
-		})
+		page.Results = append(page.Results, movieResult(item))
 	}
 	return page
 }
@@ -390,60 +371,50 @@ func normalizeTVPage(resp paginatedResponse[mediaTVResponse]) *MediaPage {
 		Results:      make([]MediaResult, 0, len(resp.Results)),
 	}
 	for _, item := range resp.Results {
-		page.Results = append(page.Results, MediaResult{
-			ID:           item.ID,
-			MediaType:    "series",
-			Title:        item.Name,
-			Overview:     item.Overview,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ReleaseDate:  item.FirstAirDate,
-			Year:         releaseYear(item.FirstAirDate),
-			Popularity:   item.Popularity,
-			VoteAverage:  item.VoteAverage,
-		})
+		page.Results = append(page.Results, tvResult(item))
 	}
 	return page
 }
 
 func normalizeMultiSearchPage(resp paginatedResponse[mediaMultiSearchResponse]) *MediaPage {
-	page := &MediaPage{
+	return &MediaPage{
 		Page:         resp.Page,
 		TotalPages:   resp.TotalPages,
 		TotalResults: resp.TotalResults,
-		Results:      make([]MediaResult, 0, len(resp.Results)),
+		Results:      appendMultiResults(make([]MediaResult, 0, len(resp.Results)), resp.Results),
 	}
-	for _, item := range resp.Results {
+}
+
+// appendMultiResults appends the movies and TV shows of a mixed result list;
+// people and anything else are skipped.
+func appendMultiResults(results []MediaResult, items []mediaMultiSearchResponse) []MediaResult {
+	for _, item := range items {
 		switch item.MediaType {
 		case "movie":
-			page.Results = append(page.Results, MediaResult{
-				ID:           item.ID,
-				MediaType:    "movie",
-				Title:        item.Title,
-				Overview:     item.Overview,
-				PosterPath:   item.PosterPath,
-				BackdropPath: item.BackdropPath,
-				ReleaseDate:  item.ReleaseDate,
-				Year:         releaseYear(item.ReleaseDate),
-				Popularity:   item.Popularity,
-				VoteAverage:  item.VoteAverage,
-			})
+			results = append(results, movieResult(item.asMovie()))
 		case "tv":
-			page.Results = append(page.Results, MediaResult{
-				ID:           item.ID,
-				MediaType:    "series",
-				Title:        item.Name,
-				Overview:     item.Overview,
-				PosterPath:   item.PosterPath,
-				BackdropPath: item.BackdropPath,
-				ReleaseDate:  item.FirstAirDate,
-				Year:         releaseYear(item.FirstAirDate),
-				Popularity:   item.Popularity,
-				VoteAverage:  item.VoteAverage,
-			})
+			results = append(results, tvResult(item.asTV()))
 		}
 	}
-	return page
+	return results
+}
+
+// movieResult and tvResult normalize one TMDB movie or show for the request
+// surfaces; a show is a "series".
+func movieResult(item mediaMovieResponse) MediaResult {
+	return MediaResult{
+		ID: item.ID, MediaType: "movie", Title: item.Title, Overview: item.Overview,
+		PosterPath: item.PosterPath, BackdropPath: item.BackdropPath, ReleaseDate: item.ReleaseDate,
+		Year: releaseYear(item.ReleaseDate), Popularity: item.Popularity, VoteAverage: item.VoteAverage,
+	}
+}
+
+func tvResult(item mediaTVResponse) MediaResult {
+	return MediaResult{
+		ID: item.ID, MediaType: "series", Title: item.Name, Overview: item.Overview,
+		PosterPath: item.PosterPath, BackdropPath: item.BackdropPath, ReleaseDate: item.FirstAirDate,
+		Year: releaseYear(item.FirstAirDate), Popularity: item.Popularity, VoteAverage: item.VoteAverage,
+	}
 }
 
 func releaseYear(value string) int {
@@ -763,11 +734,23 @@ func buildDiscoverQuery(mediaType string, params DiscoverParams) string {
 	if without := joinIntSlice(params.WithoutGenres, ","); without != "" {
 		values.Set("without_genres", without)
 	}
-	if companies := joinIntSlice(params.WithCompanies, ","); companies != "" {
+	// Companies, networks, keywords and watch providers match any of their
+	// values ("|"); genres must all match (","), as collection sync expects.
+	if companies := joinIntSlice(params.WithCompanies, "|"); companies != "" {
 		values.Set("with_companies", companies)
 	}
-	if networks := joinIntSlice(params.WithNetworks, ","); networks != "" {
+	if networks := joinIntSlice(params.WithNetworks, "|"); networks != "" {
 		values.Set("with_networks", networks)
+	}
+	if keywords := joinIntSlice(params.WithKeywords, "|"); keywords != "" {
+		values.Set("with_keywords", keywords)
+	}
+	if len(params.WithOriginCountry) > 0 {
+		values.Set("with_origin_country", strings.Join(params.WithOriginCountry, "|"))
+	}
+	if providers := joinIntSlice(params.WithWatchProviders, "|"); providers != "" {
+		values.Set("with_watch_providers", providers)
+		values.Set("watch_region", params.WatchRegion)
 	}
 	if params.VoteCountGte > 0 {
 		values.Set("vote_count.gte", strconv.Itoa(params.VoteCountGte))
@@ -869,6 +852,25 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 // list's last page or once limit entries are collected. A limit <= 0 reads
 // the whole list.
 func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult, error) {
+	items, err := c.GetListMedia(ctx, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]CollectionResult, 0, len(items))
+	for _, item := range items {
+		mediaType := item.MediaType
+		if mediaType == "series" {
+			mediaType = "tv"
+		}
+		results = append(results, CollectionResult{ID: item.ID, MediaType: mediaType, Title: item.Title})
+	}
+	return results, nil
+}
+
+// GetListMedia is GetList with the full results a discovery card shows
+// (poster, overview, release date, votes). MediaType is Silo-facing: "movie"
+// or "series".
+func (c *Client) GetListMedia(ctx context.Context, id, limit int) ([]MediaResult, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: list id must be > 0 (got %d)", id)
 	}
@@ -880,7 +882,7 @@ func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult
 	if err != nil {
 		return nil, err
 	}
-	results := appendListItems(make([]CollectionResult, 0, min(limit, 100)), first.Items)
+	results := appendMultiResults(make([]MediaResult, 0, min(limit, 100)), first.Items)
 	// Later pages load a few at a time; the client's rate limit sets the
 	// pace, and results keep list order.
 	for next := 2; next <= first.TotalPages && len(results) < limit; {
@@ -902,12 +904,12 @@ func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult
 		next += len(pages)
 		for _, page := range pages {
 			if len(page.Items) == 0 {
-				return truncateResults(results, limit), nil
+				return truncateMedia(results, limit), nil
 			}
-			results = appendListItems(results, page.Items)
+			results = appendMultiResults(results, page.Items)
 		}
 	}
-	return truncateResults(results, limit), nil
+	return truncateMedia(results, limit), nil
 }
 
 // listPageFetches bounds the list pages GetList requests at once;
@@ -923,27 +925,77 @@ func (c *Client) getListPage(ctx context.Context, id, page int) (listResponse, e
 	return resp, err
 }
 
-// appendListItems appends a list page's movies and TV shows; lists can also
-// hold people, which are skipped.
-func appendListItems(results []CollectionResult, items []TrendingResult) []CollectionResult {
-	for _, item := range items {
-		if item.MediaType != "movie" && item.MediaType != "tv" {
-			continue
-		}
-		title := item.Title
-		if title == "" {
-			title = item.Name
-		}
-		results = append(results, CollectionResult{ID: item.ID, MediaType: item.MediaType, Title: title})
-	}
-	return results
-}
-
-func truncateResults(results []CollectionResult, limit int) []CollectionResult {
+func truncateMedia(results []MediaResult, limit int) []MediaResult {
 	if len(results) > limit {
 		return results[:limit]
 	}
 	return results
+}
+
+// MediaCard fetches one movie or series as a discovery card: the plain
+// /movie/{id} or /tv/{id} document with nothing appended, uncached. mediaType
+// accepts Silo-facing "movie" or "series". A title TMDB does not have wraps
+// ErrNotFound.
+func (c *Client) MediaCard(ctx context.Context, mediaType string, id int) (*MediaResult, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("tmdb: media id must be > 0 (got %d)", id)
+	}
+	switch mediaType {
+	case "movie":
+		var resp mediaMovieResponse
+		if err := c.doGet(ctx, fmt.Sprintf("/movie/%d", id), &resp); err != nil {
+			return nil, err
+		}
+		return new(movieResult(resp)), nil
+	case "series", "tv":
+		var resp mediaTVResponse
+		if err := c.doGet(ctx, fmt.Sprintf("/tv/%d", id), &resp); err != nil {
+			return nil, err
+		}
+		return new(tvResult(resp)), nil
+	default:
+		return nil, fmt.Errorf("tmdb: invalid media type for card: %q", mediaType)
+	}
+}
+
+// WatchProvider is one streaming service TMDB knows in a region.
+type WatchProvider struct {
+	ID              int
+	Name            string
+	LogoPath        string
+	DisplayPriority int
+}
+
+// WatchProviders lists the streaming services TMDB has availability data for
+// in a region (ISO 3166-1 alpha-2), in TMDB's display order. mediaType
+// accepts "movie", "series" or "tv".
+func (c *Client) WatchProviders(ctx context.Context, mediaType, region string) ([]WatchProvider, error) {
+	segment := "movie"
+	switch mediaType {
+	case "movie":
+	case "series", "tv":
+		segment = "tv"
+	default:
+		return nil, fmt.Errorf("tmdb: invalid media type for watch providers: %q", mediaType)
+	}
+	var resp struct {
+		Results []struct {
+			ProviderID      int    `json:"provider_id"`
+			ProviderName    string `json:"provider_name"`
+			LogoPath        string `json:"logo_path"`
+			DisplayPriority int    `json:"display_priority"`
+		} `json:"results"`
+	}
+	path := "/watch/providers/" + segment + "?watch_region=" + url.QueryEscape(region)
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]WatchProvider, 0, len(resp.Results))
+	for _, p := range resp.Results {
+		out = append(out, WatchProvider{ID: p.ProviderID, Name: p.ProviderName, LogoPath: p.LogoPath, DisplayPriority: p.DisplayPriority})
+	}
+	slices.SortStableFunc(out, func(a, b WatchProvider) int { return a.DisplayPriority - b.DisplayPriority })
+	return out, nil
 }
 
 // GetMediaDetail fetches a single TMDB movie or series with credits, external
@@ -1101,18 +1153,7 @@ func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 	if resp.Recommendations != nil {
 		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
 		for _, item := range resp.Recommendations.Results {
-			detail.Recommendations = append(detail.Recommendations, MediaResult{
-				ID:           item.ID,
-				MediaType:    "movie",
-				Title:        item.Title,
-				Overview:     item.Overview,
-				PosterPath:   item.PosterPath,
-				BackdropPath: item.BackdropPath,
-				ReleaseDate:  item.ReleaseDate,
-				Year:         releaseYear(item.ReleaseDate),
-				Popularity:   item.Popularity,
-				VoteAverage:  item.VoteAverage,
-			})
+			detail.Recommendations = append(detail.Recommendations, movieResult(item))
 		}
 	}
 	return detail
@@ -1185,18 +1226,7 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 	if resp.Recommendations != nil {
 		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
 		for _, item := range resp.Recommendations.Results {
-			detail.Recommendations = append(detail.Recommendations, MediaResult{
-				ID:           item.ID,
-				MediaType:    "series",
-				Title:        item.Name,
-				Overview:     item.Overview,
-				PosterPath:   item.PosterPath,
-				BackdropPath: item.BackdropPath,
-				ReleaseDate:  item.FirstAirDate,
-				Year:         releaseYear(item.FirstAirDate),
-				Popularity:   item.Popularity,
-				VoteAverage:  item.VoteAverage,
-			})
+			detail.Recommendations = append(detail.Recommendations, tvResult(item))
 		}
 	}
 	return detail
@@ -1759,32 +1789,10 @@ func (c *Client) fetchFind(ctx context.Context, path string) ([]MediaResult, err
 	}
 	out := make([]MediaResult, 0, len(resp.MovieResults)+len(resp.TVResults))
 	for _, item := range resp.MovieResults {
-		out = append(out, MediaResult{
-			ID:           item.ID,
-			MediaType:    "movie",
-			Title:        item.Title,
-			Overview:     item.Overview,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ReleaseDate:  item.ReleaseDate,
-			Year:         releaseYear(item.ReleaseDate),
-			Popularity:   item.Popularity,
-			VoteAverage:  item.VoteAverage,
-		})
+		out = append(out, movieResult(item))
 	}
 	for _, item := range resp.TVResults {
-		out = append(out, MediaResult{
-			ID:           item.ID,
-			MediaType:    "series",
-			Title:        item.Name,
-			Overview:     item.Overview,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ReleaseDate:  item.FirstAirDate,
-			Year:         releaseYear(item.FirstAirDate),
-			Popularity:   item.Popularity,
-			VoteAverage:  item.VoteAverage,
-		})
+		out = append(out, tvResult(item))
 	}
 	return out, nil
 }

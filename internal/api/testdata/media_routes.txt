@@ -301,6 +301,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -794,6 +799,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
@@ -1601,6 +1607,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -2094,6 +2105,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
