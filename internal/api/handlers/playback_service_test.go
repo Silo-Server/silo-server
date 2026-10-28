@@ -912,6 +912,23 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 		},
 		wantReason: PlaybackEndStopped, wantWatched: 1200, wantProviders: 1,
 	}, {
+		name: "stream abort finishes a client stop that never claimed its end",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), &playback.ProgressSampleV3{Sequence: 2, Position: 1200}); err != nil {
+				t.Fatal(err)
+			}
+			stream := NewStreamHandler(f.manager, f.handler.fileResolver)
+			stream.PlanStoreV3 = memory
+			stream.abortPlaybackSession(context.Background(), f.session)
+			if record, _ := memory.GetAttempt(context.Background(), f.session.ID); record == nil {
+				t.Fatal("attempt missing")
+			}
+			if receipt, _, err := memory.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil); err != nil || !receipt.Finalized {
+				t.Fatalf("receipt = %+v, %v; want the client stop finalized", receipt, err)
+			}
+		},
+		wantReason: PlaybackEndStopped, wantWatched: 1200, wantProviders: 0,
+	}, {
 		name: "expiry records the sample its attempt accepted",
 		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
 			snapshot, _ := f.manager.GetSession(f.session.ID)
