@@ -211,6 +211,19 @@ describe("ItemGrid scroll anchoring", () => {
       expect(window.scrollY).toBe(150 * 340 + 19);
     });
 
+    it("lands once the row's page loads when the total is exact", () => {
+      returnToRow150();
+      const props = { pageSize: 100, onVisibleRangeChange: vi.fn(), totalItems: 400 };
+      const { rerender } = render(<ItemGrid {...props} pages={firstPage} />);
+
+      expect(awaitingGridRestore()).toBe(true);
+
+      rerender(<ItemGrid {...props} pages={new Map([...firstPage, [3, items.slice(300, 400)]])} />);
+
+      expect(awaitingGridRestore()).toBe(false);
+      expect(window.scrollY).toBe(150 * 340 + 19);
+    });
+
     it("restores nothing against a previous query's pages", () => {
       returnToRow150();
       const props = {

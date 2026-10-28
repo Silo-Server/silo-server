@@ -187,8 +187,11 @@ export default function ItemGrid(props: ItemGridProps) {
   const stale = props.stale === true;
   const extentFinal =
     hasStaticItems(props) || (props.knownItems ?? props.totalItems) >= props.totalItems;
-  const restoreRowSettled =
-    !restoreAnchor || extentFinal || pages.has(Math.floor(restoreAnchor.index / pageSize));
+  const restorePageLoaded =
+    !restoreAnchor ||
+    hasStaticItems(props) ||
+    pages.has(Math.floor(restoreAnchor.index / pageSize));
+  const restoreRowSettled = extentFinal || restorePageLoaded;
 
   // Back or Forward to this page: put the saved row back at the top, at the
   // same depth into it. The restore stays in force until the page settles,
@@ -207,10 +210,15 @@ export default function ItemGrid(props: ItemGridProps) {
     virtualizer.scrollToOffset(virtualizer.options.scrollMargin + row * rowHeight + offset, {
       behavior: "instant",
     });
-    restoreLanded();
+    // Until the row's cards load, the row height is an estimate, and the
+    // browser may have clamped the offset to a document that is too short.
+    // Land once they're in, so the restore re-applies at the measured height;
+    // or now, when the list ends before the saved row.
+    if (row < savedRow || restorePageLoaded) restoreLanded();
   }, [
     restoreVersion,
     restoreRowSettled,
+    restorePageLoaded,
     stale,
     showsItems,
     anchorEl,
