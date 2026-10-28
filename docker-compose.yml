@@ -11,7 +11,7 @@
 # The services that keep the names of the multi-container stack's PostgreSQL,
 # Redis, and Meilisearch; see the note under services.
 x-bridge: &bridge
-  image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
+  image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
   entrypoint: ["true"]
   restart: "no"
   network_mode: none
@@ -23,7 +23,7 @@ x-bridge: &bridge
 
 services:
   silo:
-    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
     restart: unless-stopped
     # On stop Silo fails readiness, keeps serving for SILO_SHUTDOWN_DELAY
     # (default 5s), then finishes in-flight requests, and PostgreSQL shuts

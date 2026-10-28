@@ -239,9 +239,9 @@ It does nothing when the omnibus install already has a database of its own
 and none of the earlier stack is here, and refuses, before anything is moved
 into place, when:
 
-- A pinned `SILO_IMAGE` (other than `latest` or `latest-omnibus`) is set
+- A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
-  `latest-omnibus` past the pin.
+  `aio` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
   the earlier stack's cluster or Silo directories are here: Silo created that
   database first, most likely when started with `--no-deps` before this step.
