@@ -706,3 +706,7 @@
 # Personal collection list reads remember counts and collages with no source
 # until the membership revision or the viewer's access changes.
 ./internal/catalog TestPersonalCollectionReadsRememberedDB
+
+# The artwork reconcile sweep leaves bundled app-relative collection posters
+# alone: it neither checks them against storage nor counts them as errors.
+./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
