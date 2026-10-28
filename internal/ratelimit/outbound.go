@@ -37,6 +37,10 @@ type sharedWaiter struct {
 	rate    Rate
 	now     func() time.Time
 	after   func(time.Duration) <-chan time.Time
+	// turn admits one waiter at a time to Redis. The rest wait here
+	// without calling it, so a backlog of waiters costs Redis one refused
+	// check per node a second rather than one per waiter.
+	turn chan struct{}
 }
 
 func newSharedWaiter(limiter *RedisLimiter, key string, perSecond int) *sharedWaiter {
@@ -50,10 +54,17 @@ func newSharedWaiter(limiter *RedisLimiter, key string, perSecond int) *sharedWa
 		},
 		now:   time.Now,
 		after: time.After,
+		turn:  make(chan struct{}, 1),
 	}
 }
 
 func (w *sharedWaiter) Wait(ctx context.Context) error {
+	select {
+	case w.turn <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-w.turn }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

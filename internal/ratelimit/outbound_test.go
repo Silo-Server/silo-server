@@ -15,6 +15,7 @@ import (
 type fakeWindows struct {
 	mu     sync.Mutex
 	counts map[string]int64
+	checks int
 }
 
 func (f *fakeWindows) answer(cmd redis.Cmder) error {
@@ -24,6 +25,7 @@ func (f *fakeWindows) answer(cmd redis.Cmder) error {
 	secLimit, minLimit := int64(args[5].(int)), int64(args[6].(int))
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.checks++
 	if f.counts == nil {
 		f.counts = map[string]int64{}
 	}
@@ -127,5 +129,50 @@ func TestOutboundLimiterWaitEndsWithContext(t *testing.T) {
 				t.Fatal("call kept waiting after its context ended")
 			}
 		})
+	}
+}
+
+// A backlog of waiters on one node does not multiply Redis load: while the
+// budget is spent, one waiter checks Redis each second and the rest wait
+// on the node without calling it.
+func TestOutboundLimiterBacklogChecksRedisOncePerNode(t *testing.T) {
+	const perSecond, backlog = 2, 20
+	clock := time.Unix(1_800_000_000, 0)
+	waiting := make(chan struct{}, backlog)
+	windows := &fakeWindows{}
+	w := sharedTestWaiter(t, windows, perSecond,
+		func() time.Time { return clock },
+		// The next second never comes.
+		func(time.Duration) <-chan time.Time { waiting <- struct{}{}; return nil })
+	for i := range perSecond {
+		if err := w.Wait(t.Context()); err != nil {
+			t.Fatalf("call %d within the budget: %v", i, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	for range backlog {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = w.Wait(ctx)
+		}()
+	}
+	<-waiting
+	// Negative observation: give the other waiters time to reach Redis if
+	// they could; with the gate they never do.
+	select {
+	case <-waiting:
+		t.Fatal("a second waiter checked Redis while the first was still waiting for the next second")
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	wg.Wait()
+
+	windows.mu.Lock()
+	defer windows.mu.Unlock()
+	if want := perSecond + 1; windows.checks != want {
+		t.Fatalf("%d waiters made %d Redis checks after the budget ran out, want 1", backlog, windows.checks-perSecond)
 	}
 }

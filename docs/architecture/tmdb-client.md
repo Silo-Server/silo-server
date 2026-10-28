@@ -34,9 +34,11 @@ feature or per node. It is a constant, not a setting.
   `RedisLimiter`, counted in the key `outbound:tmdb` in wall-clock second
   windows. A call the window refuses waits for the next second and tries
   again, until its context ends, so a busy moment loads more slowly instead of
-  returning errors. Waiters are not served in order: at each second every
-  waiter tries again and Redis decides who gets a slot. Window keys come from
-  each node's clock, so nodes should keep their clocks in sync.
+  returning errors. On each node one waiter at a time checks Redis while the
+  rest wait locally, so a backlog costs Redis at most one refused check per
+  node a second. Nodes are not served in order: at each second every node's
+  current waiter tries again and Redis decides who gets a slot. Window keys
+  come from each node's clock, so nodes should keep their clocks in sync.
 - **No Redis**: a per-process token bucket with a burst of the budget, the
   limiter each client used to build for itself.
 
