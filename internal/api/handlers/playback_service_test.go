@@ -236,6 +236,20 @@ func TestStopPlaybackV2FirstStopWinsAndLaterStopsReplay(t *testing.T) {
 	assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
 }
 
+// TestStopPlaybackV2RefusesServerStopIDs covers a client stop that names one
+// of the ids the server mints for its own ends: it is refused, so a client
+// cannot record its play as terminated, expired or aborted.
+func TestStopPlaybackV2RefusesServerStopIDs(t *testing.T) {
+	for _, minted := range []func(string) string{adminStopID, expiredStopID, abortStopID} {
+		f := newPlaybackServiceFixture(t)
+		_, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: minted(f.session.ID)})
+		assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
+		if record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID); err != nil || record.StoppedAt != nil {
+			t.Fatalf("attempt = %+v, %v; want it still live", record, err)
+		}
+	}
+}
+
 // TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow covers a stop that
 // reaches a replica without the session's copy: the row stops, and the admin
 // log records the play from the attempt row, started when the attempt was.

@@ -541,6 +541,11 @@ func (h *PlaybackHandler) StopPlaybackV2(ctx context.Context, caller PlaybackCal
 	if id, err := uuid.Parse(command.StopID); err != nil || id == uuid.Nil || id.String() != command.StopID {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "A canonical stop_id is required")
 	}
+	if serverStopID(sessionID, command.StopID) {
+		// The server's own stop ids say who ended the attempt; a client
+		// stop must not claim one.
+		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "The stop_id is reserved")
+	}
 	if command.Sequence < 0 || (command.Position == nil) != (command.Sequence == 0) ||
 		(command.Position != nil && (*command.Position < 0 || math.IsNaN(*command.Position) || math.IsInf(*command.Position, 0))) {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid stop identity or final sample")
@@ -877,6 +882,12 @@ func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
 	default:
 		return PlaybackEndStopped
 	}
+}
+
+// serverStopID reports whether stopID is one the server mints for an end it
+// makes itself.
+func serverStopID(sessionID, stopID string) bool {
+	return stopID == adminStopID(sessionID) || stopID == expiredStopID(sessionID) || stopID == abortStopID(sessionID)
 }
 
 func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {

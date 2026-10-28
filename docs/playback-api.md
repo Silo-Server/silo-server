@@ -303,7 +303,8 @@ global position through `POST /api/v2/sync/progress`.
 Stop accepts `{installation_id, stop_id}` plus an optional final sample
 `{sequence, position, is_paused}`; `sequence` and `position` appear together or
 not at all. `stop_id` is a canonical UUID the client mints once and keeps on
-every retry. The first stop wins a compare-and-set on `stopped_at`: it applies
+every retry; a `stop_id` the server mints for its own ends (below) is refused
+with `400`. The first stop wins a compare-and-set on `stopped_at`: it applies
 the final sample when it is newer than the last progress, runs the stop and
 history writer, stops the local session and transcode, writes the stream deny
 marker and stores the receipt on the row. The reply is
