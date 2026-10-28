@@ -225,7 +225,9 @@ successfully. `redis` and `meilisearch` exit at once. `postgres` runs
   ignores.
 - The cluster in `postgres/18/docker` is copied to `config/postgres/data`. A
   temporary server on a private socket creates the `silo` superuser role if
-  `POSTGRES_USER` named another, and renames `POSTGRES_DB` to `silo`.
+  `POSTGRES_USER` named another, and renames `POSTGRES_DB` to `silo`. When that
+  was `postgres`, it creates an empty `postgres` database again, which
+  `init-postgres-db` connects to.
   `init-postgres` then replaces the copy's `pg_hba.conf`, which trusted every
   local connection, on its first start, and `init-postgres-db` rebuilds the
   collation-dependent indexes, since the copy was built under glibc 2.36.
