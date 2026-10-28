@@ -75,6 +75,10 @@ hold:
   (`ClaimNativeSessionExpiry`), which re-checks the play row's activity under its lock.
 - An Audiobookshelf session ends after 24 hours without a holder.
 
+A Jellyfin copy that saw no progress records no end, because it cannot tell whether
+another server holds the copy that took the play's reports; a Jellyfin play that ends
+before reporting any progress is therefore ended by the sweep, as `expired`.
+
 An end the sweep makes records history from the row the session stored when it
 started, at the last position the attempt knows; a play whose media file left the
 catalog is recorded without the item and duration only the file gave.
