@@ -266,10 +266,6 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 // sign out. Refreshing the session afterwards is a public route; the refreshed
 // tokens drop the restriction once the account has a new password.
 var passwordChangeRoutes = map[string]bool{
-	"GET /api/v1/auth/me":                     true,
-	"GET /api/v1/auth/account/capability":     true,
-	"POST /api/v1/auth/account/password":      true,
-	"POST /api/v1/auth/logout":                true,
 	"GET /api/v2/account/me":                  true,
 	"GET /api/v2/account/password/capability": true,
 	"POST /api/v2/account/password":           true,

@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -201,32 +199,6 @@ func (p *AdminTimeseriesProvider) Close() {
 		return
 	}
 	p.cache.Close()
-}
-
-// HandleGetTimeseries handles GET /admin/stats/timeseries.
-func (h *AdminHandler) HandleGetTimeseries(w http.ResponseWriter, r *http.Request) {
-	hours, err := parseClampedIntQuery(
-		r, "hours",
-		adminTimeseriesDefaultHours,
-		adminTimeseriesMinHours,
-		adminTimeseriesMaxHours,
-	)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	series, err := h.ReadAdminTimeseries(r.Context(), hours, isTruthyQuery(r.URL.Query().Get("refresh")))
-	if errors.Is(err, ErrAdminDashboardUnavailable) {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get dashboard timeseries")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, series)
 }
 
 // timeseriesRow is one grouped display bucket as it comes back from Postgres.

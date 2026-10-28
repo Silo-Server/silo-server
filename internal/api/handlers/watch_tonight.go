@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sort"
-	"strconv"
 	"sync"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -49,24 +46,6 @@ const (
 	baseNextUpScore   = 1.50 // next-up items — rank above recommendations but below in-progress
 	watchTonightLimit = 5
 )
-
-// HandleWatchTonight handles GET /recommendations/watch-tonight.
-// It merges live Continue Watching / Next Up items with recommendation-engine
-// candidates, applies taste-profile boosts, enriches, and returns a unified list.
-func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *http.Request) {
-	limit := watchTonightLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 20 {
-			limit = n
-		}
-	}
-	resp, err := h.watchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit, true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
 
 // WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
 // list the v1 and v2 handlers both answer. limit must already be validated.

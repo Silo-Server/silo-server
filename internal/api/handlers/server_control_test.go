@@ -3,9 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -20,127 +18,87 @@ func (c *serverControlTestConn) WriteJSON(v any) error {
 	return nil
 }
 
-func TestServerControlRestartRequestsShutdown(t *testing.T) {
+// TestRequestAdminServerRestart covers the shared restart seam v2 calls:
+// both accepted outcomes mark the restart tracker, a failed request does not,
+// and connected playback sessions receive the restart notice first.
+func TestRequestAdminServerRestart(t *testing.T) {
 	t.Parallel()
 
-	called := 0
-	restartStatus := NewServerRestartStatusTracker()
-	handler := NewServerControlHandler(func(context.Context) error {
-		called++
-		return nil
-	}, nil, restartStatus)
+	cases := []struct {
+		name          string
+		restartErr    error
+		wantStatus    string
+		wantErr       bool
+		wantRequested bool
+	}{
+		{name: "first request", wantStatus: "restart_requested", wantRequested: true},
+		{name: "already requested", restartErr: ErrServerRestartAlreadyRequested, wantStatus: "already_requested", wantRequested: true},
+		{name: "request fails", restartErr: errors.New("boom"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleRestart(rec, req)
+			sessions := playback.NewSessionManager(0, 0)
+			session, err := sessions.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			hub := playback.NewRealtimeHub()
+			conn := &serverControlTestConn{}
+			registration := hub.Register(session.ID, conn)
+			if registration == nil {
+				t.Fatal("expected realtime registration")
+			}
+			defer hub.Unregister(registration)
 
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if called != 1 {
-		t.Fatalf("restart calls = %d, want 1", called)
-	}
+			calls := 0
+			tracker := NewServerRestartStatusTracker()
+			h := NewServerControlHandler(func(context.Context) error {
+				calls++
+				return tc.restartErr
+			}, playback.NewCommandDispatcher(sessions, hub, nil), tracker)
 
-	var resp serverRestartResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Status != "restart_requested" {
-		t.Fatalf("status = %q, want restart_requested", resp.Status)
-	}
-	if resp.NotifiedSessions != 0 {
-		t.Fatalf("notified_sessions = %d, want 0", resp.NotifiedSessions)
-	}
-	if snapshot := restartStatus.Snapshot(); !snapshot.RestartRequested {
-		t.Fatal("RestartRequested = false, want true")
-	}
-}
-
-func TestServerControlRestartAlreadyRequested(t *testing.T) {
-	t.Parallel()
-
-	handler := NewServerControlHandler(func(context.Context) error {
-		return ErrServerRestartAlreadyRequested
-	}, nil, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleRestart(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-
-	var resp serverRestartResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Status != "already_requested" {
-		t.Fatalf("status = %q, want already_requested", resp.Status)
-	}
-}
-
-func TestServerControlRestartNotifiesPlaybackSessions(t *testing.T) {
-	t.Parallel()
-
-	sessionMgr := playback.NewSessionManager(0, 0)
-	session, err := sessionMgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	realtimeHub := playback.NewRealtimeHub()
-	conn := &serverControlTestConn{}
-	registration := realtimeHub.Register(session.ID, conn)
-	if registration == nil {
-		t.Fatal("expected realtime registration")
-	}
-	defer realtimeHub.Unregister(registration)
-
-	dispatcher := playback.NewCommandDispatcher(sessionMgr, realtimeHub, nil)
-	handler := NewServerControlHandler(func(context.Context) error {
-		return nil
-	}, dispatcher, NewServerRestartStatusTracker())
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/admin/server/restart",
-		strings.NewReader(`{"reason":"maintenance","message":"Restarting for maintenance"}`),
-	)
-	rec := httptest.NewRecorder()
-	handler.HandleRestart(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-
-	var resp serverRestartResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.NotifiedSessions != 1 {
-		t.Fatalf("notified_sessions = %d, want 1", resp.NotifiedSessions)
-	}
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want 1", len(conn.messages))
-	}
-
-	command, ok := conn.messages[0].(playback.CommandEnvelope)
-	if !ok {
-		t.Fatalf("message type = %T, want playback.CommandEnvelope", conn.messages[0])
-	}
-	if command.Name != playback.CommandServerRestarting {
-		t.Fatalf("command name = %q, want %q", command.Name, playback.CommandServerRestarting)
-	}
-	if command.Reason != "maintenance" {
-		t.Fatalf("reason = %q, want maintenance", command.Reason)
-	}
-
-	var payload map[string]string
-	if err := json.Unmarshal(command.Payload, &payload); err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	if payload["message"] != "Restarting for maintenance" {
-		t.Fatalf("payload message = %q, want custom message", payload["message"])
+			res, err := h.RequestAdminServerRestart(context.Background(), AdminServerRestartRequest{
+				Reason:  "maintenance",
+				Message: "Restarting for maintenance",
+			})
+			if calls != 1 {
+				t.Fatalf("restart calls = %d, want 1", calls)
+			}
+			if got := tracker.Snapshot().RestartRequested; got != tc.wantRequested {
+				t.Fatalf("RestartRequested = %v, want %v", got, tc.wantRequested)
+			}
+			if tc.wantErr {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != 500 {
+					t.Fatalf("err = %v, want 500 APIError", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RequestAdminServerRestart: %v", err)
+			}
+			if res.Status != tc.wantStatus || res.NotifiedSessions != 1 {
+				t.Fatalf("result = %+v, want status %q and 1 notified session", res, tc.wantStatus)
+			}
+			if len(conn.messages) != 1 {
+				t.Fatalf("messages = %d, want 1", len(conn.messages))
+			}
+			command, ok := conn.messages[0].(playback.CommandEnvelope)
+			if !ok {
+				t.Fatalf("message type = %T, want playback.CommandEnvelope", conn.messages[0])
+			}
+			if command.Name != playback.CommandServerRestarting || command.Reason != "maintenance" {
+				t.Fatalf("command = %q reason %q", command.Name, command.Reason)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(command.Payload, &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload["message"] != "Restarting for maintenance" || payload["title"] != "Server restarting" {
+				t.Fatalf("payload = %v", payload)
+			}
+		})
 	}
 }

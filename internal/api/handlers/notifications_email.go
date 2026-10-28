@@ -2,13 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"html"
 	"net/http"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
@@ -33,121 +30,6 @@ type updateEmailPreferencesRequest struct {
 
 type updateEmailAddressRequest struct {
 	Email string `json:"email"`
-}
-
-func emailPreferencesPayload(state notifications.EmailPreferencesState) emailPreferencesResponse {
-	return emailPreferencesResponse{
-		Mode:           state.Mode,
-		CustomEmail:    state.CustomEmail,
-		PendingEmail:   state.PendingEmail,
-		CanEditAddress: !state.IsChild,
-	}
-}
-
-// respondEmailPreferences re-reads and writes the profile's full email state,
-// so every mutation returns the same shape as GET.
-func (h *NotificationsHandler) respondEmailPreferences(w http.ResponseWriter, r *http.Request, userID int, profileID string) {
-	state, err := h.system.EmailPreferences(r.Context(), userID, profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load email preferences")
-		return
-	}
-	writeJSON(w, http.StatusOK, emailPreferencesPayload(state))
-}
-
-// HandleGetEmailPreferences handles GET /notifications/email-preferences.
-func (h *NotificationsHandler) HandleGetEmailPreferences(w http.ResponseWriter, r *http.Request) {
-	h.respondEmailPreferences(w, r, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
-}
-
-// HandleUpdateEmailPreferences handles PUT /notifications/email-preferences.
-func (h *NotificationsHandler) HandleUpdateEmailPreferences(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req updateEmailPreferencesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	err := h.system.SetEmailMode(r.Context(), userID, profileID, req.Mode)
-	switch {
-	case err == nil:
-	case errors.Is(err, notifications.ErrEmailModeInvalid):
-		writeError(w, http.StatusBadRequest, "bad_request", "Unknown email notification mode")
-		return
-	case errors.Is(err, notifications.ErrEmailModeNotAllowed):
-		writeError(w, http.StatusBadRequest, "not_allowed", "Per-episode email is disabled by the administrator")
-		return
-	case errors.Is(err, notifications.ErrEmailNoAddress):
-		writeError(w, http.StatusBadRequest, "no_email", "Verify an email address for this profile first")
-		return
-	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save email preferences")
-		return
-	}
-	h.respondEmailPreferences(w, r, userID, profileID)
-}
-
-// HandleRequestEmailAddress handles PUT /notifications/email-preferences/address.
-// It stores the candidate address and emails it a verification link; the
-// address only becomes the destination once that link is clicked.
-func (h *NotificationsHandler) HandleRequestEmailAddress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req updateEmailAddressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	err := h.system.RequestEmailAddress(r.Context(), userID, profileID, req.Email)
-	switch {
-	case err == nil:
-	case errors.Is(err, notifications.ErrEmailLegacyWriter):
-		writeError(w, http.StatusConflict, "email_verification_upgrade_required", "This profile requires durable email verification")
-		return
-
-	case errors.Is(err, notifications.ErrEmailInvalidAddress):
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid email address")
-		return
-	case errors.Is(err, notifications.ErrEmailChildProfile):
-		writeError(w, http.StatusForbidden, "child_profile", "Child profiles cannot set a custom notification address")
-		return
-	case errors.Is(err, notifications.ErrEmailAddressInUse):
-		writeError(w, http.StatusConflict, "address_in_use", "That email address is already used by another profile or account")
-		return
-	case errors.Is(err, notifications.ErrEmailVerifyRateLimited):
-		writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many verification emails; try again later")
-		return
-	case errors.Is(err, notifications.ErrEmailNoLinkBase):
-		writeError(w, http.StatusConflict, "no_external_url", "The server has no external URL configured for verification links")
-		return
-	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to send the verification email")
-		return
-	}
-	h.respondEmailPreferences(w, r, userID, profileID)
-}
-
-// HandleClearEmailAddress handles DELETE /notifications/email-preferences/address.
-func (h *NotificationsHandler) HandleClearEmailAddress(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	err := h.system.ClearEmailAddress(r.Context(), userID, profileID)
-	switch {
-	case err == nil:
-	case errors.Is(err, notifications.ErrEmailChildProfile):
-		writeError(w, http.StatusForbidden, "child_profile", "Child profiles cannot change the notification address")
-		return
-	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove the custom address")
-		return
-	}
-	h.respondEmailPreferences(w, r, userID, profileID)
 }
 
 // EmailLinkHandler serves the public tokenized email endpoints: address

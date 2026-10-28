@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 
@@ -128,23 +127,4 @@ func (h *PluginHandler) CancelAdminPluginUpload(_ context.Context, uploadID stri
 		return err
 	}
 	return nil
-}
-
-// writePluginUploadError keeps the frozen bridge answers for the upload seams.
-func writePluginUploadError(w http.ResponseWriter, r *http.Request, err error) {
-	var apiErr *APIError
-	switch {
-	case errors.As(err, &apiErr):
-		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-	case errors.Is(err, ErrPluginUploadMissingArchive):
-		writeError(w, http.StatusBadRequest, "bad_request", "archive upload is required")
-	default:
-		status, message := uploadErrorResponse(err)
-		if status == http.StatusInternalServerError {
-			slog.ErrorContext(r.Context(), "plugin upload failed", "component", "api", "error", err)
-			writeError(w, status, "internal_error", "Failed to install uploaded plugin")
-			return
-		}
-		writeError(w, status, "upload_error", message)
-	}
 }

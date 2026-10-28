@@ -120,7 +120,6 @@ series' backdrop, and local extras use their own still as the poster when they
 have one and otherwise inherit their parent's artwork. URLs use
 the same resolver and `image_size` query as catalog item detail. Missing
 artwork is omitted; clients can retain their catalog-detail fallback.
-The frozen v1 watch response does not gain these fields.
 
 ## Marker ranges
 
@@ -154,8 +153,8 @@ validation_failed` at `header.x-profile-id`.
 
 When `playback.allow_hevc_encoding` is enabled, video adaptation may encode
 HEVC for clients that explicitly support HEVC on their HLS delivery route.
-The server advertises `video_to_hevc` through the existing transformation
-capability inventory. The effective recipe and frozen transcode target identify
+The server lists `video_to_hevc` in its validated transformation inventory
+(`getAdminHardwareAcceleration`). The effective recipe and frozen transcode target identify
 HEVC; existing H.264-only clients continue to receive H.264. Disabling the
 setting affects new planning decisions without changing active frozen recipes.
 HEVC direct play and remux remain independent of the encoding setting.
@@ -189,8 +188,7 @@ A start that returns a playable decision registers the device the client
 declares in `X-Silo-Device-Id` (with the optional `X-Silo-Device-Name` and
 `X-Silo-Device-Platform`) for the acting profile and refreshes its
 `last_seen_at`, as described in the
-[device registry](settings-api.md#device-registry). The v1 start route reads the
-same headers. A refused start, or one that returns a terminal decision,
+[device registry](settings-api.md#device-registry). A refused start, or one that returns a terminal decision,
 registers nothing. These headers do not change the playback device that
 `X-Device-ID` names.
 
@@ -208,9 +206,7 @@ rejection only refers to that file: with alternate versions allowed, the server
 tries the item's other versions the viewer may play (library access and
 playback-quality ceiling) before answering `source_unreadable`.
 Season episode listings mark such files with `unreadable: true` (see
-[Catalog API](catalog-api.md#episode-files)). The v1 start route shares the
-planner, so v1 clients can also receive `source_unreadable`; like any unknown
-reason, they show `terminal.message`.
+[Catalog API](catalog-api.md#episode-files)).
 
 The web player retries an interrupted START with the identical body, including
 when response headers arrived but reading the body failed. Its 60-second retry
@@ -220,7 +216,6 @@ the request or backoff. A 4xx refusal ends that start, and a later user Play
 uses the newly selected file and a new attempt ID. The web client does not
 restore pending START requests across page reloads.
 
-The frozen v1 start route ignores `allow_alternate_versions`.
 Servers advertising `fixed_media_file_v1` accept the optional start field
 `allow_alternate_versions`. Setting it to `false` keeps this attempt on the
 requested file through quality, track, output, seek, and recovery replans.
@@ -289,7 +284,7 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Attempt ended by an administrator | 410 `playback_session_ended` |
 | Attempt already stopped otherwise, or unknown | 404 |
 
-An applied sample is persisted through the same writers v1 uses (resume
+An applied sample is persisted through the shared progress writers (resume
 position, scrobbles), from the live session when this replica holds it and from
 the attempt row otherwise. The writers run after the compare-and-set and the
 resume position is last-write-wins, so after writing, the server re-reads the
@@ -334,8 +329,7 @@ own receipt.
 ## Replan and route events
 
 `replanPlayback` covers failure recovery, seek re-anchor, and track, quality and
-output changes, with the v3 body plus `installation_id`. It runs the same
-application code as the frozen v1 replan route. It is idempotent on `replan_request_id`
+output changes, with the v3 body plus `installation_id`. It is idempotent on `replan_request_id`
 plus the body digest: the same request replays its committed decision; a reused
 id with different input, a superseded plan, or an identical replan still in
 progress is `409`; a session owned by another profile is `403`; a session an
@@ -378,7 +372,7 @@ signed query strings are preserved without decoding or re-encoding.
 
 ## Revocation
 
-Stop, session expiry or abort, and admin stop or terminate (v1 and v2) write the
+Stop, session expiry or abort, and admin stop or terminate write the
 Redis key `silo:streamauth:<session_id>` with a TTL equal to the stream token
 lifetime. The API checks it before it serves or reconstructs a session, and the
 proxy and transcode nodes check it on every token-verified serve, so a
@@ -449,25 +443,13 @@ plays every pick from the beginning, ignoring saved progress. While a shuffle
 is set, the post-roll screen shows `next` instead of the next episode, and the
 player offers no sequential next or previous episode.
 
-## v1 bridge
-
-`/api/v1/playback/start`, `/{session_id}/progress`, `DELETE /{session_id}`,
-`/{session_id}/replan`, `/route-events` and `/api/v1/stream/...` keep their
-frozen handlers and bodies: progress is `{position, is_paused}` and answers
-`204`, and stop needs no body and answers `204`. They share the application
-code, the deny marker and the attempt row with v2. Apple and Android use this
-surface until they adopt v2; it is retired with the rest of `/api/v1` under the
-`410 client_upgrade_required` tombstone
-([API contract](architecture/api-contract.md)).
-
-### Marker preview delivery
+## Marker preview delivery
 
 Native v2 playback capabilities also advertise `marker_thumbnails_v1`. The web
 player opts into that feature at playback start to receive `marker_thumbnail_ready`
 updates; negotiation stays fixed for the attempt. Canonical watch reads return
 the same durable optional preview fields on `marker_segments`, so reconnects
 and clients without the realtime feature can refresh through the normal read.
-The frozen v1 listener does not advertise or negotiate this feature.
 
 A marker preview is captured at its start timestamp. It does not replace an
 embedded chapter, change seek boundaries, or enable timeline trickplay. Native

@@ -1,9 +1,7 @@
 # Admin API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` admin routes are summarized in
-> [Bridge note](#bridge-note) and are retired after the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 Server-administration operations under `/api/v2/admin`. Every `/api/v2/admin`
 operation requires an authenticated account with the server-wide `admin` role — the
@@ -76,9 +74,9 @@ Public reads are deliberately unauthenticated: branding has to apply on the
 login page, before anyone has a session.
 
 `{kind}` is one of `wordmark`, `mark`, `favicon`, `login_bg`. The web client has a
-single dark theme, so the former light-theme variants are gone from v2; the frozen
-v1 upload route still accepts `wordmark_light` and `mark_light` until v1 retires,
-and the public asset route still serves them. Uploads are
+single dark theme, so the former light-theme variants `wordmark_light` and
+`mark_light` can no longer be uploaded; the public asset route still serves a
+copy stored earlier. Uploads are
 processed per kind — the numbers below are the contract the admin UI quotes back
 to the operator, and they live in `internal/branding/assets.go`:
 
@@ -209,8 +207,7 @@ or Jellyfin playback contracts; those clients need no changes to report it.
 `direct` (Direct Play), `remux` (copied audio and video in a streaming
 container), `direct_stream` (copied video with converted audio), or `transcode`
 (converted video). Unknown decisions omit the field, and the capability's
-`effective_play_method_values` lists the vocabulary. The frozen `/api/v1`
-bridge keeps reporting its alpha `audio` value instead of `direct_stream`.
+`effective_play_method_values` lists the vocabulary.
 Per-stream Copy means no re-encoding; it does not promise byte-identical packets
 after a permitted bitstream transformation.
 
@@ -219,16 +216,14 @@ after a permitted bitstream transformation.
 transport reports the container (`fmp4`, `mpegts`, or the source container for
 Direct Play) separately from the protocol (`hls` or `http`). An older node can
 omit both; clients then show the output as unknown rather than inferring it
-from `play_method`, the source container, or the video codec. The frozen
-`/api/v1` bridge does not carry these fields.
+from `play_method`, the source container, or the video codec.
 
 `source_video_height: true` advertises an optional `source_video_height` on v2
 session rows: the pixel height of the source's primary video track.
 `source_video_resolution` names the file's size class, so a 3840x1600 file is
 `2160p`, while a transcode's `target_resolution` names its output height
 (`1600p`). A client compares the target height with `source_video_height` to
-tell a full-resolution transcode from a downscale. The frozen `/api/v1` bridge
-does not carry the field.
+tell a full-resolution transcode from a downscale.
 
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
@@ -671,8 +666,7 @@ budget; `null` or `-1` restores `download.artifact_max_bytes`) are writable here
 A new budget applies at the next storage maintenance pass. A new directory applies
 when the node restarts; files in the old directory are not moved, so in-use files are
 prepared again and cached ones are dropped. See
-[prepared download storage](architecture/download-storage.md). The frozen
-`/api/v1/admin/nodes` routes neither accept nor return these two fields.
+[prepared download storage](architecture/download-storage.md).
 
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
@@ -1028,7 +1022,7 @@ deleting a layout that is not there succeeds.
 
 ## `GET /api/v2/admin/dashboard/capabilities`
 
-Feature detection for the admin dashboard surface. Per the v1 rules a new
+Feature detection for the admin dashboard surface. Per the API contract rules a new
 feature is detected rather than inferred from a server version, and every field
 here is additive: a server that has this endpoint answers `true` for all of
 them, and a server that predates the dashboard answers `404`. That is how a
@@ -1488,21 +1482,21 @@ delivers both.
 
 `GET /api/v2/admin/playback-history` (`listAdminPlaybackHistory`) is the finalized
 playback log across every account and profile, newest ended first, for acting
-administrators. It keeps the frozen v1 filters
+administrators. It takes the filters
 (`user_id`, `profile_id`, `media_item_id`, `completed` as `all`, `true` or `false`) and
-replaces offset paging with `limit` (default 50, maximum 200) plus an opaque `cursor` bound
+pages with `limit` (default 50, maximum 200) plus an opaque `cursor` bound
 to the operation, acting account and profile, filters and limit; `offset` is refused with
 422. Each page is one consistent read ordered by `ended_at` then `session_id`; later pages
 read the live log. Account and file identifiers are strings, instants are RFC 3339, and
 `duration_seconds` is null when the media duration was never recorded. A deleted account
 lists with an empty `username`; an item no longer in the catalog lists with an empty
-`media_title` and `media_type`. The stored client address is not part of this projection,
-matching v1. It is the viewer's last address on the playback session. Rows written by
+`media_title` and `media_type`. The stored client address is not part of this projection.
+It is the viewer's last address on the playback session. Rows written by
 earlier server versions hold the address of the request that ended the attempt instead:
 the administrator's when an administrator stopped or terminated it, and none when it
 expired. A missing database returns 503; storage errors are masked as 500.
 
-Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
+`ended_after` (an RFC 3339 instant) keeps
 attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
 like the other filters, so a cursor from one window is refused under another. Each entry
 also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
@@ -1606,7 +1600,7 @@ issued token so the administrator can assign it to a source.
 
 ### Personal history import acceptance and monitoring
 
-Personal history imports on both `/api/v1` and `/api/v2` use the acting
+Personal history imports use the acting
 `X-Profile-Id`. A non-primary profile can import only into itself and see only runs
 targeting itself. The primary profile (with its PIN verified when it has one) can act
 for any profile on its own account, whether or not the account is an admin. Another
@@ -1619,9 +1613,6 @@ run returns 404. Any other request without an acting profile cannot create a run
 and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
 are bound to the account and acting profile.
 
-This deliberately tightens the frozen v1 bridge as a security fix: otherwise its
-run routes would bypass the v2 profile restriction. V1 keeps its existing response
-envelopes, 201 create response, and maximum list size of 50. Web uses v2;
 Apple and Android have no personal history-import consumer, and jellycompat has
 no corresponding import operation.
 
@@ -1652,12 +1643,10 @@ account is an admin or an admin turned on `media_servers.allow_private_destinati
 That covers a typed Jellyfin or Plex URL and the server addresses Emby Connect or
 plex.tv list for the account; servers an admin configured as import sources are
 exempt. A refused address returns `422 validation_failed` whose detail says the
-address is on the server's local network (v1 answers 400 `bad_request` with the
-same message). Cloud metadata, link-local, and other blocked addresses are refused
+address is on the server's local network. Cloud metadata, link-local, and other blocked addresses are refused
 for every account. The policy is read again when a queued run starts, so a run
-admitted before the setting was turned off fails with the same message. v1 run
-responses and realtime history-import events carry the same safe summaries as
-the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
+admitted before the setting was turned off fails with the same message. Realtime
+history-import events carry the same safe summaries as the monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
 
 A Plex import races the addresses plex.tv advertised for the selected server, up to
 eight, and keeps the first that returns a library listing for the rest of the run. A
@@ -1691,8 +1680,7 @@ The dashboard uses four acting-administrator operations under `/api/v2/admin/sta
 | `/downloads` | `getAdminDashboardDownloadsStats` | `limit`: 1–25, default 10 |
 
 All accept `refresh=true` to invalidate the provider cache before reading.
-Out-of-range inputs return a validation problem; the frozen v1 routes continue
-their existing clamping behavior. Missing data services return 503. The web normalizes
+Out-of-range inputs return a validation problem. Missing data services return 503. The web normalizes
 its window before choosing a query cache key and retains its existing page-owned
 refresh cadence.
 
@@ -1746,8 +1734,8 @@ The restart tracker is process-local and resets when that process restarts.
 This response does not describe a durable job, acknowledge completion of a
 restart, or establish cluster-wide restart state. An unhealthy configured
 Postgres or Redis remains a 200 response with `ok: false`; a service that is not
-configured omits `ok` and latency. The existing bounded probes, optional
-Jellyfin restart derivation, and cached log counts are shared with the bridge.
+configured omits `ok` and latency. The probes are bounded; Jellyfin restart
+state is derived when configured, and log counts are cached.
 Failure to read settings does not hide the dependency-health response. A missing
 administrator status service returns 503.
 
@@ -1760,8 +1748,7 @@ and synchronously submits one test message through the saved SMTP settings.
 It requires acting-administrator access. A 200 response contains `ok`,
 `duration_ms`, and an optional safe explanation when the mail server did not
 confirm the send. Invalid recipients return 422; an unavailable sender returns
-503. V2 excludes provider error text from the response. The bridge keeps its
-existing response behavior and shares the message construction and send call.
+503. The response excludes provider error text.
 
 This operation is non-retryable: a lost response does not prove the message was
 not sent. There is no durable job or replay identity. The web captures the
@@ -1782,8 +1769,7 @@ require acting-administrator authority and report missing dependencies as 503.
 Runtime observations are separate from the canonical configuration validator.
 The web reads both under captured account/profile authority and discards results
 after an authority change. The two reads are not an atomic runtime snapshot;
-backend changes may require a restart. The frozen bridge retains its combined
-response and existing save path. This read slice adds no write, reload, job, or
+backend changes may require a restart. This read slice adds no write, reload, job, or
 cross-replica convergence guarantee.
 
 `PATCH /api/v2/admin/rate-limits/config` merges supplied configuration fields;
@@ -1825,7 +1811,7 @@ API reopens the wizard for the next admin visit; nothing else reads it.
 ### Settings discovery
 
 `GET /api/v2/admin/settings/{key}` returns one visible stored value and its
-`restart_required` flag. It shares the bridge's bootstrap precedence and hides
+`restart_required` flag. It applies bootstrap precedence and hides
 sensitive and machine-managed keys with 404. Missing and empty values also remain
 404. The setup wizard uses this route for its Redis configuration read and treats
 only 404 as absence, rejecting stale responses after an authority change.
@@ -1838,8 +1824,7 @@ this read.
 ### Jellyfin compatibility status
 
 `GET /api/v2/admin/jellyfin-compat/status` requires acting-administrator authority
-and shares the bridge's configured compatibility and local web-component status
-reader. It preserves configured API/web states, versions, provenance, installer
+and reads the configured compatibility and local web-component status. It preserves configured API/web states, versions, provenance, installer
 prerequisites, restart indication and local operation progress. This is not a
 listener-health probe or a durable cluster-wide job receipt. The underlying reader
 can reconcile stale installation locks on the local filesystem.
@@ -1854,15 +1839,12 @@ change. This read adds no installation, update, removal or provider request.
 
 The autoscan administrator UI displays and copies the accepted
 `/api/v2/autoscan/webhooks/{token}` delivery URL, including immediately created or
-rotated source responses. Bridge management responses retain their frozen URL;
-the UI projects only the known delivery path to v2 and preserves the configured
-host, deployment prefix, query and existing secret. An already-v2 URL is unchanged.
-
-Operators must replace the saved URL in existing download-manager connections.
-Displaying or copying it does not rotate the secret, update a provider, send a
+rotated source responses. The retired `/api/v1/autoscan/webhooks/{token}` URL
+answers `410 Gone`, so operators must replace a v1 URL saved in existing
+download-manager connections.
+Displaying or copying the URL does not rotate the secret, update a provider, send a
 test delivery or replay an event. New setup and existing-source instructions both
-state the external configuration step. Other source-management operations remain
-separate migration work.
+state the external configuration step.
 
 `GET /api/v2/admin/autoscan/sources` returns administrator-only source metadata in
 signed, account/profile/page-size-bound cursor pages ordered by label then source
@@ -1888,16 +1870,14 @@ sequential source, poll and queue reads; it is not an atomic scheduler snapshot.
 Running poll IDs are opaque strings and timestamps use UTC milliseconds. Source
 observations omit webhook credentials and source configuration. The web settings
 and activity queries use these reads under captured authority and retain their
-existing refresh cadence. Bridge configuration mutations and scheduler updates
-remain unchanged. No Apple, Android or Jellyfin caller uses these administrator reads.
+existing refresh cadence. No Apple, Android or Jellyfin caller uses these administrator reads.
 
 `GET /api/v2/admin/autoscan/connections` lists configured connections using a
 signed administrator/profile/limit-bound name-and-ID cursor. Each page enumerates
 the full configured connection list; concurrent edits can reorder the live list.
 The response preserves connection metadata and `has_api_key`, while excluding
 credential references and resolved secrets. Reading does not contact a provider.
-The existing web picker drains bounded pages under captured authority; connection
-writes remain on the bridge. No native or Jellyfin connection-list caller exists.
+The existing web picker drains bounded pages under captured authority. No native or Jellyfin connection-list caller exists.
 
 ### Native administrator playback observations
 
@@ -1938,13 +1918,12 @@ unreadable records from the source enumeration before filtering. Missing or
 unparseable start timestamps are null, and the original nanosecond precision is
 the decimal string `started_at_unix_nano` (`"0"` when absent). Unknown numeric
 ownership keys remain `"0"`; the older `user_id` is a display label, while
-`auth_user_id` identifies the account when reported. The frozen v1 raw-record
-response is unchanged.
+`auth_user_id` identifies the account when reported.
 
 Both lists accept `limit` (default 50, maximum 100) and an opaque `cursor` bound
 to the acting account/profile, filter and page size. The playback list applies
 its session-ID keyset and limit in SQL, fetching one extra row to determine
-continuation. The frozen v1 loader retains its newest-200 cap. The node list
+continuation. The node list
 bounds response size but rereads the live source on each page. The node reader
 refuses a truncated 50,000-record enumeration with 503 instead of claiming a
 complete list. Expired keys and failed GETs can be absent under the existing
@@ -1976,10 +1955,7 @@ not an atomic cluster snapshot. No native or Jellyfin caller uses this admin rea
 
 There is no setting for whether profiles may add rule rows: they always may.
 `GET`/`PUT /api/v2/admin/settings/sections` (`getAdminSectionSettings`,
-`updateAdminSectionSettings`) were removed before the v2 lock. The frozen v1
-`GET /api/v1/admin/settings/sections` answers `allow_profile_custom_sections:
-true`, and v1 `PUT` checks that the body is JSON, changes nothing, and answers
-the same. A stored `sections.allow_profile_custom_sections` row is ignored.
+`updateAdminSectionSettings`) were removed before the v2 lock. A stored `sections.allow_profile_custom_sections` row is ignored.
 
 ### Offline-download preparation
 
@@ -2114,8 +2090,8 @@ views that are open.
 ### Sequenced administrator playback commands (v2)
 
 `POST /api/v2/admin/sessions/{session_id}/pause`, `/resume`, `/stop` and
-`/message` port the bridge control routes with an ordered command identity the
-session applies once. `/terminate` is ported separately below with a different
+`/message` carry an ordered command identity the
+session applies once. `/terminate` is described separately below with a different
 contract: it revokes first and notifies second.
 
 Every request body carries `command_id` (a client-allocated canonical UUID) and
@@ -2145,9 +2121,9 @@ by any other route. It answers deterministically:
   reported value and reissues; the header is absent on other conflicts.
 - Pause, resume and message require a live realtime lane (`409 conflict`
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
-  the server ends the session after the deadline, as on the bridge.
+  the server ends the session after the deadline.
 - A pause, resume or stop the player does not confirm before its deadline ends
-  the session, here and on the bridge. The session's playback attempt is then
+  the session. The session's playback attempt is then
   recorded as ended by an administrator, so the player is told to leave
   (`410 playback_session_ended`) when it next reports progress or replans,
   rather than starting a fresh session
@@ -2161,16 +2137,13 @@ administrator. Commands enforce the demo restriction; capability reads do not.
 The web session actions send
 pause, resume, stop and message through these operations under captured
 administrator authority, allocate a fresh identity per click, and raise the
-allocation floor from a stale refusal's `X-Silo-Latest-Sequence`; terminate
-stays on the bridge.
+allocation floor from a stale refusal's `X-Silo-Latest-Sequence`.
 
 
 ### Administrator terminate (v2)
 
 `POST /api/v2/admin/sessions/{session_id}/terminate`
-(`terminateAdminPlaybackSession`) reverses the bridge order. The bridge sends a
-terminate command and, when the player is silent, ends the session after a
-deadline: revocation follows the client. On v2 the server first revokes the
+(`terminateAdminPlaybackSession`) revokes before it notifies: the server first revokes the
 session's playback authority durably, then dispatches the dismissal as best
 effort, and reports the two facts separately. It never promises that media
 already buffered stops instantly, and it never waits for the player.
@@ -2198,7 +2171,7 @@ session whose stop cannot be committed in its current state is `409`. The
 operation requires an acting administrator, is restricted in demo mode, and is
 registered unconditionally: it answers `503` and the shared command capability
 lists `terminate` with `terminate_revokes_authority: true` only when the durable
-revocation seam is wired. The bridge terminate route is unchanged. The web
+revocation seam is wired. The web
 session actions send terminate through this operation under captured
 administrator authority and show both facts.
 
@@ -2240,7 +2213,7 @@ within an API process. Direct settings callbacks, Redis notifications and config
 watchers use that same ordering; a failed read retains the previous trusted set.
 This prevents an older local read from overwriting a newer applied value. It does
 not make settings notifications a durable queue or provide simultaneous trust
-updates across replicas. The frozen bridge retains its existing wire behavior.
+updates across replicas.
 
 ### Jellyfin compatibility settings patch in v2
 
@@ -2250,11 +2223,10 @@ updates across replicas. The frozen bridge retains its existing wire behavior.
 settings GET and send its `ETag` in required `If-Match`; `If-None-Match` optionally
 excludes another state. Explicit null fields and empty patches are rejected.
 
-V2 validates the guard and applies the complete patch under the shared settings
+The server validates the guard and applies the complete patch under the shared settings
 transaction. Disabling compatibility forces `web_enabled` off. `web_dir` remains
 managed: an empty value resolves to the managed path under the supplied or stored
 installation root; arbitrary active directories are rejected before any write.
-The bridge preserves its existing per-key writes and error precedence.
 
 After commit, settings notifications and restart markers retain their existing
 behavior. The response uses the existing desired/active compatibility status
@@ -2274,8 +2246,7 @@ they do not promise that a database or other runtime dependency is healthy.
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
 `downloads_stats` and `egress_totals` are true for the existing v2 dashboard operations.
 `server_layouts` remains false while the v2 layout lifecycle is unavailable.
-`log_level_list` is true for the accepted multi-level application-log reader. Clients
-must not infer v2 support from the bridge's independently retained capabilities.
+`log_level_list` is true for the accepted multi-level application-log reader.
 
 ### Retained application-log read in v2
 
@@ -2338,16 +2309,14 @@ profile-less session gains a PIN-protected or access-limited profile. Reconnect 
 this is bounded revocation detection, not instantaneous. Without Redis the ticket is
 process-local and requires affinity to the minting node.
 
-The frames after the upgrade are the bridge's: one `snapshot` (`entries`, `next_cursor`)
+The frames after the upgrade are one `snapshot` (`entries`, `next_cursor`)
 from the matching list route, then buffered `append` frames newer than the snapshot, then live
 `append` frames filtered by the same options and deduplicated by id, or an `error` frame
 followed by close 1011 when a repository read fails. The hub buffers 64 messages per
 connection and drops on overflow; the stream is a live tail, not a gap-free feed. Ping runs
 every 20 seconds with a 30-second pong deadline.
 
-The bridge route is unchanged: bearer token via middleware (the legacy web client carried it
-in the URL), same statuses (503 without a hub, 400 `bad_request` "Invalid stream" or the filter
-error), shared origin check, no lifetime bound. The web logs page now mints a ticket under
+The web logs page mints a ticket under
 captured administrator authority for each connection, offers the protocol pair, never puts a
 credential in the URL, and discards frames after the authority changes. Native clients have
 no log stream caller.
@@ -2434,21 +2403,19 @@ Timestamps use UTC milliseconds.
 The strong conditional-read ETag binds the account, acting profile/access scope,
 canonical layout object and full stored timestamp. It supports If-Match and
 If-None-Match/304, but is not an acknowledged write revision or a promise of
-write-side compare-and-set. Save/reset transport and the complete `server_layouts`
-capability remain separate work; a read alone does not advertise that lifecycle.
+write-side compare-and-set. `saveAdminDashboardLayout` and
+`resetAdminDashboardLayout`, below, are the writers.
 
 The web reader keys its cache by captured service/account authentication context,
 profile and setter-owned non-secret PIN generation, and rejects responses decoded
-after authority changes. Legacy save/reset success invalidates layout query
+after authority changes. A successful save or reset invalidates layout query
 variants so active readers fetch the canonical document; it does not seed a local
-timestamp as a server acknowledgement. Local immediate edits, debounced saves
-and serialized legacy writes remain unchanged. This read migration does not add
-write-side conflict handling or change the legacy writer's authority semantics.
+timestamp as a server acknowledgement.
 
 ### Hardware-acceleration inventory in v2
 
-`GET /api/v2/admin/system/hw-accel` requires an acting administrator and reuses
-the synchronous inventory walk described for the bridge endpoint. Enabled healthy
+`GET /api/v2/admin/system/hw-accel` requires an acting administrator and walks
+the hardware inventory synchronously. Enabled healthy
 nodes are queried concurrently within their advertised/configured budgets. The
 first successful node supplies the primary report; no nodes, or all failed nodes,
 falls back to the local host with current playback settings. Failed nodes remain
@@ -2479,8 +2446,8 @@ profile/access scope and page limit. Each page enumerates the full stored list;
 this is live pagination, not a snapshot or bounded database query. The web reader
 drains at most100pages and fails visibly on invalid/duplicate identity, unsupported
 source kind or bad continuation rather than publishing a partial list. It captures
-authority and keys cached success by non-secret PIN generation. Existing legacy
-repository writes invalidate the shared key prefix; their transport is unchanged.
+authority and keys cached success by non-secret PIN generation. Repository writes
+invalidate the shared key prefix.
 Plugin installation/runtime compatibility remains a separate gate.
 
 ### Stream telemetry parity in v2
@@ -2580,7 +2547,7 @@ URL, resets markers. Base URLs that differ only in the case of the scheme or hos
 surrounding whitespace, or trailing slashes name the same server and keep them; a
 different port, scheme or path (an escaped slash, `%2F`, included) does not.
 Changing the name, kind or API key, or the stored base URL of a linked connection,
-keeps them. The frozen v1 connection update shares this repository path. Editing
+keeps them. Editing
 the linked Requests integration itself does not reset markers. A poll that was
 already running does not restore the old marker; see the source update below.
 
@@ -2767,10 +2734,9 @@ If-Match is evaluated before If-None-Match. A successful empty204 includes the E
 of that exact committed write. Invalid objects422, excessive body413, missing storage503
 and masked uncertain500 remain. No automatic replay or durable job receipt is supplied.
 
-A dashboard-specific revision table retains generations after reset. All current
-bridge/v2 save/reset handlers lock the account before checking or changing layout and
-revision in one transaction. The migration preserves existing layouts; bridge HTTP
-bodies/statuses remain unchanged. The lock covers an absent layout too, and reset
+A dashboard-specific revision table retains generations after reset. The save and
+reset handlers lock the account before checking or changing layout and
+revision in one transaction. The migration preserves existing layouts. The lock covers an absent layout too, and reset
 cannot make an old absent-layout validator current again. Old binaries that do not
 participate in this writer protocol are not covered by this ordering guarantee.
 
@@ -2819,7 +2785,7 @@ the plugin's continuation token for one upstream; replaying it against another
 server can repeat or skip that server's history. Changing only the label, enabled
 state, delivery mode, poll interval or path rewrites keeps the marker and
 `last_run_at`.
-The rule lives in the repository update, so the frozen v1 source update applies it too.
+The rule lives in the repository update.
 A poll cycle re-reads each source just before polling it, so an edit made earlier in
 the cycle is honored; a source whose row cannot be read is skipped until the next cycle. A poll already running during the reset cannot write the old
 upstream's marker back: the poll stores its next marker only if the source's marker,
@@ -2833,7 +2799,7 @@ the next poll starts from the reset marker. A poll that fails after such a reset
 likewise leaves `last_error` and `last_run_at` as the reset left them; its error is
 recorded only on the poll's event, with a note that it was not stored on the source.
 
-Configuration keys/values, connection and label are normalized as in the bridge.
+Configuration keys/values, connection and label are normalized.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider
 validation. Creation does not create a webhook endpoint. Update returns existing
 webhook state with v2 callback URL projection; reveal failures can omit the URL.
@@ -2843,8 +2809,7 @@ must name a connection: create or update without one returns422 with a `required
 error at `body.connection_id`. A disabled source may be saved without one, so a
 source stored before this check can still be switched off; enabling it then needs
 a server. When the descriptor cannot be resolved (the plugin is no longer
-installed, or discovery fails during an update) the write is not blocked. The
-frozen v1 source routes do not apply this check.
+installed, or discovery fails during an update) the write is not blocked.
 
 At poll time, a source whose descriptor requires a connection and has none bound
 is not sent to its plugin; the source and its activity event record "No server
@@ -2894,7 +2859,8 @@ Acting administrators can create, remove or rotate a source endpoint:
 All three are demo-restricted, require no request body and are `non_retryable`.
 Create requires webhook delivery mode and preserves an existing endpoint/token.
 Rotate requires an existing endpoint and replaces its token, invalidating the old URL;
-it retains the bridge behavior for an endpoint whose source mode subsequently changed.
+it does not check the source's current delivery mode, so it also rotates the endpoint of
+a source that has since switched to polling.
 Delete removes the endpoint, without canceling queued or running source work.
 Missing sources/endpoints return404, wrong create delivery mode422, absent storage503,
 and private failures an uncertain500. No provider configuration or external send occurs.
@@ -2924,7 +2890,7 @@ requires an acting administrator; demo mode refuses it. It uses the existing tas
 manager to reserve and start `autoscan_poll` on the receiving process and returns200
 with the canonical `AdminTask` snapshot (`execution_scope: process`). This is not a
 202 job acceptance, durable dispatch, restart-safe execution or completed scan receipt.
-It does not create another worker implementation or change the frozen bridge trigger.
+It does not create another worker implementation.
 
 An absent task manager returns503, an unregistered poll task404, an already reserved
 worker409, and private start failures500. The operation is `non_retryable`: a repeat
@@ -2936,9 +2902,7 @@ every enabled polling source immediately: per-source and default poll intervals 
 only to scheduled runs. It still does nothing while Autoscan is disabled, skips
 disabled and webhook sources and any source whose poll is already running, and
 records per-source provider/enqueue failures in activity without necessarily failing
-the overall task. The frozen v1 entry points keep the interval behavior:
-`POST /api/v1/admin/autoscan/trigger` and `POST /api/v1/admin/tasks/{key}/run` still
-skip sources polled within their interval. A successful start does not promise provider
+the overall task. A successful start does not promise provider
 success, new scan runs or completed downstream work. The web Run-now button captures
 profile authority before queueing, disables retries/auth replay, stays pending until
 acknowledgement and fences late feedback/invalidation under a changed authority.
@@ -2966,8 +2930,7 @@ for worker refusal or uncertain completion. node_id is an opaque decimal string;
 capabilities_refreshed distinguishes a refreshed inventory from a successful node probe.
 A failed refresh does not turn an already successful probe into failure. No hardware
 support or plugin launch is inferred. The operation remains non_retryable; inspect
-node state before repeating an uncertain command. Frozen bridge response shapes and
-worker wire contracts remain unchanged through shared service extraction.
+node state before repeating an uncertain command. Worker wire contracts are unchanged.
 
 Actual node-row actions copy the selected node and capture authority before queueing,
 disable automatic/authentication replay, and fence late receipts, feedback and cache
@@ -3026,9 +2989,7 @@ neither atomic nor a durable job. No202/job Location or rollback is promised.
 Force reload can tear down active worker sessions. Lost responses and error results
 must be reconciled before another explicit command; do not interpret them as proof
 that no reload or teardown happened. The API does not launch plugins, verify hardware
-support or manufacture worker completion beyond the acknowledgement. Shared URL/auth
-request construction preserves the frozen bridge's existing behavior; worker reload
-and teardown implementation remains unchanged. There are no actual web callers or
+support or manufacture worker completion beyond the acknowledgement. There are no actual web callers or
 helpers for either route, and no Jellyfin administration equivalent.
 
 ### Node configuration lifecycle (v2)
@@ -3040,7 +3001,7 @@ matches the submitted creation fields; conflicting configuration returns409.
 It does not overwrite a competing administrator's node or contact the worker.
 
 `GET /api/v2/admin/nodes` adds `config_etag` to each stored node. This validator
-covers configuration, including bridge edits, and excludes health/capability
+covers configuration and excludes health/capability
 samples. Paging remains a live full-discovery projection, not a cross-page
 snapshot. Capture the node's validator when opening an edit or delete action.
 
@@ -3065,7 +3026,7 @@ prove which caller deleted the node.
 Every API replica reconciles persisted node configuration on startup and on a
 five-second cadence, retrying failed reads and recovering missed notifications.
 Configuration changes and deletions advance a durable generation in the same
-transaction, including writes through the frozen bridge. Reconciliation reapplies
+transaction. Reconciliation reapplies
 the current snapshot even when the generation is unchanged so a late legacy
 notification cannot leave the pool stale indefinitely. A response acknowledges
 stored configuration, not reconciliation by every replica, worker policy reload,
@@ -3095,7 +3056,7 @@ are not silently rebased onto another writer's configuration.
 
 `GET /api/v2/admin/plugins/catalog` returns cursor-paged, typed catalog entries sorted by
 `(plugin_id, version)`; repository identifiers are opaque strings. Each page performs the same
-live fetch of every enabled repository index as the legacy read, recording
+live fetch of every enabled repository index, recording
 `last_fetched_at` on the repositories it reaches, so continuation enumerates that page's
 fetch and is not a snapshot. Plugin-defined JSON (manifest metadata, capability metadata,
 admin-form default values) travels in named extension bags; every other object is closed.
@@ -3124,7 +3085,7 @@ authority or a duplicated identifier fails the read rather than merging pages.
 `archive_url`; mixing the two or supplying neither is a 422 naming the field. Both paths
 fetch over the network. An installation with the same manifest `plugin_id` is stopped and
 replaced rather than duplicated, and metadata-provider capabilities are appended to the
-library chains as on v1. Success is 201 with the installation. There is no replay identity
+library chains. Success is 201 with the installation. There is no replay identity
 and no database uniqueness, so the row is non-retryable: a lost response may follow a
 committed install and the client reconciles from the installation list.
 
@@ -3141,7 +3102,7 @@ installation.
 
 `POST /api/v2/admin/plugins/installations/{id}/update` installs the recorded available
 version from the installation's repository (a network fetch) and clears the marker; an
-installation without a recorded update or without a repository is 409 (v1 answered 500).
+installation without a recorded update or without a repository is 409.
 Success is 200. Non-retryable: no replay identity, and a lost response may follow a
 committed update.
 
@@ -3188,11 +3149,10 @@ list omits it, and deleting it removes the row but leaves its files on disk. Suc
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at
 `body.archive`, an oversize body 413. A zip archive is installed from its manifest; any
 other file is treated as a plugin binary whose manifest the server obtains by executing
-it, exactly as v1 does. Either way, the server ignores manifest fields and enum values it
+it. Either way, the server ignores manifest fields and enum values it
 doesn't know, such as ones a newer SDK added, so such a plugin still installs and starts;
 the stored manifest keeps them as the plugin wrote them. Success is 201 with the installation. Non-retryable: the same
-plugin_id is replaced, so a delayed retry can replace a newer installation. The frozen
-bridge route keeps its own answers (an oversize or malformed form is 400 `bad_request`).
+plugin_id is replaced, so a delayed retry can replace a newer installation.
 
 Chunked uploads mirror the diagnostics transport. `POST /api/v2/admin/plugins/uploads/chunked`
 opens a process-local session for one file (`filename`, `size_bytes` up to 256 MiB, optional
@@ -3225,8 +3185,7 @@ are merged over the stored entry: an omitted field keeps its stored value. A dec
 non-secret top-level field sent as `null` or a blank string is removed from the stored entry,
 so the plugin's default applies; fields the manifest does not declare (plugin-owned state)
 are kept. Manifest-declared secret fields left blank keep their stored value, and a secret is
-removed only when named in `clear_secrets`. The frozen v1 `PUT .../config` shares the
-clearing rule as a bridge bug fix: before it, an emptied field kept its stored value. The
+removed only when named in `clear_secrets`. The
 connection test (`.../config/test` and the auth connection test) merges a staged entry the
 same way without storing it. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
@@ -3255,7 +3214,7 @@ whole binding row keyed by installation and capability. The auth binding answers
 restart. An omitted `auto_provision` is true, and enabling an auth binding while another
 is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
-restart required and answers 200 with `restart_required` true, matching the legacy shape.
+restart required and answers 200 with `restart_required` true.
 An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
@@ -3263,17 +3222,6 @@ installation, 409 for the reserved built-in host row, 422 for a blank key or cap
 503 when the plugin service or stores are not wired. The web plugin dialog captures profile
 authority before each submission and ignores a completion that arrives under a replaced
 authority.
-
-## Bridge note
-
-The frozen alpha surface serves the same administration features under `/api/v1/admin`
-(plus the public `/api/v1/branding/assets/{kind}` and `/api/v1/theme/branding` reads)
-through the pre-1.0 bridge window. It uses integer IDs, second-precision timestamps,
-bare JSON arrays with offset paging, a flat `{error, message}` envelope, and clamps
-out-of-range numeric query parameters instead of rejecting them. Those routes are
-frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
-namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`.
 
 ### Account and permission audit details (v2)
 
@@ -3299,7 +3247,6 @@ and `target_id` alongside existing filters. History cursors bind these filters.
 `audit_actions`. Historical request rows continue to have no domain details.
 Live rows publish after commit; history remains authoritative if a frame is
 missed. Existing live delivery does not promise gap-free or late-commit traversal.
-The frozen v1 read/socket projections retain their previous fields.
 
 Audit detail index readiness: the additive migration creates metadata-only
 partitioned indexes for action and target filters. Primary API startup and

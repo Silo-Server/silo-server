@@ -2,10 +2,10 @@
 
 A profile verification token (`X-Profile-Token`) proves that the caller entered a
 PIN-locked profile's PIN in the current login session. `POST
-/api/v2/profiles/{id}/verify-pin` and v1 `POST /profiles/{id}/verify-pin` mint it,
-and a remote-playback device sign-in returns one for the approved profile. The
-viewer gate (`access.VerifyProfileForRequest`) and the v1 household check
-(`handlers.verifyProfileToken`) accept it through one function,
+/api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) mints it, and a
+remote-playback device sign-in returns one for the approved profile. The viewer
+gate (`access.VerifyProfileForRequest`) and the household-management check
+(`handlers.canManageHousehold`) accept it through one function,
 `access.CheckProfileToken`.
 
 ## What the token is bound to

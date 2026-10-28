@@ -5,18 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
@@ -186,30 +182,6 @@ type authProviderResponse struct {
 
 // --- Handler methods ---
 
-// HandleLogin handles POST /auth/login.
-func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	// The session records the device headers, else the User-Agent as its
-	// name, and the client IP.
-	view, err := h.Login(auth.WithClientDevice(r.Context(), r.Header), LoginInput{
-		Provider:   req.Provider,
-		Username:   req.Username,
-		Password:   req.Password,
-		DeviceName: r.UserAgent(),
-		IP:         clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, loginResponseOf(view))
-}
-
 // LoginInput is a password login as the transport received it.
 type LoginInput struct {
 	Provider   string
@@ -217,11 +189,6 @@ type LoginInput struct {
 	Password   string
 	DeviceName string
 	IP         string
-}
-
-// loginResponseOf renders the shared credential view in the v1 shape.
-func loginResponseOf(v TokenPairView) loginResponse {
-	return loginResponse(v)
 }
 
 // Login authenticates a username and password and opens a login session. v1
@@ -360,161 +327,6 @@ func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims)
 	return nil
 }
 
-func (h *AuthHandler) HandleProviders(w http.ResponseWriter, r *http.Request) {
-	providers := h.ListProviders()
-	response := make([]authProviderResponse, 0, len(providers))
-	for _, provider := range providers {
-		response = append(response, authProviderResponse{
-			ID:             provider.ID,
-			DisplayName:    provider.DisplayName,
-			Mode:           provider.Mode,
-			Default:        provider.Default,
-			IconURL:        provider.IconURL,
-			InstallationID: provider.InstallationID,
-		})
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// HandleSetupStatus handles GET /auth/setup.
-func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) {
-	needsSetup, err := h.service.NeedsSetup(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, setupStatusResponse{
-		NeedsSetup: needsSetup,
-	})
-}
-
-// HandleSetup handles POST /auth/setup.
-func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
-	// A browser cannot send JSON cross-origin without a CORS preflight.
-	// Do not decode safelisted form or text bodies as setup credentials.
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != setupMediaTypeJSON {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Initial setup requires application/json")
-		return
-	}
-
-	var req setupRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	view, err := h.SetupInitialUser(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
-		Username:             req.Username,
-		Email:                req.Email,
-		Password:             req.Password,
-		CreateDefaultProfile: req.CreateDefaultProfile,
-		DefaultProfileName:   req.DefaultProfileName,
-		DeviceName:           r.UserAgent(),
-		IP:                   clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, loginResponseOf(view))
-}
-
-// HandleLogout handles POST /auth/logout. Requires authentication.
-func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	if err := h.Logout(r.Context(), claims); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleEndImpersonation handles POST /auth/impersonation/end. Requires authentication.
-func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-	if err := h.EndImpersonation(r.Context(), claims); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRefresh handles POST /auth/refresh.
-func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	pair, err := h.Refresh(r.Context(), req.RefreshToken)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, refreshResponse{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		ExpiresIn:    pair.ExpiresIn,
-	})
-}
-
-func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil || claims.SessionID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     auth.PluginAccessCookieName,
-		Value:    token,
-		Path:     "/api/v1",
-		MaxAge:   int(ttl.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
-	})
-	writeJSON(w, http.StatusOK, pluginLaunchResponse{ExpiresIn: int(ttl.Seconds())})
-}
-
-// HandleMe handles GET /auth/me. Requires authentication.
-func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	resp, err := h.CurrentUser(r.Context(), claims)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // NeedsSetup reports whether the first administrator still has to be created.
 // v1 GET /auth/setup and v2 getSetupStatus both answer from it.
 func (h *AuthHandler) NeedsSetup(ctx context.Context) (bool, error) {
@@ -547,88 +359,6 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 // during a temporary database failure.
 func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
 	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
-}
-
-// HandleListSessions handles GET /auth/sessions. Requires authentication.
-func (h *AuthHandler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	sessions, err := h.ListSessions(r.Context(), claims.UserID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := sessionsListResponse{
-		Sessions: make([]sessionResponse, 0, len(sessions)),
-	}
-	for _, s := range sessions {
-		resp.Sessions = append(resp.Sessions, sessionResponse{
-			ID:         s.ID,
-			DeviceName: s.DeviceName,
-			IPAddress:  s.IPAddress,
-			CreatedAt:  s.CreatedAt,
-			ExpiresAt:  s.ExpiresAt,
-			RevokedAt:  s.RevokedAt,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteSession handles DELETE /auth/sessions/{id}. Requires authentication.
-func (h *AuthHandler) HandleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	if err := h.RevokeSession(r.Context(), chi.URLParam(r, "id"), claims.UserID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleSignupStatus handles GET /auth/signup.
-func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request) {
-	enabled, err := h.SignupEnabled(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, signupStatusResponse{Enabled: enabled})
-}
-
-// HandleSignup handles POST /auth/signup.
-func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
-	var req signupRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	view, err := h.Signup(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
-		Username:             req.Username,
-		Email:                req.Email,
-		Password:             req.Password,
-		InviteCode:           req.InviteCode,
-		CreateDefaultProfile: req.CreateDefaultProfile,
-		DefaultProfileName:   req.DefaultProfileName,
-		DeviceName:           r.UserAgent(),
-		IP:                   clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, loginResponseOf(view))
 }
 
 // --- Helper functions ---
@@ -705,21 +435,6 @@ func (h *AuthHandler) loadImpersonator(ctx context.Context, claims *auth.Claims)
 		return nil, nil
 	}
 	return h.service.GetCurrentUser(ctx, &auth.Claims{UserID: *claims.ImpersonatorUserID})
-}
-
-// extractClaims extracts JWT claims from the Authorization header.
-func (h *AuthHandler) extractClaims(r *http.Request) (*auth.Claims, error) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, auth.ErrInvalidToken
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-		return nil, auth.ErrInvalidToken
-	}
-
-	return h.jwt.ValidateToken(parts[1])
 }
 
 // writeJSON marshals the given value as JSON and writes it to the response.

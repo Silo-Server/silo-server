@@ -32,13 +32,6 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
 	},
 	auth.ScopeAdminUsers: {
-		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/users$`)},
-		{http.MethodPost, regexp.MustCompile(`^/api/v1/admin/users$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+$`)},
-		{http.MethodPut, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+$`)},
-		{http.MethodDelete, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/users/[0-9]+/profiles$`)},
-		// V2 preserves the same scoped account administration surface.
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/policy-defaults$`)},
@@ -51,8 +44,6 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 	auth.ScopeAdminAccessGroupsRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/access-groups$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/access-groups/[0-9]+$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/access-groups$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v1/admin/access-groups/[0-9]+$`)},
 	},
 }
 

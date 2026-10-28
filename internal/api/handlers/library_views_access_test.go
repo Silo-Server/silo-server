@@ -2,43 +2,54 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// TestLibraryViewsRefuseLibraryOutsideViewerScope: the v1 library section
-// handlers share their seams with v2, and every seam refuses a library the
-// viewer's allowlist excludes with the same 404 the collection handlers
-// answer. The handlers are built on nil repositories, so a skipped check
-// would panic rather than pass.
+// Every library view seam refuses a library the viewer's allowlist excludes
+// with not_found, so a restricted profile cannot probe which libraries exist.
+// The handlers are built on nil repositories, so a skipped check panics
+// rather than passes.
 func TestLibraryViewsRefuseLibraryOutsideViewerScope(t *testing.T) {
 	sectionsHandler := NewSectionHandler(nil, nil)
 	collections := NewLibraryCollectionHandler(nil, nil, nil, nil)
-	router := chi.NewRouter()
-	router.Get("/library/{id}/layout", sectionsHandler.HandleLibraryLayout)
-	router.Get("/library/{id}/sections", sectionsHandler.HandleLibrarySections)
-	router.Get("/library/{id}/sections/{sectionId}/items", sectionsHandler.HandleLibrarySectionItems)
-	router.Get("/library/{id}/collections/{collection_id}/items", collections.HandleGetLibraryCollectionItems)
-
 	scope := access.Scope{UserID: 1, ProfileID: "p-kid", ProfileVerified: true, AllowedLibraryIDs: []int{2}, LibrariesRestricted: true}
-	for _, path := range []string{
-		"/library/1/layout",
-		"/library/1/sections",
-		"/library/1/sections/default-recently-added/items",
-		"/library/1/collections/c1/items",
+	ctx := access.SetScope(context.Background(), scope)
+	viewer := SectionViewer{Access: catalog.AccessFilter{UserID: 1, ProfileID: "p-kid"}}
+
+	for name, call := range map[string]func() error{
+		"layout": func() error { _, err := sectionsHandler.LibraryLayout(ctx, 1); return err },
+		"sections": func() error {
+			_, err := sectionsHandler.LibrarySections(ctx, 1, viewer)
+			return err
+		},
+		"section items": func() error {
+			_, err := sectionsHandler.LibrarySectionItems(ctx, 1, "default-recently-added", viewer)
+			return err
+		},
+		"collections tab": func() error {
+			_, err := collections.LibraryCollectionsTab(ctx, 1, 1, "p-kid")
+			return err
+		},
+		"user collections": func() error {
+			_, err := collections.LibraryUserCollections(ctx, 1, 1, "p-kid")
+			return err
+		},
+		"collection items": func() error {
+			_, err := collections.LibraryCollectionItemsPage(ctx, 1, "c1", viewer.Access, userstore.CollectionItemsPageOptions{}, nil)
+			return err
+		},
 	} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req = req.WithContext(access.SetScope(context.Background(), scope))
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"not_found"`) {
-			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
-		}
+		t.Run(name, func(t *testing.T) {
+			var apiErr *APIError
+			if err := call(); !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound || apiErr.Code != "not_found" {
+				t.Fatalf("error = %#v, want 404 not_found", err)
+			}
+		})
 	}
 }

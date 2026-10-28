@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -31,21 +30,4 @@ type previewRequest struct {
 type previewResponse struct {
 	Items      []*models.MediaItem `json:"items"`
 	TotalCount int                 `json:"total_count"`
-}
-
-// HandlePreview is POST /api/admin/sections/preview. Returns a sample of items without persisting.
-func (h *SectionHandler) HandlePreview(w http.ResponseWriter, r *http.Request) {
-	var req previewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_json", err.Error())
-		return
-	}
-	req.V1Rules = true
-
-	resp, err := h.previewAdminSection(r.Context(), req, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
 }

@@ -13,7 +13,7 @@ side in `internal/api/handlers/watchlist_titles.go`, and the v2 operations in
 `internal/apiv2/watchlist_titles.go`.
 
 Scope: movies and series only, native `/api/v2` only. jellycompat has nowhere
-to show a title outside the library, and `/api/v1` is frozen. Catalog queries,
+to show a title outside the library. Catalog queries,
 smart filters, the calendar, recommendations, Watch Together and the home
 Watchlist row read catalog items only and never see these entries.
 
@@ -95,8 +95,8 @@ deletion through the `users` foreign key. Both can leave titles with no
 entries. After every profile delete, the profile handler calls
 `Titles.PurgeProfile`, which removes that profile's entries under the lock and
 then sweeps up to 1000 orphaned titles (`FOR UPDATE SKIP LOCKED`, checked again
-after locking). After every account delete (v1 `DELETE /admin/users/{id}` and
-the v2 admin account delete), the admin handler runs the same sweep through
+after locking). After every account delete (the v2 admin account delete), the
+admin handler runs the same sweep through
 `Titles.SweepOrphanTitles`. A sweep failure is logged and the next delete
 continues it.
 
@@ -174,14 +174,13 @@ A failure is logged and the read continues; the next read retries.
 | Read | Call |
 |---|---|
 | `GET /api/v2/watchlist/titles` | `PromoteProfile` on the first page only, then the list |
-| `GET /api/v2/watchlist` and v1 `GET /watchlist` (`PersonalDataHandler.ListWatchlistPage` / `ListWatchlist`) | `PromoteProfile` on the first page only (no cursor, offset 0) |
+| `GET /api/v2/watchlist` (`PersonalDataHandler.ListWatchlistPage`) | `PromoteProfile` on the first page only (no cursor, offset 0) |
 | Catalog query with `source: "watchlist"` (`CatalogResolver.resolvePersonalSource`) | `PromoteProfile` |
 | Watchlist section in `internal/sections/fetcher.go` (home rows and the recommendations fetcher) | `PromoteProfile` |
 | Item detail `user_state.in_watchlist` (`CatalogResourceHandler.enrichViewerState`, movies and series) and `GET /api/v2/watchlist/{item_id}` | `PromoteItem` |
 
 Other catalog reads (item lists through `ItemsHandler`, people, jellycompat) do
-not promote. Calling promotion from v1 changes no v1 contract: the arrived item
-simply appears in the list.
+not promote.
 
 ## ID repair without a scheduled task
 

@@ -17,14 +17,14 @@ authentication replay because the provider may already have processed the search
 Both operations require the acting administrator. The POST test operation honors
 the demo restriction; the GET read does not.
 The web settings and setup wizard use these typed inspection operations. Saving
-provider settings remains on the bridge until guarded configuration updates and
-live application across nodes are implemented. No native provider-administration
+provider settings uses the [guarded provider configuration
+transport](#guarded-provider-configuration-transport); live application across
+nodes is not implemented. No native provider-administration
 consumer or Jellyfin counterpart is changed by these inspection operations.
 
 ## Profile header on media-file operations
 
-`X-Profile-Id` is optional on the subtitle operations, as on the bridge API,
-with one narrowing. The operations that act on one media file or stored
+`X-Profile-Id` is optional on the subtitle operations, with one narrowing. The operations that act on one media file or stored
 subtitle (stored-track listing, search, download, upload, AI job creation,
 reads and cancellation, sync and timing, and the stored-subtitle metadata read
 and delete) refuse a request without the header when any profile on the account
@@ -36,8 +36,7 @@ account quota and language detection keep account scope.
 ## Subtitle AI state
 
 GET `/api/v2/subtitles/ai/jobs?media_file_id=<string ID>` returns `jobs[]` for up to
-50 recent jobs on an accessible media file. It retains the bridge's bounded
-recent-activity view. GET `/api/v2/subtitles/ai/jobs/{job_id}` returns `job` after
+50 recent jobs on an accessible media file, a bounded recent-activity view. GET `/api/v2/subtitles/ai/jobs/{job_id}` returns `job` after
 checking access to that job's media file. Job, media-file and result-subtitle IDs
 are strings; `result_subtitle_id` is null until a result exists. Track indices
 remain numbers. Creation and update times are UTC instants with millisecond
@@ -50,13 +49,13 @@ grant an exemption. The shared legacy policy also exempts an admin acting withou
 a profile, or when no profile store is configured. The web translation modal reads
 this typed quota operation through its captured player configuration.
 
-These operations read persisted state and do not enqueue or cancel jobs. Job
-creation and cancellation remain separate migration work. Native consumers must
+These operations read persisted state and do not enqueue or cancel jobs; see
+`createSubtitleAIJob` and `cancelSubtitleAIJob`. Native consumers must
 retain string identifiers and the captured account/profile when following jobs.
 
 The v2 subtitle capability probes are always registered. They require an
 authenticated account. A supplied profile must belong to that account and pass
-viewer-access checks; a profile header is optional, as on the bridge API.
+viewer-access checks; a profile header is optional.
 
 | Operation | Method and path | Response |
 | --- | --- | --- |
@@ -70,8 +69,7 @@ service is absent, both AI flags are false. These reads do not search providers,
 start jobs, or contact an external engine.
 
 The web subtitle menu uses the typed v2 AI probe with the player's credentials.
-Apple and Android adoption is coordinated separately. Generation and delivery retain their existing routes until their own
-migration scopes land. Jellyfin compatibility uses its existing subtitle
+Jellyfin compatibility uses its existing subtitle
 protocol and needs no equivalent native capability route.
 
 ## OpenRouter transcription configuration
@@ -131,9 +129,8 @@ Stored subtitle IDs and file IDs are strings. Search result IDs remain opaque
 provider identifiers. Timestamps use UTC with millisecond precision; an unknown
 search upload date is omitted. Arrays are empty rather than null. Stored object
 keys and uploader identities are not exposed. Provider failures preserve partial
-results with a generic warning; their raw error details are not part of v2. The
-`/api/v1` bridge names each failed provider as `<provider>: search failed`, and
-the server log keeps the cause with credentials masked.
+results with a generic warning; their raw error details are not part of the
+response. The server log keeps the cause with credentials masked.
 
 Search accepts compatibility inputs including ISO 639-2 aliases (`ara`), case
 and underscore variants, and legacy English display names (`Arabic`). The
@@ -183,10 +180,7 @@ uncertain response must not trigger automatic retry or authentication replay.
 The immutable object publication rules and best-effort cleanup limits are
 specified in [subtitle storage](architecture/subtitle-storage.md).
 
-The bridge download retains its existing request and response contract. This
-operation does not change Jellyfin subtitle delivery. Both native clients must
-adopt the new download operation separately; AI creation/cancellation and user
-multipart uploads remain separate migration scopes.
+This operation does not change Jellyfin subtitle delivery.
 
 
 ## Multipart upload and language detection
@@ -206,8 +200,7 @@ refused with `400` and the detail "This file doesn't contain readable
 subtitles. Upload an SRT, VTT, ASS, SSA or SUB subtitle file." before anything
 is stored. Legacy single-byte encodings and UTF-16 with a byte-order mark pass
 the check. UTF-16 files are stored converted to UTF-8, and the 5 MiB limit
-also applies to the converted file; other bytes are stored as uploaded. The v1
-bridge shares this check.
+also applies to the converted file; other bytes are stored as uploaded.
 
 Authentication and profile gates precede multipart parsing. The shared service
 checks file and parent-item access before storage and derives uploader identity
@@ -240,8 +233,7 @@ authority but works without subtitle storage. This read-only POST is naturally
 idempotent. Detection uses the supplied language only as fallback, not override.
 
 Web detail and player callers use these forms with captured authority and suppress
-stale completions. Apple and Android multipart adoption is separate required work;
-bridge multipart behavior and Jellyfin subtitle delivery remain unchanged.
+stale completions. Jellyfin subtitle delivery is unchanged.
 
 ## V2 administrator stored-subtitle list
 
@@ -269,8 +261,8 @@ return a redacted `500 internal_error`.
 
 The bundled administrator page uses cursor history and authority-scoped read
 caches, discards stale account/profile/PIN replies and preserves string IDs in
-its existing controls. Metadata edits, deletion and byte downloads retain their
-separate bridge transports. This list does not add a native client screen or a
+its existing controls. Metadata edits, deletion and byte downloads use their own
+operations, described below. This list does not add a native client screen or a
 Jellyfin counterpart. Its ordinary migration row remains proposed until the
 independent review and actual consumer inventory requirements are satisfied.
 
@@ -406,21 +398,21 @@ administration UI or Jellyfin metadata endpoint is introduced here.
 
 `GET /api/v2/admin/subtitles/{id}/download` (`downloadAdminStoredSubtitle`) requires the acting administrator. The ID is a canonical positive decimal string. It returns the complete stored object with the format's MIME type, a sanitized attachment filename, `Content-Length`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. Range and conditional headers are ignored; this operation does not advertise HEAD, partial responses, or validators.
 
-Metadata is captured before the object read; this is not a transaction spanning Postgres and object storage. Concurrent deletion can make the object unavailable. Both server and bundled web buffer the complete subtitle, as the bridge does; this is not a bounded streaming implementation. Missing metadata returns 404, an unavailable service 503, invalid IDs 422, and other storage failures a redacted 500 problem before attachment headers. The bundled web saves a deterministic subtitle-ID filename only while the original list authority remains active after body consumption. It does not replay authentication or fall back to v1. Jellyfin has no administrator attachment counterpart.
+Metadata is captured before the object read; this is not a transaction spanning Postgres and object storage. Concurrent deletion can make the object unavailable. Both server and bundled web buffer the complete subtitle; this is not a bounded streaming implementation. Missing metadata returns 404, an unavailable service 503, invalid IDs 422, and other storage failures a redacted 500 problem before attachment headers. The bundled web saves a deterministic subtitle-ID filename only while the original list authority remains active after body consumption. It does not replay authentication. Jellyfin has no administrator attachment counterpart.
 
 ### Administrator subtitle deletion
 
 `DELETE /api/v2/admin/subtitles/{id}` (`deleteAdminStoredSubtitle`) requires acting-admin/demo authorization and `If-Match`. Obtain the strong validator from the canonical administrator metadata GET and retain it through confirmation. Missing validators return 428; a stale validator or revision race returns 412 with the current validator when available. The actual SQL DELETE enforces the captured revision. Explicit `If-Match: *` requests an existence-only deletion; the bundled confirmation always uses its captured strong tag. Missing metadata returns 404.
 
-A 204 confirms removal of metadata. Object deletion follows and is best effort; failure can leave an orphaned object. A database error, including a lost successful reply, never triggers object cleanup and does not prove the row survived. No durable deletion receipt, automatic retry, physical-erasure guarantee, or reconciliation worker is supplied. After an uncertain response, explicitly inspect the resource before another attempt. The bundled confirmation reads canonical metadata before enabling Delete, consumes one attempt, retains errors, and requires closing and reopening for a fresh observation. It never rereads on confirmation, rebases, refresh-replays, or falls back to v1. Viewer deletion and Jellyfin remain separate.
+A 204 confirms removal of metadata. Object deletion follows and is best effort; failure can leave an orphaned object. A database error, including a lost successful reply, never triggers object cleanup and does not prove the row survived. No durable deletion receipt, automatic retry, physical-erasure guarantee, or reconciliation worker is supplied. After an uncertain response, explicitly inspect the resource before another attempt. The bundled confirmation reads canonical metadata before enabling Delete, consumes one attempt, retains errors, and requires closing and reopening for a fresh observation. It never rereads on confirmation, rebases, or refresh-replays. Viewer deletion and Jellyfin remain separate.
 
 ### Provider-configuration revision foundation
 
-Migration `20260906152948_subtitle_provider_config_revision.sql` must precede any caller of the optional `ProviderConfigRevisionRepository`. A non-cycling bigint sequence and INSERT/UPDATE trigger assign fresh positive revisions to every writer, including bridge upsert/credential clear and direct SQL. Existing provider names, encrypted credential bytes, extra configuration and timestamps remain unchanged during backfill. Revisions are not timestamps; gaps from failed writes are expected. Positive revisions cannot match a deleted/recreated provider while this sequence and trigger remain intact. Sequence exhaustion rejects the write.
+Migration `20260906152948_subtitle_provider_config_revision.sql` must precede any caller of the optional `ProviderConfigRevisionRepository`. A non-cycling bigint sequence and INSERT/UPDATE trigger assign fresh positive revisions to every writer, including unguarded upserts, credential clears and direct SQL. Existing provider names, encrypted credential bytes, extra configuration and timestamps remain unchanged during backfill. Revisions are not timestamps; gaps from failed writes are expected. Positive revisions cannot match a deleted/recreated provider while this sequence and trigger remain intact. Sequence exhaustion rejects the write.
 
 `GetProviderConfigWithRevision` returns a canonical internal configuration plus its revision, or nil when absent. It requires the encryption key and preserves provider-name-bound AAD; never expose its internal secret fields through a new transport projection. `SaveProviderConfigWithRevision` applies the revision condition in the actual SQL write: zero permits create-if-absent, positive updates only that exact version, and nil explicitly updates an existing row without matching a revision and never creates one. Blank API key/username/password preserve their current columns. Explicit `ClearCredentials` overrides other input, disables the provider and clears all three credential columns atomically. Stale writes return a conflict containing only the currently observed revision (zero if absent), never credentials. That conflict hint can itself be superseded by another writer.
 
-A successful save returns the durable new revision. SQL errors do not prove that a write failed to commit and must not cause automatic replay or live reload. These repository methods neither validate credentials with a remote provider nor apply them to any running manager. The existing reload mechanism is local-process-only; cluster convergence is not supplied by this foundation. A later guarded transport must retain the original edit revision, validate preserved credentials against that version, and report save versus local-apply outcomes truthfully. Existing unguarded bridge writers remain compatible and invalidate subsequent v2 edits; they do not acquire v2 precondition enforcement.
+A successful save returns the durable new revision. SQL errors do not prove that a write failed to commit and must not cause automatic replay or live reload. These repository methods neither validate credentials with a remote provider nor apply them to any running manager. The existing reload mechanism is local-process-only; cluster convergence is not supplied by this foundation. A later guarded transport must retain the original edit revision, validate preserved credentials against that version, and report save versus local-apply outcomes truthfully.
 
 The migration adds a column and updates existing rows under PostgreSQL migration locks; the isolated test does not establish populated deployment lock timing. Apply it before enabling the new methods. Rollback preserves configuration but removes the guard and sequence. Trigger bypass, sequence reset, divergent restore, or rollback/reapplication requires invalidating previously issued validators before resuming revision-aware service. No deployment or HTTP/client adoption is implied by the repository foundation.
 
@@ -430,7 +422,7 @@ The migration adds a column and updates existing rows under PostgreSQL migration
 
 `SaveAdminSubtitleProviderConfiguration` validates enabled built-in provider construction against credentials from the captured revision. Blank input is preserved for the actual SQL write rather than replaced with a stale copy of a secret. Explicit clearing bypasses enabled-provider validation and follows the storage clear contract. API keys/passwords are limited to 8192 bytes, usernames to 1024, and provider names to 128. Construction does not test credentials through a remote search. Unknown provider names retain storage-only compatibility and do not create a live built-in provider.
 
-The result separates `SavedRevision` from `LocalApply` and optional `LocalAppliedRevision`. Local statuses are `applied`, `not_configured`, `unsupported`, and `failed`. An applied revision can differ from the saved revision if another writer commits before local application; zero denotes a missing row that removed the local provider. Read/application runs under the same handler-instance mutex as bridge reloads and reads durable state after acquiring that mutex. No request-local stale credentials are applied afterward. This does not synchronize other handler instances, processes or nodes, and a subsequent writer can supersede the observed state.
+The result separates `SavedRevision` from `LocalApply` and optional `LocalAppliedRevision`. Local statuses are `applied`, `not_configured`, `unsupported`, and `failed`. An applied revision can differ from the saved revision if another writer commits before local application; zero denotes a missing row that removed the local provider. Read/application runs under the same handler-instance mutex as other provider reloads and reads durable state after acquiring that mutex. No request-local stale credentials are applied afterward. This does not synchronize other handler instances, processes or nodes, and a subsequent writer can supersede the observed state.
 
 A SQL error, including an uncertain successful commit reply, causes no reload and returns a redacted error. A confirmed save followed by local read/construction failure returns a successful saved result with `LocalApply: failed`; the previous local registration is retained. A caller must distinguish those outcomes and must not automatically replay the save. Request cancellation after save can prevent local application without undoing the database change. This application seam adds no HTTP route, durable replay receipt, remote credential verification or cluster convergence guarantee.
 
@@ -473,7 +465,7 @@ before ordinary ratification.
 
 ### Viewer stored subtitle deletion
 
-`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or the acting admin (see [api-contract.md](architecture/api-contract.md)): an admin account acting through its primary profile, an admin API key, or an admin login session with no profile while no profile on the account has a PIN or an access limit. A primary household profile alone grants no administrator permission, and another profile on an admin's account has none either. `DELETE /api/v1/subtitles/{id}` applies the same rule. Storage keys and downloading-account identities are omitted.
+`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or the acting admin (see [api-contract.md](architecture/api-contract.md)): an admin account acting through its primary profile, an admin API key, or an admin login session with no profile while no profile on the account has a PIN or an access limit. A primary household profile alone grants no administrator permission, and another profile on an admin's account has none either. Storage keys and downloading-account identities are omitted.
 
 DELETE requires `If-Match`: missing validators return 428, stale validators or a revision race return 412, and absent metadata returns 404. Authority is checked again before deletion. Even explicit `If-Match: *` retains the freshly authorized revision in the SQL comparison; a concurrent replacement requires a fresh authorized observation. Reads support `If-Match` and `If-None-Match` with 304 for an unchanged representation.
 
@@ -604,8 +596,7 @@ Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
 and AI translation sources. Those responses are `Cache-Control: private,
 no-cache`, since the bytes change behind the same URL. The player's subtitle
 offset (`player.subtitle_sync_ms`, a profile value a device can override from
-settings manifest revision 19) still applies on top. The frozen v1 bridge exposes
-neither timing nor sync but serves corrected bytes.
+settings manifest revision 19) still applies on top.
 
 Replacing the media file (a new file hash or size at the same path) resets the
 timing of every stored subtitle of that file, removes its sidecar corrections,

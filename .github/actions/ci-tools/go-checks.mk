@@ -15,9 +15,8 @@ lint:
 # Package assertions belong to the tests lane; these check generated artifacts.
 contracts:
 	$(MAKE) -j1 -f Makefile verify-settings-bindings verify-playback-fixtures verify-route-inventory
-	$(MAKE) -j1 -f Makefile verify-migration-ledger verify-apiv2-openapi CONTRACT_GO_TESTS=0
+	$(MAKE) -j1 -f Makefile verify-apiv2-openapi CONTRACT_GO_TESTS=0
 	git fetch --no-tags origin "+refs/heads/$${CONTRACT_BASE_REF}:refs/remotes/origin/$${CONTRACT_BASE_REF}"
-	$(MAKE) -j1 -f Makefile verify-v1-route-freeze BASE_REF="origin/$${CONTRACT_BASE_REF}"
 	$(MAKE) -j1 -f Makefile verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/$${CONTRACT_BASE_REF}"
 
 # Go's test cache cannot see files a test's child process reads, so these
@@ -26,7 +25,7 @@ contracts:
 UNCACHED := cmd/silo internal/jellycompat internal/pluginhost internal/plugins scripts/ci/sizeratchet scripts/ci/migrationcheck
 # subprocess-manifest: scripts/ci/subprocess-tests.json
 # deferred: no recorded occurrence; retain UNCACHED and the subprocess guard.
-IMMUTABLE := internal/contractledger internal/contractspec internal/debugserver
+IMMUTABLE := internal/contractspec internal/debugserver
 test-dependencies:
 	@variants="$$(go list -deps -test -f '{{.ImportPath}}|{{.ForTest}}' ./internal/auth/ ./internal/api/handlers/)" || exit $$?; \
 	[ -n "$$variants" ] || { echo "::error::test dependency metadata is empty"; exit 1; }; \

@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -154,80 +151,6 @@ func TestAdminAccountServiceGuardsBreakGlass(t *testing.T) {
 	}
 }
 
-func TestCreateAdminNeedsOwner(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		actor  int
-		status int
-	}{
-		{"admin creates admin", 7, http.StatusForbidden},
-		{"owner creates admin", scopedKeyTestOwnerID, http.StatusCreated},
-	} {
-		h, repo := newScopedKeyAdminHandler(models.RoleUser)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(`{"username":"new","email":"new@example.test","password":"long-enough","role":"admin"}`))
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: tc.actor, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		h.HandleCreateUser(rec, req)
-		if rec.Code != tc.status {
-			t.Errorf("%s: status = %d, want %d (body %s)", tc.name, rec.Code, tc.status, rec.Body.String())
-		}
-		if tc.status == http.StatusForbidden && (decodeErrorCode(t, rec) != codeOwnerProtected || repo.created != nil) {
-			t.Errorf("%s: refusal %s, created %v", tc.name, rec.Body.String(), repo.created != nil)
-		}
-	}
-}
-
-func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
-	// An admin that inherits the profile limit; the v1 body reports it as 5.
-	inheritingAdmin := adminAccount()
-	inheritingAdmin.MaxProfiles = nil
-	for _, tc := range []struct {
-		name, method, body string
-		target             models.User
-		actor, status      int
-	}{
-		{"admin edits admin", http.MethodPut, `{"email":"new@example.test"}`, adminAccount(), 7, http.StatusForbidden},
-		{"admin demotes admin", http.MethodPut, `{"role":"user"}`, adminAccount(), 7, http.StatusForbidden},
-		{"admin deletes admin", http.MethodDelete, "", adminAccount(), 7, http.StatusForbidden},
-		{"admin promotes user", http.MethodPut, `{"role":"admin"}`, userAccount(), 7, http.StatusForbidden},
-		{"admin edits user", http.MethodPut, `{"email":"new@example.test"}`, userAccount(), 7, http.StatusOK},
-		{"admin edits self", http.MethodPut, `{"email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
-		{"admin demotes self", http.MethodPut, `{"role":"user"}`, adminAccount(), testAdminID, http.StatusForbidden},
-		{"admin disables self", http.MethodPut, `{"enabled":false}`, adminAccount(), testAdminID, http.StatusForbidden},
-		{"admin deletes self", http.MethodDelete, "", adminAccount(), testAdminID, http.StatusForbidden},
-		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
-		{"admin changes own policy", http.MethodPut, `{"download_transcode_allowed":false}`, adminAccount(), testAdminID, http.StatusForbidden},
-		{"admin saves self with its policy unchanged", http.MethodPut, `{"email":"new@example.test","max_streams":null}`, adminAccount(), testAdminID, http.StatusOK},
-		{"admin saves self re-sending the profile limit it read", http.MethodPut, `{"email":"new@example.test","max_profiles":5}`, inheritingAdmin, testAdminID, http.StatusOK},
-		{"admin changes own inherited profile limit", http.MethodPut, `{"max_profiles":3}`, inheritingAdmin, testAdminID, http.StatusForbidden},
-		{"owner limits admin", http.MethodPut, `{"max_streams":2}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
-		{"provider-only admin sets own password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), testAdminID, http.StatusForbidden},
-		{"owner sets a provider-only admin's password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), scopedKeyTestOwnerID, http.StatusOK},
-		{"owner demotes admin", http.MethodPut, `{"role":"user"}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
-		{"owner deletes admin", http.MethodDelete, "", adminAccount(), scopedKeyTestOwnerID, http.StatusNoContent},
-	} {
-		repo := &scopedKeyUserRepo{user: new(tc.target)}
-		h := &AdminHandler{userRepo: repo}
-		req := httptest.NewRequest(tc.method, "/api/v1/admin/users/9", strings.NewReader(tc.body))
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "9")
-		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: tc.actor, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		if tc.method == http.MethodDelete {
-			h.HandleDeleteUser(rec, req)
-		} else {
-			h.HandleUpdateUser(rec, req)
-		}
-		if rec.Code != tc.status {
-			t.Errorf("%s: status = %d, want %d (body %s)", tc.name, rec.Code, tc.status, rec.Body.String())
-			continue
-		}
-		if tc.status == http.StatusForbidden && (decodeErrorCode(t, rec) != codeOwnerProtected || repo.updated != nil || repo.deleted) {
-			t.Errorf("%s: refusal %s, updated %v, deleted %v", tc.name, rec.Body.String(), repo.updated != nil, repo.deleted)
-		}
-	}
-}
-
 func TestTransferAdminOwnership(t *testing.T) {
 	session := func(userID int) context.Context { return claimsCtx(userID) }
 	apiKey := apimw.SetClaims(context.Background(), &auth.Claims{UserID: testOwnerID, Role: "admin", TokenType: auth.TokenTypeAPIKey})
@@ -275,49 +198,6 @@ func (r *transferRepo) TransferOwnership(_ context.Context, fromID, toID int) er
 	}
 	r.from, r.to = fromID, toID
 	return nil
-}
-
-func TestV1AdminUserHandlersProtectOwner(t *testing.T) {
-	request := func(h *AdminHandler, method string, actor int, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, "/api/v1/admin/users/42", strings.NewReader(body))
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "42")
-		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: actor, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		if method == http.MethodDelete {
-			h.HandleDeleteUser(rec, req)
-		} else {
-			h.HandleUpdateUser(rec, req)
-		}
-		return rec
-	}
-	owner := ownerAccount()
-	for _, tc := range []struct {
-		name, method, body string
-		actor, status      int
-	}{
-		{"admin edits owner", http.MethodPut, `{"email":"new@example.test"}`, 7, http.StatusForbidden},
-		{"admin disables owner", http.MethodPut, `{"enabled":false}`, 7, http.StatusForbidden},
-		{"admin deletes owner", http.MethodDelete, "", 7, http.StatusForbidden},
-		{"owner disables self", http.MethodPut, `{"enabled":false}`, testOwnerID, http.StatusForbidden},
-		{"owner deletes self", http.MethodDelete, "", testOwnerID, http.StatusForbidden},
-		{"owner edits self", http.MethodPut, `{"email":"new@example.test"}`, testOwnerID, http.StatusOK},
-	} {
-		repo := &scopedKeyUserRepo{user: new(owner)}
-		rec := request(&AdminHandler{userRepo: repo}, tc.method, tc.actor, tc.body)
-		if rec.Code != tc.status {
-			t.Errorf("%s: status = %d, want %d (body %s)", tc.name, rec.Code, tc.status, rec.Body.String())
-			continue
-		}
-		if tc.status == http.StatusForbidden {
-			if code := decodeErrorCode(t, rec); code != codeOwnerProtected {
-				t.Errorf("%s: error = %q, want owner_protected", tc.name, code)
-			}
-			if repo.updated != nil {
-				t.Errorf("%s: the refused update reached the repository", tc.name)
-			}
-		}
-	}
 }
 
 func TestPasswordResetRefusesOwnerForOtherAdmins(t *testing.T) {
@@ -400,129 +280,34 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 	if err := h.DeleteAdminAPIKey(claimsCtx(testOwnerID), 5, auth.APIKeyPrecondition{}); err != nil || !store.changed {
 		t.Fatalf("owner revoking its own key: %v", err)
 	}
-
-	// The v1 transport refuses the same operations.
-	for _, tc := range []struct {
-		name, method, path, body string
-		serve                    func(*APIKeyHandler, http.ResponseWriter, *http.Request)
-	}{
-		{"v1 create", http.MethodPost, "/api/v1/admin/api-keys", `{"label":"takeover","user_id":42}`, (*APIKeyHandler).HandleAdminCreateAPIKey},
-		{"v1 delete", http.MethodDelete, "/api/v1/admin/api-keys/5", "", (*APIKeyHandler).HandleAdminDeleteAPIKey},
-		{"v1 tier", http.MethodPut, "/api/v1/admin/api-keys/5/tier", `{"tier":"elevated"}`, (*APIKeyHandler).HandleAdminUpdateTier},
-	} {
-		h, store := newHandler()
-		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "5")
-		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		tc.serve(h, rec, req)
-		if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || store.created || store.changed {
-			t.Errorf("%s: status = %d body %s, store touched %v", tc.name, rec.Code, rec.Body.String(), store.created || store.changed)
-		}
-	}
 }
 
-// A v1 client that sends back the profile limit it read leaves an inheriting
-// account inheriting; a different limit becomes its override.
-func TestV1UpdateUserKeepsInheritedProfileLimit(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		body    string
-		wantSet bool
-	}{
-		{"re-sent limit", `{"email":"new@example.test","max_profiles":5}`, false},
-		{"new limit", `{"max_profiles":3}`, true},
-	} {
-		target := userAccount()
-		target.MaxProfiles = nil
-		repo := &scopedKeyUserRepo{user: &target}
-		h := &AdminHandler{userRepo: repo}
-		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/9", strings.NewReader(tc.body))
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "9")
-		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: scopedKeyTestOwnerID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		h.HandleUpdateUser(rec, req)
-		if rec.Code != http.StatusOK || repo.updated == nil {
-			t.Fatalf("%s: status = %d (body %s), updated %v", tc.name, rec.Code, rec.Body.String(), repo.updated != nil)
-		}
-		if repo.updated.MaxProfiles.Set != tc.wantSet {
-			t.Errorf("%s: max_profiles set = %v, want %v", tc.name, repo.updated.MaxProfiles.Set, tc.wantSet)
-		}
-	}
-}
-
-func v1UpdateUser(t *testing.T, target models.User, body string) *scopedKeyUserRepo {
-	t.Helper()
-	repo := &scopedKeyUserRepo{user: &target}
-	h := &AdminHandler{userRepo: repo}
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/9", strings.NewReader(body))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "9")
-	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: scopedKeyTestOwnerID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateUser(rec, req)
-	if rec.Code != http.StatusOK || repo.updated == nil {
-		t.Fatalf("status = %d (body %s), updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
-	}
-	return repo
-}
-
-// The limit an account reports belongs to the role and group it had when the
-// client read it. Sending that limit while the same request moves the
-// account is an explicit override for the new context, not an echo.
-func TestV1UpdateUserProfileLimitFollowsRoleChange(t *testing.T) {
-	target := userAccount()
-	target.Role = models.RoleAdmin
-	target.MaxProfiles = nil
-	repo := v1UpdateUser(t, target, `{"role":"user","max_profiles":5}`)
-	if !repo.updated.MaxProfiles.Set || repo.updated.MaxProfiles.Value == nil || *repo.updated.MaxProfiles.Value != 5 {
-		t.Errorf("max_profiles = %+v, want an override of 5", repo.updated.MaxProfiles)
-	}
-}
-
-type noRowsRow struct{}
-
-func (noRowsRow) Scan(...any) error { return pgx.ErrNoRows }
-
-// profileLimitTx answers the in-transaction group lookup with no group, so a
-// test can prove the limit resolves through the mutation transaction rather
-// than a second pool connection.
-type profileLimitTx struct {
-	pgx.Tx
-	queried bool
-}
-
-func (tx *profileLimitTx) QueryRow(context.Context, string, ...any) pgx.Row {
-	tx.queried = true
-	return noRowsRow{}
-}
-
-func TestKeepInheritedProfileLimitReadsGroupInTransaction(t *testing.T) {
-	target := userAccount()
-	target.MaxProfiles = nil
-	input := models.UpdateUserInput{MaxProfiles: models.Optional[int]{Set: true, Value: new(5)}}
-	tx := &profileLimitTx{}
-	h := &AdminHandler{}
-	if err := h.keepInheritedProfileLimit(t.Context(), tx, &target, &input); err != nil {
+// Only the Owner grants the admin role, including on account creation. The
+// refusal comes before anything is written; the Owner's request passes the
+// rule and reaches storage, which this test's pool cannot reach.
+func TestCreateAdminNeedsOwner(t *testing.T) {
+	unreachable, err := pgxpool.New(t.Context(), "postgres://silo@127.0.0.1:1/silo?sslmode=disable&connect_timeout=2")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !tx.queried {
-		t.Error("group was not resolved through the transaction")
-	}
-	if input.MaxProfiles.Set {
-		t.Errorf("max_profiles = %+v, want the re-sent limit dropped", input.MaxProfiles)
-	}
-}
-
-// A v1 client clears an override back to inherit with an explicit null, like
-// every other policy field in the same body.
-func TestV1UpdateUserClearsProfileLimit(t *testing.T) {
-	target := userAccount()
-	target.MaxProfiles = new(3)
-	repo := v1UpdateUser(t, target, `{"max_profiles":null}`)
-	if !repo.updated.MaxProfiles.Set || repo.updated.MaxProfiles.Value != nil {
-		t.Errorf("max_profiles = %+v, want set to inherit (null)", repo.updated.MaxProfiles)
+	t.Cleanup(unreachable.Close)
+	for _, tc := range []struct {
+		name    string
+		actor   int
+		refused bool
+	}{
+		{"admin creates admin", 7, true},
+		{"owner creates admin", scopedKeyTestOwnerID, false},
+	} {
+		h, repo := newScopedKeyAdminHandler(models.RoleUser)
+		h.pool = unreachable
+		_, err := h.CreateAdminAccount(claimsCtx(tc.actor), auth.CreateAccountInput{User: models.CreateUserInput{
+			Username: "new", Email: "new@example.test", Password: "long-enough", Role: models.RoleAdmin,
+		}})
+		var apiErr *APIError
+		protected := errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && apiErr.Code == codeOwnerProtected
+		if protected != tc.refused || repo.created != nil {
+			t.Errorf("%s: err = %v, created %v; want owner_protected %v", tc.name, err, repo.created != nil, tc.refused)
+		}
 	}
 }

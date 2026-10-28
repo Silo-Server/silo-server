@@ -198,8 +198,7 @@ settings leave on.
 the same capabilities document reports, reruns local detection of an episode's
 intro, credits, or both, or of a movie's credits; see
 [admin-catalog-api.md](admin-catalog-api.md#episode-and-movie-marker-analysis).
-The v1 refresh endpoint retains its local-only behavior, and it, the v1
-re-detect endpoint, and v2 `redetect-intro` analyze episode intros only,
+`POST /api/v2/admin/items/{id}/redetect-intro` analyzes episode intros only,
 whatever the detection settings say.
 
 ## Operations
@@ -277,7 +276,6 @@ and a provider can accept a contribution before its response or local receipt is
 lost. A failed response can therefore follow a successful save. Read the current
 markers before deciding whether another user-directed update is needed.
 
-The legacy v1 adapter shares the manual writer path and retains its wire format.
 Jellyfin does not expose these manual editing routes. Its MediaSegments response
 returns each occurrence separately, with credits represented as `Outro`.
 The generated OpenAPI document is the authoritative v2 schema and error contract.
@@ -296,7 +294,7 @@ manual, provider and legacy ranges, including repeated kinds. Extraction uses
 the existing hardware, execution-mode, HDR, width and retry policies. A failed
 preview never prevents marker navigation or playback. Internal image metadata
 is bound to the file identity and exact occurrence; concurrent edits cannot
-publish a stale frame. The frozen v1 responses do not gain preview fields.
+publish a stale frame.
 
 On-demand provider ranges remain ephemeral. When the library enables previews,
 lookup queues thumbnails from the effective ranges and stores only opaque

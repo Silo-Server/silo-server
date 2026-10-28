@@ -82,7 +82,7 @@ that list rather than trusting the queued credential. The Plex client removes
 `X-Plex-Token` from any redirect that leaves the first request's host or
 downgrades from HTTPS to HTTP, which `net/http` does not do for custom headers.
 
-Run monitors, v1 run responses, and realtime history-import events carry only
+Run monitors, run responses, and realtime history-import events carry only
 the fixed summaries from `historyimport.PublicRun`; stored diagnostics can hold
 an upstream response body and stay on the server.
 
@@ -102,9 +102,8 @@ Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
 images) comes from Public addresses only (`imagecache`). Provider artwork URLs
 are untrusted, so these downloads use the netguard transport too, checked on
 every dial and redirect; the cache keeps no address list of its own. An image
-an admin applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
-counterpart) is trusted with the local network, like the import sources an
-admin configures. That covers a URL the admin typed and one picked from the
+an admin applies through `POST /api/v2/admin/items/{id}/images/apply` is
+trusted with the local network, like the import sources an admin configures. That covers a URL the admin typed and one picked from the
 provider list, since the server cannot tell them apart. The handler marks the
 request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
@@ -152,9 +151,8 @@ Collection artwork downloads use the netguard transport with no fallback
 client (`newCollectionImageClient` in `internal/api/handlers`):
 
 - **Personal collection posters.** Any profile, including a child's, can set
-  one from a URL: `poster_source_url` on the v1 create and update and the v2
-  `createCollection`, and `source_url` on v2 `uploadCollectionPoster`. These
-  are Public only. Every refused address fails with the same error
+  one from a URL: `poster_source_url` on `createCollection`, and `source_url`
+  on `uploadCollectionPoster`. These are Public only. Every refused address fails with the same error
   (`errCollectionImageSourceNotAllowed`), whether something listens there or
   not, so the answer cannot be used to map the server's network.
 - **Library collection artwork.** The poster and backdrop source URLs on the

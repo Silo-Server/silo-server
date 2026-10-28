@@ -2,12 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +11,6 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 type CatalogHandler struct {
@@ -85,39 +80,6 @@ type catalogFiltersResponse struct {
 	Resolutions       *[]string `json:"resolutions,omitempty"`
 	AudioLanguages    *[]string `json:"audio_languages,omitempty"`
 	SubtitleLanguages *[]string `json:"subtitle_languages,omitempty"`
-}
-
-func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.resolver == nil || h.itemsH == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-		return
-	}
-
-	req, err := catalog.ParseCatalogRequest(r.URL.Query())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-	groupedByWork := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group")), "work")
-	view, err := h.Browse(r.Context(), viewerFromRequest(r, accessFilter), req, groupedByWork)
-	if err != nil {
-		writeCatalogError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
-// writeCatalogError writes a seam failure; a canceled request has no client
-// left, so nothing is written.
-func writeCatalogError(w http.ResponseWriter, err error) {
-	if errors.Is(err, context.Canceled) {
-		return
-	}
-	writeAPIError(w, err)
 }
 
 func handleCatalogResolveError(w http.ResponseWriter, r *http.Request, err error, groupedByWork bool) {
@@ -454,31 +416,6 @@ func applyWorkSummaryToCatalogItem(item *itemListResponse, summary *catalog.Work
 	}
 }
 
-func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.resolver == nil || h.itemsH == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-		return
-	}
-
-	req, err := catalog.ParseCatalogRequest(r.URL.Query())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-
-	view, err := h.Filters(r.Context(), viewerFromRequest(r, accessFilter), req, parseIncludeTechnical(r.URL.Query().Get("include_technical")))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
 // catalogFacetSearchResponse is the v1 facet typeahead answer.
 // matches[] is always present (empty when no hits); has_more
 // is true when the underlying result set held more entries than the
@@ -488,207 +425,11 @@ type catalogFacetSearchResponse struct {
 	HasMore bool     `json:"has_more"`
 }
 
-// HandleGetCatalogFacetSearch — GET /api/v1/catalog/filters/search
-//
-// Prefix-typeahead for the high-cardinality filter facets (authors /
-// narrators / series, plus genre / studio / network / country /
-// original_language / content_rating for consistency). Query
-// parameters: same as /api/v1/catalog/filters for scope (source,
-// library_id, etc.), plus facet=<name>, q=<prefix>, limit=<N>.
-func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.resolver == nil || h.itemsH == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
+// writeCatalogError writes a seam failure; a canceled request has no client
+// left, so nothing is written.
+func writeCatalogError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
 		return
 	}
-
-	req, err := catalog.ParseCatalogRequest(r.URL.Query())
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	facet := strings.TrimSpace(r.URL.Query().Get("facet"))
-	if facet == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "facet parameter is required")
-		return
-	}
-	prefix := r.URL.Query().Get("q")
-
-	limit := 20
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		n, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || n <= 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
-			return
-		}
-		if n > 100 {
-			n = 100
-		}
-		limit = n
-	}
-
-	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-
-	matches, hasMore, err := h.resolver.SearchFacetV1(r.Context(), req, accessFilter, facet, prefix, limit)
-	if err != nil {
-		writeAPIError(w, facetSearchError(err))
-		return
-	}
-	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{Matches: matches, HasMore: hasMore})
-}
-
-func parseIncludeTechnical(raw string) bool {
-	if strings.TrimSpace(raw) == "" {
-		return true
-	}
-	includeTechnical, err := strconv.ParseBool(raw)
-	if err != nil {
-		return true
-	}
-	return includeTechnical
-}
-
-func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.itemsH == nil || h.itemsH.browseRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-		return
-	}
-
-	var req filterItemsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.Limit <= 0 {
-		req.Limit = 20
-	}
-	if req.Limit > 100 {
-		req.Limit = 100
-	}
-
-	// The filter body is validated before the access filter so an invalid
-	// filter and an unresolvable policy answer in the v1 order. A rule /api/v2
-	// added is refused as v1 refused it before.
-	if err := catalog.ValidateV1Rules(req.FilterConfig); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
-		return
-	}
-	if _, _, err := sections.NewFilterBuilder("mi").Build(req.FilterConfig); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
-		return
-	}
-
-	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-	view, err := h.QueryItems(r.Context(), viewerFromRequest(r, accessFilter), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
-func buildPostCatalogLibraryScope(
-	libraryID int,
-	allowedLibraryIDs []int,
-	disabledLibraryIDs []int,
-	argIdx int,
-) (conditions []string, args []any, nextArgIdx int, earlyEmpty bool) {
-	nextArgIdx = argIdx
-	if allowedLibraryIDs != nil && len(allowedLibraryIDs) == 0 {
-		return nil, nil, nextArgIdx, true
-	}
-
-	positiveConditions := []string{"mil_scope_in.content_id = mi.content_id"}
-	hasPositiveScope := false
-	if libraryID > 0 {
-		positiveConditions = append(positiveConditions, fmt.Sprintf("mil_scope_in.media_folder_id = $%d", nextArgIdx))
-		args = append(args, libraryID)
-		nextArgIdx++
-		hasPositiveScope = true
-	}
-	if allowedLibraryIDs != nil {
-		positiveConditions = append(positiveConditions, fmt.Sprintf("mil_scope_in.media_folder_id = ANY($%d)", nextArgIdx))
-		args = append(args, allowedLibraryIDs)
-		nextArgIdx++
-		hasPositiveScope = true
-	}
-	if hasPositiveScope {
-		conditions = append(conditions, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE %s)",
-			strings.Join(positiveConditions, " AND "),
-		))
-	} else if len(disabledLibraryIDs) > 0 {
-		conditions = append(conditions,
-			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-		)
-	}
-
-	if len(disabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf(
-			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
-			nextArgIdx,
-		))
-		args = append(args, disabledLibraryIDs)
-		nextArgIdx++
-	}
-
-	return conditions, args, nextArgIdx, false
-}
-
-func (h *CatalogHandler) HandleLegacySearch(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.itemsH == nil || h.itemsH.itemRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-		return
-	}
-
-	if values, ok := buildLegacySearchCatalogValues(r.URL.Query()); ok && h.resolver != nil {
-		h.itemsH.writeCatalogBrowseResponse(w, r, values)
-		return
-	}
-
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	if query == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Search query 'q' is required")
-		return
-	}
-
-	limit := catalog.ParseIntParam(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	offset := max(catalog.ParseIntParam(r.URL.Query().Get("offset")), 0)
-
-	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-
-	items, total, err := h.itemsH.itemRepo.Search(r.Context(), query, parseSearchTypes(r.URL.Query()["type"]), limit, offset, accessFilter)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "search failed", "component", "api", "query", query, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Search failed")
-		return
-	}
-
-	userStates := h.itemsH.listItemUserStates(r.Context(), viewerFromRequest(r, accessFilter), items)
-	resp := make([]itemListResponse, 0, len(items))
-	for _, item := range items {
-		resp = append(resp, h.itemsH.toItemListResponseWithOverlay(r.Context(), viewerFromRequest(r, accessFilter), item, nil, userStates[item.ContentID], accessFilter.Artwork()))
-	}
-
-	writeJSON(w, http.StatusOK, browseResponse{
-		Total:   total,
-		HasMore: offset+len(resp) < total,
-		Items:   resp,
-	})
+	writeAPIError(w, err)
 }

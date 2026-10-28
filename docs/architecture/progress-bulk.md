@@ -40,12 +40,8 @@ The bundled web `useReportMediaProgress` hook uses v2 and turns an item failure
 inside HTTP `200` into a failed mutation. Generated types and contract fixtures
 carry the discriminated result shape.
 
-Apple's `iosApp/iosApp/Downloads/DownloadAPI.swift` (`syncProgressBatch`) and
-`iosApp/iosApp/Networking/SiloAPI.swift` (`syncProgress`) still use v1. Android's
-`shared/src/commonMain/kotlin/org/siloserver/silo/network/api/PersonalDataApi.kt`
-feeds playback and offline outbox progress through v1. Their v2 adoption must
-chunk at 100, avoid duplicate targets within a batch, consume ordered item results,
-and preserve failed items without blindly replaying successful ones. These native
-migrations remain a coordinated follow-up; this change leaves the frozen v1
-request and response unchanged. Jellyfin compatibility does not use this native
+Native clients (Apple's `syncProgressBatch` and `syncProgress`, Android's
+playback and offline outbox progress) must chunk at 100, avoid duplicate targets
+within a batch, consume ordered item results, and preserve failed items without
+blindly replaying successful ones. Jellyfin compatibility does not use this native
 batch envelope and needs no transport change.

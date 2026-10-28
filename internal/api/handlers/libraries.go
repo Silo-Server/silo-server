@@ -5,21 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/adminjob"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -462,147 +457,9 @@ func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *mod
 	return resp
 }
 
-// HandleListUserLibraries preserves the frozen bridge projection and errors.
-func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.Request) {
-	views, err := h.ListUserLibraries(r.Context(), apimw.GetUserID(r.Context()), false)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, views)
-}
-
-// HandleListLibraries handles GET /libraries.
-func (h *LibraryHandler) HandleListLibraries(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListLibraries(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // reorderLibrariesRequest is the JSON body for PUT /libraries/reorder.
 type reorderLibrariesRequest struct {
 	Entries []catalog.FolderReorderEntry `json:"entries"`
-}
-
-// HandleReorderLibraries handles PUT /libraries/reorder.
-func (h *LibraryHandler) HandleReorderLibraries(w http.ResponseWriter, r *http.Request) {
-	var req reorderLibrariesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ReorderLibraries(r.Context(), req.Entries); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleListSkippedRoots handles GET /libraries/skipped-roots.
-func (h *LibraryHandler) HandleListSkippedRoots(w http.ResponseWriter, r *http.Request) {
-	resp, _, err := h.ListSkippedRoots(r.Context(), "", 0, 0)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleCreateLibrary handles POST /libraries.
-func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Request) {
-	var req createLibraryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	resp, err := h.CreateLibrary(r.Context(), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-// HandleUpdateLibrary handles PUT /libraries/{id}.
-func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	var req updateLibraryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	resp, err := h.UpdateLibrary(r.Context(), id, currentAdminUserID(r), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteLibrary handles DELETE /libraries/{id}.
-func (h *LibraryHandler) HandleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	job, err := h.DeleteLibrary(r.Context(), id, currentAdminUserID(r))
-	if err != nil {
-		var conflict *adminjob.ActiveJobConflictError
-		var apiErr *APIError
-		if errors.As(err, &conflict) && errors.As(err, &apiErr) {
-			writeAdminJobConflict(w, apiErr.Message, conflict.Job, NewAdminJobsHandler(nil, nil), r)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
-}
-
-// HandleCheckLibraryMount handles POST /libraries/{id}/check-mount.
-// It verifies that each configured library root exists and can be listed.
-func (h *LibraryHandler) HandleCheckLibraryMount(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	resp, err := h.CheckLibraryMount(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleScan handles POST /scan. It accepts either a library_id, a path, or both
-// and dispatches to full-library, subtree, or single-file scanning.
-func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
-	var req scanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, scanControlBadRequestCode, "Invalid request body")
-		return
-	}
-
-	result, err := h.StartLibraryScan(r.Context(), req.LibraryID, req.Path)
-	if err != nil {
-		failure, ok := errors.AsType[*APIError](err)
-		if !ok {
-			writeError(w, 500, scanControlInternalCode, "Failed to start scan")
-			return
-		}
-		writeError(w, failure.Status, failure.Code, failure.Message)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, result)
 }
 
 // StartLibraryScan resolves the existing scan target and preserves queue/local dispatch.
@@ -644,27 +501,6 @@ func (h *LibraryHandler) StartLibraryScan(ctx context.Context, libraryID *int, p
 		Mode:      target.Mode,
 		LibraryID: target.Folder.ID,
 	}, nil
-}
-
-// HandleScanCancel handles POST /scan/cancel. It cancels all running scans
-// for a given library.
-func (h *LibraryHandler) HandleScanCancel(w http.ResponseWriter, r *http.Request) {
-	var req scanCancelRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, scanControlBadRequestCode, "Invalid request body")
-		return
-	}
-	result, err := h.CancelLibraryScans(r.Context(), req.LibraryID)
-	if err != nil {
-		failure, ok := errors.AsType[*APIError](err)
-		if !ok {
-			writeError(w, 500, scanControlInternalCode, "Failed to cancel scans")
-			return
-		}
-		writeError(w, failure.Status, failure.Code, failure.Message)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 // CancelLibraryScans applies the existing library-wide queue and local cancellation.
@@ -1177,86 +1013,6 @@ type libraryRawMatchBacklogEntryResponse struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-func (h *LibraryHandler) HandleListMetadataMatchQueues(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListMetadataMatchQueues(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if !h.metadataMatchBacklogConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	limit := 10
-	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
-		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 && parsed <= 50 {
-			limit = parsed
-		}
-	}
-	offset := 0
-	if value := strings.TrimSpace(r.URL.Query().Get("offset")); value != "" {
-		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-
-	resp, err := h.GetMetadataMatchQueue(r.Context(), id, limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *LibraryHandler) HandleRetryMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if !h.metadataMatchBacklogConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	resp, err := h.RetryMetadataMatchQueue(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if !h.metadataMatchBacklogConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-	resp, err := h.CancelMetadataMatchQueue(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 func (h *LibraryHandler) metadataMatchBacklogConfigured() bool {
 	return h.folderRepo != nil &&
 		(h.MovieMatchQueueRepo != nil || h.SeriesMatchQueueRepo != nil || h.RawMatchBacklogRepo != nil)
@@ -1330,153 +1086,7 @@ func (h *LibraryHandler) rawMatchBacklogMode() scanner.RawMatchBacklogMode {
 	return scanner.RawMatchBacklogGeneric
 }
 
-// HandleRefreshLibraryMetadata handles POST /libraries/{id}/refresh-metadata.
-// It queues a background admin job to refresh metadata for items in the
-// specified library. Quick mode is the default.
-func (h *LibraryHandler) HandleRefreshLibraryMetadata(w http.ResponseWriter, r *http.Request) {
-	if h.JobRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Library refresh jobs are not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	mode := adminjob.LibraryRefreshModeQuick
-	if r.Body != nil {
-		var req refreshLibraryMetadataRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-			return
-		}
-		if req.Mode != "" {
-			switch adminjob.LibraryRefreshMode(req.Mode) {
-			case adminjob.LibraryRefreshModeQuick, adminjob.LibraryRefreshModeFull:
-				mode = adminjob.LibraryRefreshMode(req.Mode)
-			default:
-				writeError(w, http.StatusBadRequest, "bad_request", "Invalid refresh mode")
-				return
-			}
-		}
-	}
-
-	job, err := h.RefreshLibraryMetadata(r.Context(), id, currentAdminUserID(r), mode)
-	if err != nil {
-		var conflict *adminjob.ActiveJobConflictError
-		var apiErr *APIError
-		if errors.As(err, &conflict) && errors.As(err, &apiErr) {
-			writeAdminJobConflict(w, apiErr.Message, conflict.Job, NewAdminJobsHandler(nil, nil), r)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
-}
-
-// HandleConfirmEmptyRootCleanup handles POST /libraries/{id}/confirm-empty-root-cleanup.
-// It arms the next empty-root scan for destructive cleanup.
-func (h *LibraryHandler) HandleConfirmEmptyRootCleanup(w http.ResponseWriter, r *http.Request) {
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	if err := h.ConfirmEmptyRootCleanup(r.Context(), id); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "ok",
-		"message": "Empty-root cleanup confirmed for next scan",
-	})
-}
-
 // --- Library poster handlers ---
-
-// HandleUploadPoster handles PUT /libraries/{id}/poster.
-// Accepts a multipart form upload with a single "poster" file field.
-func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Request) {
-	if h.ArtworkStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	// Parse multipart form (max 10 MB).
-	if err := r.ParseMultipartForm(maxLibraryPosterBytes); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid multipart form")
-		return
-	}
-
-	file, header, err := r.FormFile("poster")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Missing poster file")
-		return
-	}
-	defer file.Close()
-
-	// Validate content type before reading the bytes, as v1 always has.
-	ct := header.Header.Get("Content-Type")
-	if posterExtension(ct) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
-		return
-	}
-
-	data, err := io.ReadAll(io.LimitReader(file, maxLibraryPosterBytes+1))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read upload")
-		return
-	}
-
-	resp, err := h.UploadLibraryPoster(r.Context(), id, ct, data)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeletePoster handles DELETE /libraries/{id}/poster.
-func (h *LibraryHandler) HandleDeletePoster(w http.ResponseWriter, r *http.Request) {
-	if h.ArtworkStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	if err := h.DeleteLibraryPoster(r.Context(), id); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
 
 // posterExtension returns the file extension for a valid poster content type.
 func posterExtension(contentType string) string {
@@ -1518,83 +1128,6 @@ type chainEntryInput struct {
 	CapabilityID         string `json:"capability_id"`
 	Priority             int    `json:"priority"`
 	Enabled              bool   `json:"enabled"`
-}
-
-// HandleGetLibraryProviders handles GET /libraries/{id}/providers.
-// It returns the provider chain for the given library grouped by content level.
-func (h *LibraryHandler) HandleGetLibraryProviders(w http.ResponseWriter, r *http.Request) {
-	if h.ChainRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Provider chain management is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	levels, err := h.LibraryProviders(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"levels": levels})
-}
-
-// HandleGetLibraryProviderDefaults handles GET /libraries/provider-defaults.
-// It returns the provider chain that would be seeded for a new library of the
-// given type, grouped by content level and in seeded order. The admin UI
-// renders this while creating a library instead of re-deriving the chain from
-// plugin manifests client-side, so the displayed defaults and the chain the
-// server seeds on create can never disagree.
-func (h *LibraryHandler) HandleGetLibraryProviderDefaults(w http.ResponseWriter, r *http.Request) {
-	out, err := h.LibraryProviderDefaults(r.Context(), r.URL.Query().Get("library_type"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"levels": out})
-}
-
-// HandleSetLibraryProviders handles PUT /libraries/{id}/providers.
-// It replaces the entire provider chain for the given library.
-func (h *LibraryHandler) HandleSetLibraryProviders(w http.ResponseWriter, r *http.Request) {
-	if h.ChainRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Provider chain management is not configured")
-		return
-	}
-
-	id, err := parseIDParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	// Verify the library exists before reading the body, as v1 always has.
-	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
-		if errors.Is(err, catalog.ErrFolderNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Library not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "fetching library for provider chain update", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
-		return
-	}
-
-	var req setChainLevelRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.SetLibraryProviders(r.Context(), id, req.Levels); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *LibraryHandler) wakeMetadataMatcher(ctx context.Context, libraryID int) {
@@ -1711,80 +1244,6 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 	return metadata.ContentLevelsForLibraryType(libraryType)
 }
 
-// HandleListStaleIDs handles GET /libraries/stale-ids.
-func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Request) {
-	resp, _, err := h.ListStaleIDs(r.Context(), "", 0, 0)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleRematchStaleID handles POST /libraries/stale-ids/{contentID}/rematch.
-// Deprecated: prefer the explicit admin match search/apply flow via
-// POST /admin/items/{id}/match/search and POST /admin/items/{id}/match/apply.
-func (h *LibraryHandler) HandleRematchStaleID(w http.ResponseWriter, r *http.Request) {
-	if err := h.RematchStaleID(r.Context(), chi.URLParam(r, "contentID")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	libraryID, err := strconv.Atoi(q.Get("library_id"))
-	if err != nil || libraryID <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id is required")
-		return
-	}
-	limit := 100
-	if value := strings.TrimSpace(q.Get("limit")); value != "" {
-		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 && parsed <= 500 {
-			limit = parsed
-		}
-	}
-	offset := 0
-	if value := strings.TrimSpace(q.Get("offset")); value != "" {
-		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-	items, total, err := h.ListLibraryRoots(r.Context(), libraryID, strings.TrimSpace(q.Get("state")), "", limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, libraryRootsListResponse{Items: items, Total: total})
-}
-
-func (h *LibraryHandler) HandleUpsertRootOverride(w http.ResponseWriter, r *http.Request) {
-	var req rootOverrideUpsertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.SetRootOverride(r.Context(), apimw.GetUserID(r.Context()), req); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *LibraryHandler) HandleDeleteRootOverride(w http.ResponseWriter, r *http.Request) {
-	var req rootOverrideDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.DeleteRootOverride(r.Context(), req); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // unmatchedItemResponse represents an item in the unmatched-items list.
 type unmatchedItemResponse struct {
 	ContentID   string `json:"content_id"`
@@ -1802,38 +1261,6 @@ type unmatchedItemResponse struct {
 type unmatchedItemsListResponse struct {
 	Items []unmatchedItemResponse `json:"items"`
 	Total int                     `json:"total"`
-}
-
-// HandleListUnmatchedItems handles GET /libraries/unmatched-items.
-// Returns items that are in unmatched, pending, or ambiguous status and that
-// no admin ignored, enriched with library context so the admin maintenance
-// page can link to them.
-func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit := 100
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-	items, total, err := h.ListUnmatchedItems(r.Context(), q.Get("q"), false, limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, unmatchedItemsListResponse{Items: items, Total: total})
-}
-
-// parseIDParam extracts and parses the "id" URL parameter as an integer.
-func parseIDParam(r *http.Request) (int, error) {
-	idStr := chi.URLParam(r, "id")
-	return strconv.Atoi(idStr)
 }
 
 // ScanControlAvailable reports whether either existing scan execution path exists.

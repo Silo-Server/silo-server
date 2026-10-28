@@ -6,17 +6,16 @@ When the event service is unavailable, the capability response remains `200` wit
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
 `subscribe_grace_period_seconds`, `max_requested_channels`, and `channels`.
-These values come from the same implementation as the bridge capability route
-and the event socket's enforced subscription limits. `channels` lists client
+These values come from the same implementation as the event socket's enforced
+subscription limits. `channels` lists client
 channels independently of the caller's role. The socket hello frame determines
 which channels that connection may actually subscribe to. Internal plugin
 channels are excluded.
 
 This read creates no ticket or connection and does not grant access to a
 channel. It describes the subscription protocol, not a socket authentication
-credential or a guarantee that a particular API-version socket is available.
-Socket authorization and ticket issuance are separate contracts. The bridge
-capability response remains unchanged. Current first-party web, Apple, and
+credential or a guarantee that the socket is available.
+Socket authorization and ticket issuance are separate contracts. Current first-party web, Apple, and
 Android callers do not consume this capability read; Jellyfin has no matching
 native realtime discovery operation.
 
@@ -46,8 +45,7 @@ Malformed upgrades and rejected origins do not consume valid tickets.
 
 Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
 Without Redis, tickets are process-local and require affinity to the minting
-node; restarting that node invalidates them. This store is distinct from the
-bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
+node; restarting that node invalidates them.
 
 Admission rechecks the current session, enabled account, account role and viewer
 policy/PIN proof. An admin account receives the administrator channels only while
@@ -70,12 +68,9 @@ The handshake version does not rewrite another domain's event payload.
 Web consumers capture account/profile authority before minting and discard
 connection results and frames after that authority changes.
 
-Native socket/ticket adoption and independent domain review are required before
-these two migration rows can be ratified. No bridge socket or ticket was removed.
-
 ### Personal event recipients
 
-Both event socket versions restrict `user_state` to a positive account ID
+The event socket restricts `user_state` to a positive account ID
 matching the connection and a non-empty profile ID matching its bound profile.
 `user_settings` requires the same account match; a non-empty event profile must
 match the bound profile, while an empty event profile reaches that account's
@@ -99,11 +94,6 @@ those channels. A `user_state` producer without a profile, including an
 unmanaged download's `download` event, reaches no socket. Settings events name
 the changed key and scope; they do not carry its value. Channel eligibility,
 snapshots and socket authority/lifetime checks are unchanged.
-
-On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
-profile. The handshake's `X-Profile-Id` decides administrator access but binds
-nothing, so a bridge socket opened with that header and no ticket is unbound and
-receives no `user_state`, including its own profile's.
 
 ### Access changes
 
@@ -147,22 +137,6 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The bridge events socket never sends this frame. It picks its channels once, at
-the handshake: an admin account gets the administrator channels only while
-it is the acting admin (see
-[api-contract.md](architecture/api-contract.md)), judged on the handshake's
-`X-Profile-Id` or, without one, on the profile its ticket was minted for. That
-profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`
-sent when it was minted, server-side, and the socket re-verifies it. Any
-other profile on the account, such as a child profile, connects with the user
-channels. A rejected ticket (expired, reused, or for another account) leaves the
-connection unbound and judged as acting with no profile, so on a household with
-a PIN-protected or limited profile it also gets the user channels until the
-client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
-without a frame once the session ends, the account's role differs from the
-token's, or a connection holding the administrator channels is no longer the
-acting admin (including when its profile's PIN proof stops verifying after a PIN
-change) or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
@@ -172,8 +146,8 @@ close without a frame or dedicated code when it fails.
 (`createPlaybackControlSocketTicket`) delegates the caller's current access-token
 login session and verified profile proof to one control handshake for one
 playback session. The body's `installation_id` is optional: send the value
-`getPlaybackCapabilities` returned, and it must equal this server's installation;
-omit it for a session the bridge started. Minting checks, in order: a bounded
+`getPlaybackCapabilities` returned, and it must equal this server's installation.
+Minting checks, in order: a bounded
 login session; the current session, enabled account, role and viewer/PIN proof;
 that the playback session exists in the session manager and belongs to the
 caller's account and profile (`403 permission_denied` otherwise); and that a
@@ -208,18 +182,15 @@ already accepted progress does not undo a confirmation; progress accepted after
 its receipt supersedes a queued confirmation. A completed stop or terminate ends
 session authority before ordered watch-provider finalization. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
-access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
-`result`, event) are unchanged from the bridge socket. A client message larger
-than 64 KiB closes the connection with `1009` (message too big); the bridge
-socket applies the same limit.
+access-token expiry, or after four hours. The frames are `hello`, command,
+`ack`, `result` and event. A client message larger than 64 KiB closes the
+connection with `1009` (message too big).
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
 `protocol` only when this server serves the handshake. The web player mints
 under captured profile authority for every connection, offers the protocol pair,
-discards frames once that authority changes, and uses the bridge socket only
-when the handshake is not served (`404`/`503`), never after an ownership
-refusal. The bridge socket route is
-unchanged.
+discards frames once that authority changes, and retries a refused mint only
+under the original authority, with bounded backoff.
 
 
 ### V2 suggestion reads and vote membership
@@ -232,10 +203,9 @@ The response is `{items, page}` with string identifiers and UTC timestamps.
 suggestion ID. Cursor scope includes account, profile, access policy, room and
 page size. Vote changes do not move suggestions across the cursor. Concurrent
 creation/deletion is not a snapshot; clients refresh to reconcile live changes.
-Room lifecycle and the room websocket still use the bridge contract.
 
 HTTP suggestion reads return the requesting profile's authoritative
-`voted_by_me`. Both v1 and v2 socket `suggestions_update` frames carry common room
+`voted_by_me`. Room socket `suggestions_update` frames carry common room
 rows and tallies, with every `voted_by_me` set to `false`. That socket field is
 non-authoritative: clients retain their own vote membership or refresh it through
 the authenticated HTTP read. Local and cross-node broadcasts use the same shape;
@@ -254,9 +224,8 @@ An error after a database commit does not prove that the vote was unchanged.
 The web adapter drains bounded pages under one captured authority and sorts the
 completed list by votes for display. After a vote receipt it reloads under that
 same authority; it does not replay or retarget a mutation after authentication or
-profile changes. Suggestion creation, deletion, promotion, room policy and room
-socket migration are separate operations. Native consumer closure remains
-required before ratifying these mappings.
+profile changes. Suggestion creation, deletion, promotion and room policy are
+separate operations.
 
 `DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}`
 requires the same login/profile and `X-Room-Token` proof. Only the room host or
@@ -269,8 +238,7 @@ not establish that the entry still exists.
 
 The existing web delete action sends once, surfaces errors including `404`, and
 reloads the bounded list only after success under the original captured authority.
-It does not replay after a lost response or authentication error. Suggestion
-creation and promotion remain separate bridge operations.
+It does not replay after a lost response or authentication error.
 
 ### End a Watch Together room
 
@@ -278,15 +246,15 @@ creation and promotion remain separate bridge operations.
 
 Success returns bodyless `204` after the existing room-close service completes. Non-host authority returns `403`, a missing room `404`, an already-ended room `409`, and unavailable service `503`. Natural-idempotent classification describes convergence on ended state, not a promise that every repeated request returns `204`. The actual web action sends once without authentication replay and fences original authority before dispatch, after receipt and before completion feedback. It does not optimistically mark the room ended or automatically retry an uncertain close.
 
-The owning service retains persistence, host/wait timer cleanup, local connected-member `room_closed` dispatch with the existing `host_left` reason, and live-room removal. This port changes no domain persistence or callback behavior. It does not cancel already-dispatched playback, establish cross-node socket broadcast, or complete the separate v2 room-socket contract. Existing room creation, joining and room credentials remain separate migration scopes; v1 wire behavior is unchanged.
+The owning service retains persistence, host/wait timer cleanup, local connected-member `room_closed` dispatch with the existing `host_left` reason, and live-room removal. This port changes no domain persistence or callback behavior. It does not cancel already-dispatched playback or establish cross-node socket broadcast.
 
 ### Read a Watch Together room
 
 `GET /api/v2/watch-together/rooms/{room_id}` (`getWatchTogetherRoom`) requires authenticated profile authority and existing room proof in `X-Room-Token`. It fails closed when the room/token service is unavailable. Proof must match the exact room, account and profile. Invalid proof returns `403`, missing room `404`, closed room `409`, and unavailable service `503`.
 
-A successful no-store `200` returns `room` and renewed `room_access_token`. The snapshot preserves selection, playback anchor, host/member roles and permission fields. IDs are strings on v2; the anchor time is a typed UTC instant. Renewal retains the existing room/account/profile token semantics. This token is not a session-bound socket credential, does not grant account authentication, and does not complete the separate v2 room-socket contract.
+A successful no-store `200` returns `room` and renewed `room_access_token`. The snapshot preserves selection, playback anchor, host/member roles and permission fields. IDs are strings on v2; the anchor time is a typed UTC instant. Renewal retains the existing room/account/profile token semantics. This token is not a session-bound socket credential and does not grant account authentication.
 
-The existing web initial-room read sends proof only in the header, captures authority before dispatch, rejects stale success and failure, validates identities before converting to the existing UI model, and fences publication against room-effect cancellation and authority replacement. Closed-room conflict is terminal. Existing room-proof storage and socket transport remain separate; the read does not activate a new native surface or migrate the room socket. Domain snapshot and v1 wire behavior are unchanged.
+The existing web initial-room read sends proof only in the header, captures authority before dispatch, rejects stale success and failure, validates identities before converting to the existing UI model, and fences publication against room-effect cancellation and authority replacement. Closed-room conflict is terminal.
 
 ### Set guest transport policy
 
@@ -294,15 +262,15 @@ The existing web initial-room read sends proof only in the header, captures auth
 
 Success returns a no-store `200` room snapshot and renewed existing room proof. The owning service retains generation-based persistence and local snapshot broadcasts. If a competing writer wins the generation check, it can return the refreshed winning snapshot without retrying or broadcasting the failed write. Clients must use that returned policy rather than assuming the requested value was stored. Natural-idempotent classification describes the policy value; it does not promise an unchanged generation or suppress successful-write broadcasts.
 
-The existing web toggle captures policy and authority, sends once without authentication replay, and fences authority, replaced room and superseded run before publication or feedback. It retains a newer currently held room generation when a policy response is older. Stale room/run failures do not report into the replacement context. It does not automatically read, rebase or retry a conflict/uncertain result. Existing proof renewal is not a session-bound socket credential. V1 service behavior, guest transport enforcement and socket protocol remain unchanged; no cross-node broadcast or native activation is implied.
+The existing web toggle captures policy and authority, sends once without authentication replay, and fences authority, replaced room and superseded run before publication or feedback. It retains a newer currently held room generation when a policy response is older. Stale room/run failures do not report into the replacement context. It does not automatically read, rebase or retry a conflict/uncertain result. Proof renewal is not a session-bound socket credential.
 
 ### Resolve a room invitation
 
 `POST /api/v2/watch-together/join` (`joinWatchTogetherRoom`) requires authenticated account/profile authority and the demo guard. Send `code` or `join_token` in the JSON body. Values are trimmed; a nonempty invite token takes precedence when both are supplied. Missing input returns `422`, missing room `404`, closed room `409`, and unavailable room/token service `503` before proof issuance.
 
-Success returns a no-store `200` with the existing room snapshot and room/account/profile-bound `room_access_token`. HTTP joining resolves the invitation and issues proof; it does not connect a member, attach playback, or cancel the host-disconnect timer. Those effects belong to the separate socket lifecycle. Repeated resolution can issue a different proof and observe a newer room snapshot; natural-idempotent classification does not promise a stable credential or durable admission receipt. Existing v1 behavior is unchanged.
+Success returns a no-store `200` with the existing room snapshot and room/account/profile-bound `room_access_token`. HTTP joining resolves the invitation and issues proof; it does not connect a member, attach playback, or cancel the host-disconnect timer. Those effects belong to the separate socket lifecycle. Repeated resolution can issue a different proof and observe a newer room snapshot; natural-idempotent classification does not promise a stable credential or durable admission receipt.
 
-The actual web code-entry and invite auto-join/retry actions copy input and capture authority synchronously, send once without authentication replay, and suppress navigation and errors after authority replacement, unmount, superseding request or invite replacement. The existing room route still receives room proof for the legacy socket flow. This operation does not make that proof session-bound, migrate the socket, or activate dormant native UI. Room creation remains a separate operation.
+The actual web code-entry and invite auto-join/retry actions copy input and capture authority synchronously, send once without authentication replay, and suppress navigation and errors after authority replacement, unmount, superseding request or invite replacement. The room proof is not session-bound; the room socket needs its own ticket. Room creation is a separate operation.
 
 ### Select room content as the host
 
@@ -310,7 +278,7 @@ The actual web code-entry and invite auto-join/retry actions copy input and capt
 
 A changed selection retains the existing service behavior: reset playback anchor to zero and paused, enter waiting with resume-on-ready, advance selection revision and generation, clear prior member playback-session/readiness/buffering/ignore-wait state, and broadcast the room snapshot across connected API servers. The v2 writer locks the authoritative database row and compares resolved content, file and library identity before any reset. An identical current selection preserves anchor, revision, generation, member readiness, waiting timer and broadcasts. That no-op applies only while the room is playing: selecting the item a lobby has merely staged starts it, because staging is not playback. This is a current-state no-op, not a historical replay receipt: after a different intervening selection, the old request can select its content again. The operation remains non-retryable. A competing generation writer can cause the service to return its refreshed winning snapshot without replaying the failed selection. Clients must use the returned snapshot.
 
-The actual web action captures input and authority, sends once without authentication replay, and fences replaced authority, room and request run before publication. A newer held generation is retained only for the same room. Stale receipts do not clear the candidate or display completion feedback. There is no automatic read, rebase or retry after an uncertain result. Success returns the existing room snapshot and renewed room/account/profile proof; that proof is not a session-bound socket credential. The v1 selection writer retains its frozen reset behavior; all nodes serving this v2 operation must use the guarded writer. A no-op refresh from another node adopts a newer selection revision locally and discards readiness belonging to the prior selection. Room coordination across API servers is described in [Watch Party synchronization](architecture/watch-party-synchronization.md). Native Watch Party UI remains inactive.
+The actual web action captures input and authority, sends once without authentication replay, and fences replaced authority, room and request run before publication. A newer held generation is retained only for the same room. Stale receipts do not clear the candidate or display completion feedback. There is no automatic read, rebase or retry after an uncertain result. Success returns the existing room snapshot and renewed room/account/profile proof; that proof is not a session-bound socket credential. A no-op refresh from another node adopts a newer selection revision locally and discards readiness belonging to the prior selection. Room coordination across API servers is described in [Watch Party synchronization](architecture/watch-party-synchronization.md). Native Watch Party UI remains inactive.
 
 ### Stage room content without starting it
 
@@ -318,7 +286,7 @@ The actual web action captures input and authority, sends once without authentic
 
 A staged item is a lobby room whose `selected_content_id` is set. A changed selection keeps the room in the lobby, advances the room generation, refreshes the idle timestamp so the janitor leaves an active lobby alone, and broadcasts the snapshot across API servers. It never advances the selection revision, because that revision is the playback epoch and nothing has started. Staging different content clears every member's lobby ready state; re-staging the same content keeps it. The row update is guarded in SQL on generation, lobby phase and host-pick mode, so a stale node cannot stage into a room another node has started or switched. The operation is naturally idempotent: repeating the same resolved content, file, and library preserves the generation, idle timestamp, readiness, and broadcasts.
 
-The web sends once under captured authority and uses the returned snapshot. A member cannot attach a playback session to a staged lobby; attach, transport and buffering readiness remain playing-only. No v1 route stages: v1 selection always starts playback.
+The web sends once under captured authority and uses the returned snapshot. A member cannot attach a playback session to a staged lobby; attach, transport and buffering readiness remain playing-only.
 
 ### Start the staged content
 
@@ -336,17 +304,17 @@ Stop locks the authoritative row and returns a playing room to the lobby: lobby 
 
 The server performs the same stop on the host's behalf when the item finishes: once the room's position is within two seconds of the playing file's duration, whether the host paused there at the end or the room's clock ran past it. The file is the room's selected file, or the host's attached file when the selection does not pin one; a file without a known duration never finishes this way. Clients need no new message: they see the same lobby snapshot a host's stop produces.
 
-Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop route, but a v1 client in a room still sees it return to the lobby when a v2 host stops playback or the item finishes.
+Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone.
 
 ### Switch a lobby's selection mode
 
 `PATCH /api/v2/watch-together/rooms/{room_id}/selection-mode` (`updateWatchTogetherRoomSelectionMode`) requires authenticated profile authority, the demo guard and both the host account and profile. The body contains `selection_mode`: `host_pick` or `vote`. A playing room refuses with `409`; non-host authority returns `403`, missing room `404`, an invalid mode `422`, closed room `409`, and unavailable service `503`.
 
-Switching drops the staged item and every member's lobby ready state, advances the generation, refreshes the idle timestamp and broadcasts the local snapshot. Suggestions and votes are rows that outlive the switch: a room switched from voting to host picks can still promote any of them, and a room switched to voting starts with whatever was already suggested. Repeating the current mode is a no-op with no persistence or broadcast. Frozen v1 fixes the mode at creation and has no switch.
+Switching drops the staged item and every member's lobby ready state, advances the generation, refreshes the idle timestamp and broadcasts the local snapshot. Suggestions and votes are rows that outlive the switch: a room switched from voting to host picks can still promote any of them, and a room switched to voting starts with whatever was already suggested. Repeating the current mode is a no-op with no persistence or broadcast.
 
 ### Lobby ready over the room socket
 
-A connected member sends `{"type":"lobby_ready","ready":true|false}` on the v2 room socket. The server commits the flag in the shared runtime, broadcasts the snapshot, and answers `error bad_request` when the room is not in the lobby. V1 sockets reject this message, and v1 HTTP and socket snapshots retain the frozen six-field member representation. Every member listed in v2 `members[]` carries `lobby_ready`; it is always `false` once the room is playing. The flag is distinct from the buffering `ready` message, which still requires an attached playback session.
+A connected member sends `{"type":"lobby_ready","ready":true|false}` on the room socket. The server commits the flag in the shared runtime, broadcasts the snapshot, and answers `error bad_request` when the room is not in the lobby. Every member listed in `members[]` carries `lobby_ready`; it is always `false` once the room is playing. The flag is distinct from the buffering `ready` message, which still requires an attached playback session.
 
 Lobby ready is persisted in the shared room runtime and included in snapshots across API servers. Staging different content, starting or stopping playback, and switching modes clear it in the same transaction as the room update. A stale node adopting that transaction preserves any ready flag subsequently saved for the current selection.
 
@@ -364,35 +332,35 @@ Rows are resolved to catalog cards through the caller's access filter; a row who
 
 ### Watch-together capabilities
 
-`GET /api/v2/watch-together/capabilities` (`getWatchTogetherCapabilities`) requires an authenticated account and follows the shared capability document conventions (opaque `revision`, `state`, `allowed`, private revalidation with `ETag`). When rooms are served, each feature flag reflects its wired operation dependencies. `max_member_state_ids` is 200 when member-state is available and zero otherwise. `lobby_ready`, `connection_replaced` and `socket_protocol` (`silo.room.v2`) require the v2 socket; the protocol is an empty string when the socket is unavailable. When the room service is not wired the state is `not_configured` and every flag is `false`. Clients decide whether to show the staged lobby, the ready check, the mode switch and the shared picker from this document, not from the server version.
+`GET /api/v2/watch-together/capabilities` (`getWatchTogetherCapabilities`) requires an authenticated account and follows the shared capability document conventions (opaque `revision`, `state`, `allowed`, private revalidation with `ETag`). When rooms are served, each feature flag reflects its wired operation dependencies. `max_member_state_ids` is 200 when member-state is available and zero otherwise. `lobby_ready`, `connection_replaced` and `socket_protocol` (`silo.room.v2`) require the room socket; the protocol is an empty string when the socket is unavailable. When the room service is not wired the state is `not_configured` and every flag is `false`. Clients decide whether to show the staged lobby, the ready check, the mode switch and the shared picker from this document, not from the server version.
 
 ### Suggestion creation receipt storage
 
 The v2 suggestion creation prerequisite stores a caller-selected suggestion identity with the original account, profile, room and a SHA-256 digest of the canonical content metadata. The receipt and suggestion insert commit in one transaction. The room row is locked before admission, so committed closure refuses creation. An identical retry returns the existing suggestion; a different owner, room or payload conflicts. The created flag distinguishes insertion from replay so the later caller can avoid repeat broadcasts.
 
-Receipts survive suggestion and room deletion. Repeating a deleted identity conflicts instead of recreating it. Receipts retain no title, note or poster URL payload and are removed on login-account deletion. There is no age-based receipt expiry; expiring them would permit identity reuse. Legacy suggestion insertion/deletion and their wire behavior are unchanged. The receipt store does not dispatch broadcasts or provide durable broadcast delivery; the caller behavior is described below.
+Receipts survive suggestion and room deletion. Repeating a deleted identity conflicts instead of recreating it. Receipts retain no title, note or poster URL payload and are removed on login-account deletion. There is no age-based receipt expiry; expiring them would permit identity reuse. The receipt store does not dispatch broadcasts or provide durable broadcast delivery; the caller behavior is described below.
 
 ### Create a room suggestion
 
 `POST /api/v2/watch-together/rooms/{room_id}/suggestions` (`createWatchTogetherSuggestion`) requires authenticated profile authority, the demo guard and original room proof in `X-Room-Token`. Supply a client-generated UUID `suggestion_id`, required `content_id`, `content_type` (`movie` or `episode`) and `title`, plus optional `subtitle`, `poster_url` and `note`. The receipt migration must be installed before enabling this writer on any v2-serving node.
 
-A successful insertion or identical live replay returns `201` with `suggestion_id`. The original account/profile/room and metadata are bound by the receipt store. Changed or deleted identities return `409` without resurrection; closed room returns `409`, missing room `404`, invalid input `422`, invalid proof `403`, and unavailable service `503`. A room holds at most 200 suggestions: a new identity in a full room returns `409` and keeps no receipt, while an identical replay still returns `201`. Frozen v1 creation shares the cap (`409`) and the same 32 KiB body limit (`413`). Current suggestion state is read separately. The service supplies creation time and attempts the existing local suggestion snapshot broadcast only for a new insertion. A failure after commit can leave the broadcast incomplete; retry returns the identity without attempting it again. This is not durable delivery or an outbox.
+A successful insertion or identical live replay returns `201` with `suggestion_id`. The original account/profile/room and metadata are bound by the receipt store. Changed or deleted identities return `409` without resurrection; closed room returns `409`, missing room `404`, invalid input `422`, invalid proof `403`, and unavailable service `503`. A room holds at most 200 suggestions: a new identity in a full room returns `409` and keeps no receipt, while an identical replay still returns `201`. A body over 32 KiB returns `413`. Current suggestion state is read separately. The service supplies creation time and attempts the existing local suggestion snapshot broadcast only for a new insertion. A failure after commit can leave the broadcast incomplete; retry returns the identity without attempting it again. This is not durable delivery or an outbox.
 
-The actual web candidate holds an immutable ID, metadata, room proof and authority. Explicit retry of that unchanged draft reuses them; dismissing or replacing it creates a new identity. Authority replacement refuses the old draft instead of rebinding it. Each submission sends one POST without authentication replay and refreshes the existing suggestion list under the original authority after a matching receipt. Superseded room/run/authority cannot publish the list; superseded candidate cannot be cleared or receive success/error feedback. Drafts are not persisted across page reloads. Room proof expiry is surfaced without automatic renewal or rebasing. V1 creation remains unchanged; native caller inventory and adoption are separate gates.
+The actual web candidate holds an immutable ID, metadata, room proof and authority. Explicit retry of that unchanged draft reuses them; dismissing or replacing it creates a new identity. Authority replacement refuses the old draft instead of rebinding it. Each submission sends one POST without authentication replay and refreshes the existing suggestion list under the original authority after a matching receipt. Superseded room/run/authority cannot publish the list; superseded candidate cannot be cleared or receive success/error feedback. Drafts are not persisted across page reloads. Room proof expiry is surfaced without automatic renewal or rebasing.
 
 ### Promote a room suggestion
 
 `POST /api/v2/watch-together/rooms/{room_id}/suggestions/promote` (`promoteWatchTogetherSuggestion`) requires profile/demo authority, original `X-Room-Token`, both host account and profile, and a suggestion belonging to the room. The body contains `suggestion_id`. The host may promote any suggestion in either mode: in a vote room the tally is advisory and the host's choice is broadcast as the selection, so an override is visible rather than silent. Clients read the leader from the suggestion list ordering rather than from a server-side gate.
 
-The v2 path retains playable/access resolution, then uses the guarded selection transaction. Promotion chooses content rather than an explicit file variant: already-selected content preserves its selected file/library, playback anchor, revision/generation, attached readiness and local broadcast count even if the resolver now prefers another variant. A different eligible content selection resets playback/readiness once. Direct selection continues to compare all resolved identities. Host/closed/mode checks still precede the no-op. No historical replay receipt is promised after intervening different content, so promotion remains non-retryable. Frozen v1 promotion remains unchanged.
+The v2 path retains playable/access resolution, then uses the guarded selection transaction. Promotion chooses content rather than an explicit file variant: already-selected content preserves its selected file/library, playback anchor, revision/generation, attached readiness and local broadcast count even if the resolver now prefers another variant. A different eligible content selection resets playback/readiness once. Direct selection continues to compare all resolved identities. Host/closed/mode checks still precede the no-op. No historical replay receipt is promised after intervening different content, so promotion remains non-retryable.
 
-Success returns the authoritative room snapshot and renewed existing room proof. A competing writer may determine that snapshot; the web reports selection updated without asserting playback started. Missing room/suggestion returns `404`, non-host or invalid proof `403`, closed room `409`, unplayable selection `422`, and unavailable service `503`. V2 permits a host override of the tally. The frozen v1 route retains its `409` for a non-leader or a room with no votes. The actual panel sends once without auth replay, suppresses stale room/run/authority success and error feedback, and compares generations only within one room before publication. No new session-bound socket proof, cross-node broadcast, native activation or real playback dispatch is established by this port.
+Success returns the authoritative room snapshot and renewed existing room proof. A competing writer may determine that snapshot; the web reports selection updated without asserting playback started. Missing room/suggestion returns `404`, non-host or invalid proof `403`, closed room `409`, unplayable selection `422`, and unavailable service `503`. The host may override the tally. The actual panel sends once without auth replay, suppresses stale room/run/authority success and error feedback, and compares generations only within one room before publication. No new session-bound socket proof, cross-node broadcast, native activation or real playback dispatch is established by this port.
 
 ### Room creation identity storage
 
 The v2 room creation prerequisite binds a caller-selected room ID to its original host account, host profile and selection mode. Room and receipt insert atomically. The caller supplies server-generated code, invite token and initial room state; regenerated values on retry do not replace stored credentials or state. Exact replay returns the current active room, including later playback changes. A changed original host or mode conflicts. A closed room stays closed, and a deleted room cannot be recreated under its retained ID.
 
-Creation receipts retain no invitation credentials and survive room deletion. They are removed with login-account deletion and have no age-based expiry. Collision with an existing unreceipted legacy room refuses adoption and rolls back the new receipt. The v1 creation service and insert remain unchanged. This storage prerequisite does not register a creation endpoint or hydrate live members; the later v2 service must preserve existing live-room membership on replay. Stable web draft identity, native coordination and rollout remain separate work.
+Creation receipts retain no invitation credentials and survive room deletion. They are removed with login-account deletion and have no age-based expiry. Collision with an existing unreceipted room refuses adoption and rolls back the new receipt. The storage does not hydrate live members; the creation operation below preserves existing live-room membership on replay.
 
 ### API v2 room creation
 
@@ -400,7 +368,7 @@ Creation receipts retain no invitation credentials and survive room deletion. Th
 
 A successful insert or exact active replay returns `201` with the current room snapshot and account/profile room proof. Original account/profile/mode binding cannot change. Closed rooms and conflicting or deleted creation identities return `409`; invalid input returns `422`; an unavailable dependency returns `503`. Replay retains stored invite credentials and does not overwrite connected members, readiness, or playback state. The response includes local member information without creating membership or broadcasting creation. This proof is not a session-bound socket credential.
 
-Only a definite room-code or invite-token uniqueness violation allows up to three internal credential candidates with the same caller identity and original binding. An uncertain database outcome is not retried internally. The response is current state, not a durable admission receipt, historical snapshot, outbox, or cross-node membership guarantee. Creation does not hydrate a local room; the existing socket/read paths handle loading separately. Frozen v1 creation is unchanged.
+Only a definite room-code or invite-token uniqueness violation allows up to three internal credential candidates with the same caller identity and original binding. An uncertain database outcome is not retried internally. The response is current state, not a durable admission receipt, historical snapshot, outbox, or cross-node membership guarantee. Creation does not hydrate a local room; the socket and read paths handle loading separately.
 
 The web create action captures one immutable room UUID, selection mode, and profile authority. An explicit retry after uncertainty retains that draft; mode replacement creates another draft. Replaced authority is never rebound to an old draft. Stale completion cannot navigate or clear a newer pending action. No automatic authentication replay or draft persistence across page reload is provided. Native creation adoption and exact caller inventories remain separate acceptance gates.
 
@@ -413,20 +381,20 @@ This storage foundation does not expose a socket or validate current account/ses
 
 ### API v2 room socket admission and lifetime
 
-`POST /api/v2/watch-together/rooms/{room_id}/ws-ticket` (`createWatchTogetherSocketTicket`) requires authenticated profile/demo authority, an expiring access login session, and the original `X-Room-Token` matching room/account/profile. API keys and profile-only room proof cannot delegate a socket. The room proof must have a valid HS256 signature and signed expiry; frozen v1 proof validation is unchanged. Current session validity, enabled account/role, profile PIN verification, viewer scope, and room existence are checked before minting. The response carries `ticket`, `expires_in`, `max_connection_seconds` (300), and `protocol` (`silo.room.v2`). Credential storage failure returns 503; invalid original proof or authority returns 403; closed rooms return 409. No automatic room-proof renewal occurs here.
+`POST /api/v2/watch-together/rooms/{room_id}/ws-ticket` (`createWatchTogetherSocketTicket`) requires authenticated profile/demo authority, an expiring access login session, and the original `X-Room-Token` matching room/account/profile. API keys and profile-only room proof cannot delegate a socket. The room proof must have a valid HS256 signature and signed expiry. Current session validity, enabled account/role, profile PIN verification, viewer scope, and room existence are checked before minting. The response carries `ticket`, `expires_in`, `max_connection_seconds` (300), and `protocol` (`silo.room.v2`). Credential storage failure returns 503; invalid original proof or authority returns 403; closed rooms return 409. No automatic room-proof renewal occurs here.
 
 Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must pass the same check as the events socket: the configured public origin, the request's own scheme and host, or a connected overlay origin; absent Origin is permitted for independently authenticated native callers. Forwarded host headers do not authorize an Origin; only a trusted proxy's single `X-Forwarded-Proto` value can supply the scheme for the request-origin match. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
-The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. On both versions a client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the same disconnect callback. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
+After the upgrade, Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong run through the room service. A client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the disconnect callback. There is no leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 
-The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Existing room-proof expiry ends access; it is not automatically renewed or rebound. Native adoption and exact caller inventories remain separate gates. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
+The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Room-proof expiry ends access; it is not automatically renewed or rebound. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
 
 ### Replaced room connections
 
 A new socket for the same account and profile replaces that member's previous
-socket. On v2, the displaced socket receives this terminal frame before closure:
+socket. The displaced socket receives this terminal frame before closure:
 
 ```json
 {"type":"connection_replaced","reason":"This profile joined the Watch Party on another device."}
@@ -448,8 +416,7 @@ and cannot disconnect the winner. Expired membership, ordinary network loss,
 five-minute renewal and credential rotation do not send this replacement frame.
 
 The `connection_replaced` capability advertises support. Deploy the correction
-to every API node before relying on it across the cluster. V1 retains its frozen
-close behavior. Older v2 clients that ignore the frame can still reconnect and
+to every API node before relying on it across the cluster. Older clients that ignore the frame can still reconnect and
 displace the winner; upgrading those clients is a release prerequisite.
 
 Native adoption is tracked in
@@ -518,11 +485,10 @@ is neither corrected nor taken as the host's decision. A report that names the
 latest command ends that window early. Clients that omit the field get the time
 window alone. Reports from a host that has just re-attached are corrected like a
 guest's until one plays as its sync said, within the host band; only then is its
-pause or position a decision for the room. The host band is 10 seconds on the
-v2 socket and 2 seconds on the v1 socket.
+pause or position a decision for the room. The host band is 10 seconds.
 
 A viewer the room stopped waiting for sends `ready` while the room is `playing`
-or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as
+or `paused`. The snapshot shows this state as `self_ignore_wait: true`, or as
 the viewer's own member entry still marked `is_buffering`. The client sends the
 acknowledgement once it has executed the latest transport command and its media
 is playable, and retries every 500 ms until its own member entry is `is_ready`.
@@ -535,7 +501,7 @@ the same status; this covers late joiners and clients that never send
 `ready`. Seek-destination checks apply only while the room is
 `waiting`.
 
-`command_id` is optional for older clients on the shared v1/v2 message loop. Their
+`command_id` is optional for older clients. Their
 seek acknowledgements still need to reach the destination, but a client that
 omits the ID cannot distinguish consecutive seeks to the same position. Older
 servers ignore these additive request fields. Updated servers advertise
@@ -586,11 +552,10 @@ cannot cause a second fallback. No candidate returns `409`; disconnected or
 unauthorized viewers receive `403`. Clients retain the playback refusal if the
 fallback fails and must not independently substitute another file.
 
-V2 room snapshots include members connected through all API servers. Each member can
+Room snapshots include members connected through all API servers. Each member can
 include additive `is_ready`, `is_buffering`, and `is_syncing` booleans; absent fields
 mean false. `is_syncing` identifies an attached member still blocking the current
-readiness barrier. HTTP v2 snapshots and raw socket snapshots expose these fields.
-The frozen v1 HTTP responses and room socket omit these status fields. The web
+readiness barrier. HTTP snapshots and raw socket snapshots expose these fields. The web
 player lists viewer status and names the viewers it is waiting for.
 
 The web player reports buffering after 2 seconds without playable media and
@@ -627,8 +592,8 @@ durable, snapshot-fenced persistence and protected URL resolution.
 
 Consumers match the active session/file and exact kind/range before merging the
 image; they discard events for other versions or edited occurrences. Failed
-event delivery leaves the canonical v2 watch/marker read available. The existing
-`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+event delivery leaves the canonical v2 watch/marker read available. The
+`chapter_thumbnail_ready` event is unchanged.
 
 Marker thumbnail readiness uses the playback event bus to reach sessions on
 other API replicas. Each serving replica resolves a protected image URL and

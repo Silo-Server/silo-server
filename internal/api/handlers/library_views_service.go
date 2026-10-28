@@ -35,10 +35,6 @@ func (v SectionViewer) Artwork() imagesize.Request {
 	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
-func sectionViewerFromRequest(r *http.Request) SectionViewer {
-	return SectionViewer{Access: requestAccessFilter(r), ImageSize: requestImageSize(r)}
-}
-
 // SectionLayoutView is a page's section layout without items.
 type SectionLayoutView = homeLayoutResponse
 
@@ -77,13 +73,6 @@ type LibraryCollectionTabEntryView = libraryTabCollection
 
 // LibraryCollectionTabUngroupedView is the tab's ungrouped collections.
 type LibraryCollectionTabUngroupedView = libraryTabUngrouped
-
-// HomeLayout answers the home page's section layout for the profile on the
-// context.
-func (h *SectionHandler) HomeLayout(ctx context.Context) (SectionLayoutView, error) {
-	view, err := h.HomeLayoutWithItems(ctx, SectionViewer{}, 0)
-	return view.Layout, err
-}
 
 // requireViewableLibrary is the gate every profile-scoped section read
 // shares: the viewer scope must admit the library and, when a folder
@@ -395,43 +384,6 @@ func (h *LibraryCollectionHandler) libraryCollectionResponsesOf(ctx context.Cont
 type CollectionItemPage struct {
 	Limit  int
 	Offset int
-}
-
-// paged reports whether the caller asked for a page rather than the whole
-// collection.
-func (p CollectionItemPage) paged() bool {
-	return p.Limit > 0
-}
-
-// LibraryCollectionItems answers the items of one visible collection of the
-// library, in curated order or as the smart query resolves them. With a
-// page it answers that window of the order and whether more follow; the
-// zero page answers everything and never reports more.
-func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]CollectionItemView, bool, error) {
-	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
-		return nil, false, err
-	}
-	collection, err := h.repo.GetByID(ctx, collectionID)
-	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
-		return nil, false, apiError(http.StatusNotFound, "not_found", "Collection not found")
-	}
-	var (
-		items   []itemListResponse
-		hasMore bool
-	)
-	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, hasMore, err = h.loadLiveCollectionItems(ctx, collection, access, page)
-	} else {
-		items, hasMore, err = h.loadOrderedCollectionItems(ctx, collectionID, access, page)
-	}
-	if err != nil {
-		var queryErr smartCollectionQueryError
-		if errors.As(err, &queryErr) {
-			return nil, false, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
-	}
-	return items, hasMore, nil
 }
 
 // collectionSpansLibrary reports whether the collection is a member of the

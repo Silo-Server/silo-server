@@ -6,13 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -221,120 +217,6 @@ type PersonalCollectionPreviewItemView struct {
 
 // --- Handler methods ---
 
-// HandleListCollections handles GET /collections.
-func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ListPersonalCollections(r.Context(), userID, apimw.GetProfileID(r.Context()))
-	if err == nil {
-		views := make([]*PersonalCollectionView, len(resp.Collections))
-		for i := range resp.Collections {
-			views[i] = &resp.Collections[i]
-		}
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, views...)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleCapabilities exposes additive feature support for collection clients.
-func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.Capabilities())
-}
-
-// HandleCreateCollection handles POST /collections.
-func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionCreateRequest
-	if err := decodeJSONOrMultipart(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	created, err := h.CreatePersonalCollection(r.Context(), PersonalCollectionCreateCommand{
-		UserID:     userID,
-		ProfileID:  apimw.GetProfileID(r.Context()),
-		Request:    req,
-		PosterFile: posterFileReader(r),
-		V1Rules:    true,
-	})
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &created)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
-}
-
-// HandleUpdateCollection handles PUT /collections/{id}.
-func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionUpdateRequest
-	if err := decodeJSONOrMultipart(r, &req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: userID, ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r), V1Rules: true})
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *CollectionHandler) HandlePreviewCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionPreviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	req.V1Rules = true
-	resp, err := h.PreviewPersonalCollection(r.Context(), req, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteCollection handles DELETE /collections/{id}.
-func (h *CollectionHandler) HandleDeleteCollection(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeletePersonalCollection(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleListCollectionItems handles GET /collections/{id}/items.
-func (h *CollectionHandler) HandleListCollectionItems(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListPersonalCollectionItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleAddCollectionItem handles PUT /collections/{id}/items/{item_id}.
-func (h *CollectionHandler) HandleAddCollectionItem(w http.ResponseWriter, r *http.Request) {
-	var req collectionItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Position = 0
-	}
-	if err := h.AddPersonalCollectionItem(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), chi.URLParam(r, "item_id"), req.Position); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 type reorderRequest struct {
 	OrderedIDs []string `json:"ordered_ids"`
 	// GroupID is kept for v1 clients; personal collection groups no longer
@@ -342,140 +224,7 @@ type reorderRequest struct {
 	GroupID *string `json:"group_id,omitempty"`
 }
 
-// HandleReorderCollections handles PUT /collections/order.
-// The body must name each of the profile's own collections exactly once;
-// concurrent edits that would silently drop one are rejected.
-func (h *CollectionHandler) HandleReorderCollections(w http.ResponseWriter, r *http.Request) {
-	var req reorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.GroupID != nil {
-		writeAPIError(w, fieldError("group_id", "Personal collection groups are not supported; omit group_id"))
-		return
-	}
-	if err := h.ReorderPersonalCollections(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleCreateCollectionGroup handles POST /collections/groups.
-func (h *CollectionHandler) HandleCreateCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	var req CollectionGroupCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	group, err := h.CreateCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, group)
-}
-
-// HandleUpdateCollectionGroup handles PUT /collections/groups/{id}.
-func (h *CollectionHandler) HandleUpdateCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "id is required")
-		return
-	}
-	var req CollectionGroupUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	group, err := h.UpdateCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), id, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, group)
-}
-
-// HandleDeleteCollectionGroup handles DELETE /collections/groups/{id}.
-func (h *CollectionHandler) HandleDeleteCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeleteCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), chi.URLParam(r, "id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleReorderCollectionGroups handles PUT /collections/groups/order.
-func (h *CollectionHandler) HandleReorderCollectionGroups(w http.ResponseWriter, r *http.Request) {
-	var req reorderCollectionGroupsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ReorderCollectionGroups(r.Context(), apimw.GetUserID(r.Context()), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleReorderCollectionItems handles PUT /collections/{id}/items/order.
-// The body must contain every item currently in the collection.
-func (h *CollectionHandler) HandleReorderCollectionItems(w http.ResponseWriter, r *http.Request) {
-	var req reorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ReorderPersonalCollectionItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRemoveCollectionItem handles DELETE /collections/{id}/items/{item_id}.
-func (h *CollectionHandler) HandleRemoveCollectionItem(w http.ResponseWriter, r *http.Request) {
-	if err := h.RemovePersonalCollectionItem(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), chi.URLParam(r, "item_id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- Helpers ---
-
-// v1CollectionAudience fills allowed_profile_ids for the /api/v1 bridge, which
-// still reports it: the creator alone for a private collection, every profile
-// on the login (sorted by ID) for a shared one. Visibility itself is decided
-// from is_shared; the reported list is never read back.
-func v1CollectionAudience(ctx context.Context, provider userstore.UserStoreProvider, userID int, views ...*PersonalCollectionView) error {
-	var login []string
-	for _, v := range views {
-		if !v.IsShared {
-			v.AllowedProfileIDs = []string{v.CreatorProfileID}
-			continue
-		}
-		if login == nil {
-			store, err := provider.ForUser(ctx, userID)
-			if err != nil {
-				return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-			}
-			profiles, err := store.ListProfiles(ctx)
-			if err != nil {
-				return apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-			}
-			login = make([]string, 0, len(profiles))
-			for _, p := range profiles {
-				login = append(login, p.ID)
-			}
-			slices.Sort(login)
-		}
-		v.AllowedProfileIDs = slices.Clone(login)
-	}
-	return nil
-}
 
 func toCollectionResponse(c userstore.Collection) PersonalCollectionView {
 	queryDefinition := defaultJSON([]byte(c.QueryDefinition))
@@ -579,17 +328,6 @@ func firstNonEmptyCollection(values ...string) string {
 // errCollectionForbidden is returned by the artwork pipeline when the caller
 // is not the collection's creator. It surfaces as a 403 to the client.
 var errCollectionForbidden = errors.New("only the creator can edit this collection")
-
-// HandleDeleteCollectionImage clears the poster on a personal collection.
-// The query parameter "type" is required and currently only "poster" is
-// supported.
-func (h *CollectionHandler) HandleDeleteCollectionImage(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeletePersonalCollectionImage(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), r.URL.Query().Get("type")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
 
 // posterInputProvided reports whether the request body or form contained
 // poster artwork inputs that the upload pipeline would act on.

@@ -9,9 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
@@ -194,56 +191,6 @@ func deleteUploadedAvatarObjects(ctx context.Context, store profileAvatarStore, 
 	return err
 }
 
-func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if h.AvatarStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Avatar upload storage is not configured")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil || profile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
-	}
-
-	if err := r.ParseMultipartForm(profileAvatarMaxFileSize); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid multipart form")
-		return
-	}
-
-	file, header, err := r.FormFile("avatar")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Missing avatar file")
-		return
-	}
-	defer file.Close()
-
-	view, err := h.UploadAvatar(r.Context(), ProfileAvatarUpload{
-		UserID: userID, ProfileID: profileID, ContentType: header.Header.Get("Content-Type"), File: file,
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
 // ProfileAvatarUpload is an avatar upload with its multipart part already
 // extracted and its caller already reduced to an identity.
 type ProfileAvatarUpload struct {
@@ -314,27 +261,6 @@ func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUploa
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
 	}
 	return h.toProfileResponse(ctx, store, *updatedProfile), nil
-}
-
-func (h *ProfileHandler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	view, err := h.DeleteAvatar(r.Context(), userID, profileID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
 }
 
 // DeleteAvatar clears a profile's uploaded avatar (a preset reference is

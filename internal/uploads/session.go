@@ -140,10 +140,6 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 }
 
-func (m *Manager) MaxChunkSize() int64 {
-	return m.maxChunkSize
-}
-
 func (m *Manager) Create(req CreateRequest) (SessionInfo, error) {
 	filename := filepath.Base(strings.TrimSpace(req.Filename))
 	if filename == "." || filename == string(filepath.Separator) || filename == "" {

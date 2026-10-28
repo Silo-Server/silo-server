@@ -3,7 +3,7 @@
 The v2 administrator task surface uses generated web bindings. Apple and Android
 have no task or administrator-job HTTP calls in their checked source trees; the
 migration inventory also records only web consumers. Jellyfin compatibility has
-no equivalent management surface. Legacy routes remain available during migration.
+no equivalent management surface.
 
 ## Execution and schedules
 
@@ -12,8 +12,7 @@ By default it omits hidden tasks: queue workers, pollers, and repairs that run
 without an administrator, such as `match_media` or `cache_metadata_images`. It
 also omits tasks that serve one library kind, such as `sync_ebook_metadata`,
 while no library of that kind exists. `include_hidden=true` returns every
-registered task. The frozen v1 list applies the hidden flags only, not library
-scoping. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
+registered task. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
 responding process for any registered task, hidden or not. Both require
 acting-administrator access, as do task mutations and history.
 
@@ -67,8 +66,8 @@ ignored at startup. The web page lists them in a separate "On demand" group.
 `GET /api/v2/admin/tasks/{key}/triggers` reads persisted schedule configuration
 and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 `triggers` array, including an empty array to disable scheduling. The database
-compares the original revision under the schedule parent lock. Legacy writers
-use that same lock and advance the revision. A mismatch returns 412 with the
+compares the original revision under the schedule parent lock, and every
+schedule writer advances the revision. A mismatch returns 412 with the
 observed validator, without rereading or retrying the write. An empty schedule
 remains configured across restarts rather than restoring task defaults.
 
@@ -130,7 +129,7 @@ objects whose destination content was checked in the current copy pass, and
 bucket names, object keys, or local paths. The count can restart when an
 interrupted pass resumes. A completed copy reports `restart_pending` until the
 new storage is active after restart. The job's raw message and error remain
-available only to internal diagnostics. Legacy administrator-job responses and
+available only to internal diagnostics. Administrator-job responses and
 the jobs realtime channel use the same safe storage-transition receipt,
 including the websocket snapshot; they omit the raw request and result
 documents for this job type.

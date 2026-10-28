@@ -1,27 +1,22 @@
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
+// The household rule for history imports (#1336): the verified primary
+// profile acts for every profile on the account, any other profile only for
+// itself, and another profile's run reads as not found.
+func TestHistoryImportProfileAuthorizationDB(t *testing.T) { //nolint:funlen,gocyclo // ported unchanged from the retired v1 handler test
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -71,70 +66,48 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pin := "1234"
-	if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, pin)}); err != nil {
+	if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, "1234")}); err != nil {
 		t.Fatal(err)
 	}
 	stores := mappedTestUserStoreProvider{stores: map[int]userstore.UserStore{1: store}}
-	tokens := access.NewProfileTokenService("history-import-profile-test-secret", 0)
-	profileToken, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: pinRevision(t, store, "primary")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	viewer := apimw.NewViewerAccessMiddleware(access.NewResolver(
-		stubUserRepo{user: &models.User{ID: 1}}, stores, tokens,
-	))
-	// No credential cipher: an authorized create reaches the existing 503
-	// admission guard, without exchanging external credentials or writing a run.
+	// No credential cipher: an authorized create reaches the 503 admission
+	// guard without exchanging external credentials or writing a run.
 	handler := NewHistoryImportHandler(historyimport.NewService(t.Context(), historyimport.NewRepository(pool, nil), stores))
-	router := chi.NewRouter()
-	router.Use(viewer.RequireViewerAccess)
-	router.Post("/api/v1/history-imports/runs", handler.HandleCreateRun)
-	router.Get("/api/v1/history-imports/runs", handler.HandleListRuns)
-	router.Get("/api/v1/history-imports/runs/{id}", handler.HandleGetRun)
 
-	request := func(method, path, body, profile, tokenType, role, proof string) *httptest.ResponseRecorder {
-		t.Helper()
-		r := httptest.NewRequest(method, "/api/v1/history-imports/runs"+path, strings.NewReader(body))
-		r.Header.Set("X-Profile-Id", profile)
-		r.Header.Set("X-Profile-Token", proof)
-		r = r.WithContext(apimw.SetClaims(r.Context(), &auth.Claims{UserID: 1, SessionID: "session-1", Role: role, TokenType: tokenType}))
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, r)
-		return rec
+	verified := func(string) error { return nil }
+	unverified := func(string) error { return access.ErrProfileUnverified }
+	actor := func(profile string, verify func(string) error) HistoryImportActor {
+		return HistoryImportActor{UserID: 1, ProfileID: profile, VerifyProfile: verify}
+	}
+	status := func(err error) int {
+		if err == nil {
+			return 200
+		}
+		if e, ok := errors.AsType[*APIError](err); ok {
+			return e.Status
+		}
+		t.Fatalf("unexpected error type %T: %v", err, err)
+		return 0
 	}
 
 	t.Run("create", func(t *testing.T) {
 		for _, tc := range []struct {
-			name, profile, target, tokenType, role, proof string
-			status                                        int
+			name   string
+			actor  HistoryImportActor
+			target string
+			want   int
 		}{
-			{"guest cannot target primary", "guest", "primary", auth.TokenTypeAccess, "user", "", 403},
-			{"guest own import reaches admission", "guest", "guest", auth.TokenTypeAccess, "user", "", 503},
-			{"no acting profile", "", "guest", auth.TokenTypeAccess, "user", "", 403},
-			{"locked primary without proof", "primary", "guest", auth.TokenTypeAccess, "user", "", 403},
-			{"locked primary with invalid proof", "primary", "guest", auth.TokenTypeAccess, "user", "invalid-token", 403},
-			{"verified primary reaches admission", "primary", "guest", auth.TokenTypeAccess, "user", profileToken, 503},
-			{"foreign acting profile rejected", "foreign", "guest", auth.TokenTypeAccess, "user", "", 404},
-			{"API key PIN exemption is not household authority", "primary", "guest", auth.TokenTypeAPIKey, "user", "", 403},
-			// The admin role manages the household only through the verified
-			// primary profile; this household has a PIN-locked primary, so a
-			// profile-less admin request no longer stands in for it.
-			{"admin without profile on a locked household", "", "guest", auth.TokenTypeAccess, "admin", "", 403},
-			{"admin account guest cannot target primary", "guest", "primary", auth.TokenTypeAccess, "admin", "", 403},
-			{"admin as verified primary reaches admission", "primary", "guest", auth.TokenTypeAccess, "admin", profileToken, 503},
-			{"admin cannot target another account", "primary", "foreign", auth.TokenTypeAccess, "admin", profileToken, 404},
+			{"guest cannot target primary", actor("guest", verified), "primary", 403},
+			{"guest own import reaches admission", actor("guest", unverified), "guest", 503},
+			{"no acting profile", actor("", verified), "guest", 403},
+			{"locked primary without proof", actor("primary", unverified), "guest", 403},
+			{"locked primary without a verifier", actor("primary", nil), "guest", 403},
+			{"verified primary reaches admission", actor("primary", verified), "guest", 503},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				rec := request(http.MethodPost, "", fmt.Sprintf(`{"profile_id":%q,"source":"plex"}`, tc.target), tc.profile, tc.tokenType, tc.role, tc.proof)
-				if rec.Code != tc.status {
-					t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
-				}
-				var failure struct {
-					Error string `json:"error"`
-				}
-				if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil || failure.Error == "" {
-					t.Fatalf("missing v1 error envelope: %s (%v)", rec.Body.String(), err)
+				_, err := handler.CreateImportRunAs(t.Context(), tc.actor, historyimport.CreateRunInput{ProfileID: tc.target, Source: "plex"})
+				if got := status(err); got != tc.want {
+					t.Fatalf("status = %d (%v), want %d", got, err, tc.want)
 				}
 			})
 		}
@@ -142,22 +115,21 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 
 	t.Run("list", func(t *testing.T) {
 		for _, tc := range []struct {
-			name, profile, tokenType, role, proof, query string
-			count                                        int
-			profileOnly                                  string
+			name        string
+			actor       HistoryImportActor
+			limit       int
+			count       int
+			profileOnly string
 		}{
-			{"guest sees only own runs before limit", "guest", auth.TokenTypeAccess, "user", "", "?limit=2", 2, "guest"},
-			{"no acting profile sees no runs", "", auth.TokenTypeAccess, "user", "", "", 0, ""},
-			{"verified primary sees household", "primary", auth.TokenTypeAccess, "user", profileToken, "?limit=200", 50, ""},
-			{"API key sees only locked primary runs", "primary", auth.TokenTypeAPIKey, "user", "", "?limit=200", 50, "primary"},
-			{"admin without profile on a locked household sees no runs", "", auth.TokenTypeAccess, "admin", "", "", 0, ""},
-			{"admin as verified primary retains v1 limit", "primary", auth.TokenTypeAccess, "admin", profileToken, "?limit=200", 50, ""},
+			{"guest sees only own runs", actor("guest", verified), 2, 2, "guest"},
+			{"no acting profile sees no runs", actor("", verified), 50, 0, ""},
+			{"verified primary sees household", actor("primary", verified), 50, 50, ""},
+			{"unverified primary sees only its own runs", actor("primary", unverified), 100, 60, "primary"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				rec := request(http.MethodGet, tc.query, "", tc.profile, tc.tokenType, tc.role, tc.proof)
-				var runs []historyimport.Run
-				if err := json.Unmarshal(rec.Body.Bytes(), &runs); err != nil || rec.Code != http.StatusOK || len(runs) != tc.count {
-					t.Fatalf("list status=%d count=%d err=%v, want %d runs", rec.Code, len(runs), err, tc.count)
+				runs, _, err := handler.ListImportRunsPageAs(t.Context(), tc.actor, nil, tc.limit)
+				if err != nil || len(runs) != tc.count {
+					t.Fatalf("count=%d err=%v, want %d runs", len(runs), err, tc.count)
 				}
 				for _, run := range runs {
 					if run.UserID != 1 || (tc.profileOnly != "" && run.ProfileID != tc.profileOnly) {
@@ -167,55 +139,51 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 				if tc.count > 0 && tc.profileOnly == "" && runs[0].ID != "guest-new" {
 					t.Fatalf("household list omitted guest run: %+v", runs[0])
 				}
-				if tc.profile == "guest" && (runs[0].ID != "guest-new" || runs[1].ID != "guest-old") {
-					t.Fatalf("guest run order = %+v", runs)
-				}
 			})
 		}
 	})
 
 	t.Run("get", func(t *testing.T) {
 		for _, tc := range []struct {
-			name, profile, run, tokenType, role, proof string
-			status                                     int
+			name  string
+			actor HistoryImportActor
+			run   string
+			want  int
 		}{
-			{"guest reads own run", "guest", "guest-new", auth.TokenTypeAccess, "user", "", 200},
-			{"guest cannot read primary run", "guest", "primary-1", auth.TokenTypeAccess, "user", "", 404},
-			{"no profile cannot read a run", "", "guest-new", auth.TokenTypeAccess, "user", "", 404},
-			{"verified primary reads guest run", "primary", "guest-new", auth.TokenTypeAccess, "user", profileToken, 200},
-			{"API key cannot read guest run as locked primary", "primary", "guest-new", auth.TokenTypeAPIKey, "user", "", 404},
-			{"admin without profile on a locked household cannot read guest run", "", "guest-new", auth.TokenTypeAccess, "admin", "", 404},
-			{"admin as verified primary reads guest run", "primary", "guest-new", auth.TokenTypeAccess, "admin", profileToken, 200},
-			{"admin cannot read another account run", "primary", "foreign-run", auth.TokenTypeAccess, "admin", profileToken, 404},
+			{"guest reads own run", actor("guest", unverified), "guest-new", 200},
+			{"guest cannot read primary run", actor("guest", verified), "primary-1", 404},
+			{"no profile cannot read a run", actor("", verified), "guest-new", 404},
+			{"verified primary reads guest run", actor("primary", verified), "guest-new", 200},
+			{"unverified primary cannot read guest run", actor("primary", unverified), "guest-new", 404},
+			{"verified primary cannot read another account run", actor("primary", verified), "foreign-run", 404},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				rec := request(http.MethodGet, "/"+tc.run, "", tc.profile, tc.tokenType, tc.role, tc.proof)
-				if rec.Code != tc.status {
-					t.Fatalf("get = %d %s, want %d", rec.Code, rec.Body.String(), tc.status)
+				_, err := handler.GetImportRunAs(t.Context(), tc.actor, tc.run)
+				if got := status(err); got != tc.want {
+					t.Fatalf("status = %d (%v), want %d", got, err, tc.want)
 				}
 			})
 		}
 	})
 
 	t.Run("profile cursor filters every page", func(t *testing.T) {
-		actor := HistoryImportActor{UserID: 1, ProfileID: "guest"}
-		first, more, err := handler.ListImportRunsPageAs(t.Context(), actor, nil, 1)
+		guest := actor("guest", unverified)
+		first, more, err := handler.ListImportRunsPageAs(t.Context(), guest, nil, 1)
 		if err != nil || len(first) != 1 || first[0].ID != "guest-new" || !more {
 			t.Fatalf("first page = %+v, more=%v, err=%v", first, more, err)
 		}
 		after := &historyimport.RunKey{CreatedAt: first[0].CreatedAt, ID: first[0].ID}
-		last, more, err := handler.ListImportRunsPageAs(t.Context(), actor, after, 1)
+		last, more, err := handler.ListImportRunsPageAs(t.Context(), guest, after, 1)
 		if err != nil || len(last) != 1 || last[0].ID != "guest-old" || more {
 			t.Fatalf("last page = %+v, more=%v, err=%v", last, more, err)
 		}
 	})
 
 	t.Run("primary without PIN sees every household run", func(t *testing.T) {
-		emptyPIN := ""
-		if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, emptyPIN)}); err != nil {
+		if err := store.UpdateProfile(t.Context(), "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, "")}); err != nil {
 			t.Fatal(err)
 		}
-		runs, more, err := handler.ListImportRunsPageAs(t.Context(), HistoryImportActor{UserID: 1, ProfileID: "primary"}, nil, 100)
+		runs, more, err := handler.ListImportRunsPageAs(t.Context(), actor("primary", nil), nil, 100)
 		if err != nil || more || len(runs) != 62 || !slices.ContainsFunc(runs, func(run historyimport.Run) bool { return run.ProfileID == "guest" }) {
 			t.Fatalf("household page count=%d, more=%v, err=%v", len(runs), more, err)
 		}

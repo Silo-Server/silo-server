@@ -7,8 +7,7 @@ profile is not a server administrator.
 
 An `admin:users` key cannot create or promote an administrator, or set an
 administrator account's password, recovery email (`email`), role, or break-glass
-flag. These writes return 403 (`insufficient_scope` in v1, `permission_denied`
-in v2), including on the key owner's own account. Email is a recovery credential
+flag. These writes return 403 `permission_denied`, including on the key owner's own account. Email is a recovery credential
 because a reset link permits a full login session. Other account fields remain
 subject to the Owner rules, and ordinary accounts remain editable within the scope.
 
@@ -48,8 +47,7 @@ still do not.
 
 A role change also keeps the account signed in, but admin checks trust the role
 in the access token, so the token must be replaced. Every request that presents
-an access token minted before the change gets `401 token_refresh_required` (v1:
-`401 unauthorized`). The login session and its refresh token stay valid, and a
+an access token minted before the change gets `401 token_refresh_required`. The login session and its refresh token stay valid, and a
 refresh issues a token with the new role, so a demoted administrator loses admin
 access on its next request. Clients refresh and retry once and never sign out on
 this response. The same transaction ends every impersonation session the account
@@ -58,8 +56,6 @@ only the Owner may view as an administrator. Jellyfin- and
 Audiobookshelf-compatible sessions are kept, because neither carries the role:
 the Jellyfin surface reports every account as a non-administrator and resolves
 access per request.
-
-The same rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
 
 Omitted update fields preserve their values. Nullable policy overrides accept
 `null` to restore inheritance. Explicit empty library and permission arrays,
@@ -78,13 +74,8 @@ as well. `null` inherits the access group's `max_profiles`, and a value of at le
 an access group created without a value gets 5. `effective_policy.max_profiles` is
 the limit that profile creation enforces: an account at its limit gets
 `409 profile_limit_reached`, and profiles it already has above a lowered limit are
-kept. The bridge v1 body has no inherit state for this field, so its
-`max_profiles` reports the limit that applies. A v1 update stores an override,
-except that sending back the inherited limit an account reported leaves it
-inheriting, and an explicit `null` clears an override back to inherit, as with
-the other policy fields. The group's own limit is v2-only: the v1
-access-group body carries no `max_profiles`, so a group limit is set and read
-through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
+kept. An access group's own limit is set and read through the access-group
+operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
 when access groups and account overrides take `max_profiles`.
 
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
@@ -144,7 +135,7 @@ update turns local password sign-in back on, so `password_login` is true afterwa
 this is how an administrator recovers an account whose provider is gone, and
 clients keep the set-password action for accounts where it is false. Only the server
 Owner may set the password of its own account while `password_login` is false for it
-(403 `permission_denied`; v1 answers `owner_protected`), so an admin cannot turn its own password sign-in back on and
+(403 `permission_denied`), so an admin cannot turn its own password sign-in back on and
 keep its role through provider demotion. A password
 reset link needs `password_login` (see below). `password_change_required` is true
 while the account holds a temporary password.
@@ -221,8 +212,6 @@ they:
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 
-The v1 account and API key routes answer the same refusals with
-`403 owner_protected`, and the v1 invitation routes with `403 role_not_allowed`.
 No account may change its own role, disable itself, or delete itself through these
 routes, and that includes the Owner; those writes return the same 403. Nobody may impersonate the Owner. Administrators may still impersonate only
 non-administrators, but the Owner may also impersonate other administrators.
@@ -232,7 +221,7 @@ administrator the Owner and returns 204. The caller must be the Owner, signed in
 an API key or an impersonation session receives `403 permission_denied`, and so
 does any caller that is not the Owner. A target that is not another enabled
 administrator returns `422 validation_failed`. The previous Owner stays an
-administrator. The operation has no v1 route and is not retryable; a replay is
+administrator. The operation is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
 `ownership_transfer`. Moving ownership ends every session in which someone views the
 server as the new Owner and the previous Owner's sessions viewing as other

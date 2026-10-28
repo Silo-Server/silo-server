@@ -1,9 +1,7 @@
 # Downloads & Offline Sync API (client integration guide)
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface is summarized in
-> [section 16](#16-bridge-the-frozen-apiv1-surface) and is retired after the pre-1.0 bridge
-> window. See [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 This is the client-facing integration guide for downloads v2 / offline sync. It is
 the contract the Apple (`silo-apple`) and Android (`silo-android`) apps should use
@@ -194,8 +192,7 @@ identifier: letters, digits, `.`, `_`, `:` or `-`, with no comma or interior
 whitespace (surrounding whitespace is ignored; each operation keeps its 128-character
 bound). A repeated header line or a comma-joined value is refused with
 `422 validation_failed` at `header.x-silo-device-id` before any operation runs, so a
-joined value can never be stored as a device identity. v1 reads only the first header
-line and is unchanged.
+joined value can never be stored as a device identity.
 
 > **Warning:** any client that sends `X-Silo-Device-Id` on download routes MUST
 > also send `X-Profile-Id`. A device header without a profile is rejected with
@@ -476,7 +473,7 @@ reused entry that belongs to an earlier batch.
 Creation is **non-retryable**: it has no durable receipt and does not promise atomic
 application of every replacement in a page. After an uncertain response, reconcile
 the registry and make an explicit new request for unresolved work rather than
-replaying, refreshing revision guards, or falling back to v1.
+replaying or refreshing revision guards.
 
 ### 4.2 List downloads
 
@@ -1822,8 +1819,7 @@ Detail behind sections 3-8, kept for client and server maintainers.
 ### Ordered status events
 
 Database migration initializes existing managed downloading/completed rows from
-their last bridge update time. Subsequent v1 status writes advance this same
-ordering fence using server time. Replacing an entry increments its revision and
+their last update time. Replacing an entry increments its revision and
 clears its prior event timestamp, so a previous version's event cannot cross
 the revision boundary.
 
@@ -1834,8 +1830,7 @@ flow rather than assuming one implies the others.
 ### Canonical decimal string IDs
 
 Decimal string IDs must be canonical positive values: `"7"` is valid, while `"007"`
-and `"+7"` are rejected. These conventions apply to the native v2 surface; the
-bridge retains its existing error contract.
+and `"+7"` are rejected.
 
 ### File and asset delivery
 
@@ -1874,8 +1869,7 @@ A native manifest has `manifest_version: 3`, a string `media_file_id`,
 millisecond UTC `generated_at`, and authenticated `/api/v2/downloads/...`
 artwork/subtitle references. It preserves the complete metadata, stable provider
 identity, integrity, source or artifact media details, chapters, markers and
-selected audio information. Bridge manifests remain version 2 with their
-original v1 references.
+selected audio information.
 
 Each encoded native manifest is limited to 1 MiB. A single manifest beyond that
 bound returns 413; no fields or arrays are silently truncated. Batch responses
@@ -1940,9 +1934,7 @@ and storage accounting use that same transaction; a changed monitor returns 409
 and requires a fresh monitor read before a new sync. Repeating a page skips
 already-registered entries and may report zero new registrations. Paused monitors
 never register episodes. Episodes the device deleted while monitored, and finished
-episodes of a `delete_watched` monitor, are skipped (8.2). The bridge retains
-immediate best-effort backfill on create/edit and now discards delayed sync
-snapshots after a monitor change.
+episodes of a `delete_watched` monitor, are skipped (8.2).
 Capabilities `subscription_mutations` and `bounded_subscription_sync` identify
 these operations separately from subscription reads.
 
@@ -1985,7 +1977,7 @@ needed for episodes inserted behind a cursor.
 
 Creation has no durable response receipt and does not promise atomic application
 of all replacements in a page. Do not automatically replay an uncertain request,
-refresh revision guards, or fall back to v1. Reconcile the registry after
+or refresh revision guards. Reconcile the registry after
 uncertainty, then make an explicit new request for unresolved work. This also
 prevents duplicate ephemeral transfers. The download capability exposes
 `bounded_creation` when this full native creation flow is configured.
@@ -2001,31 +1993,3 @@ The service opens the authorized source file and closes it after streaming. Succ
 The proxy producer resolves permission before creating a token for the selected FileTarget. The existing planner, short-lived signed target, preflight and local fallback remain authoritative; callers cannot supply a path or proxy URL. A successful proxy preflight may yield 307. HEAD releases its provisional planner reservation; GET retains the existing reservation lifecycle, with no new completion/cleanup guarantee. Preflight failure releases the reservation and falls back to a freshly authorized local serve. A redirect is not proof of delivery, and an issued proxy token retains its existing expiration/revocation limits.
 
 The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, mints a link with those headers, probes the link once with HEAD, and launches browser GET on the identical link URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
-
----
-
-## 16. Bridge: the frozen `/api/v1` surface
-
-The alpha surface serves the same downloads and offline-sync features under
-`/api/v1` through the pre-1.0 bridge window. It is frozen: no feature work lands
-there, and Silo 1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
-`client_upgrade_required` problem code
-([API contract](architecture/api-contract.md)).
-
-The differences a migrating client has to handle:
-
-| Area | Bridge (`/api/v1`) | Stable (`/api/v2`) |
-| --- | --- | --- |
-| Capability | `GET /api/v1/downloads/capability` | `GET /api/v2/capabilities/downloads`, plus the bounded-flow flags |
-| Identifiers | Integer `media_file_id` and `file_id` | Canonical positive decimal strings |
-| Collections | `{downloads: [...]}`, `{manifests: [...]}`, `{progress: [...]}` | `{items, page}` with opaque cursors |
-| Creation | `202` with a bare row or `{downloads, skipped}` | `202` with `{items, skipped, page}` and revision guards |
-| Status report | `PATCH` `{status}` answering `204` | `PATCH` `{status, updated_at, revision}` answering `200` with the entry |
-| Manifest | `manifest_version: 2`; asset URLs are `/api/v2/...` because both versions share the manifest builder | `manifest_version: 3`, millisecond `generated_at`, `/api/v2/...` asset URLs, 1 MiB bound |
-| Progress flush | `position`/`duration` seconds, `{results}` | `position_ms`/`duration_ms`, `{items, summary}` |
-| Progress pull | `GET /api/v1/progress?since=` | `GET /api/v2/progress?cursor=` |
-| Subscriptions | No `ETag`; sync registers across every monitor | `If-Match` on mutations; bounded per-monitor sync |
-| Errors | Flat `{error, message}` envelope | RFC 9457 problem documents (section 12) |
-
-Do not fall back to the bridge after an uncertain v2 request. Reconcile the
-registry on v2 and make an explicit new request.

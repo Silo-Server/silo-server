@@ -58,7 +58,7 @@ the same posters:
 `catalog.LibraryCollectionService.CollectionPosters` is the only way to answer "which poster
 does this viewer see". Never build a viewer-facing response from `poster_url` alone:
 
-- The v1 and v2 handlers build responses from `withViewerPosters` copies
+- The v2 handlers build responses from `withViewerPosters` copies
   (`internal/api/handlers/library_collections.go`). That covers the library Collections tab,
   server collections, and admin responses. `/api/v2` collections and collection cards mark a
   collage with `poster_is_collage`, so a client can tell it from an uploaded poster.
@@ -114,7 +114,6 @@ above with these differences:
 - A create, edit, membership change, poster removal or sync calls `Refresh`, which waits about
   two seconds so a burst of changes to one collection shares one build, then builds the acting
   profile's collage (the owner's filter for a scheduled sync) through the build queue.
-- Only `/api/v2` reads show collages. The `/api/v1` bridge is frozen and keeps returning
-  assigned posters only. Accounts on the per-user SQLite store keep their collections outside
-  Postgres and have no collage.
+- Accounts on the per-user SQLite store keep their collections outside Postgres and have no
+  collage.
 - Jellyfin clients never see personal collections, so jellycompat has no personal collage path.

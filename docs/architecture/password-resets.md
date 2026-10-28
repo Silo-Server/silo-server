@@ -131,9 +131,9 @@ administrator's tokens never carry it.
 
 **Allowlist, fail closed.** `RequireAuth` admits a restricted session only to the
 exact routes in `passwordChangeRoutes`: reading the account, the password
-capability, changing the password, and logout, on both API majors. Everything
+capability, changing the password, and logout. Everything
 else, including new routes, returns `403 password_change_required`. The
-`plugin_access` bridge refuses restricted tokens too. The refusal is still
+`plugin_access` check refuses restricted tokens too. The refusal is still
 attributed to the account in the request log. A restricted session may change the
 password without choosing a profile, but must still prove the temporary password,
 and cannot reuse it as the new one.

@@ -4,102 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
-
-func routeLibraryPlaybackPref(
-	t *testing.T,
-	h *LibraryPlaybackPrefHandler,
-	method string,
-	libraryID string,
-	body []byte,
-) *httptest.ResponseRecorder {
-	t.Helper()
-	req := valuesRequest(method, "/library-playback-prefs/"+libraryID, body)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("library_id", libraryID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rec := httptest.NewRecorder()
-	if method == http.MethodPut {
-		h.HandleSetLibraryPlaybackPref(rec, req)
-	} else {
-		h.HandleDeleteLibraryPlaybackPref(rec, req)
-	}
-	return rec
-}
-
-func TestLegacyLibraryPlaybackWritesStayInCanonicalSync(t *testing.T) {
-	_, store := newValuesTestHandler(t)
-	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
-
-	rec := routeLibraryPlaybackPref(t, handler, http.MethodPut, "7", []byte(`{
-		"audio_language":"ja",
-		"subtitle_language":"de",
-		"subtitle_mode":"always",
-		"show_forced_subtitles":false
-	}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	want := map[string]string{
-		settingskeys.PlaybackAudioLanguage:       `"ja"`,
-		settingskeys.PlaybackSubtitleLanguage:    `"de"`,
-		settingskeys.PlaybackSubtitleMode:        `"always"`,
-		settingskeys.PlaybackShowForcedSubtitles: `false`,
-	}
-	for key, expected := range want {
-		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileLibrary,
-			ProfileID: "profile-1", LibraryID: 7,
-		})
-		if err != nil || value == nil {
-			t.Fatalf("reading canonical %s: value=%+v err=%v", key, value, err)
-		}
-		if string(value.Value) != expected {
-			t.Errorf("%s = %s, want %s", key, value.Value, expected)
-		}
-	}
-
-	// The legacy PUT replaces the combined row. Omitting three fields clears
-	// their canonical overrides rather than leaving the backfilled values live.
-	rec = routeLibraryPlaybackPref(t, handler, http.MethodPut, "7", []byte(`{"audio_language":"fr"}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("replacement PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	for _, key := range []string{
-		settingskeys.PlaybackSubtitleLanguage,
-		settingskeys.PlaybackSubtitleMode,
-		settingskeys.PlaybackShowForcedSubtitles,
-	} {
-		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileLibrary,
-			ProfileID: "profile-1", LibraryID: 7,
-		})
-		if err != nil || value != nil {
-			t.Errorf("omitted %s was not cleared: value=%+v err=%v", key, value, err)
-		}
-	}
-
-	rec = routeLibraryPlaybackPref(t, handler, http.MethodDelete, "7", nil)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-	value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key: settingskeys.PlaybackAudioLanguage, Scope: settingscontract.ScopeProfileLibrary,
-		ProfileID: "profile-1", LibraryID: 7,
-	})
-	if err != nil || value != nil {
-		t.Fatalf("DELETE left canonical audio value=%+v err=%v", value, err)
-	}
-}
 
 // canonicalLibraryValue is the canonical profile_library row for key, or nil.
 func canonicalLibraryValue(t *testing.T, store userstore.UserStore, profileID string, libraryID int, key string) *string {
@@ -117,131 +27,92 @@ func canonicalLibraryValue(t *testing.T, store userstore.UserStore, profileID st
 	return &s
 }
 
-// The v2 partial update merges onto the canonical rows, not the legacy
-// composite row: PUT /settings/values (and the web library editor) write the
-// canonical row without mirroring it into the legacy row, so a patch of one
-// member must keep the newer canonical value of another rather than copy the
-// obsolete legacy one back over it.
+// A partial update merges onto the canonical profile_library rows: a member
+// the patch omits keeps its newer canonical value, a nil value clears only
+// that member, values are normalized, and a rejected member writes nothing.
 func TestPatchLibraryPlaybackPreferenceMergesOntoCanonicalRows(t *testing.T) {
 	_, store := newValuesTestHandler(t)
 	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
-	ctx := context.Background()
+	ctx := t.Context()
 	const profileID = "profile-1"
-
-	rec := routeLibraryPlaybackPref(t, handler, http.MethodPut, "7", []byte(`{"audio_language":"ja","subtitle_mode":"always"}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	value := func(key string) *string { return canonicalLibraryValue(t, store, profileID, 7, key) }
+	patch := func(p LibraryPlaybackPrefPatch) {
+		t.Helper()
+		if err := handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, p); err != nil {
+			t.Fatalf("patch: %v", err)
+		}
 	}
-	// A canonical-only write moves subtitle_language to "de" while the
-	// legacy row still says nothing about it.
+
+	patch(LibraryPlaybackPrefPatch{
+		AudioLanguage: PrefPatch[string]{Present: true, Value: new(" EN-us ")},
+		SubtitleMode:  PrefPatch[string]{Present: true, Value: new("always")},
+	})
+	if got := value(settingskeys.PlaybackAudioLanguage); got == nil || *got != `"en-US"` {
+		t.Fatalf("audio_language = %v, want normalized \"en-US\"", got)
+	}
+	// A canonical-only write, as PUT /settings/values makes, moves
+	// subtitle_language; the next patch must not revert it.
 	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
 		Key: settingskeys.PlaybackSubtitleLanguage, Scope: settingscontract.ScopeProfileLibrary,
 		ProfileID: profileID, LibraryID: 7,
 	}, []byte(`"de"`)); err != nil {
 		t.Fatalf("canonical write: %v", err)
 	}
-
-	if err := handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, LibraryPlaybackPrefPatch{
-		AudioLanguage: PrefPatch[string]{Present: true, Value: ptr("fr")},
-	}); err != nil {
-		t.Fatalf("patch: %v", err)
-	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackAudioLanguage); got == nil || *got != `"fr"` {
+	patch(LibraryPlaybackPrefPatch{AudioLanguage: PrefPatch[string]{Present: true, Value: new("fr")}})
+	if got := value(settingskeys.PlaybackAudioLanguage); got == nil || *got != `"fr"` {
 		t.Fatalf("audio_language = %v, want \"fr\"", got)
 	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackSubtitleLanguage); got == nil || *got != `"de"` {
-		t.Fatalf("subtitle_language reverted to %v, want the newer canonical \"de\"", got)
+	if got := value(settingskeys.PlaybackSubtitleLanguage); got == nil || *got != `"de"` {
+		t.Fatalf("subtitle_language = %v, want the newer canonical \"de\"", got)
 	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackSubtitleMode); got == nil || *got != `"always"` {
+	if got := value(settingskeys.PlaybackSubtitleMode); got == nil || *got != `"always"` {
 		t.Fatalf("subtitle_mode = %v, want \"always\"", got)
 	}
-	// The legacy row is rewritten from the merged set, so it now carries the
-	// canonical subtitle_language too.
-	row, err := store.GetLibraryPlaybackPreference(ctx, profileID, 7)
-	if err != nil || row == nil {
-		t.Fatalf("legacy row: %+v err=%v", row, err)
-	}
-	if row.AudioLanguage != "fr" || !row.HasSubtitleLanguage || row.SubtitleLanguage != "de" || row.SubtitleMode != "always" || row.HasShowForcedSubtitles {
-		t.Fatalf("legacy row = %+v", row)
-	}
 
-	// Clearing (nil Value) removes only that override; clearing the last
-	// override removes the row.
-	if err := handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, LibraryPlaybackPrefPatch{
+	patch(LibraryPlaybackPrefPatch{
 		AudioLanguage: PrefPatch[string]{Present: true},
 		SubtitleMode:  PrefPatch[string]{Present: true},
-	}); err != nil {
-		t.Fatalf("clearing patch: %v", err)
+	})
+	if value(settingskeys.PlaybackAudioLanguage) != nil || value(settingskeys.PlaybackSubtitleMode) != nil {
+		t.Fatal("cleared members survived")
 	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackAudioLanguage); got != nil {
-		t.Fatalf("audio_language not cleared: %s", *got)
-	}
-	if row, _ = store.GetLibraryPlaybackPreference(ctx, profileID, 7); row == nil || !row.HasSubtitleLanguage || row.HasAudioLanguage || row.HasSubtitleMode {
-		t.Fatalf("legacy row after clear = %+v", row)
-	}
-	if err := handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, LibraryPlaybackPrefPatch{
-		SubtitleLanguage: PrefPatch[string]{Present: true},
-	}); err != nil {
-		t.Fatalf("final clear: %v", err)
-	}
-	if row, _ = store.GetLibraryPlaybackPreference(ctx, profileID, 7); row != nil {
-		t.Fatalf("row survived clearing every override: %+v", row)
-	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackSubtitleLanguage); got != nil {
-		t.Fatalf("subtitle_language survived: %s", *got)
+	if got := value(settingskeys.PlaybackSubtitleLanguage); got == nil || *got != `"de"` {
+		t.Fatalf("clearing other members dropped subtitle_language: %v", got)
 	}
 
-	// A rejected member never reaches the store.
-	err = handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, LibraryPlaybackPrefPatch{
-		SubtitleMode: PrefPatch[string]{Present: true, Value: ptr("sometimes")},
+	err := handler.PatchLibraryPlaybackPreference(ctx, 1, profileID, 7, LibraryPlaybackPrefPatch{
+		SubtitleLanguage: PrefPatch[string]{Present: true, Value: new("fr")},
+		SubtitleMode:     PrefPatch[string]{Present: true, Value: new("sometimes")},
 	})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Field != "subtitle_mode" {
 		t.Fatalf("invalid subtitle_mode: %v", err)
 	}
-	// The v1 PUT is unchanged: it still replaces the whole row.
-	rec = routeLibraryPlaybackPref(t, handler, http.MethodPut, "7", []byte(`{"audio_language":"ja","subtitle_language":"de"}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	rec = routeLibraryPlaybackPref(t, handler, http.MethodPut, "7", []byte(`{"audio_language":"fr"}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := canonicalLibraryValue(t, store, profileID, 7, settingskeys.PlaybackSubtitleLanguage); got != nil {
-		t.Fatalf("v1 PUT kept the omitted member: %s", *got)
+	if got := value(settingskeys.PlaybackSubtitleLanguage); got == nil || *got != `"de"` {
+		t.Fatalf("a rejected patch wrote subtitle_language: %v", got)
 	}
 }
 
-// The v2 listing is assembled from the canonical profile_library rows: a
-// row written through the settings writer shows up with the legacy table
-// empty, and a legacy-only row (written before the sync existed) does not.
+// The listing is assembled from the canonical profile_library rows of the
+// requesting profile only; a legacy-only composite row is not part of it, and
+// a library drops out once its last canonical key is cleared.
 func TestListLibraryPlaybackPreferencesCanonicalReadsSettingRows(t *testing.T) {
 	_, store := newValuesTestHandler(t)
 	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
-	ctx := context.Background()
+	ctx := t.Context()
 	const profileID = "profile-1"
-
-	canonical := func(libraryID int, key string, value string) {
+	write := func(profile string, libraryID int, key, value string) {
 		t.Helper()
 		if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: libraryID,
+			Key: key, Scope: settingscontract.ScopeProfileLibrary, ProfileID: profile, LibraryID: libraryID,
 		}, []byte(value)); err != nil {
 			t.Fatalf("canonical write %s: %v", key, err)
 		}
 	}
-	canonical(9, settingskeys.PlaybackSubtitleLanguage, `"de"`)
-	canonical(9, settingskeys.PlaybackShowForcedSubtitles, `true`)
-	canonical(4, settingskeys.PlaybackSubtitleMode, `"off"`)
-	// Another profile's row and a profile_library key outside the four are
-	// not part of the preference.
-	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
-		Key: settingskeys.PlaybackAudioLanguage, Scope: settingscontract.ScopeProfileLibrary, ProfileID: "profile-2", LibraryID: 9,
-	}, []byte(`"fr"`)); err != nil {
-		t.Fatalf("other profile write: %v", err)
-	}
-	// A legacy-only row: written straight to the composite table, as data
-	// predating the canonical sync would be.
+	write(profileID, 9, settingskeys.PlaybackSubtitleLanguage, `"de"`)
+	write(profileID, 9, settingskeys.PlaybackShowForcedSubtitles, `true`)
+	write(profileID, 4, settingskeys.PlaybackSubtitleMode, `"off"`)
+	write("profile-2", 9, settingskeys.PlaybackAudioLanguage, `"fr"`)
 	if err := store.UpsertLibraryPlaybackPreference(ctx, userstore.LibraryPlaybackPreference{
 		ProfileID: profileID, LibraryID: 2, AudioLanguage: "ja", HasAudioLanguage: true,
 	}); err != nil {
@@ -269,17 +140,6 @@ func TestListLibraryPlaybackPreferencesCanonicalReadsSettingRows(t *testing.T) {
 		}
 	}
 
-	// The v1 listing still reads the legacy table unchanged: it sees the
-	// legacy-only row and nothing of the canonical-only libraries.
-	legacy, err := handler.ListLibraryPlaybackPreferences(ctx, 1, profileID)
-	if err != nil {
-		t.Fatalf("legacy list: %v", err)
-	}
-	if len(legacy) != 1 || legacy[0].LibraryID != 2 || legacy[0].AudioLanguage != "ja" {
-		t.Fatalf("legacy list = %+v", legacy)
-	}
-
-	// A canonical clear drops the library from the list once no key is left.
 	for _, key := range []string{settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackShowForcedSubtitles} {
 		if _, err := store.DeleteSettingValue(ctx, userstore.SettingIdentity{
 			Key: key, Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: 9,
@@ -290,38 +150,5 @@ func TestListLibraryPlaybackPreferencesCanonicalReadsSettingRows(t *testing.T) {
 	got, err = handler.ListLibraryPlaybackPreferencesCanonical(ctx, 1, profileID)
 	if err != nil || len(got) != 1 || got[0].LibraryID != 4 {
 		t.Fatalf("after clear = %+v err=%v", got, err)
-	}
-}
-
-func TestPatchLibraryPlaybackPreferenceMirrorsNormalizedValues(t *testing.T) {
-	_, store := newValuesTestHandler(t)
-	handler := NewLibraryPlaybackPrefHandler(testUserStoreProvider{store: store})
-	for _, input := range []string{" EN-us ", "  "} {
-		if err := handler.PatchLibraryPlaybackPreference(t.Context(), 1, "profile-1", 7, LibraryPlaybackPrefPatch{
-			AudioLanguage:    PrefPatch[string]{Present: true, Value: new(input)},
-			SubtitleLanguage: PrefPatch[string]{Present: true, Value: new(input)},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		legacy, err := handler.ListLibraryPlaybackPreferences(t.Context(), 1, "profile-1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		canonical, err := handler.ListLibraryPlaybackPreferencesCanonical(t.Context(), 1, "profile-1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if input == "  " {
-			if len(legacy) != 0 || len(canonical) != 0 {
-				t.Fatalf("cleared values: legacy=%+v canonical=%+v", legacy, canonical)
-			}
-			continue
-		}
-		if len(legacy) != 1 || len(canonical) != 1 {
-			t.Fatalf("rows: legacy=%+v canonical=%+v", legacy, canonical)
-		}
-		if legacy[0].AudioLanguage != "en-US" || legacy[0].SubtitleLanguage != "en-US" || canonical[0].AudioLanguage != "en-US" || canonical[0].SubtitleLanguage != "en-US" {
-			t.Fatalf("normalization diverged: legacy=%+v canonical=%+v", legacy, canonical)
-		}
 	}
 }

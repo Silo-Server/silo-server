@@ -1,6 +1,6 @@
 # Native API contract: Huma and `/api/v2`
 
-**Status: accepted for Silo 1.0; implementation pending.** Tracking issue:
+**Status: accepted for Silo 1.0; `/api/v1` retired.** Tracking issue:
 [#135](https://github.com/Silo-Server/silo-server/issues/135). Commands assume the repository
 root is the cwd.
 
@@ -12,26 +12,29 @@ its pull requests.
 
 Silo 1.0's first stable native API is `/api/v2`.
 
-The current `/api/v1` surface is an alpha contract. It will be frozen, carried only through a
-bounded pre-1.0 bridge, and removed from the 1.0 server except for a retirement tombstone. Silo will
-not maintain two native business APIs indefinitely.
+The `/api/v1` surface was the alpha contract. It is retired: the main API listener answers every
+`/api/v1` route with a retirement tombstone, except the retained operational probes (see
+[Huma coverage](#what-huma-covers)). Silo does not maintain two native business APIs. The
+maintainer waived the planned two pre-1.0 bridge releases once v2 had shipped long enough
+(issue #886, 2026-10-27); [v1 lifecycle](#v1-lifecycle-and-release-sequence) records the
+retirement.
 
-The pre-1.0 native HTTP surface is broader than that prefix. The proxy and transcode-node
-listeners currently expose native stream, download, media-delivery, and internal-control routes
-mostly at version-neutral paths, plus their own `/api/v1/health` routes. In this document,
-**legacy native surface** means both the main API router's `/api/v1` namespace and those
-alpha-native routes on the other listeners. It excludes Jellyfin and Audiobookshelf compatibility
-protocols, plugin RPC, and operational endpoints. The main API listener's tombstone cannot retire
-routes on another listener; every proxy/transcode-node route therefore receives its own explicit
-move, replacement, retention, or removal disposition.
+The alpha native HTTP surface was broader than that prefix. The proxy and transcode-node
+listeners expose native stream, download, media-delivery, and internal-control routes mostly at
+version-neutral paths, plus their own `/api/v1/health` routes. In this document, **legacy native
+surface** means both the main API router's former `/api/v1` namespace and those alpha-native
+routes on the other listeners. It excludes Jellyfin and Audiobookshelf compatibility protocols,
+plugin RPC, and operational endpoints. The main API listener's tombstone cannot retire routes on
+another listener; every proxy/transcode-node route received its own explicit move, replacement,
+retention, or removal disposition.
 
 The v2 JSON API is implemented with Huma v2 mounted on the existing chi router through the
 `humachi` adapter. Go input and output types are the source of truth. Huma derives OpenAPI 3.1 and
 JSON Schema from those types and applies the same request validation at runtime. The generated
 spec is committed under `contracts/api/v2/`, served by the running server, and reproduced in CI.
 
-This is a contract reset, not a mechanical change of path prefix. Every route in the legacy native
-surface receives an explicit v2 disposition: carried forward, redesigned, replaced, removed,
+This was a contract reset, not a mechanical change of path prefix. Every route in the legacy native
+surface received an explicit v2 disposition: carried forward, redesigned, replaced, removed,
 compatibility-only, or outside the native JSON contract. Wire changes must be intentional and
 reviewed. The existing implementation is evidence about product behavior, not an automatic
 compatibility requirement: v2 replaces alpha-era shortcuts and framework accidents with current
@@ -51,8 +54,8 @@ while simultaneously changing the transport framework. It would spend most of th
 budget preserving alpha behavior and then lock that behavior into 1.0.
 
 A permanent v1/v2 split would be worse: self-hosted servers and independently updated clients
-create real version skew, and duplicated handlers inevitably drift. The bridge therefore exists
-only to sequence releases safely; it is not a support policy.
+create real version skew, and duplicated handlers inevitably drift. The v1 surface was therefore
+carried only until v2 clients shipped; it was never a support policy.
 
 ## Contract architecture
 
@@ -74,9 +77,8 @@ only to sequence releases safely; it is not a support policy.
   optional dependencies do not make the contract itself nondeterministic.
 
 Huma transport types stay close to the operation that uses them. Business behavior remains in
-the package that owns the domain. During the bridge, v1 and v2 handlers call the same application
-services; a v2 handler must not proxy to a v1 HTTP handler, and business logic must not be copied
-between versions.
+the package that owns the domain. v2 handlers call application services; transport code holds no
+business logic.
 
 The raw playback registry may reuse byte-delivery handlers for range, HEAD, HLS and subtitle
 sidecar protocols. That boundary does not apply to structured JSON: subtitle font bundles call
@@ -122,10 +124,10 @@ publishing them is a post-1.0 follow-up. `https://siloserver.org/docs/api/v2/` m
 browsable UI, but it is presentation over the raw JSON, not another source of truth. The hosting
 provider may change without changing these canonical project URLs.
 
-### Legacy native route inventory
+### Native route inventory
 
-`contracts/api/v2/route-inventory.json` is the enumerated legacy native surface every later
-migration decision is measured against: one row per method+path variant (`GET` and `HEAD`, a
+`contracts/api/v2/route-inventory.json` enumerates every route the native listeners register
+outside the Huma registry: one row per method+path variant (`GET` and `HEAD`, a
 WebSocket handshake, and each method of a wildcard `Handle` are separate rows) across four
 native listeners: the root `http.ServeMux` (`cmd/silo.newRootHandler`), the API router
 (`internal/api.NewRouter`), the proxy node and the transcode node (each `(*Server).Handler`). Root
@@ -162,117 +164,13 @@ bug, each listener package reconciles a real router at test time through its une
 (exact for root, proxy, transcode; one-way for API). `deferred_fields` are null; `heuristic_fields`
 are evidence, not facts.
 
-### Migration ledger
+### Migration ledger (retired)
 
-`contracts/api/v2/migration.json` records the v2 disposition of every native row in the route inventory.
-Its key is the inventory row's listener, method, exact path, and `registration_index`: the
-inventory registers twelve method+path pairs twice, under different middleware or conditions
-(for example a rate-limited and an unlimited variant of the same login route), and each
-registration is a separate operation with its own consumers and disposition, so the index
-disambiguates them in registration order. There is exactly one ledger entry per native inventory row and
-one row per entry, and the entries follow inventory order.
-
-The finite `/debug/pprof/` route set on `operational_debug` and `/metrics` on
-`operational_metrics` are explicitly outside native migration decisions and
-native release-scenario catalogs. They are validated by the profiling,
-metrics-listener, and route-inventory suites and documented in
-[Observability](observability.md#profiling-and-resource-boundaries) and its
-[deployment section](observability.md#deployment-and-retention). Each exclusion matches
-its exact listener, methods, and paths; it cannot hide a profiling or metrics
-path on a native listener or an unexpected route on an operational listener.
-The root listener's own `/metrics` row, which answers 404 so a disabled metrics
-listener does not fall through to the SPA, stays in the ledger as a documented
-exclusion.
-
-An entry has two kinds of fields. The first kind is copied from the inventory row — `listener`,
-`namespace`, `method`, `path`, `handler`, `handler_kind`, `source_file`, `route_group`,
-`middleware_chain`, `auth_class`, `auth_traits`, `conditional`, `conditions`, `delegates_to`
-(the inventory's empty string is the ledger's `null`), `request_kind`, `response_media_kind`,
-`streams`, and `upgrades_websocket` — plus `profile_required` and `admin_required`, which are
-projections of `auth_traits`. `make verify-migration-ledger` (the whole `internal/contractledger`
-test package, run in CI) validates the file against `contracts/api/v2/migration.schema.json`,
-reconciles every one of those fields against the inventory, reporting drift per field, and
-enforces the review rules below. The one permitted override is the ten `dynamic_plugin_proxy`
-rows, whose media kinds are recorded as `dynamic_proxy` because a plugin proxy has no static
-request or response shape; the override is anchored to the inventory side, so only a row whose
-inventory handler is one of the two plugin-proxy literals (`/api/v1/plugin-assets/{installation_id}/*`
-and `/api/v1/plugins/{installation_id}/*`) may claim the rule, and any other row that claims it
-fails with `dynamic_plugin_proxy rule on a non-proxy handler`. The gate also prints set problems
-(missing entry, orphan entry, drift) before the order check and reports only the first order
-mismatch, because later ones cascade from it.
-
-The second kind is curated by hand and is what the ledger exists to hold: `consumers` and
-`consumer_call_sites` (including `match: manual` and `match: follower` sites), `section`, `release_flow`, `tier`, `disposition`,
-`disposition_rule`, `disposition_rationale`, `owner`, `review_state`, `v2`, and `notes`. The
-schema ties them together: each `disposition_rule` names the document or decision that justifies
-it and is therefore allowed only with the disposition it justifies (`maintainer_decision` is the
-escape hatch for any); `removed` and `documented_exclusion` rows carry an all-null `v2`; a
-`ported`, `redesigned`, or `replaced` row can be `ratified` only with a complete `v2` target,
-except the four `contract_root_probes` rows, which are ratified as retained unversioned probes
-with `v2` unset and `notes` opening `Retained as unversioned probe on <listener> listener`; and
-every `removed`, `redesigned`, or `replaced` row names an `owner`, which the gate refuses to
-ratify while it is a placeholder (anything starting with `pending`, or `tbd`, `todo`, `unknown`,
-`none`, compared case-insensitively). Tier is a rule, stated in the file's `description` and
-enforced by the gate: tier 1 is the plan's release-critical flows unless the row is `removed`,
-since a removed route has no v2 behavior to baseline, so a removed row in tier 1 fails.
-`release_flow` is derived from route intent, not path prefix: the acting-admin library
-management routes under `/api/v1/libraries/`, the admin scan triggers, and the theme catalog
-refresh are `core_admin`, while the viewer-facing `/api/v1/library/{id}/*` reads are
-`browse_search`. Proxy and transcode-node rows that are `ported` keep `v2` null by design: those
-listeners have no `/api/v2` namespace, so the route is retained at its version-neutral path and
-described through the raw-operation registry, never aliased into v2. Ratifying such a row therefore
-means ratifying its retention, not a mapping: the schema's node-listener rule requires a ratified
-`proxy` or `transcode_node` port to keep `v2` unset, carry `disposition_rule` `listener_delegation`,
-and open its `notes` with `Retained on <listener> listener with <auth class>`, citing the
-`x-silo-worker-protocols` entry that describes it; on the `api` listener a ratified port still
-names its v2 operation completely. Because these fields are decisions
-rather than derivations, the ledger is gated, not regenerated: CI checks the committed file, and
-nothing rewrites it.
-
-`section` is the one scheduling field with a generator: it names the Phase 4 delivery unit (one
-section PR per value, at most 40 rows each) and is a pure function of listener, namespace and
-path in `scripts/apiv2-ledger/assign_sections.py`. `make verify-migration-ledger` fails when the
-committed assignments differ from the script's, so a new route lands in a section by regenerating,
-and moving a route between sections is a change to the script, reviewed like any other boundary
-decision. Rows that need no v2 work (`removed`, `documented_exclusion`) still carry a section so
-the PR that retires or documents them is unambiguous.
-
-Consumer evidence comes from `scripts/apiv2-ledger/`. `extract_consumers.py` scans `web/src`, a
-silo-apple tree, and a silo-android tree for HTTP and WebSocket calls, resolving path literals,
-helper functions that return a path template, templates rooted at the API base URL, Kotlin
-`buildString`/`const val` builders, and Swift `let`/`static let` path bindings;
-`match_consumers.py` maps those sites onto inventory rows by normalized path template and method;
-`sweep_uncredited.py` then greps the last two static segments of every inventory path across all
-three trees and lists every request-shaped hit not already credited, which a maintainer resolves
-by hand. Call-site files are repository-root-relative for their repo (web sites are relative to
-`web/`), and the schema enforces each repo's root so a mis-rooted site fails the gate. Sibling
-sites are pinned: the ledger's `source_trees` header records the silo-apple and silo-android
-commit the sites were extracted from (`build_ledger.py` takes both SHAs as arguments), so a
-site is re-resolved with `git show <sha>:<file>` against that exact tree rather than a moving
-branch. `sweep_uncredited.py`, given the sibling git checkouts, reports a credited file that no
-longer exists at the pin as `stale-against-pinned-tree`, separately from an uncredited hit.
-`TestSiblingCallSitesResolveAgainstPinnedTrees` goes further for every apple and android site:
-the file must exist at the pin, the line must be inside it, and the route's last static path
-segment (or, for a row that maps to a v2 operation, that operation's last static segment, since
-`match_consumers.py` credits a client that already spells the v2 path back to the v1 row) must
-appear within four lines of the credited line, so a wrong pin whose files still exist is
-reported rather than passed. Two site annotations refine that check. A site whose
-path is a constant declared elsewhere in the file records `path_literal_line`, the line of the
-declaration, and the segment is looked for there instead of at the call line. A site marked
-`match: follower` is the validator or resolver that admits a server-supplied URL (the stream
-and transcode URLs a client fetches from the playback plan), so it never spells the path and is
-exempt from the segment check while its file and line are still verified. The test skips only
-when a sibling checkout is absent next to this repository, which is the CI case; a checkout
-that is present but has not fetched the pinned commit, or a site that no longer holds up at
-the pin, fails it, so `make verify-migration-ledger` cannot print ok over an unfetched pin.
-`build_ledger.py` merges a regenerated inventory and consumer map into the committed ledger by
-key: it refreshes the copied fields and mechanical call sites (carrying each mechanical site's
-`path_literal_line` over by location), preserves every curated field and every manual and
-follower site on an existing entry, and seeds defaults only for rows that have no entry yet.
-Running it on an unchanged inventory and consumer map rewrites the file byte for byte.
-Server-internal and compat consumers (Go URL builders in this repository) are recorded as
-manual sites. Absence of a first-party consumer is not proof of disuse; removal needs an
-affirmative product decision.
+During the migration, `contracts/api/v2/migration.json` recorded a reviewed v2 disposition for
+every legacy native route, and the tier-1 scenario catalogs under `contracts/api/v2/scenarios`
+paired each release-critical v1 exchange with its v2 counterpart. Both were retired with the v1
+surface: every row had a ratified disposition, and the behavior they compared is now tested once,
+against the v2 entry points, in the packages that own it. The ledger's history is in git.
 
 ### Contract foundation
 
@@ -329,17 +227,18 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Operation classes.** Every v2 operation declares one class at registration — `public`,
   `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
   policy permission it needs) — and the listener composes the existing `internal/api/middleware`
-  gates onto it per class, in the order the v1 authenticated group runs them: auth, then demo
+  gates onto it per class, in the order the v1 authenticated group ran them: auth, then demo
   mode for operations marked demo-restricted, then the rate limiter, then viewer access for
   every class that resolves a profile (`profile_scoped`, `acting_admin`, `permission_gated`),
-  then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
-  matching Problem Details document by switching on the v1 body's machine-readable `error` and
-  `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
+  then the profile, acting-admin, or permission gate. The shared gates still write the legacy
+  JSON error body v1 answered with; v2 re-renders a denial as the matching Problem Details
+  document by switching on that body's machine-readable `error` and `reason`
+  (`internal/apiv2/gates.go`). The decision itself is the shared gate's, and a locked profile keeps its own
   `profile_verification_required` type so clients still know to ask for the PIN, a session
   holding a temporary password keeps `password_change_required` so clients route to the
   password change, and an access token minted before the account's role changed gets
   `token_refresh_required` so clients refresh instead of signing out. A credential the auth
-  gate could not check because its store failed (v1 `503 service_unavailable`) becomes
+  gate could not check because its store failed (the gate's `503 service_unavailable`) becomes
   `503 dependency_unavailable` with `Retry-After`, never a 401. Viewer access answers the
   same way, with reason `viewer_access_unavailable`, when the viewer's scope policy runs out
   of evaluation time; the request is refused either way. A gate the
@@ -356,11 +255,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   to the Huma adapter (`RouterConsumer` in the generator config), and only as the constructor's
   own root router at the constructor's top level — never a router derived by `Group()`,
   `Route()` or `With()`, and never inside a closure, a helper function, or a condition. The
-  operations behind it are described by `contracts/api/v2/openapi.json`. `TestRuntimeReconcile`
-  in `internal/apiv2` asserts the routes the assembled router serves are exactly the set the
-  registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
-  `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
-  listener like any other unrouted path.
+  operations behind it are described by `contracts/api/v2/openapi.json`, and
+  `TestCommittedArtifactMatchesRouter` (below) reconciles them with the assembled router. The
+  wildcard covers `/api/v2/` and everything under it; the namespace root `/api/v2`, with no
+  trailing slash, is outside the v2 surface and is answered by the API listener's router like
+  any other unrouted path.
 - **The artifact.** `cmd/apiv2-openapi` renders `contracts/api/v2/openapi.json` from the
   registries alone (`apiv2.GenerateOpenAPI`; no database, network, credentials or
   environment), the binary embeds the committed bytes, `GET /api/v2/openapi.json`
@@ -395,17 +294,16 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   fallbacks), `method`, `status_class`, `error_code` (the problem type identifier),
   `auth_class` (`public`, `anonymous`, `session`, `api_key`, `plugin`) and a clamped client
   name — on `streamapp_apiv2_requests_total` and `streamapp_apiv2_request_duration_seconds`,
-  and the same attributes plus the request id on the `apiv2 request` log line. The v1
-  request logger and metrics skip `/api/v2/` so nothing is counted twice.
+  and the same attributes plus the request id on the `apiv2 request` log line. The API
+  listener's own request logger and metrics skip `/api/v2/` so nothing is counted twice.
   `streamapp_apiv2_validation_failures_total` counts `validation_failed` problems per
-  operation; `streamapp_apiv1_tombstone_requests_total` is registered now and incremented by
-  `apiv2.RecordV1Tombstone` once the tombstone exists. No URL, query string, body or
+  operation; `streamapp_apiv1_tombstone_requests_total` counts requests the `/api/v1`
+  tombstone answers, by method (`apiv2.RecordV1Tombstone`). No URL, query string, body or
   credential header is logged.
 - **The body read timeout.** `apiv2.BodyReadTimeout` is the server's 30 s `ReadTimeout`
   baseline, not Huma's 5 s default. Ratified on #135, 2026-09-02; the constant is the one
   place to change it.
-- **Request IDs.** v1 routes set no request-ID response header; v2 sets `X-Request-ID` from the
-  same context value `apimw.RequestID` already stored, so the request log, activity log, and the
+- **Request IDs.** v2 sets `X-Request-ID` from the same context value `apimw.RequestID` already stored, so the request log, activity log, and the
   Problem Details `instance` name the same request.
 - **Optimistic concurrency.** An operation opts in at registration: `Guarded` (PUT, PATCH,
   DELETE only), `Conditional` (GET, HEAD only) or `CreateOnly` (PUT only, exclusive with
@@ -438,11 +336,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   against that latest row on every retry; a race lost to a delete is `412` with no `ETag`,
   and only an exact tag turns a lost race into `412` with the current `ETag`. A create-only
   handler that loses its write evaluates `If-None-Match` again against the latest state and
-  retries while the condition holds, so only a state that falsifies the condition is `412`. `TestGuardedOperationsAreMarkedIfMatch`
-  reconciles both directions, requires the marking only on a row eligible to carry it
-  (ported at either tier, PUT/PATCH/DELETE, so a redesigned or replaced row that names a guarded
-  operation is not caught between two rules), and refuses a guarded operation that maps to
-  no legacy row unless `guardedWithoutLegacyRow` names it with a reason. A
+  retries while the condition holds, so only a state that falsifies the condition is `412`. A
   guarded operation documents `412` and `428`, a required `If-Match` parameter, an optional
   `If-None-Match` parameter, and the `ETag` header on every `2xx`
   (except a guarded DELETE's `204` or a `GuardedReceipt` success, which carry none)
@@ -470,40 +364,24 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   an optional `If-Match`), `EvaluateIfNoneMatch` and `NotModified`
   for `304`, `EvaluateCreateOnly` for `If-None-Match: *`, and the `ErrStaleVersion` sentinel a
   storage compare-and-update returns, mapped by `StaleVersionProblem`. The handler loads
-  first (`404` before any precondition), evaluates, then writes. The ledger's optional
-  `concurrency: if_match` field names ported PUT/PATCH/DELETE rows at either test tier
-  whose operation registers `Guarded`; schema and ledger gates reject the marking on reads,
-  POSTs, and non-ported rows. Registry reconciliation enforces agreement in both directions.
-  Production guarded operations now include watch-provider connection updates. Test tier
-  determines required coverage, not whether an implemented operation may declare its concurrency
-  contract. Review and owner gates remain independent: naming an implemented operation requires
-  a ratified row; ordinary ported rows do not require a named owner, while ratified removals,
-  redesigns, and replacements still do.
-- **Mutation retry safety is encoded.** The ledger's curated `retry_safety` field classifies
-  every tier-1 ported mutation row (POST, PUT, PATCH, DELETE) by one of the seven strategies
-  above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`, `coalescing`,
-  `durable_dispatch`, `idempotency_key`, `non_retryable`; an optional `retry_safety_note` (at
-  most 300 characters) explains a non-obvious choice and is required for `idempotency_key` and
-  `non_retryable`. `migration.schema.json` permits both fields on ported mutations at either tier, and forbids
-  them on reads and non-ported rows. `internal/contractledger` requires the value on every
-  tier-1 ported mutation and any ported mutation mapped to `v2.operation_id`. Unmapped
-  tier-2 mutations may remain unclassified until their section is implemented. `apiv2.Operation`
-  carries the same enum as `RetrySafety`: `Register` panics when a mutating operation omits it
-  or a GET/HEAD declares it, and the document records it as `x-silo-retry-safety`.
-  `TestDeclaredRetrySafetyMatchesTheLedger` fails when a mutating v2 operation maps to no
-  classified legacy row or disagrees with it, unless `mutationWithoutLegacyRow` names a
-  v2-only mutation with a reason, and when a classified row names a v2 operation the
-  registry does not declare as a mutation; it compares only rows eligible for the
-  classification, so a redesigned or replaced row that names a v2 mutation is not caught
-  between the schema and the gate. No generic key store exists, so `Register`
+  first (`404` before any precondition), evaluates, then writes. The registration is the
+  record of which operations are guarded; the document's `x-silo-guarded` extension lists them.
+  Production guarded operations include watch-provider connection updates.
+- **Mutation retry safety is encoded.** `apiv2.Operation` carries `RetrySafety`, one of the
+  seven strategies above, spelled `natural_idempotent`, `unique_constraint`, `domain_identity`,
+  `coalescing`, `durable_dispatch`, `idempotency_key`, `non_retryable`: `Register` panics when a
+  mutating operation (POST, PUT, PATCH, DELETE) omits it or a GET/HEAD declares it, and the
+  document records it as `x-silo-retry-safety`. No generic key store exists, so `Register`
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
-  the durable replay store land together with the first operation the inventory proves
-  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (101
-  `natural_idempotent`, 24 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3
-  `durable_dispatch`, 70 `non_retryable`, 0 `idempotency_key`, counted per distinct
-  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  the durable replay store land together with the first operation that proves it needs them,
+  and the field is never advertised unimplemented. The classification began in the migration
+  ledger (retired with v1; its history is in git), which classified each tier-1 ported mutation
+  row and justified non-obvious choices in a note. Its final answer: all 225 tier-1 ported
+  mutation rows (219 distinct operations) were classified (101 `natural_idempotent`, 24
+  `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3 `durable_dispatch`, 70
+  `non_retryable`, 0 `idempotency_key`, counted per distinct operation) and no residual group
+  justified a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
@@ -533,14 +411,14 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   delete, Discord unlink, collection item add and remove, profile section overrides
   replace and reset, device forget and device-settings reset, dashboard-layout reset, web-push
   unsubscribe by endpoint, and root-override deletion whose path can resolve to a different content group), so each stays `non_retryable`
-  until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; account and node deletion) name the durable dispatch or cleanup the v2 port must add before
+  until its owning section guards the resource with a generation precondition or ordering rule; each ledger note said what the v2 operation needs before clients may retry. The `durable_dispatch` rows
+  (email-address verification; account and node deletion) named the durable dispatch or cleanup the v2 operation must add before
   their retry is safe. The existing v2 profile creation and deletion operations remain
   `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
   settings updates, stale-ID rematch, provider-chain replacement, and taste seeding also remain
   `non_retryable`: their current seams cannot resume dispatch after saving state, or
-  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Thirty-nine rows (38 distinct operations)
-  carry a `DEFECT` note where v1 gates on
+  repeat unclaimed provider work. Thirty-nine ledger rows (38 distinct operations)
+  carried a `DEFECT` note where the shared implementation gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
   sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
@@ -567,7 +445,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   library creation,
   whose seeding and initial scan run after the insert without a transaction, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
-  v2 port must move the gate
+  v2 operation must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
   dispatch on a reported change, or make the repeat a no-op before the declared strategy
   holds.
@@ -582,7 +460,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
   existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
   middleware chain ahead of the class gate, so a gate denial or validation problem carries them
-  as a 200 does. No v1 route and no v2 operation is deprecated yet; the only deprecated
+  as a 200 does. No v2 operation is deprecated yet; the only deprecated
   operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
 - **Accepted library jobs.** Library refresh and deletion use the durable admin-job runner
   with canonical `/api/v2/library-jobs/{job_id}` monitors, safe named results/failures,
@@ -753,7 +631,7 @@ an explicitly registered and documented operation. When registered, it has the c
 
 Structured JSON request bodies have a default maximum size of 1 MiB, enforced before full
 allocation or decoding. An operation may lower this limit. Raising it requires an explicit limit,
-rationale, and boundary tests in that operation's contract ledger. Large payloads use a designed
+rationale, and boundary tests on that operation. Large payloads use a designed
 multipart or streaming operation rather than a large JSON document. Multipart operations declare
 both total and per-part limits and enforce them while streaming, before storage is finalized or
 domain behavior runs. Exceeding any body limit returns the payload-too-large problem.
@@ -770,7 +648,7 @@ An operation deprecation uses the RFC 9745 structured date form
 uses the RFC 8594 HTTP-date form, and never precedes the deprecation date. Field-level deprecation
 that cannot be conveyed by a response field is recorded in OpenAPI and migration documentation.
 Every applicable representation, body limit, and response field is explicit in the operation
-contract or ledger; a Huma upgrade must not silently change these behaviors.
+contract; a Huma upgrade must not silently change these behaviors.
 
 ### Operation and schema ownership
 
@@ -799,7 +677,7 @@ meaningful resource exists.
 Operations share a component only when its meaning, authorization visibility, requiredness,
 nullability, and expected evolution are the same. Purpose-specific projections such as
 `MediaItemSummary` and `MediaItem` are preferred over one universal object filled with optional
-fields. Each shared component has one owning API section in the contract ledger. Foundation owns
+fields. Each shared component has one owning API section. Foundation owns
 the genuinely cross-cutting problem, validation, pagination, and job components. A pull request
 that changes a shared component lists every affected operation, fixture, and first-party client
 model and is reviewed as cross-section scope. Free-form maps exist only as named extension bags
@@ -808,39 +686,29 @@ with documented trust and size boundaries.
 ### Credential continuity
 
 Credentials belong to the Silo server, not an API major. Existing login sessions, access and
-refresh tokens, profile-lock state, and API keys remain valid through the bridge and 1.0 cutover
-until their normal expiry or revocation. V1 and v2 share one session/revocation model during the
-bridge; v2 does not mint a parallel credential universe. `Authorization`, `X-Profile-Id`, and
-`X-Profile-Token` retain their security meanings, as do account/profile, primary-profile,
-acting-admin, server-admin, and hidden-resource checks.
+refresh tokens, profile-lock state, and API keys remained valid through the v1 retirement and
+remain valid through the 1.0 cutover until their normal expiry or revocation. V1 and v2 shared
+one session/revocation model; v2 does not mint a parallel credential universe. `Authorization`,
+`X-Profile-Id`, and `X-Profile-Token` retain their security meanings, as do account/profile,
+primary-profile, acting-admin, server-admin, and hidden-resource checks.
 
-A critical bridge fix narrows the v1 viewer routes that do not require a profile. Without
-`X-Profile-Id` they resolved to the account's own limits, so any device signed into the
-household could read past a restricted profile's limits, or a locked profile's PIN, by omitting
-the header. When any profile on the account has a PIN, a rating ceiling, an advisory-age limit,
-or a library restriction, those routes now answer `400 bad_request` with the message
-`X-Profile-Id header is required`, the response v1 playback start already gives. The marker
-writes are gated too, and the gate runs before their `marker_edit` check, so a caller without
-that permission that omits the header gets this 400 rather than 403. Accounts without such a
-profile keep account scope. API keys, capability probes, profile selection,
-account and admin routes, and the session-bound stream and transcode routes are not gated.
-Download links that pass the access token as `?token=` cannot send the header, so on such an
-account they get the 400 too; v1 gains no profile query parameter. The gate reads only the
-profiles' stored limits. A custom scope policy (`silo_custom.scope`) that narrows one profile
-through `input.profile_id` applies only to requests that name that profile; for the household
-to require a profile, that profile also needs one of the stored limits above. The gated routes
-carry the `household_profile_gate` trait in the route inventory, and
-`TestHouseholdProfileGateCoversV1ViewerRoutes` fails when a v1 route runs viewer access without
-a profile and neither carries the trait nor is listed as exempt. The change is recorded in
+A profile-optional viewer operation must not fall back to account scope on a household with a
+limited profile. Without `X-Profile-Id` such a request would resolve to the account's own
+limits, so any device signed into the household could read past a restricted profile's limits,
+or a locked profile's PIN, by omitting the header. The rule first shipped on the v1 viewer
+routes as a critical bridge fix, recorded in
 [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 
-V2 applies the same rule to its profile-optional watch, marker and subtitle operations.
+V2 applies it to its profile-optional watch, marker and subtitle operations.
 An operation declares `HouseholdProfileGate`, and the gate chain runs the household gate right
-after viewer access. On an account with a limited profile, a request without `X-Profile-Id` (an
+after viewer access. When any profile on the account has a PIN, a rating ceiling, an
+advisory-age limit, or a library restriction, a request without `X-Profile-Id` (an
 empty header counts as absent) gets the `422 validation_failed` problem with an error at
-`header.x-profile-id`, the same problem profile-required operations answer. As on v1, the rule
-reads only the profiles' stored limits, so a custom scope override keyed on one profile does not
-trigger it. The gated
+`header.x-profile-id`, the same problem profile-required operations answer. Accounts without
+such a profile keep account scope. The rule reads only the profiles' stored limits: a custom
+scope policy (`silo_custom.scope`) that narrows one profile through `input.profile_id` applies
+only to requests that name that profile, so for the household to require a profile, that
+profile also needs one of the stored limits above. The gated
 operations are `getWatchState`, `getWatchTrickplay`, the marker reads and writes, and the
 subtitle operations that act on one media file or stored subtitle; their `X-Profile-Id`
 description states the rule. API keys are exempt. Capability probes, profile selection, account
@@ -876,31 +744,29 @@ a library restriction (the same test as the gate above), so first-run and admin 
 working on an unrestricted household. An admin API key that names no profile keeps household
 management on any household, as it keeps profile-less admin powers below: it is an account
 credential bounded by its scopes, and only the acting primary profile can create one. A key
-that names a profile is held to the primary-profile rule like a session. Refusals reuse the existing responses: v1 `403
-forbidden`, v2 `403 permission_denied` or `profile_verification_required`. The v1 change is a
+that names a profile is held to the primary-profile rule like a session. Refusals answer
+`403 permission_denied` or `profile_verification_required`. The rule first shipped on v1 as a
 critical bridge fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 `createPersonalAPIKey` became `profile_scoped` with an optional profile so the viewer gate can
 verify that profile.
 
-Admin powers follow the same household test. The acting-admin gate (v1 `RequireActingAdmin`
-and its policy-backed form; the v2 `acting_admin` class) and the metadata-curation admin
+Admin powers follow the same household test. The acting-admin gate (`RequireActingAdmin`
+and its policy-backed form, which the v2 `acting_admin` class composes) and the metadata-curation admin
 bypass already refuse a non-primary declared profile; a login session that declares no profile
 now keeps admin powers only while no profile on the account has a PIN, a rating ceiling, an
 advisory-age limit, or a library restriction. The policy input carries this as
 `household_requires_profile`, precomputed in Go like `acting_as_primary`. A refused request gets
-the existing refusal (v1 `403 forbidden`, "Admin access requires the account's primary
-profile"; v2 `403 permission_denied`), and a failed profile lookup fails closed with the
-existing `500`. API keys keep their profile-less admin access. A PIN-locked primary profile
-needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
-admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
-acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
-admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
-This is the same critical bridge fix.
+`403 permission_denied`, and a failed profile lookup fails closed with the existing `500`. API
+keys keep their profile-less admin access. A PIN-locked primary profile needs its
+`X-Profile-Token` because the viewer gate runs before the acting-admin gate on every v2
+`acting_admin` and `permission_gated` operation. The admin-role `marker_edit` grant is not an
+acting-admin decision and is unchanged here (#1911). This rule also first shipped on v1 as a
+critical bridge fix.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
 on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
-that reach from the same decision, the acting admin, never from the account role: v1 and v2 handlers call `apimw.ActingAdmin`, which answers with
+that reach from the same decision, the acting admin, never from the account role: handlers call `apimw.ActingAdmin`, which answers with
 the decider the router hands the acting-admin gate. It counts a declared profile only after the
 viewer gate verified it in the same request, so an operation that relies on it runs the viewer
 gate (v2 `profile_scoped`, optionally with `ProfileOptional`). Without a decider it answers
@@ -908,16 +774,16 @@ false. Another profile on an admin's account is treated like any profile on a re
 
 A remote-playback handoff session is narrower still: it acts only as its bound profile, with
 the account role `user`, on the v2 routes a TV needs to play and browse, and ends at its
-`session_expires_at` however often it refreshes. Every other route answers the existing 403
-(v2 `permission_denied`, v1 `forbidden`). The rules are in
-[device sign-in](device-login.md#remote-playback-handoff); the v1 change is a critical bridge
-fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+`session_expires_at` however often it refreshes. Every other route answers the existing
+`403 permission_denied`. The rules are in
+[device sign-in](device-login.md#remote-playback-handoff); the v1 version of this rule was a
+critical bridge fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 
-The short-lived plugin access cookie is transport-specific because its current path is
-`/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
-a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
-expired on the applicable launch/logout transition where practical and otherwise dies within its
-existing five-minute maximum. It is never broadened to `/`.
+The short-lived plugin access cookie is transport-specific: v1 issued it on an `/api/v1` path.
+V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on a narrow
+common v2 plugin-content parent path, using `Secure` on HTTPS. A cookie issued on the old path
+before the upgrade reaches no live route and dies within its five-minute maximum. The cookie is
+never broadened to `/`.
 
 ### Discovery and capability detection
 
@@ -1009,8 +875,8 @@ affected principals; account/profile changes are targeted and never disclose ano
 ### Mutation retry safety
 
 V2 does not impose a global mandatory `Idempotency-Key` mechanism. Every durable-effect mutation
-records its duplicate-submission and connection-loss behavior in the endpoint ledger and selects
-the smallest mechanism that supplies a real guarantee:
+declares its duplicate-submission and connection-loss behavior at registration (`RetrySafety`,
+see Foundation) and selects the smallest mechanism that supplies a real guarantee:
 
 - naturally idempotent semantics: repeating the same request converges on one resource state
   without duplicating durable state or side effects, regardless of HTTP method (including
@@ -1037,8 +903,8 @@ duplicated after a lost response.
 An `Idempotency-Key` request field appears in OpenAPI only for an operation that implements and
 documents its semantics. Silo never advertises or validates the field while silently ignoring it.
 Adding supported idempotency to an operation later is additive. Before foundation implementation,
-the v1 inventory classifies every durable-effect operation by the strategies above and identifies
-any residual group that can justify one shared implementation.
+the v1 inventory classified every durable-effect operation by the strategies above and found no
+residual group that justified one shared implementation.
 
 An absolute assignment can remain `natural_idempotent` without a concurrency guard: repeated
 identical invite-code updates converge and do not increment usage or dispatch another effect.
@@ -1051,8 +917,8 @@ membership edit; preserving its order requires a separate sequencing policy.
 
 ### Optimistic concurrency
 
-Concurrency protection is opt-in per operation rather than a default for every mutation. The
-endpoint ledger marks resources with demonstrated lost-update risk, initially including access
+Concurrency protection is opt-in per operation rather than a default for every mutation. It
+covers resources with demonstrated lost-update risk, initially including access
 groups and policy documents; server, plugin, provider, webhook, and library configuration;
 collection definitions and ordering; and destructive administrative deletes whose confirmation
 can become stale. Progress, playback, presence, notification-read state, idempotent membership,
@@ -1226,31 +1092,39 @@ artifact where OpenAPI can describe them:
 - dynamic plugin HTTP proxy paths, which are an explicit documented exclusion because they cannot
   have a finite static response schema.
 
-Each exclusion is named in the migration inventory. “Plain chi” is not permission for an
-undocumented JSON endpoint.
+Each exclusion is inventoried: the manual registry describes it in the committed artifact, or,
+for dynamic plugin proxy paths, the closed plugin-content mount inventory names it. “Plain chi”
+is not permission for an undocumented JSON endpoint.
 
-The 1.0 cutover deliberately preserves no URL alias from the legacy native surface. The main API
-listener's `/api/v1` namespace and descendants are replaced by a `410 Gone` tombstone carrying
-the stable `client_upgrade_required` problem code, `Cache-Control: no-store`, and a migration-guide
-link. `426 Upgrade Required` is not used: RFC 9110 reserves it for an HTTP protocol upgrade and
+The v1 retirement preserved no URL alias from the legacy native surface. On the main API
+listener, `/api/v1`, `/api/v1/`, and every descendant answer `410 Gone` with
+`Cache-Control: no-store`, `Content-Type: application/json`, and the v1 error envelope
+`{"error":"client_upgrade_required","message":…,"docs_url":…}`, whose `docs_url` names the
+upgrade guide (`internal/api/v1_tombstone.go`, tested by `internal/api/v1_tombstone_test.go`).
+The tombstone runs no authentication or business logic and never redirects: old URLs may carry
+tokens or secrets. The retired credential-bearing shapes (the autoscan, Plex-sync and
+webhook-sync webhook receivers and the invitation `{token}` routes) are registered on the
+tombstone explicitly so the request and activity logs redact their path segment.
+`426 Upgrade Required` is not used: RFC 9110 reserves it for an HTTP protocol upgrade and
 requires an `Upgrade` header, while this is permanent retirement of an application route.
-Separately, proxy and transcode-node routes—including mostly version-neutral stream, download,
-media-delivery, and internal-control paths plus their current `/api/v1/health` routes—move or are
-retired according to the ledger; the main API tombstone cannot catch them, and they are not
-promised a common failure status. Webhooks, OAuth/browser callbacks, tokenized email links,
-media-session URLs, download-manifest assets, and dynamic plugin URLs move to their v2 forms
-without legacy aliases. Active playback, background downloads, cached plugin resources,
-previously sent email links, and externally configured integrations may therefore need to be
-restarted, regenerated, or reconfigured after the upgrade. Silo is alpha, and 1.0 is expected to
-be a coordinated or fresh deployment; accepting that bounded break keeps the stable contract and
-routers honest.
+Separately, proxy and transcode-node routes (mostly version-neutral stream, download,
+media-delivery, and internal-control paths) each received their own move, retention, or
+retirement disposition in the migration ledger; the main API tombstone cannot catch them, and a
+retired one is not promised a common failure status. Webhooks, OAuth/browser callbacks,
+tokenized email links, media-session URLs, download-manifest assets, and dynamic plugin URLs
+moved to their v2 forms without legacy aliases. Active playback, background downloads, cached
+plugin resources, previously sent email links, and externally configured integrations may
+therefore need to be restarted, regenerated, or reconfigured after updating to a release
+without v1. Silo is pre-1.0 and that update is a coordinated maintenance-window deployment;
+accepting that bounded break keeps the stable contract and routers honest.
 
 Operational liveness and readiness are not native-client operations and gain no v2 JSON
 operation. Owner decision (Quick104, 2026-09-07): the existing probes are **retained unversioned
 on the listener that serves them** — `GET /api/v1/health` and `GET /api/v1/ready` on the API
-listener, `GET /api/v1/health` on the proxy and transcode-node listeners — exactly as they answer
-today, outside the native OpenAPI artifact and generated clients and outside the `/api/v1`
-tombstone. The retained contract is:
+listener, `GET /api/v1/health` on the proxy and transcode-node listeners — outside the native
+OpenAPI artifact and generated clients and outside the `/api/v1` tombstone. Only `GET` is
+retained on the API listener; another method on those paths gets the tombstone. The retained
+contract is:
 
 - **API `GET /api/v1/health`** (liveness): always `200`, `Content-Type: application/json`, body
   `{"status":"ok","server_name":…,"server_id":…}`; the identity fields come from the configured
@@ -1289,8 +1163,8 @@ endpoint is a dedicated opt-in listener outside the native client contract. It i
 `SILO_METRICS_LISTEN` is set and is inventoried separately from the public application listener.
 Proxy and transcode-node metrics remain on their worker listeners and must stay on private
 monitoring networks. The administrator
-upgrade guide must name every external integration and persisted URL class affected by the hard
-cutover, explain how to regenerate it, and provide a post-upgrade verification checklist. The
+upgrade guide must name every external integration and persisted URL class affected by the v1
+retirement, explain how to regenerate it, and provide a post-upgrade verification checklist. The
 server must not redirect old URLs containing tokens or secrets.
 
 Jellyfin compatibility and Audiobookshelf compatibility remain entirely outside this contract.
@@ -1300,13 +1174,13 @@ until the consolidated Books effort replaces it.
 See [the scope decision](v1-scope.md#library-scope-books-deferred). This does
 not remove the existing implementation or change its wire protocol.
 They implement other projects' wire protocols. Playback v3's normative JSON Schemas and domain
-semantics remain authoritative for v2 playback payloads. The existing HTTP conformance matrix,
-including its legacy/draft-body `426` case, remains a bridge/v1-adapter test; v2 gets a separate
-transport matrix and uses the ratified v2 status model (`422` for a protocol-version/input-schema
-failure) rather than copying that nonstandard status. The compatibility implementations currently
+semantics remain authoritative for v2 playback payloads. The playback conformance matrix in
+`internal/playback` keeps its legacy/draft-body `426` case at the service level; v2 maps that
+refusal onto the ratified v2 status model (`422` for a protocol-version/input-schema failure)
+rather than copying that nonstandard status. The compatibility implementations
 generate or consume native proxy, transcode-node, stream, and host-plugin URLs. Those internal URL
-builders and consumers are migration-ledger rows and must be updated and regression-tested when
-the native routes move.
+builders and consumers must be updated and regression-tested whenever the native routes they
+target move.
 
 ### Contract fixtures
 
@@ -1342,15 +1216,14 @@ native repositories do not vendor the full OpenAPI document they do not generate
 
 Updated native apps require v2. They use `/api/v2/system/info` to confirm the server contract and
 show a clear server-update requirement when connected to a v1-only alpha server; they never
-contain a v1 transport fallback or replay a failed v2 request against v1. The bridge supports old
-and new client generations independently: old clients use v1 and updated clients use v2. The web
-app is bundled with the server and uses v2 only.
+contain a v1 transport fallback or replay a failed v2 request against v1. While v1 was served,
+old clients used it and updated clients used v2; since the retirement, a client that predates v2
+gets the `410` tombstone. The web app is bundled with the server and uses v2 only.
 
-Cross-repository coordination stays lightweight. A server section PR may merge independently
-during the additive bridge. Issue #135 links a companion Apple or Android PR when that client
-consumes the section and otherwise records `n/a`; ordinary server CI never checks out client
-repositories. The structured migration inventory continues to prove route disposition and
-consumer ownership, but it is not a cross-repository state machine.
+Cross-repository coordination stays lightweight. A server section PR may merge independently.
+Issue #135 links a companion Apple or Android PR when that client consumes the section and
+otherwise records `n/a`; ordinary server CI never checks out client repositories. The route
+inventory proves what each listener registers, but it is not a cross-repository state machine.
 
 For the one-time 1.0 gate, the project freezes one server release commit, resynchronizes both
 native clients to that exact SHA, and requires their offline conformance suites to pass. The release
@@ -1361,17 +1234,18 @@ server commit, `SOURCE` pins, linked PR checklist, and green client builds are t
 
 ### Third-party clients
 
-Before 1.0, the project publishes the v2 OpenAPI document, the v1-to-v2 operation mapping, a
-migration guide, and the bridge/retirement dates. The alpha v1 contract does not receive a
-post-1.0 deprecation window, but its removal must not be a surprise.
+Before 1.0, the project publishes the v2 OpenAPI document and a third-party migration guide. The
+v1-to-v2 operation mapping was the migration ledger, which is in git history. The alpha v1
+contract received no deprecation window: it was retired on 2026-10-27 (issue #886), and the
+tombstone's `docs_url` points callers at the upgrade guide.
 
 ### Pilot slice
 
 Phase 3 ports five operations before any domain section, one per foundation class, so the
-foundation is proven on real v1 behavior rather than on probes. Each pilot calls the same
-service layer as its v1 handler; v1 stays byte-identical and fully served.
+foundation was proven on real v1 behavior rather than on probes. Each pilot called the same
+service layer as its v1 handler, which stayed byte-identical while v1 was served.
 
-| Operation | v2 | v1 | Proves |
+| Operation | v2 | v1 (retired) | Proves |
 | --- | --- | --- | --- |
 | `getSetupStatus` | `GET /api/v2/system/setup` | `GET /api/v1/auth/setup` | `public` discovery; v2 adds `wizard_completed` (the `setup.completed` marker the web wizard writes on its last screen, so the client refuses to reopen `/setup`) |
 | `getCurrentUser` | `GET /api/v2/account/me` | `GET /api/v1/auth/me` | `authenticated`, no profile |
@@ -1400,7 +1274,7 @@ Two findings from the pilot are now settled for every later section:
   deployment, so it takes `limit` and a `cursor` bound to the operation and the acting
   account, keyed by account id ascending (unique, monotonic), and refuses `offset`.
 
-The pilot ledger rows record the remaining v1 divergences: `max_playback_quality` is a strict
+The pilot ledger rows recorded the remaining differences from v1: `max_playback_quality` is a strict
 request enum (no `4K`/`UHD` aliases) because the server owns its constants, while
 `quality_preference` and `subtitle_mode` stay free-form (length-bounded) until their vocabulary is
 ratified (#135) since v1 never validated them and the clients already send values outside any
@@ -1416,7 +1290,7 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
 the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
-store add and remove reports whether it inserted or deleted the row, and the shared v1/v2 seam
+store add and remove reports whether it inserted or deleted the row, and the shared seam
 sends the provider list event, the recommendation refresh, and the user-state event only for a
 change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
 from the request, so a client that disconnects after the write does not cancel them, but they
@@ -1424,9 +1298,9 @@ are not durable: a crash between the write and the notices loses them, and a ret
 changes no row, does not resend them. The scheduled provider export resends an add the provider
 missed; a missed removal has no scheduled repair yet. The two rating mutations remain
 `non_retryable`: the rating seam dispatches provider rating events and recommendation refresh
-without change gating, and rating updates replace `rated_at` even when unchanged. Their ledger
-`DEFECT` notes retain the durable-dispatch work required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
-guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
+without change gating, and rating updates replace `rated_at` even when unchanged, so clients
+cannot retry them automatically until that dispatch is durable and change-gated. The mutations
+are not demo-restricted, matching v1, whose demo guard did not list them. The three
 lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
 (`rated_at`, `item_id`) — of the last entry emitted, and the next page resumes strictly after it
 in `(added_at DESC, item_id DESC)` order through dedicated `ListFavoritesPage`/`ListWatchlistPage`
@@ -1434,19 +1308,19 @@ in `(added_at DESC, item_id DESC)` order through dedicated `ListFavoritesPage`/`
 added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by
 the unique item id. PostgreSQL keeps full stored timestamp precision in the cursor and
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
-rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. `has_more` is
+rows; visible API instants remain UTC milliseconds. `has_more` is
 decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
-see never hides the rows behind it. The v1 handlers call the same seams
+see never hides the rows behind it. The operations call the seams the v1 handlers shared
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their
-watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`), so both
-surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
+watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`).
+Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
 `deleteFavorite`, `listRatings`, `getRating`, `setRating`, `deleteRating`, `listWatchlist`,
-`getWatchlistEntry`, `addToWatchlist`, `deleteWatchlistEntry`. Deliberate v1 differences: the
+`getWatchlistEntry`, `addToWatchlist`, `deleteWatchlistEntry`. Deliberate differences from v1: the
 membership reads answer a body instead of a bare `204`; `setRating` answers `422` (typed
 `out_of_range`) where v1 answered `400`; the list responses carry `page` instead of `has_more`;
-the watchlist list still hides fully-watched series as v1 does; and the v2 access filter carries
-no device id because the v2 listener reads no device header. `listWatchlist`,
-`getWatchlistEntry` and v1 `GET /watchlist` first move watchlist entries for titles
+the watchlist list still hides fully-watched series as v1 did; and the v2 access filter carries
+no device id because the v2 listener reads no device header. `listWatchlist` and
+`getWatchlistEntry` first move watchlist entries for titles
 outside the library that have since arrived onto this list; see
 [Watchlist titles](#watchlist-titles).
 
@@ -1460,7 +1334,7 @@ may see; `added_at` is present only for a member. They keep `404` for an item th
 that the viewer may not see, run through the same `GetFavorite`/`GetWatchlistEntry` seams (so the
 watchlist read still promotes arrived titles), and are the reads clients should use.
 `getFavorite` and `getWatchlistEntry` keep their entry-or-`404` contract for already shipped
-clients, as do the v1 `204`/`404` checks. Clients detect the membership reads through
+clients. Clients detect the membership reads through
 `getPersonalListCapability` (`GET /api/v2/capabilities/personal-lists`), whose
 `membership_supported` is true when they answer.
 
@@ -1469,7 +1343,7 @@ The `profiles` section (Phase 4) ports the rest of the household surface around 
 `verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
 `listProfileSectionOverrides`, `replaceProfileSectionOverrides`, `resetProfileSectionOverrides`,
 `getProfileSectionSettings`, `getProfileSectionFlags` under `/api/v2/profile/sections`. The
-deliberate v1 differences, recorded per row in the ledger: `createProfile` answers `201` with a
+deliberate differences from v1, each reviewed in the migration ledger: `createProfile` answers `201` with a
 `Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
 from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
 ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
@@ -1484,26 +1358,26 @@ method, and read back in `snake_case` like the write (the Phase 1 catalogs flagg
 casing mismatch). `getProfileSectionSettings` also returns `default_title`, the administrator's
 own title for each admin row next to the profile's effective `title`, so a client can show that a
 profile renamed a row and offer the original name back (saving an empty `title` override restores
-it); it is empty for a profile-built row, and v1 does not return it. `getProfileSectionFlags`
+it); it is empty for a profile-built row, and v1 did not return it. `getProfileSectionFlags`
 keeps `allow_profile_custom_sections` for clients that read it, but it is deprecated and always
 `true`: profiles may always add rule rows (`custom_filter`), with no server setting. Whether a
 profile that is not an admin may add a new row of a recipe is that recipe's `admin_only` in
-`listSectionRecipes`; clients follow it instead of the flag. On both versions,
+`listSectionRecipes`; clients follow it instead of the flag.
 `replaceProfileSectionOverrides` refuses only a profile that is not an admin adding a new row of
 an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kind already saved on
-the page is kept and may change. v1 answers `403 custom_disabled` with its frozen message; v2
-answers `403 permission_denied` saying only an admin can add an Editor's picks row. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+the page is kept and may change. The refusal is `403 permission_denied` saying only an admin can
+add an Editor's picks row. Every profile mutation in the section is demo-restricted (v1's demo guard listed none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
-**Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
-`/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1
+**Settings section (Phase 4).** Operations: `getSettingsContract` (replaced both v1
+`/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (replaced v1
 `/settings/capability`), `getOverlayConfig`, `getEffectiveSubtitleAppearance`,
 `updateSubtitleAppearanceDeviceOverride`, `deleteSubtitleAppearanceDeviceOverride`,
 `listPluginSettings`, `getPluginSettings`, `updatePluginSettings`, `listSettingValues`,
 `getSettingValue`, `updateSettingValue`, `deleteSettingValue`, `listEffectiveSettings`,
 `resolveEffectiveSettings`, and `updateNavigationShortcut`. Every operation calls the
-request-free core of the v1 handlers; the manifest is the same canonical bytes and ETag v1
-serves, and the effective resolver keeps `internal/settingsresolve` semantics. Deliberate v1
-differences: a key the settings contract does not define is a `422` `validation_failed` at the
+request-free core extracted from the v1 handlers; the manifest is the same canonical bytes and
+ETag v1 served, and the effective resolver keeps `internal/settingsresolve` semantics.
+Deliberate differences from v1: a key the settings contract does not define is a `422` `validation_failed` at the
 key's declared location (v1: `404` `unknown_setting`), as are every other rejected request
 member and the nav.shortcuts whole-document refusal (v1: `400`); `keys`, `library_ids` and
 `series_ids` are repeated query parameters rather than comma-separated; the v1 `{values}`,
@@ -1525,8 +1399,8 @@ The first Phase 4 section, **settings-prefs** (`internal/apiv2/preferences.go`, 
 and `listLibraryPlaybackPreferences`, `updateLibraryPlaybackPreference`,
 `deleteLibraryPlaybackPreference` (per library). Each v2 handler calls a seam extracted from the
 v1 handler (`GetAudioPreference`, `SetSubtitlePreference`, …), so the canonical-settings sync
-and the `user_settings.changed` events stay in one place and v1 is byte-identical. Deliberate
-v1 differences: the per-series `PUT`s keep v1's whole-replacement and `204` but require a
+and the `user_settings.changed` events stay in one place. Deliberate
+differences from v1: the per-series `PUT`s keep v1's whole-replacement and `204` but require a
 zero-based `*_track_index` (`minimum: -1`, where `-1` is the "no track" / "subtitles off" sentinel
 v1 clients store; v1 accepted any negative) and refuse unknown members; the
 `AudioTrackSignature` and `SubtitleTrackSignature` schemas keep the store's member names with
@@ -1539,13 +1413,13 @@ override removes the row). The `PATCH` goes through its own seam entry point,
 `profile_library` setting rows — not the legacy composite row, which `PUT /settings/values` and
 the web library editor do not mirror into — inside one store transaction behind the per-user
 advisory lock, so an omitted member keeps a newer canonical write and concurrent patches of
-different members both land; v1 `PUT` keeps its whole-row replacement path unchanged. For the
+different members both land. For the
 same reason the v2 list reads through its own seam entry point,
 `ListLibraryPlaybackPreferencesCanonical`, which assembles one entry per library from the
 canonical `profile_library` rows (the four keys the patch writes; `updated_at` is the newest of
-them) rather than the legacy table v1 `GET` still lists, so the list matches what playback
+them) rather than the legacy table v1 `GET` listed, so the list matches what playback
 resolves. A library whose overrides exist only in the legacy row is not listed: canonical is
-the source of truth, and every v1 `PUT` since the sync existed mirrors into canonical rows, so a
+the source of truth, and every v1 `PUT` since the sync existed mirrored into canonical rows, so a
 legacy-only row is data written before the sync. The per-series `GET`s read through their
 own seam entry points too, `GetAudioPreferenceCanonical` and `GetSubtitlePreferenceCanonical`:
 the legacy row is the resource — it holds the track identity (index, external path, signature)
@@ -1556,7 +1430,7 @@ rows exist — and the members playback resolves canonically (`audio_language`;
 is unset (empty string, or absent for `show_forced_subtitles`), and `updated_at` is the newest
 of the rows read. Older SQLite track preferences can have no recorded timestamp; when none
 of the rows supplies one, v2 emits `1970-01-01T00:00:00.000Z` as an unknown-time sentinel.
-A nonempty malformed output timestamp still fails validation; v1 reads remain unchanged.
+A nonempty malformed output timestamp still fails validation.
 The library patch normalizes present values once and mirrors those same values into the
 legacy composite row, including clearing whitespace-only language overrides. This is the same rule the v2 subtitle `PUT` already applies to the forced
 override: `PUT`/`DELETE /settings/values` change the canonical rows without mirroring into the
@@ -1566,7 +1440,7 @@ a member the seam rejects
 is a `422` naming it where v1 answered `400`. None of the nine registers `Guarded`, `Conditional` or `CreateOnly`: a
 per-profile playback preference is in the plan's "progress, playback" carve-out that keeps
 domain behavior rather than a row version, so the `PUT`s and `PATCH` are unconditional
-last-write-wins replacements, the reads carry no `ETag`, and the ledger rows say `Not if_match`.
+last-write-wins replacements and the reads carry no `ETag`.
 
 **Section catalog-libraries (Phase 4).** Twenty-nine operations under the `libraries` tag: the
 acting-admin management surface `listLibraries`, `createLibrary`, `updateLibrary`,
@@ -1579,7 +1453,7 @@ acting-admin management surface `listLibraries`, `createLibrary`, `updateLibrary
 `listLibrarySections`, `getLibrarySectionItems`, `getLibraryCollections`,
 `listLibraryUserCollections`. The management mutations enforce the demo guard. Every card these reads answer is the
 one `CatalogItem` schema (`internal/apiv2/catalog_types.go`), which the catalog-items and
-catalog-home sections reuse. Deliberate differences from v1, all recorded on the ledger rows:
+catalog-home sections reuse. Deliberate differences from v1, each reviewed in the migration ledger:
 `PUT` full updates are `PATCH`; offset paging (roots, unmatched items, the per-library match
 queue) is `limit` plus an opaque cursor, and v1's unpaginated stale-ID list pages the same way; ids are string `ID`s and timestamps UTC-millisecond
 instants; the provider-chain `levels` map is an ordered array of `{content_level, entries}` and
@@ -1602,7 +1476,7 @@ The pinned web carousel requests a bounded teaser and links to the full collecti
 **Section catalog-home (Phase 4).** Nine profile-scoped operations under the `home` tag:
 `getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeCapabilities`, `getHomeLayout`,
 `listHomeSections`, `getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
-gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
+gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registered them without
 `RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
 shape as a library page with scope=home, so the section and card reads reuse
 `SectionLayoutEntry`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
@@ -1618,7 +1492,7 @@ Because v2 rejects unknown query parameters, a client sends `include_items` only
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
 home sections service is not wired.
-Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
+Deliberate differences from v1, each reviewed in the migration ledger: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
 instant; the dismissal `surface` is a path enum, `progress_updated_at` an instant, and both
@@ -1633,7 +1507,7 @@ plus `listHistory`, `removeHistoryEntries`, `syncProgress` (tags `history`, `pro
 `getWatchState`, `markWatched`, `unmarkWatched` (tag `watch`). The section uses the shared domain services, with history-specific paging seams
 (`PersonalDataHandler.HistoryPage`/`HistoryPageCards`/`RemoveHistory`,
 `ProgressHandler.SyncProgress`, `ItemsHandler.WatchDetail`/`SetWatchedState`). Deliberate
-differences from v1, all recorded on the ledger rows: `listHistory` pages by `limit` plus an
+differences from v1, each reviewed in the migration ledger: `listHistory` pages by `limit` plus an
 opaque cursor. A bounded raw window is filtered against the newest visible watch of each
 movie or series across its full history, so repeated watches and sibling episodes do not
 repeat cards on later pages. PostgreSQL and SQLite share this witness rule. A page may be
@@ -1646,8 +1520,8 @@ The operation answers
 `watched_at` instant, `duration_seconds`, `completed`, `source`); `removeHistoryEntries` takes a
 closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
 integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
-per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
-optional as v1 does (narrowed by the household rule under
+per-item error) and answers the `results` list v1 answered; `getWatchState` keeps the profile header
+optional as v1 did (narrowed by the household rule under
 [Credential continuity](#credential-continuity)), takes `file_id` (string ID) and a strict `image_size`, renders file ids as
 string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
 `{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;
@@ -1659,7 +1533,7 @@ is still needed. History removal and unmark choose a fresh cutoff, so a delayed 
 hide an intervening watch (unmark keeps the watch in history but stops it counting as
 watched). Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
-Two v2-only operations extend the section without ledger rows: `clearResumePosition`
+Two v2-only operations extend the section: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
 resume position while keeping its watched state and history, answers `204` (also when there is
 nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
@@ -1668,18 +1542,18 @@ kind `markWatched` does not handle, and is
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
 `clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
 v2 `markWatched` on a watched movie or episode with a resume position records another play and
-clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
-no-op. Semantics are in
+clears the position instead of answering a no-op `204`; season or series marks keep the
+no-op, as v1 did. Semantics are in
 [the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
 `listPopular`, `listRecentlyAdded`, `getRecommendationSection`. Every recommended item is the
-shared `CatalogItem`, rendered by the same seam the v1 discover page uses
+shared `CatalogItem`, rendered by the same seam the v1 discover page used
 (`internal/api/handlers/recommendations_service.go`), so the plain lists are a
 `CatalogItemCollection` (bounded, no `page`) and the grouped reads answer `RecommendationRow`
-(`{type, title, kind, key, items}`). Deliberate differences from v1, all recorded on the ledger
-rows: the engine's `score`, `reason`, and bare `media_item_id` lists are not carried (no client
+(`{type, title, kind, key, items}`). Deliberate differences from v1, each reviewed in the migration
+ledger: the engine's `score`, `reason`, and bare `media_item_id` lists are not carried (no client
 reads them); `label` is `title` and `section_kind`/`section_key` are `kind`/`key`; `for-you/main`
 answers an empty row rather than `null`; `days` and `limit` are declared parameters answered
 `422` out of range where v1 silently fell back to a default; `section/{kind}/{key}` folds into
@@ -1698,7 +1572,6 @@ non-retryable because insertion and refresh dispatch are separate; its `item_ids
 Taste-seed submissions validate every selected catalog ID against the acting profile's
 access filter before inserting favorites. An unknown or inaccessible pick rejects the whole
 submission with `404`, so a rejected batch neither saves visible picks nor requests refresh.
-The shared v1 submission uses the same check.
 
 `WatchTonight` and `WatchTonightCardPage` embed the shared `CatalogItem` with a strict
 `watch_tonight_source` enum, `cards` is `items`, `mode` is a required enum, the `genres[]` /
@@ -1718,12 +1591,12 @@ Apple and Android currently consume `similar`
 personal list, or a person's credits), `listAudiobookGroups`, the facet documents
 `getCatalogFilters` and `searchCatalogFacet`, `queryCatalogItems` (the JSON-body form of the
 browse), `getCatalogItem`, `listCatalogItemEpisodes`, `listCatalogItemMangaFiles`,
-`listCatalogItemVersions`, `listSeriesSeasons`, and `getSeriesSeason`. The v1 handlers and these
-operations call the same seams on `handlers.CatalogHandler` and `handlers.CatalogResourceHandler`
+`listCatalogItemVersions`, `listSeriesSeasons`, and `getSeriesSeason`. These operations call
+the seams the v1 handlers shared on `handlers.CatalogHandler` and `handlers.CatalogResourceHandler`
 (`internal/api/handlers/catalog_items_service.go`), each taking an `ItemViewer` (resolved access
 filter plus declared profile); v2 resolves the viewer through `ItemsHandler.ContextAccessFilter` with
 no device id. Cards are the shared `CatalogItem`; `CatalogItemDetail` composes it. Deliberate
-differences from v1, all recorded on the ledger rows: the browse and the audiobook groups page by
+differences from v1, each reviewed in the migration ledger: the browse and the audiobook groups page by
 `limit` plus an opaque cursor. SQL query paths retain typed ordering tuples and an insertion
 cutoff where supported; later pages observe live mutable values. Recent-TV events, work
 representatives and audiobook groups retain their own final ordering tuples. PostgreSQL search
@@ -1745,13 +1618,13 @@ envelopes, `getSeriesSeason` answers the season itself, and `getCatalogItem` lea
 `getTrailersCapability` (`/capabilities/trailers`) and `getMetadataAICapability`
 (`/capabilities/metadata-ai`), the actions `refreshCatalogItemTrailers` and
 `translateCatalogItemDescription`, `listPeople`, `getPerson`, `refreshPerson`, and
-`getLiteraryWork`. The v1 handlers and these operations share the seams in
-`internal/api/handlers/catalog_actions_service.go`; `handlers.APIError` gained `RetryAfter` so
-both listeners render the per-user limiter's hint. Deliberate differences from v1, all recorded on
-the ledger rows: the two probes are typed `Capability` documents (`revision`, `state`, named
+`getLiteraryWork`. These operations call the seams in
+`internal/api/handlers/catalog_actions_service.go`; `handlers.APIError` carries `RetryAfter` so
+v2 renders the per-user limiter's hint. Deliberate differences from v1, each reviewed in
+the migration ledger: the two probes are typed `Capability` documents (`revision`, `state`, named
 fields) with `Cache-Control: private, no-cache`, and the two v1 registrations of
-`/metadata/ai/status` are one operation whose unwired answer is `not_configured`; the three
-background actions keep their v1 `202` with a small body (trailer refresh still answers `200` for
+`/metadata/ai/status` became one operation whose unwired answer is `not_configured`; the three
+background actions kept their v1 `202` with a small body (trailer refresh still answers `200` for
 `cooldown` and `disabled`) and are classified as coalescing actions, not the 202 job-monitor
 contract; an unconfigured action is `409 capability_not_configured` rather than `503`; the trailer
 `unsupported_type` refusal is `422` at `path.id`, and a missing `target_language` is `422` at
@@ -1762,37 +1635,45 @@ empty arrays rather than `null`.
 
 ## v1 lifecycle and release sequence
 
-1. Freeze v1 feature development. Critical fixes needed to keep the bridge usable may still land;
-   new stable contract work targets v2.
-2. Retain the complete legacy native surface alongside v2 routing through at least two
-   published pre-1.0 bridge releases. The bridge keeps old clients usable while v2 clients
-   and the contract gates are exercised, giving administrators time to update servers and apps.
-3. Ship Apple and Android builds that require v2 and clearly require a server update when
-   connected to an older v1-only alpha server. Ship the web client on v2 in the bridge server.
-4. Verify the release matrix and observe v2 operation/error metrics through the bridge window.
-5. Ship Silo 1.0 with the legacy native route registrations removed or moved to their accepted v2
-   forms. On the main API listener, explicit retirement handlers cover `/api/v1`, `/api/v1/`, and every descendant and
-   return `410 Gone` with the existing v1-shaped `client_upgrade_required` error, pointing the
-   user toward a v2-capable client and the administrator upgrade guide. They contain no business
-   behavior. Version-neutral legacy routes are retired individually and are not aliases into v2.
-   The retained `/api/v1/health` and `/api/v1/ready` probes remain outside the tombstone
-   handlers. Operator metrics are served only by the separate opt-in listener.
-6. Remove bridge-only legacy transport code after the 1.0 cutover is established; no updated
-   client contains a legacy native transport path to clean up.
+This section records how `/api/v1` was retired and what remains for the 1.0 cutover.
 
-Retirement is a separate maintainer decision tracked in
-[issue #886](https://github.com/Silo-Server/silo-server/issues/886). Before removing v1, record
-the bridge release tags, confirm v2-capable server and app builds are available, and announce
-the removal release and upgrade instructions. Merging v2 into main does not retire the bridge.
+What happened:
+
+1. V1 feature development was frozen. Only critical fixes needed to keep the bridge usable
+   landed on v1; new contract work targeted v2.
+2. The plan was to carry the complete legacy native surface alongside v2 through at least two
+   published pre-1.0 bridge releases, so old clients kept working while v2 clients and the
+   contract gates were exercised.
+3. Apple and Android shipped builds that require v2 and ask for a server update when connected
+   to a v1-only alpha server. The bundled web client moved to v2.
+4. On 2026-10-27 the maintainer waived the two-bridge-release requirement because v2 had been
+   out long enough ([issue #886](https://github.com/Silo-Server/silo-server/issues/886)), and
+   v1 was removed before 1.0 rather than at the 1.0 cutover.
+5. The release that carries the removal deletes every v1 HTTP handler. On the main API listener,
+   `/api/v1`, `/api/v1/`, and every descendant answer `410 Gone` with the v1-shaped
+   `client_upgrade_required` error (see [Huma coverage](#what-huma-covers)); the tombstone holds
+   no business behavior. Version-neutral legacy routes were retired individually and are not
+   aliases into v2. The retained `GET /api/v1/health` and `GET /api/v1/ready` probes, and the
+   proxy and transcode-node `GET /api/v1/health`, sit outside the tombstone. Operator metrics are
+   served only by the separate opt-in listener.
+6. The migration ledger, the scenario catalogs, and their gates retired with v1 (see
+   [Migration ledger](#migration-ledger-retired)). Behavior v1 and v2 shared is tested once,
+   against the v2 entry points, in the package that owns it.
+
+What remains for the 1.0 cutover: lock `/api/v2` once the [release gates](#release-gates) pass.
+The squashed 1.0 database baseline and its rule that an existing installation first updates to
+the final pre-1.0 release are a separate #886 item about the migration chain, not about the API;
+the [administrator upgrade guide](../update-to-1.0.md) describes them.
 
 ### Cluster cutover policy
 
-The alpha-to-1.0 update is a maintenance-window operation, not a zero-downtime rolling-upgrade
-contract. Administrators drain or stop active work, take every API replica and remote
-playback/transcode node out of service, deploy the matching 1.0 components, and then return the
-homogeneous deployment to service. Active playback and transfers may need to restart.
+Updating from an alpha release that serves `/api/v1` to one that does not, and updating to 1.0,
+are maintenance-window operations, not zero-downtime rolling-upgrade contracts. Administrators
+drain or stop active work, take every API replica and remote playback/transcode node out of
+service, deploy the matching components, and then return the homogeneous deployment to service.
+Active playback and transfers may need to restart.
 
-Silo does not support a fleet that mixes v1-only alpha API replicas or workers with 1.0
+Silo does not support a fleet that mixes v1-only alpha API replicas or workers with later
 components. API-to-worker handshakes and readiness must fail closed: an accidentally outdated or
 incompatible worker is unschedulable rather than receiving work that may fail later. Supporting
 rolling N/N-1 worker or API upgrades within the stable 1.x line is a separate post-1.0 decision;
@@ -1800,147 +1681,49 @@ this migration does not carry alpha protocols merely to provide it.
 
 Silo's standing release policy requires a verified backup before every upgrade and does not
 guarantee downgrade or in-place rollback compatibility between releases. For 1.0, the final
-dual-stack bridge remains published as an immutable recovery artifact. The supported recovery path
-is to stop 1.0, restore the complete pre-upgrade database and configuration, and deploy that bridge;
-post-backup changes are lost. Administrators must not start the bridge against a database migrated
-or written by 1.0 unless release notes explicitly certify that exact combination. The bridge
+pre-1.0 release remains published as an immutable recovery artifact. The supported recovery path
+is to stop 1.0, restore the complete pre-upgrade database and configuration, and deploy that
+release; post-backup changes are lost. Administrators must not start it against a database
+migrated or written by 1.0 unless release notes explicitly certify that exact combination. It
 receives no continuing development after cutover.
 
-The 1.0 cutover closes after the homogeneous fleet, retained probes, v2 client smoke tests, regenerated
-external integrations, and v1 tombstone isolation all pass. The bridge artifact may remain
-downloadable without becoming another supported API line or implying a guaranteed downgrade path.
+The 1.0 cutover closes after the homogeneous fleet, retained probes, v2 client smoke tests,
+regenerated external integrations, and v1 tombstone isolation all pass. The final pre-1.0
+release may remain downloadable without becoming another supported API line or implying a
+guaranteed downgrade path.
 
-## Tiered legacy native behavior and performance baseline
-
-The route and consumer inventory is exhaustive; behavioral baselining is not. Recording every
-observable case of every legacy native route would spend the migration budget documenting alpha
-behavior that v2 is free to redesign. Baselining is therefore tiered.
-
-Tier 1 is the release-critical flows — login, setup, profiles, browse/search, playback lifecycle,
-progress, settings, notifications, downloads, and core admin — plus every `ported`-disposition
-ledger row whose wire fidelity matters to a shipping client. Each tier-1 row carries a scenario
-catalog of executable assertions covering its applicable status and header behavior, data meaning,
-field presence and nullability, authorization, sorting, filtering, pagination, error behavior, and
-relevant raw-protocol behavior. Those catalogs prioritize the risky wire shapes: anonymous maps,
-`json.RawMessage`, custom marshalers, timestamps, nullable and optional fields, empty collections,
-multipart bodies, redirects, ranges, and every distinct error code, status, and header combination.
-Every other route defines its v2 behavior fresh in its own section PR with ordinary tests; there is
-no obligation to first document what its alpha predecessor did. V2 is never required to reproduce
-pre-1.0 bytes or accidental alpha shapes. A tier-1 section either proves the intended product
-behavior or records a reviewed intentional difference in the migration ledger.
-
-Inventory itself stays exhaustive and searches repository-wide path literals, regular expressions,
-and route classifiers, not only handler registrations. API-key scope checks, demo mutation guards,
-compression/sendfile exclusions, request/activity logging, telemetry labels, compatibility URL
-builders, and other internal consumers move to stable operation or route metadata where practical
-and receive parity tests. A registered-route ledger that leaves stale middleware patterns behind is
-incomplete.
-
-Every comparison run happens in one controlled bridge environment. The legacy native surface and v2
-are exercised against the same candidate build, representative non-sensitive dataset,
-configuration, cache state, and concurrency, covering mutations, negative and error cases, races,
-cold and warm cache states, and load. That same-environment comparison — not a comparison between
-unrelated production and test hosts — supplies the regression evidence. There is no
-live-deployment observation harness, no raw production capture, and no custody process to go with
-them. All committed evidence is synthetic: scenario definitions, deterministic synthetic fixtures
-and assertions, and measurements from the controlled environment. A live response is never
-converted into a committed fixture.
-
-Behavior checks assert domain outcomes rather than wire equality. For example, a recently released
-catalog query proves ordering by the intended release value, direction, null placement, stable
-tie-breaker, access filtering, and pagination without duplicates or gaps. Catalog scenarios cover
-each sort field in both directions, each filter independently, and a curated set of representative
-and pathological combinations — null-heavy sorts with pagination, filters with tie-breakers, empty
-results with cursors — plus empty, sparse, and large result sets. An intentional v2 correction
-records the previous behavior, the new expected behavior, and its rationale in the ledger.
+## Performance baseline
 
 Performance evidence is scoped to a named hot-path list: catalog list/search, home sections,
 playback start/replan, progress writes, and jellycompat browse. Those paths record p50/p95/p99
 latency, throughput, response size, allocations, and database-query behavior at representative
-concurrency under controlled cold and warm cache states. Other operations rely on the correctness
-tests in their section PR. Streaming and byte delivery are measured separately with protocol
-throughput tests because they bypass Huma. A repeatable regression is investigated; the
-program-wide quantitative threshold and hot-path budgets are agreed before any v2 measurements
-are taken, so results cannot be rationalized after the fact, and sections may adopt stricter
-budgets.
+concurrency under controlled cold and warm cache states, measured in one controlled environment
+against a representative non-sensitive dataset. Other operations rely on the correctness tests in
+their section PR. Streaming and byte delivery are measured separately with protocol throughput
+tests because they bypass Huma. A repeatable regression is investigated; the program-wide
+quantitative threshold and hot-path budgets are agreed before any v2 measurements are taken, so
+results cannot be rationalized after the fact, and sections may adopt stricter budgets. There is
+no live-deployment observation harness and no raw production capture; a live response is never
+converted into a committed fixture.
 
-### Scenario catalogs
+### Tiered baseline and scenario catalogs (retired)
 
-Tier-1 rows carry their behavior scenarios in `contracts/api/v2/scenarios/`, one file per
-migration-ledger `route_group` under `<listener>/<group-slug>.json`, validated against
-`scenario-catalog.schema.json` (JSON Schema 2020-12, closed). A catalog names its ledger rows
-by listener, method, path, and registration index and records, per row, scenarios in the
-categories the tiering rule lists: `status_headers`, `data_meaning`,
-`field_presence_nullability`, `authorization`, `sorting`, `filtering`, `pagination`, `error`,
-`raw_protocol`. Each scenario states the product behavior in plain language, the principal
-class (public, authenticated, profile, child profile, primary profile, admin, acting admin,
-access group, demo, API key with scopes), a synthetic request, and the expected outcome as a
-status, header predicates, and JSON-pointer body predicates (`exists`, `absent`, `is_null`,
-`equals`, `type`, `keys_equal`, `sorted` with direction and tie-breaker, `unique_by`,
-`rfc3339`, and so on). `v2_expectation` stays `null` until the section PR records the intended
-v2 behavior or a reviewed intentional difference. Behavior that looks accidental is recorded
-faithfully and flagged in `notes`, never corrected in the catalog.
-
-The coverage rule: every tier-1 row in a wave has a catalog, with at least one scenario per
-category or a stated `not_applicable` reason, and at least one `status_headers` or
-`authorization` scenario so the row is executable, before that wave's first section PR. Later
-waves populate their own catalogs on the same schedule. Wave membership follows the ledger's
-`release_flow` (login, setup, profiles for wave 1), not the plan's prose list of route groups,
-which is why `/api/v1/onboarding` and `/api/v1/profile/sections` are wave-1 catalogs.
-`make verify-scenario-catalogs` (`internal/scenariocatalog`) checks the schema, reconciles every
-row against the ledger and its route group's catalog file, and fails on an uncovered or misfiled
-row; CI runs it beside the ledger gate.
-
-The executor (`internal/scenariocatalog/executor`) runs the scenarios through the real router
-and middleware in an in-process `httptest` server. Scenarios that only need the router — public
-discovery, readiness failure, validation, and auth refusals on routes that register without a
-user store — run in plain CI. Whether a public scenario's row exists on the offline router
-is read from `contracts/api/v2/offline-routes.txt`, not from the router: `api.NewRouter` returns
-a sealed handler (see the route inventory contract above), so `TestOfflineRouteSet` in
-`internal/api` builds the executor's offline wiring through the unexported constructor, walks
-it, and pins the result; `make verify-offline-routes` fails in CI when the file is stale and
-`make offline-routes` regenerates it. The file records the `api.Dependencies` fields it was
-generated with, and the executor refuses it if its own offline wiring sets a different field
-set. Anything that sends a credential, applies a server setting, or
-declares `requires: [database]` runs only when `SILO_SCENARIO_DATABASE_URL` points at an empty
-database the executor owns, and skips otherwise. The variable is deliberately not
-`SILO_TEST_DATABASE_URL`: the executor truncates accounts, access groups, invite codes, and
-invitations on every reseed, which would break the other DB-gated packages sharing the test
-database. Before migrating or reseeding, the executor inspects the database and refuses one
-that holds any media item, media file, or library folder; any account whose email is missing or
-not a fixture address; any secret-bearing `server_settings` value (keys matching secret,
-password, api_key, access_key, token_secret, or jwt with a non-empty value); or a
-`branding.server_name` other than the fixture's. Other settings rows are not a refusal signal.
-Scenarios on a row the ledger registers only behind the rate-limit middleware (the `#1`
-registration variants) run on the rate-limited router variant, so the registration they name is
-the one exercised. Every profile-scoped wave-1 row pins the cross-account case: a member bearer
-declaring a profile owned by another account is 404 `not_found` from viewer access, and the
-profile mutation rows (update, delete, verify-pin, avatar upload and delete) also pin the
-path-level case, a member's own profile header with an admin-owned profile id in the path, so a
-v2 rewrite that resolves the profile before the account fails the catalog rather than passing
-silently.
-
-A scenario may carry a `then` list: ordered follow-up exchanges (method, request, expected
-outcome, optional principal) executed after the primary request in the same fixture state, so a
-cross-request effect (the device poll after an approval, the GET after a PUT) is asserted rather
-than described. The collection predicates `every`, `none`, `sorted`, and `unique_by` fail on an
-array too short to test (empty for `every`/`none`, fewer than two elements for the others)
-unless the same scenario pins that array's size on the same pointer: `empty`, `length`, or
-`min_length` satisfy all four, `non_empty` only `every`/`none`; the default `json` body kind
-fails on a body that does not decode, and `text` compares the raw bytes.
-
-Fixture privacy follows the contract-fixture rule above: identities, profiles, codes, and
-tokens are deterministic synthetic values under reserved origins; credentials are minted at run
-time and referenced through `${...}` placeholders, so no committed catalog carries a secret.
-`make verify-local-paths` scans the catalog bodies and the committed generators under
-`contracts/api/v2/scenarios/tools/` for non-reserved hosts (URL, protocol-relative, mail
-domain, bracketed IPv6, and bare dotted names whose last label is a public TLD), non-loopback
-IP literals, and credential-looking literals, and the whole scenario tree for machine paths.
+During the migration, behavioral baselining of the legacy native surface was tiered. Tier 1 was
+the release-critical flows (login, setup, profiles, browse/search, playback lifecycle, progress,
+settings, notifications, downloads, and core admin) plus every ported ledger row whose wire
+fidelity mattered to a shipping client. Each tier-1 row carried a scenario catalog under
+`contracts/api/v2/scenarios/`, executed through the real router, that pinned its status,
+headers, data meaning, authorization, sorting, filtering, pagination and errors; every other
+route defined its v2 behavior fresh in its section PR. V2 was never required to reproduce
+pre-1.0 bytes or accidental alpha shapes: a tier-1 section either proved the intended product
+behavior or recorded a reviewed intentional difference in the ledger. The catalogs, their
+executor (`internal/scenariocatalog`), `contracts/api/v2/offline-routes.txt`, and their make
+targets retired with v1; their history is in git.
 
 ## Evolution policy
 
-Before the v2 lock, a breaking v2 change is allowed only when its migration-ledger entry, generated
-spec diff, fixtures, client impact, and release consequence are reviewed together. A route is not
+Before the v2 lock, a breaking v2 change is allowed only when its
+`contracts/api/v2/breaking-approvals.json` entry, generated spec diff, fixtures, client impact, and release consequence are reviewed together. A route is not
 “done” merely because its server handler exists.
 
 At the Silo 1.0 lock, `/api/v2` becomes additive-only and binding:
@@ -1960,50 +1743,50 @@ unbounded diff.
 
 ## Release gates
 
-The v2 contract may lock only when all of the following are true:
+The migration ledger met the route-disposition gate before it retired: every registered route in
+the legacy native surface (API, proxy, transcode-node, conditional, binary, WebSocket, redirect,
+asset, internal-control, and plugin-proxy) received a reviewed v2 disposition. The v2 contract may
+lock only when all of the following are also true:
 
-- every registered route in the legacy native surface has a reviewed v2 disposition, including
-  API, proxy, transcode-node, conditional, binary, WebSocket, redirect, asset, internal-control,
-  and plugin-proxy routes;
 - every externally provisioned or persisted legacy native URL is mapped to its v2 replacement and
-  to the exact administrator action needed after cutover; the retained `/api/v1/health` and
+  to the exact administrator action needed after the update; the retained `/api/v1/health` and
   `/api/v1/ready` probes are verified independently of the `/api/v1` tombstone;
-- the main API listener's tombstone tests cover the exact `/api/v1` and `/api/v1/` roots plus descendants across
-  representative methods, including the bodyless `HEAD` response and documented `OPTIONS`
-  behavior; every case returns `410`, never reaches auth/business/proxy code, and uses `no-store`;
+- the main API listener's tombstone tests (`TestV1NamespaceIsTombstoned`) cover the exact
+  `/api/v1` and `/api/v1/` roots plus descendants across representative methods, including the
+  bodyless `HEAD` response and documented `OPTIONS` behavior; every case returns `410`, never
+  reaches auth/business/proxy code, and uses `no-store`;
 - every v2 JSON operation is Huma-typed and appears in the deterministic OpenAPI artifact;
 - the shared error and validation contract is exercised through every middleware class;
 - generated web types are the only web definitions for v2, with no unchecked v2 response casts;
 - Apple and Android have vendored their consumed release-candidate fixtures, pin the frozen server
   commit in `SOURCE`, and pass their conformance suites;
 - no first-party client contains a legacy native transport path in its release build;
-- the new-client/v1-only-alpha update-required, new-client/bridge, new-client/1.0,
-  old-client/bridge, and old-client/1.0-tombstone cases have been tested;
+- the new-client/v1-only-alpha update-required, new-client/current-server, and
+  old-client/tombstone cases have been tested;
 - compatibility listeners, plugin RPC, streaming/range behavior, WebSockets, auth boundaries, and
-  request limits have regression evidence; every tier-1 scenario catalog passes or records its
-  reviewed intentional difference, and every named hot path passes the agreed
+  request limits have regression evidence, and every named hot path passes the agreed
   controlled-environment performance budgets;
 - repository-wide legacy path literals and classifiers are migrated or explicitly retained, with
   API-key scope, demo guard, compression/sendfile, logging/activity, telemetry, and compatibility
   URL-builder parity proven;
-- spec reproducibility, semantic diffing, fixture freshness, and migration-inventory completeness
-  are required server checks; cross-client source pins are verified at the 1.0 release gate;
+- spec reproducibility, semantic diffing, fixture freshness, and route-inventory freshness are
+  required server checks; cross-client source pins are verified at the 1.0 release gate;
 - the third-party migration guide and v1 retirement notice are published;
 - the administrator update-to-1.0 guide covers integration reconfiguration, invalidated links,
   active transfers/playback, plugins, probes, validation, and recovery preparation;
-- the complete pre-upgrade restore, bridge redeployment, and 1.0 go/no-go procedures have been
-  rehearsed.
+- the complete pre-upgrade restore, redeployment of the final pre-1.0 release, and 1.0 go/no-go
+  procedures have been rehearsed.
 
 ## Consequences
 
-The reset removes the need to prove byte-for-byte equality between v1 and v2. The relevant proof
-is stronger and more useful: every old operation is accounted for, every new operation is
+The reset removed the need to prove byte-for-byte equality between v1 and v2. The relevant proof
+is stronger and more useful: every old operation was accounted for, every new operation is
 machine-described and tested, intentional differences are visible, and every shipping client has
 demonstrated the contract it consumes.
 
-The cost is a coordinated multi-repository release and a temporarily larger server. Keeping the
-bridge bounded, sharing domain services, and making each migration slice include its consumers are
-what prevent that temporary cost from becoming permanent architecture.
+The cost was a coordinated multi-repository release and a temporarily larger server. Keeping the
+bridge bounded, sharing domain services, and making each migration slice include its consumers
+kept that cost temporary; the v1 retirement removed the second surface.
 
 ### Personal requests
 
@@ -2035,8 +1818,7 @@ A profile can follow a title another profile already requested, to be notified
 when it becomes available, with `PUT` and `DELETE
 /api/v2/requests/follows/{media_type}/{tmdb_id}`. Both are naturally idempotent.
 Request state gains `following` and `requested_by_viewer`, and
-`GET /api/v2/requests/status` advertises `follow_supported`. The frozen v1
-surface has no follow operation and does not carry these fields.
+`GET /api/v2/requests/status` advertises `follow_supported`.
 
 Requests carry `source`: `direct` for a request someone made, `watchlist` for
 one a watchlist add made. It is an open set; the admin queue reads it too.
@@ -2057,11 +1839,9 @@ but reads through the layout, so a built-in row the admin turned off or removed
 answers 404. A row page's `next_page` covers rows that leave out titles the
 library has as well as rating backfill, and after a read of several pages reached
 the end it points past `total_pages`. `GET /api/v2/requests/status` advertises
-`discover_rows_supported`. The frozen v1 discovery keeps the six built-in rows
-whatever the layout.
+`discover_rows_supported`.
 
-Native Apple and Android request migrations accompany this contract change;
-integrate those client changes before retiring their v1 routes. Shipped apps
+Native Apple and Android request migrations accompany this contract change. Shipped apps
 merge only the built-in trending and popular rows, so an admin's rows reach them
 once they read `row_order`. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
@@ -2106,7 +1886,7 @@ Library reads promote: `listWatchlistTitles`, `listWatchlist`,
 `getWatchlistEntry`, a catalog query with `source: "watchlist"`, the home
 Watchlist section and item detail `user_state` first move entries whose title
 reached the library onto the library watchlist, keeping `added_at`, with the
-side effects of a manual add. The frozen v1 routes gain no field. jellycompat
+side effects of a manual add. jellycompat
 has no view of these entries. There is no new realtime event. See
 [External watchlist titles](external-watchlist.md).
 
@@ -2120,9 +1900,7 @@ verification may act for its household (see household management under
 [Credential continuity](#credential-continuity)).
 Creation requires an acting profile, except for an admin account on a household with
 no limited profile. Target account ownership is checked before source authentication. Run lists
-use signed `(created_at, id)` cursors scoped to the account and acting profile.
-The retained v1 run handlers enforce the same rule as a critical bridge fix, preserving
-their existing envelopes, success statuses, and 50-run list cap. See
+use signed `(created_at, id)` cursors scoped to the account and acting profile. See
 [Personal history import acceptance and monitoring](../admin-api.md#personal-history-import-acceptance-and-monitoring).
 A 202 response identifies the persisted run and its polling location.
 Execution is dispatched within the server process; persistence of run status is not
@@ -2137,9 +1915,8 @@ ambiguous Plex authorization calls automatically.
 
 Webhook connection management and external webhook ingress are separate surfaces.
 The seven import operations do not replace either surface. Legacy Plex management
-aliases are omitted from v2; existing v1 ingress remains available to external
-servers. No history-import consumers were found in the Apple and Android source inventory;
-v1 remains available during coordinated migration. Jellyfin protocol
+aliases are omitted from v2. No history-import consumers were found in the Apple and
+Android source inventory. Jellyfin protocol
 playback and user-state routes continue to use their existing shared store behavior.
 
 ### Request lifecycle and watch providers
@@ -2162,10 +1939,8 @@ web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
 
 Rating sync settings (`import_ratings_enabled`, `export_ratings_enabled`) and the
-rating run counters exist only on v2, as do the `import_ratings` and `export_ratings`
-capability flags, which v2 projects through its own `WatchProviderCapabilities` type. The
-frozen v1 provider, connection, and run responses omit all of them, and a v1 settings
-update ignores the toggles. See
+rating run counters are v2-only, as are the `import_ratings` and `export_ratings`
+capability flags, which v2 projects through its own `WatchProviderCapabilities` type. See
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
 dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
 the same way; see [dropped-shows.md](dropped-shows.md).
@@ -2194,12 +1969,15 @@ ownership through the shared service, and all connection operations retain accou
 ownership checks. Empty or repeated external mapping IDs fail validation before
 replacement. Mutations are conservatively non-retryable after uncertain responses.
 
-External webhook ingress remains separate from native management and continues on
-its existing v1 paths, including the legacy Plex receiver alias. Those externally
-configured URLs require their own migration decision before any v1 tombstone.
-Plex-only management aliases are proposed removals in the ledger and remain on v1;
-this work does not invent their pending reviewer. No webhook-management consumers
-were found in the native client inventory. Jellyfin protocol user-state behavior
+External webhook ingress is separate from native management. Its receiver is
+`POST /api/v2/webhook-sync/webhooks/{secret}` (autoscan has its own
+`POST /api/v2/autoscan/webhooks/{token}`). The v1 receivers, including the legacy Plex
+receiver alias `/api/v1/plex-sync/webhooks/{secret}`, which has no v2 successor of its
+own, retired with v1 and answer the tombstone; administrators re-register the v2 URL in
+the external service ([upgrade guide](../update-to-1.0.md#integration-checklist)). The
+Plex-only management aliases were removed before v1 retired
+([v1 scope](v1-scope.md#breaking-removals-taken-before-lock)). No webhook-management
+consumers were found in the native client inventory. Jellyfin protocol user-state behavior
 continues through the existing shared store paths.
 
 Imported history deduplication is atomic for concurrent import calls with the same
@@ -2341,8 +2119,7 @@ they are not silently accepted. This migration does not add those feature famili
 
 Apple and Android still need to adopt these v2 collection operation mappings, ID/envelope and
 pagination shapes, canonical editor ETags, 412 recovery, capability flags, and the split poster
-flow. Their existing v1 collection routes remain available during coordinated adoption.
-Jellyfin-protocol routes are unchanged; shared native storage fixes preserve chapter membership,
+flow. Jellyfin-protocol routes are unchanged; shared native storage fixes preserve chapter membership,
 and collection authorization checks remain enforced at the native service boundary.
 
 ### Request administration
@@ -2404,8 +2181,7 @@ wildcards overwrite atomically; first-party clients never supply them automatica
 
 The v2 request settings add `watchlist_requests` (default on): whether a
 watchlist add of a title outside the library requests it. An update that omits
-it keeps the stored value, and so does every v1 settings write; responses
-always carry it.
+it keeps the stored value; responses always carry it.
 
 Settings and limits expose only their editable fields (plus the target account ID
 for limits), without volatile metadata. Integration reads include persisted public
@@ -2433,9 +2209,7 @@ the problem detail. A server that cannot be reached stays `dependency_unavailabl
 with a detail naming the cause when known (nothing listening, unknown host,
 timeout, rejected certificate). A plugin may return a single `service_kind`
 option naming the service it found; the Sonarr and Radarr plugin does, and the
-web uses it to set the server type. The frozen v1 routes keep their behavior:
-they pass and store the address as submitted, and a failed v1 probe the host
-classified still answers 500.
+web uses it to set the server type.
 
 All mutations remain non-retryable after an uncertain response. Approve, retry and
 option loading retain their owning service behavior and may invoke a plugin; they
@@ -2559,8 +2333,8 @@ application jobs, supports conditional polling, and projects a typed result with
 payloads or operator failure details. It does not offer cancellation. The shared job listing
 remains a separate dependency for restoring previous jobs in the administrator UI.
 
-The 24 legacy administrator collection rows map to reviewed v2 operations; legacy routes stay
-available during adoption. No existing Apple or Android administrator collection consumer was
+The 24 legacy administrator collection rows mapped to reviewed v2 operations; the legacy routes
+retired with v1. No existing Apple or Android administrator collection consumer was
 found in the client inventory. Jellyfin does not expose this administrator editing surface;
 shared catalog write invariants continue to apply to its collection reads. Administrator section
 route migration is separate from collection template application.
@@ -2589,7 +2363,7 @@ item has no poster; storage keys are never serialized. Creation, bulk creation, 
 and a PATCH that changes `section_type` or `config` run the recipe's own config check and answer
 `validation_failed` when it fails, for example an Editor's Picks list with no items; a PATCH that
 leaves both unchanged, including one that echoes their stored values, does not re-check the stored
-config. The frozen `/api/v1` single create and update routes do not run this check. Capabilities report whether the
+config. Capabilities report whether the
 service, preview, and atomic profile reset are available. Clients do not automatically replay
 administrator section operations after a conflict or a partial multi-request flow.
 
@@ -2613,8 +2387,7 @@ the locked source; failed writes roll back both the document revision and runtim
 
 `DocumentService` returns the committed document and generation separately from local reload and
 event-publication outcomes. Failure to apply or announce a committed change is not a mutation
-error and does not authorize replay. This is storage/domain groundwork; administrator policy
-transport mappings remain proposed until their API and consumer reviews finish.
+error and does not authorize replay. The transport over this storage is described below.
 
 ### Administrator policy transport
 
@@ -2623,7 +2396,7 @@ consumer reviews are complete; all 14 mappings are ratified. They require acting
 access; editor operations retain the policy editor setting gate, while decision-log reads remain
 available independently of that
 setting. The shared policy capability route remains owned by auth-core. Neither Apple nor Android
-has an administrator policy consumer in the migration inventory. Jellyfin exposes no policy editor;
+has an administrator policy consumer in its source inventory. Jellyfin exposes no policy editor;
 policy evaluation behavior shared with its clients is unchanged.
 
 Document and version IDs are opaque strings. Version paths select the saved version ID, not the

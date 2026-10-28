@@ -71,7 +71,7 @@ to `numeric`; PostgreSQL compares that with a `real` rank as `float8`, so a
 `real` key such as 2.4 never equals itself, and continuation skipped or
 repeated rank ties. `postgresCursorConfig` names the meaning of the keys;
 change it with any ranking change so older cursors are rejected
-(`invalid_cursor` in `/api/v2`, `catalog_cursor_changed` in `/api/v1`).
+(`invalid_cursor`).
 
 Title and alias lookups produce an indexed union of candidate IDs before media
 policy checks and scoring. Media library checks remain correlated with those

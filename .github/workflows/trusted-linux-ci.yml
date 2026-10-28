@@ -598,7 +598,7 @@ jobs:
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
           for package in migrations internal/historyimport internal/api/handlers; do
-            (cd "$package" && "$RUNNER_TEMP/race/${package##*/}.test" -test.run='^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' -test.count=1 -test.timeout=10m)
+            (cd "$package" && "$RUNNER_TEMP/race/${package##*/}.test" -test.run='^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportProfileAuthorizationDB)$' -test.count=1 -test.timeout=10m)
           done
 
       # 20260925144545 moves marker claims between rows that share a payload
@@ -741,7 +741,7 @@ jobs:
       # a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
-          (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
+          (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
           (cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' -test.count=1 -test.timeout=10m)
           (cd internal/jellycompat && "$RUNNER_TEMP/race/jellycompat.test" -test.run='^TestLoginPINConventionStaysLocalDB$' -test.count=1 -test.timeout=10m)
           (cd internal/plugins && "$RUNNER_TEMP/race/plugins.test" -test.run='^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' -test.count=1 -test.timeout=10m)

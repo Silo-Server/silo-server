@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 )
 
@@ -86,19 +84,6 @@ func NewDiagnosticsHandler(service DiagnosticsService) *DiagnosticsHandler {
 	return handler
 }
 
-func (h *DiagnosticsHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		return
-	}
-	status, err := h.service.Status(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, diagnosticsInternalCode, diagnosticsStatusFailureMessage)
-		return
-	}
-	writeJSON(w, http.StatusOK, status)
-}
-
 // extendDiagnosticsUploadDeadlines lifts this request's read (and, when
 // includeWrite, write) deadline to diagnosticsUploadReadTimeout. The
 // server-wide ReadTimeout (30s) is too short for slow bundle/chunk uploads,
@@ -123,28 +108,6 @@ func (h *DiagnosticsHandler) extendDiagnosticsUploadDeadlines(w http.ResponseWri
 			"error", err,
 		)
 	}
-}
-
-func (h *DiagnosticsHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
-	h.extendDiagnosticsUploadDeadlines(w, r, true)
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		claims := apimw.GetClaims(r.Context())
-		if claims != nil && claims.TokenType == auth.TokenTypeAPIKey {
-			h.logRejected(r.Context(), claims.UserID, "api_key_not_allowed")
-		}
-		return
-	}
-	var profileID *string
-	if value := strings.TrimSpace(r.Header.Get("X-Profile-Id")); value != "" {
-		profileID = new(value)
-	}
-	result, err := h.IngestMultipart(w, r, userID, profileID)
-	if err != nil {
-		writeDiagnosticsUploadFailure(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, result)
 }
 
 // UploadStatus returns the same account-specific availability and quota limits
@@ -223,40 +186,6 @@ func (h *DiagnosticsHandler) IngestMultipart(w http.ResponseWriter, r *http.Requ
 		return diagnostics.IngestResult{}, diagnosticsServiceFailure(err)
 	}
 	return result, nil
-}
-
-func diagnosticsUserID(w http.ResponseWriter, r *http.Request) (int, bool) {
-	if !hasBearerAuthorizationHeader(r) {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authorization bearer token required")
-		return 0, false
-	}
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return 0, false
-	}
-	if claims.TokenType == auth.TokenTypeAPIKey {
-		writeError(w, http.StatusForbidden, "api_key_not_allowed", "API keys cannot upload diagnostics")
-		return 0, false
-	}
-	if claims.TokenType != auth.TokenTypeAccess {
-		writeError(w, http.StatusForbidden, "forbidden", "Diagnostics require a user access token")
-		return 0, false
-	}
-	if claims.UserID <= 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return 0, false
-	}
-	return claims.UserID, true
-}
-
-func hasBearerAuthorizationHeader(r *http.Request) bool {
-	header := r.Header.Get("Authorization")
-	if header == "" {
-		return false
-	}
-	parts := strings.SplitN(header, " ", 2)
-	return len(parts) == 2 && strings.EqualFold(parts[0], "bearer") && strings.TrimSpace(parts[1]) != ""
 }
 
 func nextDiagnosticsPart(mr *multipart.Reader, expectedName, expectedContentType string) (*multipart.Part, error) {
@@ -359,17 +288,6 @@ type DiagnosticsUploadFailure struct {
 }
 
 func (e *DiagnosticsUploadFailure) Error() string { return e.Message }
-
-func writeDiagnosticsUploadFailure(w http.ResponseWriter, err error) {
-	failure, ok := errors.AsType[*DiagnosticsUploadFailure](err)
-	if !ok {
-		failure = &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
-	}
-	if failure.RetryAfter != "" {
-		w.Header().Set("Retry-After", failure.RetryAfter)
-	}
-	writeError(w, failure.Status, failure.Code, failure.Message)
-}
 
 func diagnosticsServiceFailure(err error) error {
 	_, maxBytesExceeded := errors.AsType[*http.MaxBytesError](err)

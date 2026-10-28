@@ -5,57 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
-
-func TestSetSubtitlePreferencePreservesOmittedForcedOverride(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	if err := store.SetSubtitlePreference(context.Background(), userstore.SubtitlePreference{
-		ProfileID:              "profile-1",
-		SeriesID:               "series-1",
-		SubtitleLanguage:       "en",
-		SubtitleTrackIndex:     1,
-		SubtitleMode:           "always",
-		ShowForcedSubtitles:    false,
-		HasShowForcedSubtitles: true,
-	}); err != nil {
-		t.Fatalf("seed subtitle preference: %v", err)
-	}
-
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-	req := httptest.NewRequest(http.MethodPut, "/subtitle-prefs/series-1", strings.NewReader(`{
-		"subtitle_language":"ja",
-		"subtitle_track_index":2,
-		"subtitle_mode":"always"
-	}`))
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	req = withPlaybackRouteParam(req, "series_id", "series-1")
-	rec := httptest.NewRecorder()
-
-	handler.HandleSetSubtitlePref(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
-	}
-
-	pref, err := store.GetSubtitlePreference(context.Background(), "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("get subtitle preference: %v", err)
-	}
-	if pref == nil || !pref.HasShowForcedSubtitles || pref.ShowForcedSubtitles {
-		t.Fatalf("forced-subtitle override was not preserved: %+v", pref)
-	}
-	if pref.SubtitleLanguage != "ja" || pref.SubtitleTrackIndex != 2 {
-		t.Fatalf("track selection was not updated: %+v", pref)
-	}
-}
 
 // resolveSeriesSubtitleSetting resolves one canonical key the way the
 // item-detail read path does: profile_series scope first, then the wider
@@ -76,153 +32,6 @@ func resolveSeriesSubtitleSetting(t *testing.T, store userstore.UserStore, key, 
 		t.Fatalf("resolving %s returned %d values, want 1", key, len(resolved))
 	}
 	return resolved[0]
-}
-
-// TestSetSubtitlePrefSyncsCanonicalRows replays the cutover bug: a legacy
-// client turns subtitles off for one series through PUT /subtitle-prefs, and
-// the item-detail read path — which resolves only the canonical
-// profile_series rows — must see the change rather than silently serving the
-// old preference.
-func TestSetSubtitlePrefSyncsCanonicalRows(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-
-	req := httptest.NewRequest(http.MethodPut, "/subtitle-prefs/series-1", strings.NewReader(`{
-		"subtitle_language":"ja",
-		"subtitle_track_index":2,
-		"subtitle_mode":"off",
-		"show_forced_subtitles":false
-	}`))
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	req = withPlaybackRouteParam(req, "series_id", "series-1")
-	rec := httptest.NewRecorder()
-
-	handler.HandleSetSubtitlePref(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
-	}
-
-	for key, want := range map[string]string{
-		settingskeys.PlaybackSubtitleLanguage:    `"ja"`,
-		settingskeys.PlaybackSubtitleMode:        `"off"`,
-		settingskeys.PlaybackShowForcedSubtitles: `false`,
-	} {
-		eff := resolveSeriesSubtitleSetting(t, store, key, "profile-1", "series-1")
-		if eff.Source != settingscontract.ScopeProfileSeries {
-			t.Errorf("%s resolved from %q, want profile_series", key, eff.Source)
-			continue
-		}
-		if string(eff.Value) != want {
-			t.Errorf("canonical %s = %s, want %s", key, eff.Value, want)
-		}
-	}
-}
-
-// TestSetSubtitlePrefWithoutForcedClearsCanonicalOverride: a request that
-// omits show_forced_subtitles (and finds no legacy override to preserve)
-// replaces the whole preference, so a canonical forced row from an earlier
-// write must not survive it.
-func TestSetSubtitlePrefWithoutForcedClearsCanonicalOverride(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       settingskeys.PlaybackShowForcedSubtitles,
-		Scope:     settingscontract.ScopeProfileSeries,
-		ProfileID: "profile-1",
-		SeriesID:  "series-1",
-	}, json.RawMessage(`false`)); err != nil {
-		t.Fatalf("seeding canonical forced row: %v", err)
-	}
-
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-	req := httptest.NewRequest(http.MethodPut, "/subtitle-prefs/series-1", strings.NewReader(`{
-		"subtitle_language":"en",
-		"subtitle_track_index":1,
-		"subtitle_mode":"always"
-	}`))
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	req = withPlaybackRouteParam(req, "series_id", "series-1")
-	rec := httptest.NewRecorder()
-
-	handler.HandleSetSubtitlePref(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
-	}
-
-	eff := resolveSeriesSubtitleSetting(t, store, settingskeys.PlaybackShowForcedSubtitles, "profile-1", "series-1")
-	if eff.Source == settingscontract.ScopeProfileSeries {
-		t.Errorf("stale canonical forced row survived: %s from %q", eff.Value, eff.Source)
-	}
-}
-
-// TestDeleteSubtitlePrefClearsCanonicalRows: clearing the legacy row means "no
-// per-series preference", so the canonical profile_series rows must go with it
-// and resolution must fall back past the series scope.
-func TestDeleteSubtitlePrefClearsCanonicalRows(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-
-	put := httptest.NewRequest(http.MethodPut, "/subtitle-prefs/series-1", strings.NewReader(`{
-		"subtitle_language":"ja",
-		"subtitle_track_index":2,
-		"subtitle_mode":"off",
-		"show_forced_subtitles":false
-	}`))
-	put = put.WithContext(newAuthorizedPlaybackContext())
-	put = withPlaybackRouteParam(put, "series_id", "series-1")
-	putRec := httptest.NewRecorder()
-	handler.HandleSetSubtitlePref(putRec, put)
-	if putRec.Code != http.StatusNoContent {
-		t.Fatalf("PUT status = %d, want 204; body=%s", putRec.Code, putRec.Body.String())
-	}
-
-	del := httptest.NewRequest(http.MethodDelete, "/subtitle-prefs/series-1", nil)
-	del = del.WithContext(newAuthorizedPlaybackContext())
-	del = withPlaybackRouteParam(del, "series_id", "series-1")
-	delRec := httptest.NewRecorder()
-	handler.HandleDeleteSubtitlePref(delRec, del)
-	if delRec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE status = %d, want 204; body=%s", delRec.Code, delRec.Body.String())
-	}
-
-	for _, key := range []string{
-		settingskeys.PlaybackSubtitleLanguage,
-		settingskeys.PlaybackSubtitleMode,
-		settingskeys.PlaybackShowForcedSubtitles,
-	} {
-		eff := resolveSeriesSubtitleSetting(t, store, key, "profile-1", "series-1")
-		if eff.Source == settingscontract.ScopeProfileSeries {
-			t.Errorf("canonical %s row survived the delete: %s", key, eff.Value)
-		}
-	}
-}
-
-// TestSetSubtitlePrefRejectsInvalidModeBeforeWriting: a value the canonical
-// endpoint would refuse must fail the request as a no-op instead of leaving
-// the legacy row and the canonical rows disagreeing.
-func TestSetSubtitlePrefRejectsInvalidModeBeforeWriting(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-
-	req := httptest.NewRequest(http.MethodPut, "/subtitle-prefs/series-1", strings.NewReader(`{
-		"subtitle_language":"en",
-		"subtitle_mode":"sometimes"
-	}`))
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	req = withPlaybackRouteParam(req, "series_id", "series-1")
-	rec := httptest.NewRecorder()
-
-	handler.HandleSetSubtitlePref(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-
-	pref, err := store.GetSubtitlePreference(context.Background(), "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("get subtitle preference: %v", err)
-	}
-	if pref != nil {
-		t.Fatalf("legacy row written despite the rejected value: %+v", pref)
-	}
 }
 
 // TestSetSubtitlePreferenceCanonicalPreservesCanonicalForcedOverride: the v2
@@ -320,115 +129,6 @@ func TestSetSubtitlePreferenceCanonicalDoesNotResurrectClearedOverride(t *testin
 	}
 }
 
-// TestSetSubtitlePreferenceCanonicalStampsUpdatedAtOnSQLite guards the v2
-// seam against the SQLite store: updateSubtitlePreference sends no UpdatedAt,
-// and a read after the write must carry a parseable timestamp, not the empty
-// string.
-func TestSetSubtitlePreferenceCanonicalStampsUpdatedAtOnSQLite(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-	ctx := newAuthorizedPlaybackContext()
-
-	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
-		ProfileID: "profile-1", SeriesID: "series-1",
-		SubtitleLanguage: "ja", SubtitleTrackIndex: 2, SubtitleMode: "always",
-	}); err != nil {
-		t.Fatalf("SetSubtitlePreferenceCanonical: %v", err)
-	}
-	pref, err := handler.GetSubtitlePreference(ctx, 1, "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("GetSubtitlePreference: %v", err)
-	}
-	if pref.UpdatedAt == "" {
-		t.Fatal("updated_at is empty after a v2-seam write")
-	}
-	if ts, err := time.Parse(time.RFC3339Nano, pref.UpdatedAt); err != nil || ts.IsZero() {
-		t.Fatalf("updated_at %q is not a valid RFC3339 instant: %v", pref.UpdatedAt, err)
-	}
-}
-
-// TestGetSubtitlePreferenceCanonicalOverlaysCanonicalMembers replays the v2
-// read finding: /settings/values changes the canonical profile_series rows
-// without touching the legacy row, so the v2 GET must show the canonical
-// language, mode and forced override — the ones playback resolves — over the
-// legacy row's track identity, and an absent canonical row is an unset member.
-func TestGetSubtitlePreferenceCanonicalOverlaysCanonicalMembers(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	ctx := t.Context()
-	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
-	const legacyStamp = "2026-01-01T00:00:00Z"
-	if err := store.SetSubtitlePreference(ctx, userstore.SubtitlePreference{
-		ProfileID: "profile-1", SeriesID: "series-1",
-		SubtitleLanguage: "en", SubtitleTrackIndex: 3, SubtitleMode: "auto", ExternalSubtitlePath: "ep.en.srt",
-		TrackSignature:      &userstore.SubtitleTrackSignature{Source: "external", Language: "en"},
-		ShowForcedSubtitles: true, HasShowForcedSubtitles: true,
-		UpdatedAt: legacyStamp,
-	}); err != nil {
-		t.Fatalf("legacy write: %v", err)
-	}
-	canonical := func(key, value string) {
-		t.Helper()
-		if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileSeries, ProfileID: "profile-1", SeriesID: "series-1",
-		}, json.RawMessage(value)); err != nil {
-			t.Fatalf("canonical write %s: %v", key, err)
-		}
-	}
-	// A newer /settings/values write of the language and mode; the forced
-	// override the legacy row still carries was cleared canonically (no row).
-	canonical(settingskeys.PlaybackSubtitleLanguage, `"ja"`)
-	canonical(settingskeys.PlaybackSubtitleMode, `"always"`)
-
-	got, err := handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("canonical read: %v", err)
-	}
-	if got.SubtitleLanguage != "ja" || got.SubtitleMode != "always" {
-		t.Fatalf("overlaid members = %q/%q, want ja/always", got.SubtitleLanguage, got.SubtitleMode)
-	}
-	if got.HasShowForcedSubtitles {
-		t.Fatalf("forced override = %+v, want none: the canonical row is absent", got)
-	}
-	if got.SubtitleTrackIndex != 3 || got.ExternalSubtitlePath != "ep.en.srt" || got.TrackSignature == nil || got.TrackSignature.Language != "en" {
-		t.Fatalf("track identity was not the legacy row's: %+v", got)
-	}
-	if got.UpdatedAt == legacyStamp {
-		t.Fatalf("updated_at = %q, want the newer canonical stamp", got.UpdatedAt)
-	}
-	// v1's read is untouched: it still answers the legacy row verbatim.
-	legacy, err := handler.GetSubtitlePreference(ctx, 1, "profile-1", "series-1")
-	if err != nil || legacy.SubtitleLanguage != "en" || legacy.SubtitleMode != "auto" || !legacy.HasShowForcedSubtitles || legacy.UpdatedAt != legacyStamp {
-		t.Fatalf("v1 read = %+v, %v; want the legacy row unchanged", legacy, err)
-	}
-
-	// A canonical forced row overrides the legacy flag in either direction.
-	canonical(settingskeys.PlaybackShowForcedSubtitles, `false`)
-	got, err = handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
-	if err != nil || !got.HasShowForcedSubtitles || got.ShowForcedSubtitles {
-		t.Fatalf("forced after canonical false = %+v, %v; want an explicit false override", got, err)
-	}
-
-	// Clearing every canonical member leaves the track identity with no
-	// language, mode or forced override.
-	for _, key := range []string{settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles} {
-		if _, err := store.DeleteSettingValue(ctx, userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileSeries, ProfileID: "profile-1", SeriesID: "series-1",
-		}); err != nil {
-			t.Fatalf("clearing %s: %v", key, err)
-		}
-	}
-	got, err = handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
-	if err != nil {
-		t.Fatalf("canonical read after clear: %v", err)
-	}
-	if got.SubtitleLanguage != "" || got.SubtitleMode != "" || got.HasShowForcedSubtitles || got.SubtitleTrackIndex != 3 {
-		t.Fatalf("after clearing canonical rows = %+v; want unset members over the legacy track", got)
-	}
-	if got.UpdatedAt != legacyStamp {
-		t.Fatalf("updated_at after clear = %q, want the legacy stamp %q", got.UpdatedAt, legacyStamp)
-	}
-}
-
 // TestGetSubtitlePreferenceCanonicalWithoutLegacyRowIs404: the resource is
 // the track selection the legacy row holds; canonical rows alone are the
 // profile's language preference, not a remembered track, and read as 404 on
@@ -446,5 +146,123 @@ func TestGetSubtitlePreferenceCanonicalWithoutLegacyRowIs404(t *testing.T) {
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Status != http.StatusNotFound || apiErr.Code != "not_found" {
 		t.Fatalf("canonical read without a legacy row = %v, want 404 not_found", err)
+	}
+}
+
+// The subtitle preference write mirrors language, mode and the forced
+// override to the canonical profile_series rows playback resolves; a value
+// the canonical contract refuses fails before anything is written; and the
+// delete clears every canonical member.
+func TestSubtitlePreferenceCanonicalWriteAndDeleteSync(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	ctx := t.Context()
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	keys := []string{
+		settingskeys.PlaybackSubtitleLanguage,
+		settingskeys.PlaybackSubtitleMode,
+		settingskeys.PlaybackShowForcedSubtitles,
+	}
+
+	err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1", SubtitleLanguage: "en", SubtitleMode: "sometimes",
+	})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("invalid mode = %v, want 400", err)
+	}
+	if pref, err := store.GetSubtitlePreference(ctx, "profile-1", "series-1"); err != nil || pref != nil {
+		t.Fatalf("specialized row written despite the rejected mode: %+v, %v", pref, err)
+	}
+	for _, key := range keys {
+		if eff := resolveSeriesSubtitleSetting(t, store, key, "profile-1", "series-1"); eff.Source == settingscontract.ScopeProfileSeries {
+			t.Fatalf("canonical %s written despite the rejected mode: %s", key, eff.Value)
+		}
+	}
+
+	if err := handler.SetSubtitlePreferenceCanonical(ctx, 1, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1", SubtitleLanguage: "ja", SubtitleTrackIndex: 2,
+		SubtitleMode: "off", ShowForcedSubtitles: false, HasShowForcedSubtitles: true,
+	}); err != nil {
+		t.Fatalf("SetSubtitlePreferenceCanonical: %v", err)
+	}
+	want := map[string]string{
+		settingskeys.PlaybackSubtitleLanguage:    `"ja"`,
+		settingskeys.PlaybackSubtitleMode:        `"off"`,
+		settingskeys.PlaybackShowForcedSubtitles: `false`,
+	}
+	for _, key := range keys {
+		eff := resolveSeriesSubtitleSetting(t, store, key, "profile-1", "series-1")
+		if eff.Source != settingscontract.ScopeProfileSeries || string(eff.Value) != want[key] {
+			t.Errorf("canonical %s = %s from %q, want %s from profile_series", key, eff.Value, eff.Source, want[key])
+		}
+	}
+
+	if err := handler.DeleteSubtitlePreference(ctx, 1, "profile-1", "series-1"); err != nil {
+		t.Fatalf("DeleteSubtitlePreference: %v", err)
+	}
+	for _, key := range keys {
+		if eff := resolveSeriesSubtitleSetting(t, store, key, "profile-1", "series-1"); eff.Source == settingscontract.ScopeProfileSeries {
+			t.Errorf("canonical %s row survived the delete: %s", key, eff.Value)
+		}
+	}
+}
+
+// /settings/values can change the canonical members without touching the
+// specialized row, so the read overlays language, mode and the forced
+// override on the specialized track identity; an absent canonical row means
+// no preference for that member.
+func TestGetSubtitlePreferenceCanonicalOverlaysCanonicalMembers(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	ctx := t.Context()
+	handler := NewSubtitlePrefHandler(testUserStoreProvider{store: store})
+	const legacyStamp = "2026-01-01T00:00:00Z"
+	if err := store.SetSubtitlePreference(ctx, userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: "series-1",
+		SubtitleLanguage: "en", SubtitleTrackIndex: 3, SubtitleMode: "auto", ExternalSubtitlePath: "ep.en.srt",
+		TrackSignature:      &userstore.SubtitleTrackSignature{Source: "external", Language: "en"},
+		ShowForcedSubtitles: true, HasShowForcedSubtitles: true,
+		UpdatedAt: legacyStamp,
+	}); err != nil {
+		t.Fatalf("legacy write: %v", err)
+	}
+	identity := func(key string) userstore.SettingIdentity {
+		return userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfileSeries, ProfileID: "profile-1", SeriesID: "series-1"}
+	}
+	canonical := func(key, value string) {
+		t.Helper()
+		if _, err := store.UpsertSettingValue(ctx, identity(key), json.RawMessage(value)); err != nil {
+			t.Fatalf("canonical write %s: %v", key, err)
+		}
+	}
+	canonical(settingskeys.PlaybackSubtitleLanguage, `"ja"`)
+	canonical(settingskeys.PlaybackSubtitleMode, `"always"`)
+
+	got, err := handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
+	if err != nil {
+		t.Fatalf("canonical read: %v", err)
+	}
+	if got.SubtitleLanguage != "ja" || got.SubtitleMode != "always" || got.HasShowForcedSubtitles {
+		t.Fatalf("overlaid members = %+v, want ja/always and no forced override", got)
+	}
+	if got.SubtitleTrackIndex != 3 || got.ExternalSubtitlePath != "ep.en.srt" || got.TrackSignature == nil || got.TrackSignature.Language != "en" {
+		t.Fatalf("track identity was not the specialized row's: %+v", got)
+	}
+	if got.UpdatedAt == legacyStamp {
+		t.Fatalf("updated_at = %q, want the newer canonical stamp", got.UpdatedAt)
+	}
+
+	canonical(settingskeys.PlaybackShowForcedSubtitles, `false`)
+	got, err = handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
+	if err != nil || !got.HasShowForcedSubtitles || got.ShowForcedSubtitles {
+		t.Fatalf("forced after canonical false = %+v, %v; want an explicit false override", got, err)
+	}
+
+	for _, key := range []string{settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles} {
+		if _, err := store.DeleteSettingValue(ctx, identity(key)); err != nil {
+			t.Fatalf("clearing %s: %v", key, err)
+		}
+	}
+	got, err = handler.GetSubtitlePreferenceCanonical(ctx, 1, "profile-1", "series-1")
+	if err != nil || got.SubtitleLanguage != "" || got.SubtitleMode != "" || got.HasShowForcedSubtitles || got.SubtitleTrackIndex != 3 || got.UpdatedAt != legacyStamp {
+		t.Fatalf("after clearing canonical rows = %+v, %v; want unset members over the specialized track", got, err)
 	}
 }

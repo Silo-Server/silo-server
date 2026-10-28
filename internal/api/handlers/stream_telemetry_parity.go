@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,12 +65,6 @@ type parityResponse struct {
 	Reason  string                 `json:"reason,omitempty"`
 	View    parityViewResponse     `json:"view"`
 	Sources []paritySourceResponse `json:"sources"`
-}
-
-// HandleGetStreamTelemetryParity handles
-// GET /api/v1/admin/stream-telemetry/parity.
-func (h *StreamTelemetryParityHandler) HandleGetStreamTelemetryParity(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.ReadStreamTelemetryParity(r.Context()))
 }
 
 // StreamTelemetryParityView is the existing internal comparison snapshot.

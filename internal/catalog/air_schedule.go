@@ -115,17 +115,6 @@ func CalendarEventLocalTime(airDate time.Time, airTime, airTimezone *string, loc
 	return time.Date(airDate.Year(), airDate.Month(), airDate.Day(), 0, 0, 0, 0, loc), false
 }
 
-func CalendarLocation(name string) *time.Location {
-	if strings.TrimSpace(name) == "" {
-		return time.UTC
-	}
-	loc, err := time.LoadLocation(strings.TrimSpace(name))
-	if err != nil {
-		return time.UTC
-	}
-	return loc
-}
-
 func parseAirTime(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	for _, layout := range []string{"15:04:05", "15:04"} {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/go-chi/chi/v5"
 	"golang.org/x/net/idna"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
@@ -92,47 +90,6 @@ var newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 
 var checkAdminMeilisearchSettingsConnection = func(ctx context.Context, settings catalog.CatalogSearchSettings) error {
 	return catalog.NewCatalogSearchIndexer(nil, nil).CheckConnection(ctx, settings)
-}
-
-func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
-
-	kind := chi.URLParam(r, "kind")
-	if strings.TrimSpace(kind) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Check kind is required")
-		return
-	}
-
-	var req adminSettingsConnectionCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.Values == nil {
-		req.Values = map[string]string{}
-	}
-
-	effectiveSettings, err := h.effectiveSettingsForConnectionCheck(r.Context(), kind, req)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load settings")
-		return
-	}
-
-	cfg, err := config.LoadFromDB(effectiveSettings)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	response, err := h.runAdminSettingsConnectionCheck(r.Context(), kind, cfg, effectiveSettings)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported connection check kind")
-		return
-	}
-	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AdminHandler) runAdminSettingsConnectionCheck(ctx context.Context, kind string, cfg *config.Config, effectiveSettings map[string]string) (connectionCheckResponse, error) {

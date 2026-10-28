@@ -290,10 +290,9 @@
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
 ./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
 
-# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
-# the frozen legacy bridge alike.
+# Webhook deliveries are capped at 10 MiB on every receiver.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
-./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+./internal/apiv2 TestWebhookReceiverRealDeliveryDB
 
 # A person write reindexes the person's titles only when it changes the name,
 # the only person field search documents carry.

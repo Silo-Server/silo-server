@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -58,76 +56,63 @@ func storedPIN(t *testing.T, pin string) *string {
 	return new(string(hash))
 }
 
-func postVerifyPIN(t *testing.T, h *ProfileHandler, profileID, pin string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := newAuthorizedProfileRequestWithSession(http.MethodPost, "/profiles/"+profileID+"/verify-pin",
-		`{"pin":"`+pin+`"}`, "user", "", "sess-1")
-	req = withProfileRouteParam(req, "id", profileID)
-	rr := httptest.NewRecorder()
-	h.HandleVerifyPIN(rr, req)
-	return rr
+// verifyPIN checks pin for profileID from the account's login session sess-1,
+// as both listeners call the shared seam.
+func verifyPIN(h *ProfileHandler, profileID, pin string) (ProfileVerification, error) {
+	return h.VerifyPIN(profileServiceContext(""), ProfileVerifyPINCommand{
+		UserID: 1, SessionID: "sess-1", ProfileID: profileID, PIN: pin,
+	})
 }
 
-func requireVerifyPIN(t *testing.T, rr *httptest.ResponseRecorder, wantValid bool) {
+func requireVerifyPIN(t *testing.T, h *ProfileHandler, profileID, pin string, wantValid bool) {
 	t.Helper()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rr.Code, rr.Body.String())
+	got, err := verifyPIN(h, profileID, pin)
+	if err != nil {
+		t.Fatalf("verify %s: %v", profileID, err)
 	}
-	var resp verifyPINResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
+	if got.Valid != wantValid {
+		t.Fatalf("verify %s: valid = %v, want %v", profileID, got.Valid, wantValid)
 	}
-	if resp.Valid != wantValid {
-		t.Fatalf("valid = %v, want %v", resp.Valid, wantValid)
-	}
-}
-
-func requirePINLocked(t *testing.T, rr *httptest.ResponseRecorder) {
-	t.Helper()
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, body = %s; want 429", rr.Code, rr.Body.String())
-	}
-	if got := rr.Header().Get("Retry-After"); got != "300" {
-		t.Fatalf("Retry-After = %q, want 300", got)
-	}
-	var body errorResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.Error != "rate_limited" || body.Message == "" {
-		t.Fatalf("body = %+v, want rate_limited with a message", body)
+	if wantValid && got.ProfileToken == "" {
+		t.Fatalf("verify %s: a matching PIN issued no profile token", profileID)
 	}
 }
 
-func TestHandleVerifyPIN_LocksProfileAfterFiveWrongPINs(t *testing.T) {
+func requirePINLocked(t *testing.T, h *ProfileHandler, profileID, pin string) {
+	t.Helper()
+	_, err := verifyPIN(h, profileID, pin)
+	if apiErr := requireAPIStatus(t, err, http.StatusTooManyRequests); apiErr.Code != "rate_limited" || apiErr.RetryAfter != 300 {
+		t.Fatalf("locked verify = %+v, want rate_limited with Retry-After 300", apiErr)
+	}
+}
+
+func TestVerifyPIN_LocksProfileAfterFiveWrongPINs(t *testing.T) {
 	h := newPINLimitHandler(t, newPINLimitStore(t), ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy))
 
 	for range 5 {
-		requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "0000"), false)
+		requireVerifyPIN(t, h, "profile-1", "0000", false)
 	}
-	requirePINLocked(t, postVerifyPIN(t, h, "profile-1", "0000"))
+	requirePINLocked(t, h, "profile-1", "0000")
 	// The right PIN is refused too while the profile is locked.
-	requirePINLocked(t, postVerifyPIN(t, h, "profile-1", "1234"))
+	requirePINLocked(t, h, "profile-1", "1234")
 	// Another profile on the same account keeps its own budget.
-	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-2", "5678"), true)
+	requireVerifyPIN(t, h, "profile-2", "5678", true)
 }
 
-func TestHandleVerifyPIN_CorrectPINResetsCount(t *testing.T) {
+func TestVerifyPIN_CorrectPINResetsCount(t *testing.T) {
 	h := newPINLimitHandler(t, newPINLimitStore(t), ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy))
 
-	for range 4 {
-		requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "0000"), false)
+	for range 2 {
+		for range 4 {
+			requireVerifyPIN(t, h, "profile-1", "0000", false)
+		}
+		requireVerifyPIN(t, h, "profile-1", "1234", true)
 	}
-	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "1234"), true)
-	for range 4 {
-		requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "0000"), false)
-	}
-	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "1234"), true)
 }
 
 // A profile that does not exist or has no PIN is refused before an attempt
 // is counted, so it never reaches the lockout and adds no limiter entry.
-func TestHandleVerifyPIN_UnknownOrPINlessProfileTakesNoAttempt(t *testing.T) {
+func TestVerifyPIN_UnknownOrPINlessProfileTakesNoAttempt(t *testing.T) {
 	store := newPINLimitStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-3", Name: "Guest"}); err != nil {
 		t.Fatalf("create profile: %v", err)
@@ -136,9 +121,8 @@ func TestHandleVerifyPIN_UnknownOrPINlessProfileTakesNoAttempt(t *testing.T) {
 
 	for _, id := range []string{"missing", "profile-3"} {
 		for range ratelimit.ProfilePINPolicy.MaxAttempts + 1 {
-			if rr := postVerifyPIN(t, h, id, "0000"); rr.Code != http.StatusNotFound {
-				t.Fatalf("%s: status = %d, body = %s; want 404", id, rr.Code, rr.Body.String())
-			}
+			_, err := verifyPIN(h, id, "0000")
+			requireAPIStatus(t, err, http.StatusNotFound)
 		}
 	}
 }
@@ -150,29 +134,23 @@ func TestPINLockedErrorRoundsRetryAfterUp(t *testing.T) {
 	}
 }
 
+// A manager who resets a locked profile's PIN can use the new one at once.
 func TestUpdateProfile_PINChangeClearsLockout(t *testing.T) {
-	store := newPINLimitStore(t)
-	h := newPINLimitHandler(t, store, ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy))
+	h := newPINLimitHandler(t, newPINLimitStore(t), ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy))
 
 	for range 5 {
-		requireVerifyPIN(t, postVerifyPIN(t, h, "profile-2", "0000"), false)
+		requireVerifyPIN(t, h, "profile-2", "0000", false)
 	}
-	requirePINLocked(t, postVerifyPIN(t, h, "profile-2", "5678"))
+	requirePINLocked(t, h, "profile-2", "5678")
 
-	// The household parent (the PIN-locked primary, profile-1) verifies its
-	// own PIN and resets the kid's.
-	verify := postVerifyPIN(t, h, "profile-1", "1234")
-	var parent verifyPINResponse
-	if err := json.Unmarshal(verify.Body.Bytes(), &parent); err != nil || parent.ProfileToken == "" {
-		t.Fatalf("parent verify-pin: status = %d, body = %s", verify.Code, verify.Body.String())
-	}
-	req := newAuthorizedProfileRequestWithSession(http.MethodPut, "/profiles/profile-2", `{"pin":"2468"}`, "user", "profile-1", "sess-1")
-	req.Header.Set("X-Profile-Token", parent.ProfileToken)
-	rr := httptest.NewRecorder()
-	h.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("update status = %d, body = %s", rr.Code, rr.Body.String())
+	// The household parent (profile-1, already verified) resets the kid's PIN.
+	if _, err := h.UpdateProfile(profileServiceContext("profile-1"), ProfileUpdateCommand{
+		UserID: 1, ProfileID: "profile-2", ActiveProfileID: "profile-1",
+		Request:       ProfileUpdateRequest{PIN: new("2468")},
+		VerifyProfile: noProfileVerification,
+	}); err != nil {
+		t.Fatalf("reset pin: %v", err)
 	}
 
-	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-2", "2468"), true)
+	requireVerifyPIN(t, h, "profile-2", "2468", true)
 }

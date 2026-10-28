@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
@@ -214,14 +212,6 @@ func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store users
 	return canManageHousehold(r, store, h.ProfileTokens)
 }
 
-func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
-	if errors.Is(err, access.ErrProfileUnverified) {
-		writeError(w, http.StatusForbidden, "forbidden", "Profile management requires verifying the primary profile PIN")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check profile permissions")
-}
-
 // profileNameConflicts reports whether a profile other than excludeID already
 // uses name within this account's store, comparing the trimmed forms
 // case-insensitively so "Laura" and " laura " count as the same household
@@ -279,22 +269,6 @@ func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 
 // --- Handler methods ---
 
-// HandleListProfiles handles GET /profiles.
-func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	resp, err := h.ListProfiles(r.Context(), userID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // ListProfiles lists the account's household. v1 GET /profiles and v2
 // listProfiles both call it; a failure is an *APIError carrying the v1
 // status, code and message.
@@ -311,39 +285,6 @@ func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileL
 		Profiles:            h.toProfileResponses(ctx, store, profiles),
 		AvatarUploadEnabled: h.AvatarStore != nil,
 	}, nil
-}
-
-// HandleCreateProfile handles POST /profiles.
-func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var req ProfileCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	created, err := h.CreateProfile(r.Context(), ProfileCreateCommand{
-		UserID:          userID,
-		ActiveProfileID: activeProfileIDOf(r),
-		Request:         req,
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
 }
 
 // ProfileCreateCommand is a profile creation with its request already parsed
@@ -530,47 +471,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	return h.toProfileResponse(ctx, store, created), nil
 }
 
-// HandleUpdateProfile handles PUT /profiles/{id}.
-func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	var req ProfileUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	resp, err := h.UpdateProfile(r.Context(), ProfileUpdateCommand{
-		UserID:          userID,
-		ProfileID:       profileID,
-		ActiveProfileID: activeProfileIDOf(r),
-		Request:         req,
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // ProfileUpdateCommand is a profile update with its request already parsed
 // and its caller already reduced to an identity.
 type ProfileUpdateCommand struct {
@@ -744,41 +644,6 @@ func profileManagementError(err error) *APIError {
 	return out
 }
 
-// HandleDeleteProfile handles DELETE /profiles/{id}.
-func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	err := h.DeleteProfile(r.Context(), ProfileDeleteCommand{
-		UserID:          userID,
-		ProfileID:       profileID,
-		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ProfileDeleteCommand is a profile deletion with its caller already reduced
 // to an identity.
 type ProfileDeleteCommand struct {
@@ -883,55 +748,6 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		}
 	}
 	return nil
-}
-
-// HandleVerifyPIN handles POST /profiles/{id}/verify-pin.
-func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	var req verifyPINRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.PIN == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "PIN is required")
-		return
-	}
-
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	result, err := h.VerifyPIN(r.Context(), ProfileVerifyPINCommand{
-		UserID: userID, SessionID: claims.SessionID, ProfileID: profileID, PIN: req.PIN,
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := verifyPINResponse{
-		Valid:        result.Valid,
-		ProfileToken: result.ProfileToken,
-	}
-	if !result.ExpiresAt.IsZero() {
-		resp.ExpiresAt = result.ExpiresAt.UTC().Format(time.RFC3339)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // ProfileVerifyPINCommand is a PIN check with its request already parsed
@@ -1120,33 +936,6 @@ func (h *ProfileHandler) profileResponseWith(
 		CreatedAt:                  p.CreatedAt,
 		UpdatedAt:                  p.UpdatedAt,
 	}
-}
-
-// HandleListHouseholdSessions handles GET /profiles/household/sessions.
-func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	sessions, err := h.ListHouseholdSessions(r.Context(), HouseholdSessionsQuery{
-		UserID:          userID,
-		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, sessions)
 }
 
 // PlaybackSessionView is one live playback session as the session listings

@@ -35,9 +35,9 @@ problem without database error details. Restart metadata is available without
 settings storage.
 
 The web settings pages use the v2 effective settings, restart metadata, and
-sensitive-status operations. Writes remain on their existing bridge operations
-until the corresponding mutation contracts migrate. The migration inventory lists
-no Apple or Android consumers for these inspection operations. Jellyfin
+sensitive-status operations, and write through `updateAdminSettings` and
+`updateAdminSetting`. The migration inventory lists no Apple or Android
+consumers for these inspection operations. Jellyfin
 compatibility does not expose these administrator settings contracts.
 
 `POST /api/v2/admin/settings/check/{kind}` performs one synchronous connection
@@ -329,15 +329,14 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
 
 - The connection changes when the write leaves a different `redis.url`, or a
   different database number in use, than the stored settings. Both
-  writes and both API versions apply the check. A write that leaves the
+  writes apply the check. A write that leaves the
   connection as it is, clears `redis.url`, or runs in a process started with
   `REDIS_URL` connects to nothing.
 - Connecting selects the database number, so a number the Redis server does
   not have (16 or more on a Redis with the default 16 databases) fails the
   same way an unreachable host does. So does a Redis user whose ACL does not
   grant the channels (the pattern `&silo:*`).
-- A failed connection answers a `422` validation problem on `/api/v2` and
-  `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
+- A failed connection answers a `422` validation problem. The detail says whether Redis refused
   the connection, refused the channels, or could not be reached, or that
   `redis.url` is not a URL the Redis clients can read (a bare `host:port` an
   older build saved). It does not quote the client error, which can name hosts

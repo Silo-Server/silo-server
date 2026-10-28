@@ -29,7 +29,7 @@ or rewrite existing objects.
 
 Metadata updates merge only supplied fields in one SQL update. An optional
 expected revision is compared in that same statement. A database trigger
-increments the revision for every update, including bridge and direct SQL
+increments the revision for every update, including direct SQL
 writers, so an intervening change invalidates a captured guard. Language changes
 can conflict with an existing full content identity; a conflict leaves both rows
 and objects intact.

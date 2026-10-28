@@ -2,16 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -44,74 +38,6 @@ func (s *fakeAPIKeyStore) Delete(context.Context, int64, int) error   { return n
 func (s *fakeAPIKeyStore) DeleteByAdmin(context.Context, int64) error { return nil }
 func (s *fakeAPIKeyStore) UpdateTier(context.Context, int64, string) error {
 	return nil
-}
-
-func createAPIKey(t *testing.T, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
-	t.Helper()
-	return createAPIKeyAs(t, models.RoleAdmin, body)
-}
-
-func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
-	t.Helper()
-	store := &fakeAPIKeyStore{}
-	h := NewAPIKeyHandler(store)
-	// A household with no limited profile: the profile-less admin request
-	// below keeps creating keys.
-	h.Stores = householdGateStores{store: householdGateStore{}}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
-	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
-		UserID:    7,
-		Role:      role,
-		TokenType: auth.TokenTypeAccess,
-		SessionID: "s1",
-	}))
-	rec := httptest.NewRecorder()
-	h.HandleCreateAPIKey(rec, req)
-	return rec, store
-}
-
-func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:access-groups:read","admin:users","admin:users"]}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
-	}
-
-	want := []string{auth.ScopeAdminAccessGroupsRead, auth.ScopeAdminUsers}
-	if !reflect.DeepEqual(store.createdScopes, want) {
-		t.Fatalf("stored scopes = %v, want %v (normalized: deduplicated and sorted)", store.createdScopes, want)
-	}
-
-	var resp apiKeyResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !reflect.DeepEqual(resp.Scopes, want) {
-		t.Fatalf("response scopes = %v, want %v", resp.Scopes, want)
-	}
-}
-
-func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:everything"]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body.String())
-	}
-	if store.created {
-		t.Fatal("an unknown scope must not create a key")
-	}
-}
-
-// Only server admins create API keys (#1189 AC2). The role check runs before
-// the body is read, so a regular account is refused even with a bad body.
-func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
-	for _, body := range []string{`{"label":"ci"}`, `{"label":""}`, `x`} {
-		rec, store := createAPIKeyAs(t, models.RoleUser, body)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("body %q: status = %d, want 403 (body %s)", body, rec.Code, rec.Body.String())
-		}
-		if store.created {
-			t.Fatalf("body %q: a regular account must not create a key", body)
-		}
-	}
 }
 
 func (s *fakeAPIKeyStore) GetMetadataByID(context.Context, int64) (*models.APIKeyMetadata, error) {
@@ -166,27 +92,6 @@ func TestCreateAdminAPIKeyAcceptsFullScopeCatalog(t *testing.T) {
 	var unknown *auth.UnknownAPIKeyScopeError
 	if !errors.Is(err, ErrInvalidAPIKeyCreation) || !errors.As(err, &unknown) || unknown.Scope != "admin:everything" || store.created {
 		t.Fatalf("unknown scope must name itself and stay out of storage: %v", err)
-	}
-}
-
-// The v1 catalog is frozen: scopes added for v2 must not become creatable on
-// either v1 create transport.
-func TestV1CreateRejectsV2OnlyScopes(t *testing.T) {
-	for _, scope := range []string{auth.ScopeLibrariesRead, auth.ScopeAdminSessionsSummaryRead} {
-		body := `{"label":"ci","scopes":["` + scope + `"]}`
-		rec, store := createAPIKey(t, body)
-		if rec.Code != http.StatusBadRequest || store.created {
-			t.Fatalf("v1 personal create accepted %q: %d %s", scope, rec.Code, rec.Body.String())
-		}
-
-		adminStore := &fakeAPIKeyStore{}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys", strings.NewReader(body))
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		adminRec := httptest.NewRecorder()
-		NewAPIKeyHandler(adminStore).HandleAdminCreateAPIKey(adminRec, req)
-		if adminRec.Code != http.StatusBadRequest || adminStore.created {
-			t.Fatalf("v1 admin create accepted %q: %d %s", scope, adminRec.Code, adminRec.Body.String())
-		}
 	}
 }
 

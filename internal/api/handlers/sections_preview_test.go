@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -26,23 +25,6 @@ func (s *stubPreviewFetcher) FetchOne(_ context.Context, _ sections.ResolvedSect
 		Items:      s.items,
 		TotalCount: s.total,
 	}, nil
-}
-
-func TestHandlePreviewRejectsUnknownType(t *testing.T) {
-	h := &SectionHandler{}
-	body, _ := json.Marshal(map[string]any{
-		"section_type": "not_a_real_type",
-		"config":       map[string]any{},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/sections/preview", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	h.HandlePreview(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
-	}
 }
 
 // The v2 admin preview presigns each item's poster exactly as a live row does,

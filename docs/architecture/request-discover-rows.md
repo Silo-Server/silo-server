@@ -45,9 +45,9 @@ Checks (`discoverrows.NormalizeLayout`):
 
 - **Built-in rows.** The six rows the page had before it could be changed keep
   their IDs: `trending_movies`, `trending_series`, `popular_movies`,
-  `popular_series`, `upcoming_movies`, `on_air_series`. They are the section
-  keys `/api/v1` serves and the keys shipped Apple and Android apps merge into
-  their two carousels (trending, popular), so a built-in row keeps its type and
+  `popular_series`, `upcoming_movies`, `on_air_series`. They are the keys
+  `getDiscoverSection` accepts and the keys shipped Apple and Android apps merge
+  into their two carousels (trending, popular), so a built-in row keeps its type and
   chart; its title, limit, switch and `hide_available` can change, and it can be
   removed.
 - **Brand rows.** A brand row's ID is its type, so each appears at most once.
@@ -96,9 +96,6 @@ Cost: every title row costs TMDB and database work on each Discover load
 (rows run four at a time). A rating-restricted viewer on a cold certification
 cache costs up to 20 certification lookups per source page read; certifications
 are cached for seven days and shared by every profile.
-
-`/api/v1` is frozen: `Discover` and `DiscoverAll` always serve the six built-in
-rows as the default layout has them, whatever the admin's layout says.
 
 ## List rows
 

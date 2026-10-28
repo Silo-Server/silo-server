@@ -263,8 +263,8 @@ const (
 	// every row at once: on a cold certification cache each consumed page
 	// costs up to 20 cert lookups against the client's rate limiter. A
 	// Discover page row reads ceil(limit/20) pages, plus one when it filters
-	// (see firstRowPage), so its worst case is rows x that x 20 lookups;
-	// /api/v1's six rows read sectionBackfillBudgetAggregate pages each.
+	// (see firstRowPage), so its worst case is rows x that x 20 lookups; a
+	// layout preview reads sectionBackfillBudgetAggregate pages per row.
 	// Steady state is unaffected: certifications are cached for 7 days,
 	// shared across all profiles.
 	sectionBackfillBudgetSingle    = 5

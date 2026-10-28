@@ -15,7 +15,6 @@ import (
 
 func TestAIStatusReadsStopWhenRequestIsCanceled(t *testing.T) {
 	for _, path := range []string{
-		"/api/v1/metadata/ai/status", "/api/v1/subtitles/ai/status",
 		Prefix + "/capabilities/metadata-ai", Prefix + "/subtitles/ai/status",
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -49,14 +48,7 @@ func TestAIStatusReadsStopWhenRequestIsCanceled(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				switch path {
-				case "/api/v1/metadata/ai/status":
-					metadata.HandleStatus(w, r)
-				case "/api/v1/subtitles/ai/status":
-					subtitles.HandleStatus(w, r)
-				default:
-					h.ServeHTTP(w, r)
-				}
+				h.ServeHTTP(w, r)
 			}()
 			select {
 			case <-started:

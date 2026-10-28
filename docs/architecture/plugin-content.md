@@ -2,8 +2,7 @@
 
 The configured plugin HTTP proxy is mounted at the narrow common parent
 `/api/v2/plugin-content`. Pages use `/plugins/{installation_id}/*`; static
-assets use `/plugin-assets/{installation_id}/*`. The frozen v1 mounts remain
-unchanged. The ordinary public `GET /api/v2/plugin-content/capabilities`
+assets use `/plugin-assets/{installation_id}/*`. The ordinary public `GET /api/v2/plugin-content/capabilities`
 reports revision 1 and whether the proxy dependency is configured. Availability
 does not promise that a particular installation or route is available.
 
@@ -14,7 +13,7 @@ request bodies, statuses and media. The separate finite raw registry retains all
 its validation rules. This is a specific plugin-content exclusion, not an escape
 hatch for ordinary API operations.
 
-Page mounts accept the same nine HTTP methods as the bridge proxy. The proxy
+Page mounts accept the plugin proxy's nine HTTP methods. The proxy
 still matches the plugin descriptor before dispatch and applies its public,
 authenticated or admin policy. A page URL without the directory slash receives
 a same-origin 308 preserving its query before dispatch, so browser-relative
@@ -28,7 +27,7 @@ and ranges. Unsupported mount methods return 405 with Allow.
 
 The existing proxy's credential header filters, response header filters, request
 buffering, error behavior and HTTPRoutes RPC remain unchanged. Query forwarding
-retains only the first value of each repeated key, as in the bridge proxy. This is not a
+retains only the first value of each repeated key. This is not a
 websocket tunnel or an arbitrary streaming transport. Bodies are buffered in
 full before the plugin RPC, under a host cap of 3.75 MiB (4 MiB gRPC receive
 limit less room for the request envelope) on both mounts and for every method,
@@ -48,12 +47,12 @@ cookie.
 
 The launch cookie lasts five minutes, is HttpOnly and SameSite=Lax, and uses
 Secure on HTTPS. Its path is exactly `/api/v2/plugin-content`, covering plugin
-pages and assets. A cookie from the frozen v1 launch path expires on its original
-five-minute lifetime. Each content request still validates the login session,
+pages and assets. Each content request still validates the login session,
 so revoking that session invalidates the cookie before its expiry.
 
 Plugin-generated absolute links, redirects and response bodies are not rewritten.
-A preserved v1 absolute href remains a v1 href. Plugin authors must use compatible
+An absolute href to a retired `/api/v1` plugin path is passed through unchanged
+and answers `410 Gone`. Plugin authors must use compatible
 relative links or the appropriate versioned content mount for navigation and
 assets. The launch and proxy integration tests cover browser cookie scope,
 relative assets, descriptor access policies and session revocation. They do not

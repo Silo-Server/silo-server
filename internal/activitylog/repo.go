@@ -65,58 +65,6 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 	return &Repo{pool: pool}
 }
 
-// UserIPs returns the IP addresses used by a given user within the lookback window.
-func (r *Repo) UserIPs(ctx context.Context, userID int, days int) ([]UserIPEntry, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT client_ip::text, min(timestamp) AS first_seen, max(timestamp) AS last_seen, count(*) AS request_count
-		FROM activity_log
-		WHERE user_id = $1 AND timestamp > now() - make_interval(days => $2)
-		GROUP BY client_ip
-		ORDER BY last_seen DESC
-	`, userID, days)
-	if err != nil {
-		return nil, fmt.Errorf("query user IPs: %w", err)
-	}
-	defer rows.Close()
-
-	var results []UserIPEntry
-	for rows.Next() {
-		var e UserIPEntry
-		if err := rows.Scan(&e.ClientIP, &e.FirstSeen, &e.LastSeen, &e.RequestCount); err != nil {
-			return nil, fmt.Errorf("scan user IP row: %w", err)
-		}
-		results = append(results, e)
-	}
-	return results, rows.Err()
-}
-
-// IPUsers returns the users that have connected from a given IP within the lookback window.
-func (r *Repo) IPUsers(ctx context.Context, ip string, days int) ([]IPUserEntry, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT a.user_id, COALESCE(u.username, ''), min(a.timestamp) AS first_seen,
-		       max(a.timestamp) AS last_seen, count(*) AS request_count
-		FROM activity_log a
-		LEFT JOIN users u ON u.id = a.user_id
-		WHERE a.client_ip = $1::inet AND a.timestamp > now() - make_interval(days => $2) AND a.user_id IS NOT NULL
-		GROUP BY a.user_id, u.username
-		ORDER BY last_seen DESC
-	`, ip, days)
-	if err != nil {
-		return nil, fmt.Errorf("query IP users: %w", err)
-	}
-	defer rows.Close()
-
-	var results []IPUserEntry
-	for rows.Next() {
-		var e IPUserEntry
-		if err := rows.Scan(&e.UserID, &e.Username, &e.FirstSeen, &e.LastSeen, &e.RequestCount); err != nil {
-			return nil, fmt.Errorf("scan IP user row: %w", err)
-		}
-		results = append(results, e)
-	}
-	return results, rows.Err()
-}
-
 func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 	limit := opts.Limit
 	if limit <= 0 || limit > 200 {

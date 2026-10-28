@@ -11,9 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -271,222 +268,6 @@ var settingsRegistry = map[string]settingSpec{
 
 // --- Handler methods ---
 
-// HandleListSettings handles GET /settings.
-func (h *SettingsHandler) HandleListSettings(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	entries, err := store.ListSettings(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list settings")
-		return
-	}
-
-	resp := settingsListResponse{
-		Settings: make([]settingResponse, 0, len(entries)),
-	}
-	for _, e := range entries {
-		if !keyUsesUserScope(e.Key) {
-			continue
-		}
-		resp.Settings = append(resp.Settings, settingResponse{
-			Key:   e.Key,
-			Value: e.Value,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleGetSetting handles GET /settings/{key}.
-func (h *SettingsHandler) HandleGetSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	key := chi.URLParam(r, "key")
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	value, err := store.GetSetting(r.Context(), key)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get setting")
-		return
-	}
-
-	if value == "" {
-		writeError(w, http.StatusNotFound, "not_found", "Setting not found")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, settingResponse{
-		Key:   key,
-		Value: value,
-	})
-}
-
-// HandleSetSetting handles PUT /settings/{key}.
-func (h *SettingsHandler) HandleSetSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	key := chi.URLParam(r, "key")
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-
-	var req setSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := validateRegisteredSetting(key, req.Value, scopeUser); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, &req.Value); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set setting")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleDeleteSetting handles DELETE /settings/{key}.
-func (h *SettingsHandler) HandleDeleteSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	key := chi.URLParam(r, "key")
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete setting")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleGetDeviceSetting handles GET /settings/device/{key}.
-func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID, ok := activeProfileIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-	key := chi.URLParam(r, "key")
-	device := deviceMetadataFromRequest(r)
-
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	requestedKey := key
-	key = canonicalDeviceSettingKey(key)
-	if !keyUsesDeviceScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
-		return
-	}
-	if device.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-	h.registerRequestDevice(r.Context(), store, profileID, device)
-
-	value, err := getDeviceSettingWithLegacyFallback(r.Context(), store, profileID, device.DeviceID, key)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get device setting")
-		return
-	}
-	if value == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Setting not found")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, settingResponse{
-		Key:   requestedKey,
-		Value: value.Value,
-	})
-}
-
-// HandleSetDeviceSetting handles PUT /settings/device/{key}.
-func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID, ok := activeProfileIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-	cmd := DeviceSettingCommand{
-		UserID:    userID,
-		ProfileID: profileID,
-		Device:    deviceMetadataFromRequest(r),
-		Key:       chi.URLParam(r, "key"),
-	}
-	// The target is judged before the body is read, as it always was, so a
-	// request that is wrong in both ways is refused for the same reason.
-	if err := validateDeviceSettingTarget(&cmd); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	var req setSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.SetDeviceSetting(r.Context(), cmd, req.Value); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // DeviceSettingCommand is one device-scoped setting write or delete: the
 // account, the acting profile, the device the client declared in its headers,
 // and the setting key.
@@ -578,27 +359,6 @@ func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSet
 	return nil
 }
 
-// HandleDeleteDeviceSetting handles DELETE /settings/device/{key}.
-func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID, ok := activeProfileIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-	cmd := DeviceSettingCommand{
-		UserID:    userID,
-		ProfileID: profileID,
-		Device:    deviceMetadataFromRequest(r),
-		Key:       chi.URLParam(r, "key"),
-	}
-	if err := h.DeleteDeviceSetting(r.Context(), cmd); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync, error) {
 	contract, err := settingscontract.Load()
 	if err != nil {
@@ -625,72 +385,6 @@ func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync,
 		out = append(out, profileSettingSync{key: mutation.Key, value: mutation.Value})
 	}
 	return out, nil
-}
-
-// syncLegacyUserSetting commits the account-wide legacy row and its
-// profile-scoped canonical fan-out together. The old endpoint was shared by
-// every household profile, so mirroring only the active profile would change
-// its shipped semantics.
-func (h *SettingsHandler) syncLegacyUserSetting(
-	ctx context.Context,
-	store userstore.UserStore,
-	userID int,
-	key string,
-	value *string,
-) error {
-	writes, err := planLegacyRuntimeSettings(key, value)
-	if err != nil {
-		// The surviving v1 route historically accepted its registry validation.
-		// Some JSON entries are intentionally looser than the new typed schema;
-		// preserve their successful legacy write instead of changing 204 to 500.
-		slog.WarnContext(ctx, "legacy user setting has no canonical representation; preserving legacy write",
-			"component", "api", "key", key, "error", err)
-		writes = nil
-	}
-	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
-	if !ok {
-		return fmt.Errorf("user store does not support atomic preference settings synchronization")
-	}
-	type changedProfile struct {
-		profileID string
-		keys      []string
-	}
-	var changed []changedProfile
-	err = transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
-		if value == nil {
-			if err := tx.DeleteSetting(ctx, key); err != nil {
-				return err
-			}
-		} else if err := tx.SetSetting(ctx, key, *value); err != nil {
-			return err
-		}
-		profileIDs, err := tx.ListProfileIDs(ctx)
-		if err != nil {
-			return fmt.Errorf("listing profiles for settings synchronization: %w", err)
-		}
-		changed = make([]changedProfile, 0, len(profileIDs))
-		for _, profileID := range profileIDs {
-			keys, err := writeCanonicalSettingsSync(ctx, tx, userstore.SettingIdentity{
-				Scope: settingscontract.ScopeProfile, ProfileID: profileID,
-			}, writes)
-			if err != nil {
-				return err
-			}
-			changed = append(changed, changedProfile{profileID: profileID, keys: keys})
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, profile := range changed {
-		for _, changedKey := range profile.keys {
-			publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.profileID,
-				changedKey, string(settingscontract.ScopeProfile))
-			notifyScopeSettingChanged(ctx, h.RecWorker, userID, profile.profileID, changedKey)
-		}
-	}
-	return nil
 }
 
 // syncLegacyDeviceSetting mirrors a shipped device-setting mutation to its
@@ -768,59 +462,6 @@ func planInheritedLegacyUserSettings(
 	return out, nil
 }
 
-// HandleGetEffectiveSettings handles GET /settings/effective?keys=key1,key2
-func (h *SettingsHandler) HandleGetEffectiveSettings(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID, ok := activeProfileIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-	keysParam := strings.TrimSpace(r.URL.Query().Get("keys"))
-	if keysParam == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Query parameter keys is required")
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	device := deviceMetadataFromRequest(r)
-	h.registerRequestDevice(r.Context(), store, profileID, device)
-	keys := parseSettingKeys(keysParam)
-	resp := effectiveSettingsResponse{
-		Settings: make([]effectiveSettingResponse, 0, len(keys)),
-	}
-	for _, key := range keys {
-		resolved, err := h.resolveEffectiveSetting(r.Context(), store, profileID, device, key)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective settings")
-			return
-		}
-		resp.Settings = append(resp.Settings, resolved)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleGetEffectiveSubtitleAppearance handles GET /settings/subtitle_appearance/effective.
-func (h *SettingsHandler) HandleGetEffectiveSubtitleAppearance(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID, ok := activeProfileIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-	resp, err := h.EffectiveSubtitleAppearance(r.Context(), userID, profileID, deviceMetadataFromRequest(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // EffectiveSubtitleAppearance resolves the subtitle_appearance setting for
 // the acting profile on the declared device (device override over the
 // profile-wide value), refreshing the device registry as a side effect. v1
@@ -852,33 +493,10 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 	}, nil
 }
 
-// HandleSetSubtitleAppearanceDeviceOverride handles PUT /settings/device/subtitle_appearance.
-func (h *SettingsHandler) HandleSetSubtitleAppearanceDeviceOverride(w http.ResponseWriter, r *http.Request) {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", SubtitleAppearanceSettingKey)
-	h.HandleSetDeviceSetting(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx)))
-}
-
-// HandleDeleteSubtitleAppearanceDeviceOverride handles DELETE /settings/device/subtitle_appearance.
-func (h *SettingsHandler) HandleDeleteSubtitleAppearanceDeviceOverride(w http.ResponseWriter, r *http.Request) {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", SubtitleAppearanceSettingKey)
-	h.HandleDeleteDeviceSetting(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx)))
-}
-
 type DeviceMetadata struct {
 	DeviceID       string
 	DeviceName     string
 	DevicePlatform string
-}
-
-func activeProfileIDFromRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
-		return "", false
-	}
-	return profileID, true
 }
 
 func deviceMetadataFromRequest(r *http.Request) DeviceMetadata {
@@ -901,24 +519,6 @@ func clampHeaderValue(value string, maxLen int) string {
 		return value
 	}
 	return string(runes[:maxLen])
-}
-
-func parseSettingKeys(raw string) []string {
-	parts := strings.Split(raw, ",")
-	keys := make([]string, 0, len(parts))
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		key := strings.TrimSpace(part)
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		keys = append(keys, key)
-	}
-	return keys
 }
 
 func validateRegisteredSetting(key, value string, expectedScope settingsScope) error {
@@ -1247,16 +847,6 @@ type OverlayConfigView struct {
 	Defaults            string `json:"defaults,omitempty"`
 	QuickActionsEnabled bool   `json:"quick_actions_enabled"`
 	QuickActionsDefault string `json:"quick_actions_default"`
-}
-
-// HandleGetOverlayConfig returns the server-wide overlay configuration.
-// Available to all authenticated users (not admin-only). Enabled and
-// QuickActionsEnabled are only the defaults for profiles that have not chosen:
-// an explicit ui.card_overlays_enabled / ui.card_quick_actions_enabled profile
-// setting overrides them in either direction.
-func (h *SettingsHandler) HandleGetOverlayConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "private, no-cache")
-	writeJSON(w, http.StatusOK, h.OverlayConfig(r.Context()))
 }
 
 // OverlayConfig reads the server-wide overlay defaults. v1 GET

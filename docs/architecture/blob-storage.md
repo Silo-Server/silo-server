@@ -142,8 +142,7 @@ Only S3 can mint a URL that authorizes itself off this server. `BucketAPI`
 answers `ErrNoPresign`, and `SupportsPresign` lets a caller ask before offering
 a feature that would always fail. Three consequences:
 
-- **Diagnostic bundles** already streamed through the API host on `/api/v2`, and
-  the `/api/v1` handler falls through to streaming when presigning fails. No
+- **Diagnostic bundles** already streamed through the API host on `/api/v2`. No
   change was needed.
 - **Job artifacts** gained `GET /api/v2/admin/jobs/{id}/artifact`. It is
   authorized by a signed capability, not a session: the presigned URL it
@@ -152,9 +151,7 @@ a feature that would always fail. Three consequences:
   `artworkurl.NewJobArtifactSigner` under its own domain, so an artwork URL
   cannot be replayed against it and a capability for one job does not open
   another's artifact. Every rejection answers 404, so the route never reveals
-  whether a job exists. The frozen `/api/v1` job response only presigns, so
-  `POST /api/v1/admin/catalog/export-jobs` keeps answering 503 on a store that
-  cannot presign rather than queueing an export v1 cannot retrieve.
+  whether a job exists.
 - **Seven-day public links** cannot exist without presigning. The API answers
   `409` and the job projection carries `public_link_supported` so the UI hides
   the action instead of offering one that always fails.

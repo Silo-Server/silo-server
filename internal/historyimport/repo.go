@@ -252,13 +252,6 @@ func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) 
 	return source, nil
 }
 
-func (r *Repository) UpdateSource(ctx context.Context, id int, input UpdateSourceInput) (*Source, error) {
-	return r.UpdateSourceConditional(ctx, id, input, -1)
-}
-func (r *Repository) DeleteSource(ctx context.Context, id int) error {
-	return r.DeleteSourceConditional(ctx, id, -1)
-}
-
 func (r *Repository) CreateConnectSession(ctx context.Context, session ConnectSession) (*ConnectSession, error) {
 	serversJSON, err := r.marshalConnectServersForWrite(session.ID, session.Servers)
 	if err != nil {

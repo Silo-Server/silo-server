@@ -32,7 +32,7 @@ import (
 // logged once, here, with labels that are stable across releases and bounded
 // in cardinality: the operation ID (never the raw path), the method folded
 // into the fixed standard set, the status class, the problem type
-// identifier, the credential class, and a fixed client family. The v1 request logger and metrics middleware skip the /api/v2/
+// identifier, the credential class, and a fixed client family. The listener-wide request logger and metrics middleware skip the /api/v2/
 // subtree so a v2 request is not recorded twice with two label vocabularies.
 //
 // Nothing here logs a URL, a query string, a header value other than the
@@ -89,9 +89,8 @@ var (
 	}, []string{labelOperationID})
 
 	// v1TombstoneRequests counts requests answered by the v1 retirement
-	// tombstone. It is registered now so dashboards and release gates can
-	// reference it before the tombstone exists; RecordV1Tombstone increments
-	// it once the listener serves one.
+	// tombstone (RecordV1Tombstone), so operators can see which clients still
+	// call /api/v1.
 	v1TombstoneRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "streamapp_apiv1_tombstone_requests_total",
 		Help: "Requests answered by the API v1 retirement tombstone, by method.",

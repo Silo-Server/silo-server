@@ -2,22 +2,18 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -82,68 +78,33 @@ func scoredIDs(items []recommendations.ScoredItem) []string {
 	return ids
 }
 
-// restrictedRecsRequest is a v1 request for the anchored list, made by a
-// profile whose scope allows library 4 only.
-func restrictedRecsRequest(path, itemID string) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("item_id", itemID)
-	ctx := authenticatedRecsContext(req.Context(), rctx)
-	ctx = access.SetScope(ctx, access.Scope{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{4}, LibrariesRestricted: true})
-	return req.WithContext(ctx)
-}
+// An anchored list ranks under the viewer's scope, and an anchor the viewer
+// cannot see answers what an unknown anchor answers: an empty list, without
+// running the engine.
+func TestAnchoredRecommendationsHonorTheViewerScope(t *testing.T) {
+	filter := catalog.AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{4}}
+	engine := &fakeRecsEngine{items: scored("a", "b")}
+	h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
+	h.accessibleIDs = fakeAccessibleIDs{hidden: map[string]struct{}{"hidden-anchor": {}}}
+	h.Fetcher = stubDiscoverFetcher{}
 
-func decodeScoredItems(t *testing.T, rec *httptest.ResponseRecorder) []string {
-	t.Helper()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	similar, err := h.SimilarCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
+	if err != nil || len(similar) != 0 {
+		t.Fatalf("similar = %v, %v; want none", similar, err)
 	}
-	var resp scoredItemsResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	because, err := h.BecauseWatchedCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
+	if err != nil || len(because) != 0 {
+		t.Fatalf("because watched = %v, %v; want none", because, err)
+	}
+	if engine.similarCalls != 0 || engine.becauseCalls != 0 {
+		t.Fatalf("engine ran %d similar and %d because-watched reads for a hidden anchor", engine.similarCalls, engine.becauseCalls)
+	}
+
+	if _, err := h.BecauseWatched(t.Context(), 7, "profile-1", "anchor", 10, filter); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Items == nil {
-		t.Fatal("items must be an array, got null")
-	}
-	return scoredIDs(resp.Items)
-}
-
-// The v1 Similar and Because You Watched lists answer only identifiers the
-// viewer can see, in the engine's order.
-func TestV1AnchoredRecommendationsDropInaccessibleItems(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		path   string
-		handle func(*RecommendationsHandler, http.ResponseWriter, *http.Request)
-	}{
-		{"similar", "/recommendations/similar/anchor", (*RecommendationsHandler).HandleSimilar},
-		{"because watched", "/recommendations/because-watched/anchor", (*RecommendationsHandler).HandleBecauseWatched},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			engine := &fakeRecsEngine{items: scored("a", "adult-1", "b", "adult-2", "c")}
-			h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
-			h.accessibleIDs = fakeAccessibleIDs{hidden: map[string]struct{}{"adult-1": {}, "adult-2": {}}}
-
-			rec := httptest.NewRecorder()
-			tc.handle(h, rec, restrictedRecsRequest(tc.path, "anchor"))
-			if got := decodeScoredItems(t, rec); !slices.Equal(got, []string{"a", "b", "c"}) {
-				t.Fatalf("items = %v, want [a b c]", got)
-			}
-		})
-	}
-}
-
-// Because You Watched ranks under the viewer's scope, not only filters after.
-func TestBecauseWatchedRanksUnderTheViewerScope(t *testing.T) {
-	engine := &fakeRecsEngine{items: scored("a")}
-	h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
-	h.accessibleIDs = fakeAccessibleIDs{}
-
-	rec := httptest.NewRecorder()
-	h.HandleBecauseWatched(rec, restrictedRecsRequest("/recommendations/because-watched/anchor", "anchor"))
-	decodeScoredItems(t, rec)
-	if !slices.Equal(engine.becauseWith.AllowedLibraryIDs, []int{4}) || engine.becauseWith.UserID != 7 || engine.becauseWith.ProfileID != "profile-1" {
-		t.Fatalf("engine filter = %+v, want the request scope", engine.becauseWith)
+	if got := engine.becauseWith; !slices.Equal(got.AllowedLibraryIDs, []int{4}) || got.UserID != 7 || got.ProfileID != "profile-1" {
+		t.Fatalf("engine filter = %+v, want the viewer's scope", got)
 	}
 }
 
@@ -161,43 +122,6 @@ func TestBecauseWatchedCapsTheEngineLimit(t *testing.T) {
 		if engine.becauseCalls != 1 || engine.becauseLimit != tc.want {
 			t.Fatalf("limit %d: engine calls %d with limit %d; want one with %d", tc.limit, engine.becauseCalls, engine.becauseLimit, tc.want)
 		}
-	}
-}
-
-// An anchor the viewer cannot see answers what an unknown anchor answers: an
-// empty list, without running the engine, on v1 and on the v2 seams.
-func TestInaccessibleAnchorAnswersLikeAnUnknownOne(t *testing.T) {
-	engine := &fakeRecsEngine{items: scored("a", "b")}
-	h := NewRecommendationsHandler(engine, nil, nil, nil, nil, true)
-	h.accessibleIDs = fakeAccessibleIDs{hidden: map[string]struct{}{"hidden-anchor": {}}}
-
-	for _, tc := range []struct {
-		name   string
-		path   string
-		handle func(*RecommendationsHandler, http.ResponseWriter, *http.Request)
-	}{
-		{"v1 similar", "/recommendations/similar/hidden-anchor", (*RecommendationsHandler).HandleSimilar},
-		{"v1 because watched", "/recommendations/because-watched/hidden-anchor", (*RecommendationsHandler).HandleBecauseWatched},
-	} {
-		rec := httptest.NewRecorder()
-		tc.handle(h, rec, restrictedRecsRequest(tc.path, "hidden-anchor"))
-		if got := decodeScoredItems(t, rec); len(got) != 0 {
-			t.Fatalf("%s: items = %v, want none", tc.name, got)
-		}
-	}
-
-	filter := catalog.AccessFilter{UserID: 7, ProfileID: "profile-1"}
-	h.Fetcher = stubDiscoverFetcher{}
-	similar, err := h.SimilarCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
-	if err != nil || len(similar) != 0 {
-		t.Fatalf("v2 similar = %v, %v; want none", similar, err)
-	}
-	because, err := h.BecauseWatchedCards(t.Context(), 7, "profile-1", "hidden-anchor", 10, filter)
-	if err != nil || len(because) != 0 {
-		t.Fatalf("v2 because watched = %v, %v; want none", because, err)
-	}
-	if engine.similarCalls != 0 || engine.becauseCalls != 0 {
-		t.Fatalf("engine ran %d similar and %d because-watched reads for a hidden anchor", engine.similarCalls, engine.becauseCalls)
 	}
 }
 
@@ -229,9 +153,10 @@ func TestKeepAccessible(t *testing.T) {
 	}
 }
 
-// The v1 Recently Added list, which reads the server-wide query, answers only
-// the titles the viewer's libraries hold, newest first.
-func TestV1RecentlyAddedDropsInaccessibleItemsPostgres(t *testing.T) {
+// Recently Added reads the server-wide query, so it answers only the titles
+// the viewer's libraries hold, newest first, and reads past hidden titles to
+// fill its limit.
+func TestRecentlyAddedItemsKeepsTheViewersLibrariesDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -247,7 +172,7 @@ func TestV1RecentlyAddedDropsInaccessibleItemsPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	prefix := fmt.Sprintf("v1-recent-access-%d-", time.Now().UnixNano())
+	prefix := fmt.Sprintf("recent-access-%d-", time.Now().UnixNano())
 	library := func(name string) int {
 		var id int
 		if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type,name) VALUES ('movies',$1) RETURNING id`, prefix+name).Scan(&id); err != nil {
@@ -276,19 +201,22 @@ func TestV1RecentlyAddedDropsInaccessibleItemsPostgres(t *testing.T) {
 	}
 
 	h := NewRecommendationsHandler(nil, nil, nil, nil, recommendations.NewRepo(pool), true)
-	req := httptest.NewRequest(http.MethodGet, "/recommendations/recently-added?limit=50", nil)
-	ctx := authenticatedRecsContext(req.Context(), nil)
-	ctx = access.SetScope(ctx, access.Scope{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{kids}, LibrariesRestricted: true})
-	rec := httptest.NewRecorder()
-	h.HandleRecentlyAdded(rec, req.WithContext(ctx))
-
-	var got []string
-	for _, id := range decodeScoredItems(t, rec) {
-		if strings.HasPrefix(id, prefix) {
-			got = append(got, id)
+	filter := catalog.AccessFilter{UserID: 7, ProfileID: "profile-1", AllowedLibraryIDs: []int{kids}}
+	read := func(limit int) []string {
+		t.Helper()
+		items, err := h.RecentlyAddedItems(t.Context(), 7, "profile-1", 14, limit, filter)
+		if err != nil {
+			t.Fatal(err)
 		}
+		var got []string
+		for _, id := range scoredIDs(items) {
+			if strings.HasPrefix(id, prefix) {
+				got = append(got, id)
+			}
+		}
+		return got
 	}
-	if !slices.Equal(got, want) {
+	if got := read(50); !slices.Equal(got, want) {
 		t.Fatalf("recently added = %v, want the kids titles newest first %v", got, want)
 	}
 
@@ -299,10 +227,7 @@ func TestV1RecentlyAddedDropsInaccessibleItemsPostgres(t *testing.T) {
 		exec(`INSERT INTO media_items (content_id,type,title,status,genres,created_at) VALUES ($1,'movie',$1,'matched','{}',NOW() + make_interval(hours => 2000 + $2))`, id, i)
 		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, adults)
 	}
-	req = httptest.NewRequest(http.MethodGet, "/recommendations/recently-added?limit=2", nil)
-	rec = httptest.NewRecorder()
-	h.HandleRecentlyAdded(rec, req.WithContext(ctx))
-	if got := decodeScoredItems(t, rec); !slices.Equal(got, want[:2]) {
+	if got := read(2); !slices.Equal(got, want[:2]) {
 		t.Fatalf("recently added with limit 2 = %v, want %v", got, want[:2])
 	}
 }

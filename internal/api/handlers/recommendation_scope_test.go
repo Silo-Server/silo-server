@@ -2,8 +2,7 @@ package handlers
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -165,6 +164,13 @@ func TestProfileRestrictionChangeRebuildsRecommendations(t *testing.T) {
 	}
 }
 
+type recsProfilePurger struct{ calls []string }
+
+func (p *recsProfilePurger) PurgeProfile(_ context.Context, userID int, profileID string) error {
+	p.calls = append(p.calls, fmt.Sprintf("%d/%s", userID, profileID))
+	return nil
+}
+
 // Deleting a profile purges its recommendation rows through the purger the
 // SQLite user store relies on, since its delete cannot reach Postgres.
 func TestDeleteProfilePurgesRecommendations(t *testing.T) {
@@ -173,15 +179,13 @@ func TestDeleteProfilePurgesRecommendations(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := NewProfileHandler(testUserStoreProvider{store: store})
-	purger := &recordingProfilePurger{}
+	purger := &recsProfilePurger{}
 	h.RecommendationsPurger = purger
 
-	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	h.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	if err := h.DeleteProfile(profileServiceContext("profile-1"), ProfileDeleteCommand{
+		UserID: 1, ProfileID: "profile-2", ActiveProfileID: "profile-1", VerifyProfile: noProfileVerification,
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if !slices.Equal(purger.calls, []string{"1/profile-2"}) {
 		t.Fatalf("purge calls = %v, want one for profile-2", purger.calls)

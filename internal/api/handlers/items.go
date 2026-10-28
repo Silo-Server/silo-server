@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -481,65 +479,6 @@ type watchedStateResponse struct {
 
 // --- Handler methods ---
 
-// HandleGetItems handles GET /items with filtering, sorting, and pagination.
-func (h *ItemsHandler) HandleGetItems(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog")
-	if values, ok := buildLegacyItemsCatalogValues(r.URL.Query()); ok && h.catalogResolver != nil {
-		h.writeCatalogBrowseResponse(w, r, values)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-}
-
-// HandleGetLatestItems handles GET /items/latest — shortcut for sort=created_at&order=desc.
-func (h *ItemsHandler) HandleGetLatestItems(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog")
-	if h.catalogResolver != nil {
-		h.writeCatalogBrowseResponse(w, r, buildLegacyLatestCatalogValues(r.URL.Query()))
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-}
-
-// HandleGetItemFilters handles GET /items/filters for distinct browse values.
-func (h *ItemsHandler) HandleGetItemFilters(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/filters")
-	if values, ok := buildLegacyItemsCatalogValues(r.URL.Query()); ok && h.catalogResolver != nil {
-		h.writeCatalogFiltersResponse(w, r, values)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
-}
-
-// HandleGetItemDetail handles GET /items/{id}.
-func (h *ItemsHandler) HandleGetItemDetail(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/items/{id}")
-	h.catalogResourceHandler().HandleGetItemDetail(w, r)
-}
-
-// HandleGetWatchDetail handles GET /watch/{id}.
-func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Watch target ID is required")
-		return
-	}
-
-	filter, ok := h.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-	filter.OmitWatchArtwork = true
-
-	detail, err := h.WatchDetail(r.Context(), apimw.GetUserID(r.Context()), requestProfileID(r), id, filter)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, detail)
-}
-
 // trailerRefreshRate bounds how often one user may trigger trailer fetches
 // across all items. The per-item cooldown enforced by the metadata service is
 // the real budget; this only keeps a misbehaving client from hammering the
@@ -587,64 +526,6 @@ type trailerRefreshCapabilityResponse struct {
 	// SupportedTypes is the item types the action applies to; nothing else
 	// carries remote videos, so clients should not show the action elsewhere.
 	SupportedTypes []string `json:"supported_types"`
-}
-
-// HandleTrailerRefreshCapability reports whether the trailer refresh action is
-// available. GET /api/v1/items/trailers/capability.
-//
-// It answers even when the feature is unwired, because "refresh": false is the
-// answer in that case; the router registers it unconditionally so a client
-// never has to interpret a 404 on the probe itself.
-func (h *ItemsHandler) HandleTrailerRefreshCapability(w http.ResponseWriter, _ *http.Request) {
-	view := h.TrailerRefreshCapability()
-	writeJSON(w, http.StatusOK, trailerRefreshCapabilityResponse{
-		SchemaVersion:   1,
-		Refresh:         view.Enabled,
-		CooldownSeconds: view.CooldownSeconds,
-		Statuses:        view.Statuses,
-		SupportedTypes:  view.SupportedTypes,
-	})
-}
-
-// HandleRequestTrailersRefresh handles POST /api/v1/items/{id}/trailers/refresh:
-// any authenticated viewer with access to a movie or series may ask the server
-// to fetch its remote trailers, at most once per item per cooldown window.
-//
-// "cooldown" and "disabled" are expected client-rendered states, not errors,
-// so they answer 200; 429 stays reserved for the per-user limiter. The access
-// check runs before the metadata service is called so a caller who cannot see
-// the item can never consume its cooldown slot. A season or episode ID resolves
-// through its own table to 400 unsupported-type; only genuinely unknown content
-// answers 404.
-func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *http.Request) {
-	contentID := strings.TrimSpace(chi.URLParam(r, "id"))
-	view, err := h.RequestTrailersRefresh(r.Context(), apimw.GetUserID(r.Context()), contentID, func() (catalog.AccessFilter, error) {
-		filter, err := h.accessFilter(r)
-		if err != nil {
-			return catalog.AccessFilter{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
-		}
-		size, err := imagesize.FromRequest(r)
-		if err != nil {
-			return catalog.AccessFilter{}, apiError(http.StatusBadRequest, "invalid_image_size", "image_size must be one of small, medium, large, original")
-		}
-		filter.ImageSize = size
-		return filter, nil
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	resp := trailerRefreshResponse{Status: view.Status}
-	status := http.StatusOK
-	switch view.Status {
-	case metadata.TrailerRefreshStatusQueued:
-		status = http.StatusAccepted
-	case metadata.TrailerRefreshStatusCooldown:
-		if view.NextAllowedAt != nil {
-			resp.NextAllowedAt = view.NextAllowedAt.UTC().Format(time.RFC3339)
-		}
-	}
-	writeJSON(w, status, resp)
 }
 
 // trailerRefreshTarget is what a content ID on the trailer refresh route turned
@@ -699,16 +580,6 @@ func (h *ItemsHandler) resolveTrailerRefreshTarget(ctx context.Context, contentI
 	return trailerRefreshTarget{}, catalog.ErrItemNotFound
 }
 
-// HandleMarkWatched handles POST /watched/{id}.
-func (h *ItemsHandler) HandleMarkWatched(w http.ResponseWriter, r *http.Request) {
-	h.handleSetWatchedState(w, r, true)
-}
-
-// HandleMarkUnwatched handles DELETE /watched/{id}.
-func (h *ItemsHandler) HandleMarkUnwatched(w http.ResponseWriter, r *http.Request) {
-	h.handleSetWatchedState(w, r, false)
-}
-
 func (h *ItemsHandler) dispatchLocalWatchEvent(
 	ctx context.Context,
 	kind watchsync.LocalWatchEventKind,
@@ -731,124 +602,6 @@ func (h *ItemsHandler) dispatchLocalWatchEvent(
 	}); err != nil {
 		slog.WarnContext(ctx, "failed to queue local watch provider event", "component", "api", "kind", kind, "user_id", userID, "profile_id", profileID, "error", err)
 	}
-}
-
-func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Request, played bool) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	filter, ok := h.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-	// The frozen v1 mark leaves a rewatch in progress alone.
-	result, err := h.SetWatchedState(r.Context(), userID, profileID, id, played, false, filter)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
-}
-
-// HandleGetItemVersions handles GET /items/{id}/versions.
-func (h *ItemsHandler) HandleGetItemVersions(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/items/{id}/versions")
-	h.catalogResourceHandler().HandleGetItemVersions(w, r)
-}
-
-// HandleGetItemEpisodes handles GET /items/{id}/episodes for season IDs.
-func (h *ItemsHandler) HandleGetItemEpisodes(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/items/{id}/episodes")
-	h.catalogResourceHandler().HandleGetItemEpisodes(w, r)
-}
-
-// HandleGetSeasons handles GET /series/{id}/seasons.
-func (h *ItemsHandler) HandleGetSeasons(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/series/{id}/seasons")
-	h.catalogResourceHandler().HandleGetSeasons(w, r)
-}
-
-// HandleGetSeason handles GET /series/{id}/seasons/{num}.
-func (h *ItemsHandler) HandleGetSeason(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/series/{id}/seasons/{num}")
-	h.catalogResourceHandler().HandleGetSeason(w, r)
-}
-
-// HandleGetEpisodes handles GET /series/{id}/seasons/{num}/episodes.
-func (h *ItemsHandler) HandleGetEpisodes(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/series/{id}/seasons/{num}/episodes")
-	h.catalogResourceHandler().HandleGetEpisodes(w, r)
-}
-
-func (h *ItemsHandler) catalogResourceHandler() *CatalogResourceHandler {
-	return NewCatalogResourceHandler(h)
-}
-
-func (h *ItemsHandler) catalogHandler() *CatalogHandler {
-	return NewCatalogHandler(h.catalogResolver, h)
-}
-
-func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http.Request, values map[string][]string) bool {
-	req, err := catalog.ParseCatalogRequest(values)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return true
-	}
-
-	filter, ok := h.accessFilterOrError(w, r)
-	if !ok {
-		return true
-	}
-
-	result, err := h.catalogResolver.Resolve(r.Context(), req, filter)
-	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return true
-		}
-		if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
-			return true
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to browse items")
-		return true
-	}
-
-	overlaySummaries := h.listOverlaySummaries(r.Context(), result.Items, filter)
-	viewer := viewerFromRequest(r, filter)
-	userStates := h.listItemUserStates(r.Context(), viewer, result.Items)
-	playTargets := h.listPlayableTargets(r.Context(), viewer, result.Items, req.Query.LibraryIDs, filter)
-	episodeMetadata := h.listEpisodeBrowseMetadata(r.Context(), result.Items)
-	items := make([]itemListResponse, 0, len(result.Items))
-	for _, item := range result.Items {
-		resp := h.toItemListResponseWithOverlay(r.Context(), viewer, item, overlaySummaries[item.ContentID], userStates[item.ContentID], filter.Artwork())
-		// The resolver validated the item's own hint against this profile, so
-		// its answer replaces the unvalidated one carried by the item.
-		resp.PlayContentID = playTargets[playableTargetKeyForItem(item)]
-		if meta, ok := episodeMetadata[item.ContentID]; ok {
-			applyEpisodeBrowseMetadata(&resp, meta)
-		}
-		items = append(items, resp)
-	}
-
-	writeJSON(w, http.StatusOK, browseResponse{
-		Total:      result.Total,
-		TotalExact: result.TotalExact,
-		HasMore:    result.HasMore,
-		Items:      items,
-	})
-	return true
 }
 
 func (h *ItemsHandler) listPlayableTargets(ctx context.Context, v ItemViewer, items []*models.MediaItem, libraryIDs []int, filter catalog.AccessFilter) map[string]string {
@@ -938,62 +691,6 @@ func seasonPlayableTargetInput(seriesID string, season *seasonResponse) catalog.
 		SeriesID:     seriesID,
 		SeasonNumber: &seasonNumber,
 	}
-}
-
-func (h *ItemsHandler) writeCatalogFiltersResponse(w http.ResponseWriter, r *http.Request, values map[string][]string) bool {
-	req, err := catalog.ParseCatalogRequest(values)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return true
-	}
-
-	filter, ok := h.accessFilterOrError(w, r)
-	if !ok {
-		return true
-	}
-
-	filters, err := h.catalogResolver.ListFiltersWithOptions(
-		r.Context(),
-		req,
-		filter,
-		catalog.CatalogFilterOptions{IncludeTechnical: false},
-	)
-	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return true
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item filters")
-		return true
-	}
-
-	writeJSON(w, http.StatusOK, itemFiltersResponse{
-		Genres:         filters.Genres,
-		Studios:        filters.Studios,
-		Networks:       filters.Networks,
-		Countries:      filters.Countries,
-		ContentRatings: filters.ContentRatings,
-	})
-	return true
-}
-
-// toItemListResponse converts a MediaItem to an itemListResponse with presigned
-// URLs at the size the caller's request asked for.
-func (h *ItemsHandler) toItemListResponse(ctx context.Context, v ItemViewer, item *models.MediaItem, art imagesize.Request) itemListResponse {
-	return h.toItemListResponseWithOverlay(ctx, v, item, nil, nil, art)
-}
-
-func (h *ItemsHandler) toItemListResponseWithOverlay(ctx context.Context, v ItemViewer, item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, art imagesize.Request) itemListResponse {
-	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeItemModel(ctx, item, v.Access); err == nil && localized != nil {
-			item = localized
-		}
-	}
-	resp := itemListResponseShell(item, overlaySummary, userState)
-	poster, backdrop := art.For(imagesize.SlotPoster), art.For(imagesize.SlotBackdrop)
-	resp.PosterURL = h.presignURLCtx(ctx, sizedCardPath(item.PosterPath, artworkkey.ImagePoster, poster), requestVariantHint("card", poster))
-	resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(item.BackdropPath, backdrop), requestVariantHint("card", backdrop))
-	return resp
 }
 
 func itemListResponseShell(item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse) itemListResponse {
@@ -2181,16 +1878,6 @@ func flattenEpisodeGroups(groups map[int][]*models.Episode) []*models.Episode {
 	return flattened
 }
 
-// requestProfileID resolves the active profile for a request, falling back to
-// the X-Profile-Id header when the auth context does not carry one.
-func requestProfileID(r *http.Request) string {
-	profileID := apimw.GetProfileID(r.Context())
-	if profileID == "" {
-		profileID = r.Header.Get("X-Profile-Id")
-	}
-	return profileID
-}
-
 // viewerUserStore resolves a declared profile against the authenticated account.
 func (h *ItemsHandler) viewerUserStore(ctx context.Context, profileID string) (userstore.UserStore, string, bool) {
 	store, ok := h.userStoreFor(ctx, apimw.GetUserID(ctx), profileID)
@@ -2269,71 +1956,11 @@ func (h *ItemsHandler) presignURLCtx(ctx context.Context, path string, variant s
 	return ""
 }
 
-// HandleFilterItems handles POST /items/filter with a full rule-group filter body.
-func (h *ItemsHandler) HandleFilterItems(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog/query")
-	h.catalogHandler().HandlePostCatalogQuery(w, r)
-}
-
 type filterItemsRequest struct {
 	sections.FilterConfig
 	LibraryID int `json:"library_id"`
 	Limit     int `json:"limit"`
 	Offset    int `json:"offset"`
-}
-
-func filterItemColumns(alias string) string {
-	cols := []string{
-		"content_id", "type", "title", "sort_title", "original_title", "year", "genres",
-		"content_rating", "runtime", "overview", "tagline",
-		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
-		"imdb_id", "tmdb_id", "tvdb_id",
-		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
-		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "first_air_date", "last_air_date",
-		"matched_at", "status", "created_at", "updated_at",
-	}
-	prefixed := make([]string, len(cols))
-	for i, c := range cols {
-		prefixed[i] = alias + "." + c
-	}
-	return strings.Join(prefixed, ", ")
-}
-
-func filterSortClause(sort, order string) string {
-	dir := "DESC"
-	if order == "asc" {
-		dir = "ASC"
-	}
-	switch sort {
-	case "rating":
-		return fmt.Sprintf("ORDER BY mi.rating_imdb %s NULLS LAST", dir)
-	case "year":
-		return fmt.Sprintf("ORDER BY mi.year %s", dir)
-	case "title":
-		return fmt.Sprintf("ORDER BY LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) %s, LOWER(mi.title) %s, mi.content_id ASC", dir, dir)
-	default:
-		return fmt.Sprintf("ORDER BY mi.created_at %s", dir)
-	}
-}
-
-// accessFilter resolves the viewer's catalog access filter. It returns an
-// error when the account's policy cannot be resolved; callers must fail closed
-// rather than fall back to an unrestricted filter (see accessFilterOrError and
-// accessFilterOrDeny).
-func (h *ItemsHandler) accessFilter(r *http.Request) (catalog.AccessFilter, error) {
-	opts := AccessFilterOptions{DeviceID: deviceMetadataFromRequest(r).DeviceID}
-	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
-		if fileID, err := strconv.Atoi(fileIDRaw); err == nil && fileID > 0 {
-			opts.SelectedFileID = fileID
-		}
-	}
-	if libraryIDRaw := strings.TrimSpace(r.URL.Query().Get("library_id")); libraryIDRaw != "" {
-		if libraryID, err := strconv.Atoi(libraryIDRaw); err == nil && libraryID > 0 {
-			opts.PresentationLibraryID = &libraryID
-		}
-	}
-	return h.ContextAccessFilter(r.Context(), opts)
 }
 
 // AccessFilterOptions is what a caller adds to the viewer identity on the
@@ -2424,40 +2051,10 @@ type ItemViewer struct {
 	ProfileID string
 }
 
-// viewerFromRequest pairs an already-resolved access filter with the
-// request's declared profile.
-func viewerFromRequest(r *http.Request, filter catalog.AccessFilter) ItemViewer {
-	return ItemViewer{Access: filter, ProfileID: requestProfileID(r)}
-}
-
 // viewerOrDeny is the viewer for enrichment paths with no error channel;
 // see accessFilterOrDeny.
 func (h *ItemsHandler) viewerOrDeny(r *http.Request) ItemViewer {
 	return viewerFromRequest(r, h.accessFilterOrDeny(r))
-}
-
-// accessFilterOrError resolves the viewer's access filter for a handler that
-// owns the response. An unresolvable policy is answered with 500 rather than
-// an unrestricted listing.
-//
-// It is also where the request's image_size preference is read, because it is
-// the single choke point every catalog read handler already goes through, and
-// the size applies to the whole response. An unrecognized size is a 400: a
-// client that sends one has a bug, and silently serving the default size would
-// hide it.
-func (h *ItemsHandler) accessFilterOrError(w http.ResponseWriter, r *http.Request) (catalog.AccessFilter, bool) {
-	filter, err := h.accessFilter(r)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
-		return catalog.AccessFilter{}, false
-	}
-	size, err := imagesize.FromRequest(r)
-	if err != nil {
-		writeInvalidImageSize(w)
-		return catalog.AccessFilter{}, false
-	}
-	filter.ImageSize = size
-	return filter, true
 }
 
 // accessFilterOrDeny is the variant for enrichment paths with no error
@@ -2720,4 +2317,39 @@ func (h *ItemsHandler) hasAssignedMetadataCuration(ctx context.Context, userID i
 		return false
 	}
 	return user != nil && user.Enabled && auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
+}
+
+// accessFilter resolves the viewer's catalog access filter. It returns an
+// error when the account's policy cannot be resolved; callers must fail closed
+// rather than fall back to an unrestricted filter (see accessFilterOrError and
+// accessFilterOrDeny).
+func (h *ItemsHandler) accessFilter(r *http.Request) (catalog.AccessFilter, error) {
+	opts := AccessFilterOptions{DeviceID: deviceMetadataFromRequest(r).DeviceID}
+	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
+		if fileID, err := strconv.Atoi(fileIDRaw); err == nil && fileID > 0 {
+			opts.SelectedFileID = fileID
+		}
+	}
+	if libraryIDRaw := strings.TrimSpace(r.URL.Query().Get("library_id")); libraryIDRaw != "" {
+		if libraryID, err := strconv.Atoi(libraryIDRaw); err == nil && libraryID > 0 {
+			opts.PresentationLibraryID = &libraryID
+		}
+	}
+	return h.ContextAccessFilter(r.Context(), opts)
+}
+
+// requestProfileID resolves the active profile for a request, falling back to
+// the X-Profile-Id header when the auth context does not carry one.
+func requestProfileID(r *http.Request) string {
+	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
+	return profileID
+}
+
+// viewerFromRequest pairs an already-resolved access filter with the
+// request's declared profile.
+func viewerFromRequest(r *http.Request, filter catalog.AccessFilter) ItemViewer {
+	return ItemViewer{Access: filter, ProfileID: requestProfileID(r)}
 }

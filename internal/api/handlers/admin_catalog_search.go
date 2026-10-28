@@ -2,14 +2,9 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
-
-func (h *AdminHandler) HandleGetCatalogSearchStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.GetCatalogSearchStatus(r.Context()))
-}
 
 func (h *AdminHandler) GetCatalogSearchStatus(ctx context.Context) catalog.CatalogSearchRuntimeStatus {
 	if h == nil || h.CatalogSearchStatus == nil {
