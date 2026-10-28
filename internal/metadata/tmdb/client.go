@@ -1533,8 +1533,8 @@ type sharedFlight struct {
 // is detached from the caller that started it, so one caller giving up (a
 // closed page) does not fail another still waiting (a collection sync), and
 // each caller stops waiting when its own context ends. Once every caller has
-// given up, the fetch is canceled too, so an abandoned fetch does not keep
-// waiting for the shared request budget.
+// given up, the fetch is canceled, so an abandoned fetch does not keep waiting
+// for the shared request budget.
 func (c *Client) sharedFetch(ctx context.Context, key string, fetch func(context.Context) (any, error)) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1542,7 +1542,10 @@ func (c *Client) sharedFetch(ctx context.Context, key string, fetch func(context
 	c.flightsMu.Lock()
 	f := c.flights[key]
 	if f == nil {
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		// No deadline of its own: the fetch lasts as long as someone waits
+		// for it, so a long Retry-After or budget wait is cut short only
+		// when every caller has given up.
+		fetchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		f = &sharedFlight{done: make(chan struct{}), cancel: cancel}
 		if c.flights == nil {
 			c.flights = make(map[string]*sharedFlight)
