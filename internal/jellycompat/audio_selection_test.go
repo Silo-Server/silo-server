@@ -31,6 +31,8 @@ type testCompatSessionManager struct {
 	endTransportCalls   []string
 	// detached records FinishDetached snapshots with their end reason.
 	detached []compatDetachedEnd
+	// startErr fails StartSession.
+	startErr error
 }
 
 type compatDetachedEnd struct {
@@ -70,6 +72,9 @@ func (s *failAfterMutationPlaybackStore) Update(id string, fn func(*PlaybackSess
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
 	m.startCalls++
+	if m.startErr != nil {
+		return nil, m.startErr
+	}
 	session := &playback.Session{
 		ID:             "upstream-started",
 		UserID:         userID,

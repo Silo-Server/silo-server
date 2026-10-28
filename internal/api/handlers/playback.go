@@ -1408,8 +1408,8 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 
 	h.scrobbleAbortedSession(ctx, session)
 	// An abort writes no watch history, but the play happened: the admin log
-	// records it as aborted.
-	h.recordAdminStopHistory(ctx, session, PlaybackEndAborted)
+	// records it as aborted, unless it is a Jellyfin copy that never saw it.
+	h.recordStopHistory(ctx, session, PlaybackEndAborted)
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {

@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -305,8 +306,17 @@ func TestEnsureUpstreamPlaybackClearsStaleHLSRouteOnMethodSwitch(t *testing.T) {
 // the switch records it as replaced once the play has moved to the new
 // session, and a copy held elsewhere is recorded from its identity.
 func TestMethodSwitchEndsTheReplacedSession(t *testing.T) {
-	for _, held := range []bool{true, false} {
-		t.Run(map[bool]string{true: "copy held here", false: "copy held elsewhere"}[held], func(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		held       bool
+		startFails bool
+	}{
+		{name: "copy held here", held: true},
+		{name: "copy held elsewhere"},
+		{name: "replacement fails to start", held: true, startFails: true},
+	} {
+		held := tc.held
+		t.Run(tc.name, func(t *testing.T) {
 			source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 			store := NewPlaybackSessionStore(time.Hour, nil)
 			store.Put(PlaybackSession{
@@ -315,13 +325,16 @@ func TestMethodSwitchEndsTheReplacedSession(t *testing.T) {
 				MediaSources: []PlaybackMediaSource{source},
 			})
 			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{}}
+			if tc.startFails {
+				manager.startErr = errors.New("start failed")
+			}
 			if held {
 				manager.sessions["old-upstream"] = &playback.Session{ID: "old-upstream", UserID: 7, ProfileID: "profile-1", MediaFileID: source.FileID, PlayMethod: playback.PlayTranscode, Position: 600}
 			}
 			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
 			updated, err := handler.ensureUpstreamPlayback(t.Context(),
 				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", source, "direct")
-			if err != nil || updated.UpstreamSessionID == "old-upstream" {
+			if tc.startFails != (err != nil) || (err == nil && updated.UpstreamSessionID == "old-upstream") {
 				t.Fatalf("switch = %+v, %v", updated, err)
 			}
 			if len(manager.detached) != 1 {

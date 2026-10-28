@@ -600,6 +600,13 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 	if len(admin.history) != 0 {
 		t.Fatalf("admin history = %+v, want none for a copy without progress", admin.history)
 	}
+	held := replica.holdCopy(t, compatFinishSession(), 0)
+	if err := replica.handler.abortPlaybackSession(context.Background(), held); err != nil {
+		t.Fatal(err)
+	}
+	if len(admin.history) != 0 {
+		t.Fatalf("admin history = %+v, want none for an aborted copy without progress", admin.history)
+	}
 }
 
 // TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end reads

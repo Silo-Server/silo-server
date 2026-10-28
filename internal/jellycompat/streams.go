@@ -2655,6 +2655,17 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 	}
 
+	// Every exit from here ends the replaced session's play once: the switch
+	// moves the play off it, or the replacement fails after its copy stopped.
+	replacedFinished := false
+	finishReplaced := func() {
+		if !replacedFinished {
+			replacedFinished = true
+			h.finishReplacedUpstream(ctx, replaced)
+		}
+	}
+	defer finishReplaced()
+
 	var session *playback.Session
 	var err error
 	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
@@ -2702,7 +2713,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		if errors.Is(updateErr, errUpstreamReplaced) {
 			// Another request moved the play off the session this one
 			// replaced, so that session's play is over all the same.
-			h.finishReplacedUpstream(ctx, replaced)
+			finishReplaced()
 			// Adopt the winner only when it serves the same play method;
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
@@ -2719,7 +2730,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 		return nil, updateErr
 	}
-	h.finishReplacedUpstream(ctx, replaced)
+	finishReplaced()
 	updated, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
