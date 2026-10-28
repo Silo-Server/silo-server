@@ -199,4 +199,6 @@ role's password, and puts Redis back on loopback. Nodes sign in as `silo`, the
 cluster's superuser, as they did with the multi-container stack, and neither
 connection is encrypted, so the ports belong on a trusted network only.
 Reusing `POSTGRES_PASSWORD` means a main server moved from that stack keeps the
-`DATABASE_URL` its nodes already have; their `REDIS_URL` gains the password.
+`DATABASE_URL` its nodes already have, as long as that stack ran with the
+default `POSTGRES_USER=silo`; nodes that sign in as another user are refused
+until their `DATABASE_URL` names `silo`. Their `REDIS_URL` gains the password.
