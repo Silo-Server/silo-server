@@ -48,6 +48,10 @@ services:
       # Both are off by default. Set to "true" to start the bundled service.
       ENABLE_REDIS: ${ENABLE_REDIS:-false}
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
+      # Until the postgres service below has run once, Silo creates no empty
+      # database, so `up --no-deps silo` cannot start a new install in front
+      # of an earlier one the migration has yet to move.
+      REQUIRE_COMPOSE_MIGRATION: "true"
     ports:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"

@@ -235,17 +235,31 @@ successfully. `redis` and `meilisearch` exit at once. `postgres` runs
   service goes back to `postgres` in the copy, unless `ENABLE_MEILISEARCH` is
   on, in which case `init-config` hands Silo the bundled instance.
 
-It does nothing when the omnibus install already has a database of its own,
-and refuses, before anything is moved into place, when:
+It does nothing when the omnibus install already has a database of its own
+and none of the earlier stack is here, and refuses, before anything is moved
+into place, when:
 
 - A pinned `SILO_IMAGE` (other than `latest` or `latest-omnibus`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `latest-omnibus` past the pin.
+- The omnibus install has a database of its own, no migration finished, and
+  the earlier stack's cluster or Silo directories are here: Silo created that
+  database first, most likely when started with `--no-deps` before this step.
+  Copying over it would drop what it holds, and going on would leave the
+  earlier install behind unannounced. The message says to move
+  `config/postgres/data` aside and start again if it holds nothing needed, or
+  to delete the earlier stack's directories to keep it.
 - An earlier install is here and `.env` holds a `DATABASE_URL` or `REDIS_URL`
   naming the old services or `localhost` (the old file overrode them for Silo,
   and this one passes `.env` through), or a `SILO_MEILISEARCH_URL` naming the
   old `meilisearch` service (Silo applies it on every start, and the image keeps
   it even with its own Meilisearch on).
+- An earlier install is here, `.env` sets `SILO_SEARCH_PROVIDER=meilisearch`
+  without `SILO_MEILISEARCH_URL`, and `ENABLE_MEILISEARCH` is off: the URL
+  stored from the admin UI would apply, and it names the old service.
+- `plugins`, `artwork`, or `compat` in `SILO_DATA_ROOT` is a symbolic link,
+  which the earlier stack's bind mount followed but this mount cannot, or is
+  not a directory.
 - None of the earlier stack's data is here but `.env` sets `POSTGRES_PASSWORD`
   (without node access) or `SILO_IMAGE`, which only it used: its data is in
   named volumes or other paths, and starting would make an empty server
@@ -258,7 +272,8 @@ and refuses, before anything is moved into place, when:
   directory.
 - There is no room for the copy plus 2 GiB, or, once copied, for rebuilding
   its largest collation-dependent index twice over (the index and its WAL) plus
-  1 GiB.
+  1 GiB, or for copying a Silo directory that cannot be hard-linked while
+  keeping that room for the database's first start.
 - The copy has enabled proxy or transcode nodes and node access is off: they
   reached the old services on published ports.
 
@@ -268,19 +283,40 @@ How it stays safe to repeat and to roll back:
   still starts on them. Deleting them is the administrator's job.
 - The database copy and Silo's directories are one generation, built under
   staging names that no later run promotes. Moving them into place happens
-  under `/config/.compose-migration-pending`; a run that finds it sets aside
-  whatever was already moved (`.<name>.before-<time>`) and starts over, since
-  the old install may have changed since. A failure removes everything staged.
+  under `/config/.compose-migration-pending`; a run that finds it without the
+  done marker below sets aside whatever was already moved
+  (`.<name>.before-<time>`) and starts over, since the old install may have
+  changed since. A run that finds both markers, left by a kill just after the
+  done marker was written, only removes the pending record. A data directory
+  an unfinished `initdb` left is set aside the same way. A failure removes
+  everything staged, and the closing log lists every copy set aside.
+- `cp` does not flush, and PostgreSQL never syncs a cleanly stopped cluster it
+  starts on, so the script syncs the file system after staging and writing the
+  pending record, after the moves, and after the done marker. Otherwise a power
+  loss could keep the renames and lose the files.
 - The copy's `pg_hba.conf` is removed and rewritten as `postgres`, never written
   through, and its `PG_VERSION` is read without following a link, since files in
   a cluster from another container can be links.
-- `/config/.compose-cluster-copied`, written last, records the source cluster's
-  system identifier and latest checkpoint location (`pg_controldata`), or
-  `none` when Silo's database is elsewhere. Any later start of the old cluster,
-  even a clean start and stop, changes the checkpoint, so the script refuses to
-  go on once the earlier Compose file has been used since the copy: starting on
-  the copy would drop what it wrote. It checks the same before moving a copy
-  into place.
+- The done marker, `/config/.compose-cluster-copied`, is written to a
+  temporary name and renamed into place once everything else is, so it is
+  whole or absent. It records the source cluster's system identifier and latest
+  checkpoint location (`pg_controldata`), or `none` when Silo's database is
+  elsewhere. Any later start of the old cluster, even a clean start and stop,
+  changes the checkpoint, so the script refuses to go on once the earlier
+  Compose file has been used since the copy: starting on the copy would drop
+  what it wrote. It checks the same before moving a copy into place.
+- Every run that succeeds, including one that finds nothing to move, then
+  leaves a root-owned `/config/.compose-migration-checked`. The `silo` service
+  sets `REQUIRE_COMPOSE_MIGRATION`, under which `init-postgres` refuses to
+  create a cluster in an empty `/config/postgres/data` until that marker
+  exists. The user manual's update command, `docker compose up -d --no-deps
+  silo`, skips this step, and on the first update onto this file Silo would
+  otherwise come up on a new, empty database in front of the earlier install.
+  Instead it exits and asks for one `docker compose up -d` without
+  `--no-deps`; later updates can skip the step again. The migration removes the
+  empty Silo directories `init-config` made on that refused start instead of
+  setting them aside. Without the variable, as
+  under `docker run`, `init-postgres` creates the cluster as before.
 - A run with nothing to move prints nothing.
 
 Overrides of the old `postgres`, `redis`, or `meilisearch` services in a
