@@ -1098,7 +1098,12 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist playback stop", "component", "api", "session", session.ID, "error", err)
 	}
-	if err == nil && result.Completed {
+	// A completed play marks the rest of a multi-episode file's range. A
+	// repeated stop of a play already in history marks it again, so a range
+	// an earlier stop failed to mark is not lost; the mark skips episodes
+	// already completed.
+	if result.Completed || (result.AlreadyRecorded && duration > 0 &&
+		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct)) {
 		h.markSpannedEpisodesWatched(ctx, watchSvc, session, file, stoppedAt)
 	}
 	// A history row this stop wrote still counts when a later write failed:

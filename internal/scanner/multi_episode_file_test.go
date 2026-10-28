@@ -84,6 +84,8 @@ func TestMultiEpisodeFileServesSpannedEpisodesDB(t *testing.T) {
 		t.Fatalf("files by episode = %v, want the file under the first two episodes only", grouped)
 	}
 
+	assertSpannedEpisodeReaders(t, ctx, pool, file.ID, folderID, episodeIDs[1])
+
 	// A folder reconcile restores a lost membership of a spanned episode.
 	if _, err := pool.Exec(ctx, `DELETE FROM episode_libraries WHERE episode_id = $1`, episodeIDs[1]); err != nil {
 		t.Fatalf("drop spanned membership: %v", err)
@@ -102,6 +104,43 @@ func TestMultiEpisodeFileServesSpannedEpisodesDB(t *testing.T) {
 		t.Fatalf("remove stale memberships: %v", err)
 	}
 	assertEpisodeMemberships(t, ctx, pool, folderID, nil)
+}
+
+// assertSpannedEpisodeReaders checks that the card play target, the poster
+// badges, and the catalog entry that technical filters read see a
+// multi-episode file under a later episode of its range.
+func assertSpannedEpisodeReaders(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fileID, folderID int, episodeID string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET resolution = '1080p' WHERE id = $1`, fileID); err != nil {
+		t.Fatalf("probe file: %v", err)
+	}
+	card := catalog.PlayableTargetInput{ContentID: episodeID, Type: "episode"}
+	targets, err := catalog.NewPlayableTargetResolver(pool).Resolve(ctx, catalog.PlayableTargetQuery{
+		UserID: 1, ProfileID: "multi-episode", Items: []catalog.PlayableTargetInput{card},
+	})
+	if err != nil {
+		t.Fatalf("resolve play target: %v", err)
+	}
+	if targets[card.Key()] != episodeID {
+		t.Fatalf("spanned episode play target = %q, want %q", targets[card.Key()], episodeID)
+	}
+	summaries, err := catalog.ListOverlaySummaries(ctx, pool, []string{episodeID}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("overlay summaries: %v", err)
+	}
+	if summaries[episodeID] == nil {
+		t.Fatalf("spanned episode has no overlay summary")
+	}
+	var resolutionCodes []string
+	if err := pool.QueryRow(ctx, `
+		SELECT resolution_codes FROM episode_catalog_entries
+		WHERE episode_id = $1 AND media_folder_id = $2
+	`, episodeID, folderID).Scan(&resolutionCodes); err != nil {
+		t.Fatalf("spanned episode catalog entry: %v", err)
+	}
+	if len(resolutionCodes) == 0 {
+		t.Fatalf("spanned episode catalog entry has no resolution")
+	}
 }
 
 func assertEpisodeMemberships(t *testing.T, ctx context.Context, pool *pgxpool.Pool, folderID int, want []string) {

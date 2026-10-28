@@ -69,6 +69,23 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 
 	var insertedSeriesIDs []string
 	if restore {
+		// Lock every series this pass may add or remove memberships for in
+		// one ordered statement. Taking the spanned additions and the stale
+		// removals separately could lock two series in the opposite order to
+		// curation, which locks parents in content ID order.
+		spannedSeriesIDs, err := spannedMembershipCandidateSeries(ctx, tx, "mf.media_folder_id = $1", folderID)
+		if err != nil {
+			return 0, err
+		}
+		_, staleSeriesIDs, err := findStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+		if err != nil {
+			return 0, err
+		}
+		if lockIDs := append(spannedSeriesIDs, staleSeriesIDs...); len(lockIDs) > 0 {
+			if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, lockIDs); err != nil {
+				return 0, fmt.Errorf("locking series for episode library membership: %w", err)
+			}
+		}
 		if err := tx.QueryRow(ctx, `
 		WITH inserted AS (
 			INSERT INTO episode_libraries (
@@ -98,11 +115,11 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 	`, folderID).Scan(&insertedSeriesIDs); err != nil {
 			return 0, fmt.Errorf("restoring episode library membership: %w", err)
 		}
-		spannedSeriesIDs, err := InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1", folderID)
+		addedSeriesIDs, err := InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1", folderID)
 		if err != nil {
 			return 0, err
 		}
-		insertedSeriesIDs = append(insertedSeriesIDs, spannedSeriesIDs...)
+		insertedSeriesIDs = append(insertedSeriesIDs, addedSeriesIDs...)
 	}
 
 	removed, deletedSeriesIDs, err := deleteStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
@@ -127,23 +144,9 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 // delete its memberships, and do not retry a deadlock, so deleting first and
 // locking in the recompute would take the two in the opposite order.
 func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int, episodeIDs []string) (int, []string, error) {
-	scope := "el.media_folder_id = $1"
-	args := []any{folderID}
-	if episodeIDs != nil {
-		scope += " AND el.episode_id IN " + SpanReachSQL("$2::text[]")
-		args = append(args, episodeIDs)
-	}
-	var staleEpisodeIDs, staleSeriesIDs []string
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(array_agg(el.episode_id), ARRAY[]::text[]),
-		       COALESCE(
-			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
-			       ARRAY[]::text[]
-		       )
-		FROM episode_libraries el
-		LEFT JOIN episodes e ON e.content_id = el.episode_id
-		WHERE `+scope+` AND `+NoServingEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
-		return 0, nil, fmt.Errorf("finding stale episode library membership: %w", err)
+	staleEpisodeIDs, staleSeriesIDs, err := findStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+	if err != nil {
+		return 0, nil, err
 	}
 	if len(staleEpisodeIDs) == 0 {
 		return 0, nil, nil
@@ -174,4 +177,30 @@ func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int,
 		return 0, nil, fmt.Errorf("reconciling episode library membership: %w", err)
 	}
 	return removed, deletedSeriesIDs, nil
+}
+
+// findStaleEpisodeMemberships returns the folder's memberships whose episode
+// no present file there serves, limited to episodeIDs and the episodes a
+// multi-episode file linked to one of them could span when it is non-nil, and
+// their series.
+func findStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int, episodeIDs []string) ([]string, []string, error) {
+	scope := "el.media_folder_id = $1"
+	args := []any{folderID}
+	if episodeIDs != nil {
+		scope += " AND el.episode_id IN " + SpanReachSQL("$2::text[]")
+		args = append(args, episodeIDs)
+	}
+	var staleEpisodeIDs, staleSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(el.episode_id), ARRAY[]::text[]),
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM episode_libraries el
+		LEFT JOIN episodes e ON e.content_id = el.episode_id
+		WHERE `+scope+` AND `+NoServingEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
+		return nil, nil, fmt.Errorf("finding stale episode library membership: %w", err)
+	}
+	return staleEpisodeIDs, staleSeriesIDs, nil
 }

@@ -69,6 +69,27 @@ var EpisodeHasServingFileSQL = `(EXISTS (
 		WHERE covered.content_id = e.content_id
 	))`
 
+// SpanningEpisodeFileExistsSQL holds when a present multi-episode file linked
+// to an earlier episode spans the episode whose content ID is episodeExpr, and
+// that file meets fileCondition, an SQL condition on media_files mf.
+func SpanningEpisodeFileExistsSQL(episodeExpr, fileCondition string) string {
+	return `EXISTS (
+		SELECT 1
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
+		WHERE covered.content_id = ` + episodeExpr + `
+		  AND ` + fileCondition + `
+	)`
+}
+
+// SpannedEpisodesSQL selects (content_id, season_number, episode_number) of
+// the later episodes that the present multi-episode files matching
+// filePredicate, an SQL condition on media_files mf, serve.
+func SpannedEpisodesSQL(filePredicate string) string {
+	return `SELECT DISTINCT covered.content_id, covered.season_number, covered.episode_number
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
+		WHERE ` + filePredicate
+}
+
 // SpanReachSQL selects the episodes in the text[] parameter param and the ones
 // a multi-episode file linked to one of them could span. Membership cleanup
 // after a file changes checks them all.
@@ -95,18 +116,9 @@ func SpanReachSQL(param string) string {
 // so this locks the candidate series first, in content ID order, and inserts in
 // a later statement.
 func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredicate string, args ...any) ([]string, error) {
-	missing := `
-		FROM episodes covered` + spannedEpisodeJoinSQL + `
-		WHERE ` + filePredicate + `
-		  AND NOT EXISTS (
-			SELECT 1 FROM episode_libraries el
-			WHERE el.episode_id = covered.content_id
-			  AND el.media_folder_id = mf.media_folder_id
-		  )`
-	var candidateSeriesIDs []string
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(array_agg(DISTINCT covered.series_id), ARRAY[]::text[])`+missing, args...).Scan(&candidateSeriesIDs); err != nil {
-		return nil, fmt.Errorf("finding spanned episode library membership: %w", err)
+	candidateSeriesIDs, err := spannedMembershipCandidateSeries(ctx, tx, filePredicate, args...)
+	if err != nil {
+		return nil, err
 	}
 	if len(candidateSeriesIDs) == 0 {
 		return nil, nil
@@ -124,7 +136,7 @@ func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredica
 			SELECT covered.content_id,
 			       mf.media_folder_id,
 			       MIN(mf.created_at),
-			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]`+missing+`
+			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]`+missingSpannedMembershipSQL(filePredicate)+`
 			GROUP BY covered.content_id, mf.media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 			RETURNING episode_id
@@ -134,6 +146,31 @@ func InsertSpannedEpisodeMemberships(ctx context.Context, tx pgx.Tx, filePredica
 		JOIN episodes e ON e.content_id = i.episode_id
 	`, args...).Scan(&seriesIDs); err != nil {
 		return nil, fmt.Errorf("adding spanned episode library membership: %w", err)
+	}
+	return seriesIDs, nil
+}
+
+// missingSpannedMembershipSQL is the FROM and WHERE clauses selecting the
+// spanned episodes of the files matching filePredicate that have no
+// membership in the file's folder yet.
+func missingSpannedMembershipSQL(filePredicate string) string {
+	return `
+		FROM episodes covered` + spannedEpisodeJoinSQL + `
+		WHERE ` + filePredicate + `
+		  AND NOT EXISTS (
+			SELECT 1 FROM episode_libraries el
+			WHERE el.episode_id = covered.content_id
+			  AND el.media_folder_id = mf.media_folder_id
+		  )`
+}
+
+// spannedMembershipCandidateSeries returns the series that
+// InsertSpannedEpisodeMemberships would add memberships to.
+func spannedMembershipCandidateSeries(ctx context.Context, tx pgx.Tx, filePredicate string, args ...any) ([]string, error) {
+	var seriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(DISTINCT covered.series_id), ARRAY[]::text[])`+missingSpannedMembershipSQL(filePredicate), args...).Scan(&seriesIDs); err != nil {
+		return nil, fmt.Errorf("finding spanned episode library membership: %w", err)
 	}
 	return seriesIDs, nil
 }

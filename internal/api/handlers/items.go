@@ -2613,7 +2613,7 @@ func (h *ItemsHandler) episodeTargets(ctx context.Context, episodes []*models.Ep
 	for _, episode := range episodes {
 		targets = append(targets, watchedLeafTarget{
 			ContentID:       episode.ContentID,
-			DurationSeconds: mediaFileDurationSeconds(filesByEpisode[episode.ContentID], episode.Runtime),
+			DurationSeconds: mediaFileDurationSeconds(filesByEpisode[episode.ContentID], episode.ContentID, episode.Runtime),
 		})
 	}
 	return targets
@@ -2621,10 +2621,12 @@ func (h *ItemsHandler) episodeTargets(ctx context.Context, episodes []*models.Ep
 
 // mediaFileDurationSeconds picks a playable duration from an item's files,
 // falling back to the catalog runtime. Mirrors contentDurationSeconds's
-// preference order so the batched and single-item paths agree.
-func mediaFileDurationSeconds(files []*models.MediaFile, fallbackRuntimeMinutes int) float64 {
+// preference order so the batched and single-item paths agree. For an
+// episode, a multi-episode file linked to an earlier episode of its range
+// lasts the whole range, so only files linked to the episode itself count.
+func mediaFileDurationSeconds(files []*models.MediaFile, episodeID string, fallbackRuntimeMinutes int) float64 {
 	for _, file := range files {
-		if file != nil && file.Duration > 0 {
+		if file != nil && file.Duration > 0 && (episodeID == "" || file.EpisodeID == episodeID) {
 			return float64(file.Duration)
 		}
 	}
@@ -2656,7 +2658,7 @@ func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, ep
 	if err != nil {
 		files = nil
 	}
-	return mediaFileDurationSeconds(files, fallbackRuntimeMinutes)
+	return mediaFileDurationSeconds(files, episodeID, fallbackRuntimeMinutes)
 }
 
 // isNotFound checks if an error is a "not found" sentinel.
