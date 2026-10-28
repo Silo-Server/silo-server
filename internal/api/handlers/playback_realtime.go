@@ -222,7 +222,7 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 	if !claim.ownEnd(abortStopID(session.ID)) {
 		// An earlier stop won the row and never finished: finish it as
 		// that stop, then tear down as an abort without its writers.
-		h.finishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(ctx, claim, session.ID)
 		h.finalizeSessionAbort(ctx, session, true, "abort", nativeEndClaim{})
 		return nil
 	}

@@ -1437,6 +1437,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			streamHandler.TM = playbackHandler.TranscodeManager()
 			streamHandler.StreamDeny = playbackHandler.StreamDeny
 			streamHandler.PlanStoreV3 = playbackHandler.PlanStoreV3
+			streamHandler.FinishOtherEnd = playbackHandler.FinishOtherEnd
 			if deps.Config != nil {
 				streamHandler.JWTSecret = deps.Config.Auth.JWTSecret
 			}

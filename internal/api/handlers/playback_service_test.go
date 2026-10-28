@@ -918,7 +918,7 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 				t.Fatal(err)
 			}
 			stream := NewStreamHandler(f.manager, f.handler.fileResolver)
-			stream.PlanStoreV3 = memory
+			stream.PlanStoreV3, stream.FinishOtherEnd = memory, f.handler.FinishOtherEnd
 			stream.abortPlaybackSession(context.Background(), f.session)
 			if record, _ := memory.GetAttempt(context.Background(), f.session.ID); record == nil {
 				t.Fatal("attempt missing")
@@ -927,7 +927,7 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 				t.Fatalf("receipt = %+v, %v; want the client stop finalized", receipt, err)
 			}
 		},
-		wantReason: PlaybackEndStopped, wantWatched: 1200, wantProviders: 0,
+		wantReason: PlaybackEndStopped, wantWatched: 1200, wantProviders: 1,
 	}, {
 		name: "expiry records the sample its attempt accepted",
 		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {

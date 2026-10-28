@@ -87,14 +87,15 @@ func claimStopFinalization(ctx context.Context, store playback.ProgressStoreV3, 
 
 // ownEnd reports whether the claim finalizes the end its caller made, as
 // opposed to an earlier stop that won the row and never finished, which the
-// caller must finish with that stop's own writers (finishOtherEnd).
+// caller must finish with that stop's own writers (FinishOtherEnd).
 func (c nativeEndClaim) ownEnd(stopID string) bool {
 	return c.store == nil || c.receipt.StopID == stopID
 }
 
-// finishOtherEnd finalizes the earlier stop a claim took over, from the
-// attempt row with that stop's reason and accepted sample.
-func (h *PlaybackHandler) finishOtherEnd(ctx context.Context, claim nativeEndClaim, sessionID string) {
+// FinishOtherEnd finalizes the earlier stop a claim took over, from the
+// attempt row with that stop's reason and accepted sample: its watch and
+// admin history and its provider event, as the stop's own finalizer would.
+func (h *PlaybackHandler) FinishOtherEnd(ctx context.Context, claim nativeEndClaim, sessionID string) {
 	historyID, err := h.finishStop(ctx, claim.record, sessionID, claim.receipt.Accepted, claim.reason(sessionID, PlaybackEndStopped))
 	if err != nil {
 		slog.WarnContext(ctx, "failed to finish an earlier playback stop", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
