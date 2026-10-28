@@ -760,4 +760,19 @@ func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
 	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndStopped {
 		t.Fatalf("admin history = %+v, want only the stop", admin.history)
 	}
+
+	// An expiry is not a definite end: when an older copy expires first, the
+	// copy that saw further still records its progress over it.
+	admin = &endedAdminStore{}
+	older := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	newer := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	session = compatFinishSession()
+	session.ID = "compat-upstream-2"
+	olderCopy := older.holdCopy(t, session, 1800)
+	newerCopy := newer.holdCopy(t, session, 3500)
+	older.handler.expireSessionCopy(context.Background(), olderCopy)
+	newer.handler.expireSessionCopy(context.Background(), newerCopy)
+	if len(admin.history) != 2 || admin.history[1].WatchedSeconds != 3500 {
+		t.Fatalf("admin history = %+v, want the newer copy's 3500 recorded after the older expiry", admin.history)
+	}
 }

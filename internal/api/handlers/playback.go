@@ -1504,8 +1504,9 @@ type historyEndReader interface {
 	HistoryEndReason(ctx context.Context, sessionID string) (PlaybackEndReason, error)
 }
 
-// playEndedElsewhere reports whether the admin log already holds an end for
-// the session. A failed read reports false: the expiry then records as before.
+// playEndedElsewhere reports whether the admin log already holds a definite
+// end for the session: a stop, a replacement, a termination or an abort.
+// A failed read reports false: the expiry then records as before.
 func (h *PlaybackHandler) playEndedElsewhere(ctx context.Context, sessionID string) bool {
 	reader, ok := h.AdminStore.(historyEndReader)
 	if !ok {
@@ -1516,7 +1517,9 @@ func (h *PlaybackHandler) playEndedElsewhere(ctx context.Context, sessionID stri
 		slog.WarnContext(ctx, "failed to read a session's recorded end", "component", "api", "session", sessionID, "error", err)
 		return false
 	}
-	return reason != ""
+	// An earlier expiry is not the play's end: an older copy may have expired
+	// first, and this copy can still record further progress over it.
+	return reason != "" && reason != PlaybackEndExpired
 }
 
 // handleFinishedSession records a play that another playback frontend ended
