@@ -1150,8 +1150,17 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		return nil, nil
 	}
 
+	// A play whose file left the catalog (a library deleted before the play
+	// was recorded) is still recorded, without the item and duration only
+	// the file gave.
 	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
-	if err != nil {
+	switch {
+	case isPlaybackFileLookupMissing(err):
+		slog.WarnContext(ctx, "recording admin history without its media file", "component", "api", "session", session.ID, "error", err)
+		file = nil
+	case err != nil:
+		// A lookup that failed for another reason may succeed on a retry,
+		// and the history upsert never repairs the item it lacks.
 		return nil, fmt.Errorf("loading media file: %w", err)
 	}
 

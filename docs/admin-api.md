@@ -1549,7 +1549,8 @@ stop, close or abort handled by a server that did not hold the session's live co
 that row takes the start time, client and device from the shared live row when one is
 left. The one exception is a Jellyfin session copy that never reported progress: it may
 only have served media while another copy took the play's reports, so it leaves the row
-to that copy and records nothing. When an attempt is finalized more than once, for example expired and then
+to that copy and records nothing. A play whose media file left the catalog before the end
+was recorded still gets its row, without the item and duration only the file gave. When an attempt is finalized more than once, for example expired and then
 rebuilt and stopped, the latest finalization's reason wins. Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
 is also null for a server teardown the client never recovered from (an encoder exit, a

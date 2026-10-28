@@ -693,3 +693,24 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 		t.Fatalf("admin history = %+v, want the live row's client and device at the reported 600", admin.history)
 	}
 }
+
+type missingFileResolver struct{}
+
+func (missingFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	return nil, playback.ErrFileNotFound
+}
+
+// TestEndRecordsAPlayWhoseFileLeftTheCatalog covers an end recorded after
+// the play's media file was removed (a deleted library): the admin log
+// still gets its row, without the item and duration only the file gave.
+func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
+	admin := &recordingPlaybackAdminStore{}
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
+	h.AdminStore = admin
+	session := compatFinishSession()
+	session.IsJellyfinCompat, session.Position = false, 900
+	h.recordAdminStopHistory(context.Background(), &session, PlaybackEndExpired)
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].WatchedSeconds != 900 {
+		t.Fatalf("admin history = %+v, want one expired row without an item or duration", admin.history)
+	}
+}
