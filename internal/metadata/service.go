@@ -6073,7 +6073,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		keep := make([]int32, 0, len(seasonIDs))
 		for seasonNumber := range seasonIDs {
 			if catalog.FitsPostgresInteger(seasonNumber) {
-				keep = append(keep, int32(seasonNumber))
+				keep = append(keep, int32(seasonNumber)) //nolint:gosec // FitsPostgresInteger checked the range
 			}
 		}
 		if err := s.seasonRepo.ClearBackdropsExcept(ctx, seriesID, keep); err != nil {
