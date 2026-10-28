@@ -830,6 +830,9 @@ type Season struct {
 	// columns only when it is set, replacing or clearing the stored backdrop.
 	// Otherwise the stored backdrop stays, whatever the backdrop fields hold.
 	WriteBackdrop bool `json:"-"`
+	// BackdropFillOnly, with WriteBackdrop, writes only while the stored
+	// backdrop is still empty when the upsert holds the row.
+	BackdropFillOnly bool `json:"-"`
 }
 
 // Episode represents a row in the episodes table.

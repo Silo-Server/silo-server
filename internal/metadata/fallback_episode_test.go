@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -304,10 +305,10 @@ func (r *fakeSeasonRepo) applyUpsertLocked(s *models.Season) {
 		s.ContentID = existing.ContentID
 	}
 	cp := *s
-	cp.WriteBackdrop = false
+	cp.WriteBackdrop, cp.BackdropFillOnly = false, false
 	// Like SeasonRepository, only a write marked WriteBackdrop changes the
 	// stored backdrop.
-	if !s.WriteBackdrop {
+	if !s.WriteBackdrop || (s.BackdropFillOnly && ok && existing.BackdropPath != "") {
 		cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = "", "", ""
 		if ok {
 			cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = existing.BackdropPath, existing.BackdropSourcePath, existing.BackdropThumbhash
@@ -325,6 +326,17 @@ func (r *fakeSeasonRepo) BulkUpsert(_ context.Context, seasons []*models.Season)
 	}
 	for _, s := range seasons {
 		r.applyUpsertLocked(s)
+	}
+	return nil
+}
+
+func (r *fakeSeasonRepo) ClearBackdropsExcept(_ context.Context, seriesID string, keep []int32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.seasons {
+		if s.SeriesID == seriesID && !slices.Contains(keep, int32(s.SeasonNumber)) {
+			s.BackdropPath, s.BackdropSourcePath, s.BackdropThumbhash = "", "", ""
+		}
 	}
 	return nil
 }

@@ -29,6 +29,8 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		language  string
 		fillEmpty bool
 		locked    bool
+		// episodeSeason is the season of the refresh's one episode; 0 means 1.
+		episodeSeason int
 		// offered is nil when the refresh brought no season record, only
 		// the season's episode.
 		offered                *string
@@ -51,6 +53,9 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		{name: "a season known only by its episodes keeps it", authority: seasonBackdropsAnswered,
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
 		{name: "identify clears a season known only by its episodes", authority: seasonBackdropsReidentified},
+		{name: "a season the refresh names nowhere keeps it", authority: seasonBackdropsAnswered, episodeSeason: 2,
+			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
+		{name: "identify clears a season the new match names nowhere", authority: seasonBackdropsReidentified, episodeSeason: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
@@ -76,8 +81,12 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 			if tc.fillEmpty {
 				mergeMode = MergeFillEmpty
 			}
+			refreshEpisode := episode
+			if tc.episodeSeason != 0 {
+				refreshEpisode.SeasonNumber = tc.episodeSeason
+			}
 			service.persistSeasonsAndEpisodes(withSeasonBackdropAuthority(context.Background(), tc.authority),
-				series, map[string]string{"tvdb": "9"}, "en", language, seasons, []EpisodeResult{episode}, mergeMode)
+				series, map[string]string{"tvdb": "9"}, "en", language, seasons, []EpisodeResult{refreshEpisode}, mergeMode)
 
 			got := seasonRepo.seasons[seasonKey(seriesID, 1)]
 			if got.BackdropPath != tc.wantPath || got.BackdropSourcePath != tc.wantSource || got.BackdropThumbhash != tc.wantThumbhash {

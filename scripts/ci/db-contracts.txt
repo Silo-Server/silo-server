@@ -209,6 +209,7 @@
 ./internal/catalog TestRefreshKeepsArtworkPublishedAfterItsReadDB
 ./internal/catalog TestRefreshWaitingOnAPublicationKeepsItDB
 ./internal/catalog TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB
+./internal/catalog TestClearSeasonBackdropsExceptDB
 ./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.

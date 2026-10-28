@@ -131,12 +131,14 @@ var seasonArtworkAssignments = lockedArtworkAssignments("seasons", seriesImagesL
 // writeSeasonBackdrops sets the backdrop of each season marked WriteBackdrop,
 // in the upsert's transaction after the row is written and locked. It writes
 // the slot from the current row rather than the writer's earlier read, so
-// unmarked writers keep whatever is stored and a marked one replaces or
-// clears it. While the series has Images locked, a stored backdrop stays, as
+// unmarked writers keep whatever is stored, a marked one replaces or clears
+// it, and one marked BackdropFillOnly only fills a backdrop that is still
+// empty. While the series has Images locked, a stored backdrop stays, as
 // lockedArtworkAssignments keeps a poster.
 func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Season) error {
 	var seriesIDs, paths, sources, thumbhashes []string
 	var numbers []int32
+	var fillOnly []bool
 	for _, s := range seasons {
 		if !s.WriteBackdrop {
 			continue
@@ -146,6 +148,7 @@ func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Seas
 		paths = append(paths, s.BackdropPath)
 		sources = append(sources, s.BackdropSourcePath)
 		thumbhashes = append(thumbhashes, s.BackdropThumbhash)
+		fillOnly = append(fillOnly, s.BackdropFillOnly)
 	}
 	if len(seriesIDs) == 0 {
 		return nil
@@ -156,16 +159,52 @@ func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Seas
 			backdrop_source_path = target.source_path,
 			backdrop_thumbhash = target.thumbhash,
 			updated_at = NOW()
-		FROM UNNEST($1::text[], $2::int[], $3::text[], $4::text[], $5::text[])
-			AS target(series_id, season_number, path, source_path, thumbhash)
+		FROM UNNEST($1::text[], $2::int[], $3::text[], $4::text[], $5::text[], $6::bool[])
+			AS target(series_id, season_number, path, source_path, thumbhash, fill_only)
 		WHERE seasons.series_id = target.series_id
 		  AND seasons.season_number = target.season_number
 		  AND (seasons.backdrop_path, seasons.backdrop_source_path, seasons.backdrop_thumbhash)
 			IS DISTINCT FROM (target.path, target.source_path, target.thumbhash)
+		  AND NOT (target.fill_only AND seasons.backdrop_path <> '')
 		  AND NOT (`+seriesImagesLockedSQL("seasons")+` AND seasons.backdrop_path <> '')`,
-		seriesIDs, numbers, paths, sources, thumbhashes)
+		seriesIDs, numbers, paths, sources, thumbhashes, fillOnly)
 	if err != nil {
 		return fmt.Errorf("writing season backdrops: %w", err)
+	}
+	return nil
+}
+
+// ClearBackdropsExcept clears the backdrop of every season of seriesID whose
+// number is not in keep, unless the series has Images locked. Identify uses it
+// for seasons the corrected match no longer names, which may show the
+// previous match's art. It locks the rows first and updates only those, so a
+// pick published meanwhile is either seen with its images lock or waits.
+func (r *SeasonRepository) ClearBackdropsExcept(ctx context.Context, seriesID string, keep []int32) error {
+	if keep == nil {
+		keep = []int32{}
+	}
+	err := pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT content_id FROM seasons
+			WHERE series_id = $1 AND NOT (season_number = ANY($2::int[])) AND backdrop_path <> ''
+			ORDER BY content_id
+			FOR NO KEY UPDATE`, seriesID, keep)
+		if err != nil {
+			return err
+		}
+		contentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(contentIDs) == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE seasons
+			SET backdrop_path = '', backdrop_source_path = '', backdrop_thumbhash = '', updated_at = NOW()
+			WHERE content_id = ANY($1::text[])
+			  AND NOT `+seriesImagesLockedSQL("seasons"), contentIDs)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("clearing season backdrops: %w", err)
 	}
 	return nil
 }

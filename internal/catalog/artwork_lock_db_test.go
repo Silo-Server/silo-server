@@ -354,16 +354,18 @@ func TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB(t *testing.T) {
 		{"bulk upsert", func(s *models.Season) error { return f.seasons.BulkUpsert(ctx, []*models.Season{s}) }},
 	} {
 		for _, tc := range []struct {
-			name           string
-			locked, marked bool
-			storedBackdrop string
-			write, want    string
+			name                     string
+			locked, marked, fillOnly bool
+			storedBackdrop           string
+			write, want              string
 		}{
 			{name: "unmarked keeps a backdrop set after its read", storedBackdrop: stored, write: "tvdb://read.jpg", want: stored},
 			{name: "marked replaces", marked: true, storedBackdrop: stored, write: "tvdb://new.jpg", want: "tvdb://new.jpg"},
 			{name: "marked clears", marked: true, storedBackdrop: stored, want: ""},
 			{name: "locked keeps a stored backdrop", locked: true, marked: true, storedBackdrop: stored, want: stored},
 			{name: "locked fills an empty backdrop", locked: true, marked: true, write: "tvdb://new.jpg", want: "tvdb://new.jpg"},
+			{name: "fill-only keeps a backdrop set after its read", marked: true, fillOnly: true, storedBackdrop: stored, write: "tvdb://new.jpg", want: stored},
+			{name: "fill-only fills an empty backdrop", marked: true, fillOnly: true, write: "tvdb://new.jpg", want: "tvdb://new.jpg"},
 		} {
 			t.Run(upsert.name+"/"+tc.name, func(t *testing.T) {
 				locked := "{}"
@@ -378,7 +380,7 @@ func TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB(t *testing.T) {
 					t.Fatal(err)
 				}
 				write := *f.season
-				write.WriteBackdrop = tc.marked
+				write.WriteBackdrop, write.BackdropFillOnly = tc.marked, tc.fillOnly
 				write.BackdropPath, write.BackdropSourcePath = tc.write, tc.write
 				if err := upsert.run(&write); err != nil {
 					t.Fatal(err)
@@ -405,5 +407,48 @@ func TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB(t *testing.T) {
 	}
 	if season.BackdropPath != "tvdb://s2.jpg" {
 		t.Fatalf("inserted season backdrop = %q, want the marked one", season.BackdropPath)
+	}
+}
+
+// After Identify, the seasons the corrected match no longer names lose their
+// backdrop unless the series has its images locked.
+func TestClearSeasonBackdropsExceptDB(t *testing.T) {
+	f := newArtworkLockFixture(t, "season-backdrop-clear")
+	ctx := context.Background()
+	if err := f.seasons.Upsert(ctx, &models.Season{ContentID: f.seriesID + "-s2", SeriesID: f.seriesID, SeasonNumber: 2}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		locked     bool
+		wantClear2 bool
+	}{
+		{name: "unlocked clears the omitted season", wantClear2: true},
+		{name: "locked keeps every season", locked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			locked := "{}"
+			if tc.locked {
+				locked = fmt.Sprintf("{%d}", fieldImagesLocked)
+			}
+			if _, err := f.pool.Exec(ctx, `UPDATE media_items SET locked_fields = $2::int[] WHERE content_id = $1`, f.seriesID, locked); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(ctx, `UPDATE seasons SET backdrop_path = 'tvdb://old.jpg', backdrop_source_path = 'tvdb://old.jpg' WHERE series_id = $1`, f.seriesID); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.seasons.ClearBackdropsExcept(ctx, f.seriesID, []int32{1}); err != nil {
+				t.Fatal(err)
+			}
+			for number, wantClear := range map[int]bool{1: false, 2: tc.wantClear2} {
+				season, err := f.seasons.GetBySeriesAndNumber(ctx, f.seriesID, number)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cleared := season.BackdropPath == "" && season.BackdropSourcePath == ""; cleared != wantClear {
+					t.Errorf("season %d backdrop = %q, cleared %v, want cleared %v", number, season.BackdropPath, cleared, wantClear)
+				}
+			}
+		})
 	}
 }

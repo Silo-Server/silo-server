@@ -205,6 +205,7 @@ type metadataSeasonRepo interface {
 	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers []int32) ([]*models.Season, error)
 	Upsert(ctx context.Context, s *models.Season) error
 	BulkUpsert(ctx context.Context, seasons []*models.Season) error
+	ClearBackdropsExcept(ctx context.Context, seriesID string, keep []int32) error
 }
 
 type metadataItemLocalizationRepo interface {
@@ -4561,7 +4562,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			// Text a provider marked as another language is no translation.
 			dropForeignChildText(seasons, episodes, language)
 		}
-		persistCtx := withSeasonBackdropAuthority(ctx, seasonBackdropAuthorityFor(mode, seasonsComplete))
+		// A scoped refresh sees part of the series, so it never clears the
+		// seasons it was not asked about, even for Identify.
+		persistCtx := withSeasonBackdropAuthority(ctx, min(seasonBackdropAuthorityFor(mode, seasonsComplete), seasonBackdropsAnswered))
 		if s.localArtworkUsable() {
 			persistCtx = withLocalArtworkSearched(persistCtx, seasonSearched|episodeSearched)
 		}
@@ -5745,9 +5748,16 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			PosterThumbhash:         providerSeason.PosterThumbhash,
 			MetadataSource:          "provider",
 		}
-		// A fill-empty pass only fills an empty backdrop, as it does text.
-		fillOnly := mergeMode == MergeFillEmpty && existingSeason != nil && existingSeason.BackdropPath != ""
-		if backdropAuthority != seasonBackdropsKept && !fillOnly {
+		switch {
+		case backdropAuthority == seasonBackdropsKept:
+		case mergeMode == MergeFillEmpty:
+			// A fill-empty pass only fills an empty backdrop, as it does text;
+			// the repository checks it is still empty when it writes.
+			if season.BackdropPath != "" && (existingSeason == nil || existingSeason.BackdropPath == "") {
+				setProviderSeasonBackdrop(dbSeason, existingSeason, season.BackdropPath, imagesLocked, s.autoCacheImages.Load())
+				dbSeason.BackdropFillOnly = true
+			}
+		default:
 			setProviderSeasonBackdrop(dbSeason, existingSeason, season.BackdropPath, imagesLocked, s.autoCacheImages.Load())
 		}
 		if existingSeason != nil {
@@ -6053,6 +6063,22 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 					finishImplicitSeason(write)
 				}
 			}
+		}
+	}
+
+	// After Identify, a stored season the corrected match names in neither its
+	// seasons nor its episodes, such as one known only from file names, may
+	// still show the previous match's backdrop.
+	if backdropAuthority == seasonBackdropsReidentified && !imagesLocked {
+		keep := make([]int32, 0, len(seasonIDs))
+		for seasonNumber := range seasonIDs {
+			if catalog.FitsPostgresInteger(seasonNumber) {
+				keep = append(keep, int32(seasonNumber))
+			}
+		}
+		if err := s.seasonRepo.ClearBackdropsExcept(ctx, seriesID, keep); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to clear backdrops of seasons the new match omits", "component", "metadata",
+				"series_id", seriesID, "error", err)
 		}
 	}
 
