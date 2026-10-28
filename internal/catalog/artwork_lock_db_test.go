@@ -120,8 +120,11 @@ func TestRefreshKeepsArtworkPublishedAfterItsReadDB(t *testing.T) {
 		}
 	}
 
-	// The refresh writes what it read, plus a logo for the empty slot.
+	// The refresh writes what it read, plus a logo for the empty slot and a
+	// provider season backdrop.
 	f.item.LogoPath = f.path("new-logo")
+	f.season.WriteBackdrop = true
+	f.season.BackdropPath, f.season.BackdropSourcePath = "tvdb://season-backdrop.jpg", "tvdb://season-backdrop.jpg"
 	for _, write := range []struct {
 		name string
 		run  func() error
@@ -147,8 +150,6 @@ func TestRefreshKeepsArtworkPublishedAfterItsReadDB(t *testing.T) {
 	if season.PosterPath != f.path("picked-season") || season.PosterSourcePath != "upload://season" {
 		t.Errorf("season poster = %q from %q, want the published one", season.PosterPath, season.PosterSourcePath)
 	}
-	// Refresh never writes a season backdrop, so the published one stays
-	// whether or not the images lock holds.
 	if season.BackdropPath != f.path("picked-season-backdrop") || season.BackdropSourcePath != "upload://season-backdrop" {
 		t.Errorf("season backdrop = %q from %q, want the published one", season.BackdropPath, season.BackdropSourcePath)
 	}
@@ -334,5 +335,75 @@ func TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB(t *testing.T) {
 				t.Fatalf("%s artwork = %q, want the published %q", tc.name, got, picked)
 			}
 		})
+	}
+}
+
+// A season upsert writes the backdrop only when marked WriteBackdrop, from
+// the row as it stands: an unmarked writer keeps a backdrop that changed after
+// its read, a marked one replaces or clears it, and the series' images lock
+// keeps a stored backdrop while still filling an empty one.
+func TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB(t *testing.T) {
+	f := newArtworkLockFixture(t, "season-backdrop-write")
+	ctx := context.Background()
+	stored := f.path("stored-backdrop")
+	for _, upsert := range []struct {
+		name string
+		run  func(*models.Season) error
+	}{
+		{"upsert", func(s *models.Season) error { return f.seasons.Upsert(ctx, s) }},
+		{"bulk upsert", func(s *models.Season) error { return f.seasons.BulkUpsert(ctx, []*models.Season{s}) }},
+	} {
+		for _, tc := range []struct {
+			name           string
+			locked, marked bool
+			storedBackdrop string
+			write, want    string
+		}{
+			{name: "unmarked keeps a backdrop set after its read", storedBackdrop: stored, write: "tvdb://read.jpg", want: stored},
+			{name: "marked replaces", marked: true, storedBackdrop: stored, write: "tvdb://new.jpg", want: "tvdb://new.jpg"},
+			{name: "marked clears", marked: true, storedBackdrop: stored, want: ""},
+			{name: "locked keeps a stored backdrop", locked: true, marked: true, storedBackdrop: stored, want: stored},
+			{name: "locked fills an empty backdrop", locked: true, marked: true, write: "tvdb://new.jpg", want: "tvdb://new.jpg"},
+		} {
+			t.Run(upsert.name+"/"+tc.name, func(t *testing.T) {
+				locked := "{}"
+				if tc.locked {
+					locked = fmt.Sprintf("{%d}", fieldImagesLocked)
+				}
+				if _, err := f.pool.Exec(ctx, `UPDATE media_items SET locked_fields = $2::int[] WHERE content_id = $1`, f.seriesID, locked); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.pool.Exec(ctx, `UPDATE seasons SET backdrop_path = $2, backdrop_source_path = $2 WHERE content_id = $1`,
+					f.season.ContentID, tc.storedBackdrop); err != nil {
+					t.Fatal(err)
+				}
+				write := *f.season
+				write.WriteBackdrop = tc.marked
+				write.BackdropPath, write.BackdropSourcePath = tc.write, tc.write
+				if err := upsert.run(&write); err != nil {
+					t.Fatal(err)
+				}
+				_, season, _ := f.read(t)
+				if season.BackdropPath != tc.want || season.BackdropSourcePath != tc.want {
+					t.Fatalf("backdrop = %q from %q, want %q", season.BackdropPath, season.BackdropSourcePath, tc.want)
+				}
+			})
+		}
+	}
+
+	// A marked write that inserts the season sets its backdrop too.
+	inserted := &models.Season{
+		ContentID: f.seriesID + "-s2", SeriesID: f.seriesID, SeasonNumber: 2, WriteBackdrop: true,
+		BackdropPath: "tvdb://s2.jpg", BackdropSourcePath: "tvdb://s2.jpg",
+	}
+	if err := f.seasons.BulkUpsert(ctx, []*models.Season{inserted}); err != nil {
+		t.Fatal(err)
+	}
+	season, err := f.seasons.GetBySeriesAndNumber(ctx, f.seriesID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if season.BackdropPath != "tvdb://s2.jpg" {
+		t.Fatalf("inserted season backdrop = %q, want the marked one", season.BackdropPath)
 	}
 }

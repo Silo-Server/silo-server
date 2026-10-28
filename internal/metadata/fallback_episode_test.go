@@ -298,15 +298,22 @@ func (r *fakeSeasonRepo) Upsert(_ context.Context, s *models.Season) error {
 
 func (r *fakeSeasonRepo) applyUpsertLocked(s *models.Season) {
 	key := seasonKey(s.SeriesID, s.SeasonNumber)
-	if existing, ok := r.seasons[key]; ok {
+	existing, ok := r.seasons[key]
+	if ok {
 		// Preserve existing content_id (mirrors ON CONFLICT behavior).
 		s.ContentID = existing.ContentID
-		cp := *s
-		r.seasons[key] = &cp
-	} else {
-		cp := *s
-		r.seasons[key] = &cp
 	}
+	cp := *s
+	// Like SeasonRepository, only a write marked WriteBackdrop changes the
+	// stored backdrop.
+	if !cp.WriteBackdrop {
+		cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = "", "", ""
+		if ok {
+			cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = existing.BackdropPath, existing.BackdropSourcePath, existing.BackdropThumbhash
+		}
+	}
+	cp.WriteBackdrop = false
+	r.seasons[key] = &cp
 }
 
 func (r *fakeSeasonRepo) BulkUpsert(_ context.Context, seasons []*models.Season) error {

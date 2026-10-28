@@ -128,6 +128,48 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 var seasonArtworkAssignments = lockedArtworkAssignments("seasons", seriesImagesLockedSQL("seasons"),
 	"poster_path", "poster_source_path", "poster_thumbhash")
 
+// writeSeasonBackdrops sets the backdrop of each season marked WriteBackdrop,
+// in the upsert's transaction after the row is written and locked. It writes
+// the slot from the current row rather than the writer's earlier read, so
+// unmarked writers keep whatever is stored and a marked one replaces or
+// clears it. While the series has Images locked, a stored backdrop stays, as
+// lockedArtworkAssignments keeps a poster.
+func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Season) error {
+	var seriesIDs, paths, sources, thumbhashes []string
+	var numbers []int32
+	for _, s := range seasons {
+		if !s.WriteBackdrop {
+			continue
+		}
+		seriesIDs = append(seriesIDs, s.SeriesID)
+		numbers = append(numbers, int32(s.SeasonNumber)) //nolint:gosec // the upsert just stored it in an integer column
+		paths = append(paths, s.BackdropPath)
+		sources = append(sources, s.BackdropSourcePath)
+		thumbhashes = append(thumbhashes, s.BackdropThumbhash)
+	}
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE seasons
+		SET backdrop_path = target.path,
+			backdrop_source_path = target.source_path,
+			backdrop_thumbhash = target.thumbhash,
+			updated_at = NOW()
+		FROM UNNEST($1::text[], $2::int[], $3::text[], $4::text[], $5::text[])
+			AS target(series_id, season_number, path, source_path, thumbhash)
+		WHERE seasons.series_id = target.series_id
+		  AND seasons.season_number = target.season_number
+		  AND (seasons.backdrop_path, seasons.backdrop_source_path, seasons.backdrop_thumbhash)
+			IS DISTINCT FROM (target.path, target.source_path, target.thumbhash)
+		  AND NOT (`+seriesImagesLockedSQL("seasons")+` AND seasons.backdrop_path <> '')`,
+		seriesIDs, numbers, paths, sources, thumbhashes)
+	if err != nil {
+		return fmt.Errorf("writing season backdrops: %w", err)
+	}
+	return nil
+}
+
 // Upsert inserts a new season or updates all mutable fields if the
 // (series_id, season_number) natural key already exists. The stored content ID
 // is preserved on update and written back to s.ContentID.
@@ -181,7 +223,10 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			).Scan(&storedContentID, &inserted); err != nil {
 				return err
 			}
-			return checkArtworkRowLocked(locked, storedContentID, inserted)
+			if err := checkArtworkRowLocked(locked, storedContentID, inserted); err != nil {
+				return err
+			}
+			return writeSeasonBackdrops(ctx, tx, []*models.Season{s})
 		})
 	})
 	if err != nil {
@@ -296,7 +341,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			if err := rows.Err(); err != nil {
 				return fmt.Errorf("iterating bulk upsert season results: %w", err)
 			}
-			return nil
+			return writeSeasonBackdrops(ctx, tx, seasons)
 		})
 	})
 	if err != nil {

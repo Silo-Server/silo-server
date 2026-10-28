@@ -519,6 +519,7 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 			OverviewLanguage: season.GetOverviewLanguage(),
 			AirDate:          season.GetAirDate(),
 			PosterPath:       p.remoteArtwork(ctx, season.GetPosterPath()),
+			BackdropPath:     p.remoteArtwork(ctx, season.GetBackdropPath()),
 		})
 	}
 	return seasons, nil

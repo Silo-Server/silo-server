@@ -2204,6 +2204,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			return nil, err
 		}
 		seasonResults := make(map[int]*SeasonResult)
+		seasonsComplete := true
 		for _, p := range seasonChain {
 			ep, ok := p.(EpisodeProvider)
 			if !ok {
@@ -2237,6 +2238,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
+				seasonsComplete = false
 				if !errors.Is(err, ErrLocalMetadataUnavailable) {
 					continue
 				}
@@ -2252,6 +2254,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			accumulateSeasonResults(seasonResults, seasons, req.Language)
 		}
 		allSeasons = flattenSeasonResults(seasonResults)
+		ctx = withSeasonBackdropAuthority(ctx, seasonBackdropAuthorityFor(req.Mode, seasonsComplete))
 
 		// Phase 4b: Episodes — resolve with "episode" content level. The
 		// season set is the provider-returned seasons plus any filename-
@@ -4541,7 +4544,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, seasonSearched, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal)
+		seasons, seasonSearched, seasonsComplete, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal)
 		if err != nil {
 			return err
 		}
@@ -4558,9 +4561,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			// Text a provider marked as another language is no translation.
 			dropForeignChildText(seasons, episodes, language)
 		}
-		persistCtx := ctx
+		persistCtx := withSeasonBackdropAuthority(ctx, seasonBackdropAuthorityFor(mode, seasonsComplete))
 		if s.localArtworkUsable() {
-			persistCtx = withLocalArtworkSearched(ctx, seasonSearched|episodeSearched)
+			persistCtx = withLocalArtworkSearched(persistCtx, seasonSearched|episodeSearched)
 		}
 		if s.persistSeasonAndEpisodeRows(persistCtx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 			updated = true
@@ -4658,13 +4661,15 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 }
 
 // fetchTargetSeasonResults also reports localArtworkSeason when the local
-// provider answered, as processInternal records it.
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]SeasonResult, localArtworkLevel, error) {
+// provider answered, as processInternal records it, and whether every season
+// provider answered, which decides the write's seasonBackdropAuthority.
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]SeasonResult, localArtworkLevel, bool, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
-		return nil, 0, fmt.Errorf("resolve season provider chain: %w", err)
+		return nil, 0, false, fmt.Errorf("resolve season provider chain: %w", err)
 	}
 	var searched localArtworkLevel
+	complete := true
 	seasonResults := make(map[int]*SeasonResult)
 	for _, p := range seasonChain {
 		ep, ok := p.(EpisodeProvider)
@@ -4683,7 +4688,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			ShowFilePaths:        showFilePaths(childCtx.episodeFilePaths),
 		})
 		if errors.Is(err, ErrLocalMetadataUnavailable) {
-			return nil, 0, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
+			return nil, 0, false, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
 		}
 		if err != nil {
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
@@ -4691,6 +4696,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			}
 			slog.WarnContext(ctx, "metadata: target season provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
+			complete = false
 			continue
 		}
 		if !s.localArtworkUsable() {
@@ -4706,7 +4712,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			accumulateSeasonResults(seasonResults, []SeasonResult{season}, language)
 		}
 	}
-	return flattenSeasonResults(seasonResults), searched, nil
+	return flattenSeasonResults(seasonResults), searched, complete, nil
 }
 
 // fetchTargetEpisodeResults also reports localArtworkEpisode when the local
@@ -5528,6 +5534,11 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	seasonIDs := make(map[int]string, len(seasons))
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
 	imagesLocked := artworkLocked(series)
+	// Localization rows hold no backdrop, so only a canonical write decides one.
+	backdropAuthority := seasonBackdropsKept
+	if isCanonicalWrite {
+		backdropAuthority = seasonBackdropAuthorityOf(ctx)
+	}
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
 	episodeArtwork := seasonArtwork.atLevel(localArtworkEpisode)
@@ -5545,25 +5556,34 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		return providerID, findContentID(series, providerID)
 	}
 	addSeasonImageJob := func(season *models.Season) {
-		if season == nil || !isCacheableImageSourcePath(season.PosterSourcePath) {
+		if season == nil {
 			return
 		}
-		providerID, providerContentID := keyAttribution(season.PosterSourcePath)
-		seasonNumber := season.SeasonNumber
-		imageJobs = append(imageJobs, EnqueueImageCacheJobInput{
-			TargetType:        ImageCacheTargetSeason,
-			TargetContentID:   season.ContentID,
-			SeriesID:          seriesID,
-			SourcePath:        season.PosterSourcePath,
-			ProviderID:        providerID,
-			ProviderContentID: providerContentID,
-			ContentType:       "series",
-			ImageType:         ImageCacheImagePoster,
-			SeasonNumber:      &seasonNumber,
-			// Seasons of a provider-anchored series keep their content ID
-			// when the series is rebuilt; see enqueueItemImages.
-			RequeueSucceeded: !isCachedImagePath(season.PosterPath),
-		})
+		addJob := func(imageType, sourcePath, path string) {
+			if !isCacheableImageSourcePath(sourcePath) {
+				return
+			}
+			providerID, providerContentID := keyAttribution(sourcePath)
+			seasonNumber := season.SeasonNumber
+			imageJobs = append(imageJobs, EnqueueImageCacheJobInput{
+				TargetType:        ImageCacheTargetSeason,
+				TargetContentID:   season.ContentID,
+				SeriesID:          seriesID,
+				SourcePath:        sourcePath,
+				ProviderID:        providerID,
+				ProviderContentID: providerContentID,
+				ContentType:       "series",
+				ImageType:         imageType,
+				SeasonNumber:      &seasonNumber,
+				// Seasons of a provider-anchored series keep their content ID
+				// when the series is rebuilt; see enqueueItemImages.
+				RequeueSucceeded: !isCachedImagePath(path),
+			})
+		}
+		addJob(ImageCacheImagePoster, season.PosterSourcePath, season.PosterPath)
+		if season.WriteBackdrop {
+			addJob(ImageCacheImageBackdrop, season.BackdropSourcePath, season.BackdropPath)
+		}
 	}
 	addEpisodeImageJob := func(episode *models.Episode) {
 		if episode == nil || !isCacheableImageSourcePath(episode.StillSourcePath) {
@@ -5724,6 +5744,9 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			PosterSourcePath:        providerSeason.PosterSourcePath,
 			PosterThumbhash:         providerSeason.PosterThumbhash,
 			MetadataSource:          "provider",
+		}
+		if backdropAuthority != seasonBackdropsKept {
+			setProviderSeasonBackdrop(dbSeason, existingSeason, season.BackdropPath, imagesLocked, s.autoCacheImages.Load())
 		}
 		if existingSeason != nil {
 			dbSeason.ContentID = existingSeason.ContentID
@@ -5940,7 +5963,11 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				DefaultMetadataLanguage: canonicalLanguage,
 				MetadataSource:          "provider",
 			}
-			if existingSeason, err := loadSeason(ep.SeasonNumber, false); err == nil && existingSeason != nil {
+			existingSeason, err := loadSeason(ep.SeasonNumber, false)
+			if backdropAuthority == seasonBackdropsReidentified {
+				setProviderSeasonBackdrop(seasonModel, existingSeason, "", imagesLocked, false)
+			}
+			if err == nil && existingSeason != nil {
 				seasonModel.ContentID = existingSeason.ContentID
 				seasonModel.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				if isCanonicalWrite {

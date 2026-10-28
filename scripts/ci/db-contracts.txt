@@ -208,6 +208,7 @@
 # another writer created and published in the meantime.
 ./internal/catalog TestRefreshKeepsArtworkPublishedAfterItsReadDB
 ./internal/catalog TestRefreshWaitingOnAPublicationKeepsItDB
+./internal/catalog TestSeasonUpsertWritesTheBackdropOnlyWhenMarkedDB
 ./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
