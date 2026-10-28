@@ -101,16 +101,17 @@ func TestCatalogItemChangeOutboxDB(t *testing.T) {
 	exec(`UPDATE media_items SET content_id = $2 WHERE content_id = $1`, p+"m", p+"m2")
 	drained("key move", "removed "+at("m", movies), "added "+at("m2", movies))
 
-	// A membership dropped and restored, or added and dropped, before a drain
-	// is no change; one only dropped is a removal, also after the episode's
-	// own files changed.
+	// A membership dropped and restored before a drain is an add, since the
+	// new row may carry a new first-seen time; one added and dropped is no
+	// change; one only dropped is a removal, also after the episode's own
+	// files changed.
 	exec(`DELETE FROM media_item_libraries WHERE content_id = $1`, p+"s")
 	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, p+"s", tv)
 	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, p+"m2", tv)
 	exec(`DELETE FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2`, p+"m2", tv)
 	exec(`UPDATE media_files SET resolution = '2160p' WHERE file_path = $1`, "/"+p+"e.mkv")
 	exec(`DELETE FROM episode_libraries WHERE episode_id = $1`, p+"e")
-	drained("flap and removal", "removed "+at("e", tv))
+	drained("flap and removal", "added "+at("s", tv), "removed "+at("e", tv))
 
 	// Drains are spaced out across servers: right after the drain above, one
 	// within the interval claims nothing, and a later one gets what waited.

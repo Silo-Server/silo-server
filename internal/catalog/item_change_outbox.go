@@ -122,10 +122,10 @@ type itemChangeKey struct {
 
 // coalesceItemChanges reduces rows, in queue order, to at most one change per
 // item and library, in the order each key first appeared. Membership wins: a
-// key is added when its first membership row is an add and its last an add,
-// removed when they are both removals. A key whose membership came back to
-// where it started (removed then added, or added then removed) and that saw
-// no file change yields nothing; with a file change it yields files_changed.
+// key whose last membership row is an add is added, also after a removal,
+// since a re-created membership can carry a new first-seen time; one whose
+// rows are all removals is removed. A key added and then removed was absent
+// before and after: it yields files_changed if a file changed, else nothing.
 // Rows queued before cutoff are left out.
 func coalesceItemChanges(rows []itemChangeRow, cutoff time.Time) []ItemChange {
 	type state struct {
@@ -160,8 +160,10 @@ func coalesceItemChanges(rows []itemChangeRow, cutoff time.Time) []ItemChange {
 		s := states[key]
 		var change string
 		switch {
-		case s.first != "" && s.first == s.last:
-			change = s.last
+		case s.last == ItemChangeAdded:
+			change = ItemChangeAdded
+		case s.first == ItemChangeRemoved:
+			change = ItemChangeRemoved
 		case s.files:
 			change = ItemChangeFilesChanged
 		default:

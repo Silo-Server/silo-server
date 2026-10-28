@@ -178,8 +178,9 @@ periodically.
 Database triggers record these changes from every code path that writes library
 memberships or files, so a rescan that rewrites rows without changing what they
 show sends nothing. The server merges what is waiting per item and library: an
-add and a removal that cancel out send nothing, and an `added` or `removed`
-absorbs the item's `files_changed`. To leave room in each connection's buffer for
+add followed by a removal sends nothing, a removal followed by an add sends
+`added` (the re-created membership can have a new `added_at`), and an `added` or
+`removed` absorbs the item's `files_changed`. To leave room in each connection's buffer for
 other channels, the cluster publishes at most 32 of these changes every 100 ms,
 about 320 a second, so a large library's first scan arrives over minutes.
 Delivery is at most once, like every event on this socket. Changes still
