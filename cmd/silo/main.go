@@ -3422,7 +3422,7 @@ func main() {
 				brandingReconciler,
 				identity,
 				deps.DB,
-			)
+			).WithLocation(blobstore.Location(deps.Blobs.Assets))
 			taskMgr.Register(reconcileArtwork)
 			go func() {
 				if err := reconcileArtwork.CheckStorageIdentity(appCtx); err != nil {
