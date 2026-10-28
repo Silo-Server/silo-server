@@ -302,7 +302,7 @@ func (c *Client) ChartPage(ctx context.Context, params ChartParams, page int) (*
 		}
 	}
 
-	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
+	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
 		if c.discoverSectionCache != nil {
 			if cached, ok := c.discoverSectionCache.Get(cacheKey); ok {
 				return cached, nil
@@ -693,7 +693,7 @@ func (c *Client) DiscoverPage(ctx context.Context, mediaType string, params Disc
 		}
 	}
 
-	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
+	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
 		if c.discoverPageCache != nil {
 			if cached, ok := c.discoverPageCache.Get(cacheKey); ok {
 				return cached, nil
@@ -1389,7 +1389,7 @@ func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (
 		}
 	}
 
-	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
+	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
 		if c.externalIDCache != nil {
 			if cached, ok := c.externalIDCache.Get(cacheKey); ok {
 				return cached, nil
@@ -1517,25 +1517,6 @@ func certificationPath(mediaType string, id int) (string, error) {
 
 // cachedCertification fetches one certification value once across concurrent
 // callers and caches it.
-// sharedFetch runs fetch once for every concurrent caller with key, as
-// cachedCertification does: the fetch runs detached from any one caller, with
-// its own bound, so a caller that gives up (a closed page) does not fail the
-// others, such as a scheduled refresh, while each caller still stops waiting
-// when its own context ends.
-func (c *Client) sharedFetch(ctx context.Context, key string, fetch func(context.Context) (any, error)) (any, error) {
-	resultCh := c.cacheGroup.DoChan(key, func() (any, error) {
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
-		defer cancel()
-		return fetch(fetchCtx)
-	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case result := <-resultCh:
-		return result.Val, result.Err
-	}
-}
-
 func (c *Client) cachedCertification(ctx context.Context, cacheKey string, fetch func(context.Context) (string, error)) (string, error) {
 	if c.certificationCache != nil {
 		if cached, ok := c.certificationCache.Get(cacheKey); ok {
