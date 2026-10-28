@@ -118,20 +118,40 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 // Authority is already removed, so the client may have finalized from the
 // attempt row while this provider work was queued.
 func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
-	result, notify := h.realtimeStopHistory(ctx, session)
-	h.recordAdminStopHistory(ctx, session, PlaybackEndTerminated)
-	if notify {
-		h.notifyStoppedSession(ctx, session, result, PlaybackEndTerminated)
+	outcome := h.realtimeStopHistory(ctx, session)
+	if outcome.adminLog {
+		h.recordAdminStopHistory(ctx, session, outcome.reason)
+	}
+	if outcome.notify {
+		h.notifyStoppedSession(ctx, session, outcome.result, outcome.reason)
 	}
 }
 
+// realtimeStopOutcome is what a confirmed stop's history leaves to its caller.
+type realtimeStopOutcome struct {
+	result watchstate.PlaybackStopResult
+	// reason is the play's end: that of the stop that won the attempt row,
+	// which can be a client stop or an abort the worker finished.
+	reason PlaybackEndReason
+	// adminLog and notify: the caller still writes the admin log, or tells
+	// providers. A finalizer writes the admin log itself, and tells
+	// providers unless the worker deferred that notice to its caller.
+	adminLog, notify bool
+}
+
+// unarbitratedRealtimeStop is the outcome of a stop no attempt row
+// arbitrates: the worker records the administrator's end itself.
+func unarbitratedRealtimeStop(result watchstate.PlaybackStopResult) realtimeStopOutcome {
+	return realtimeStopOutcome{result: result, reason: PlaybackEndTerminated, adminLog: true, notify: true}
+}
+
 // realtimeStopHistory records the confirmed stop's watch history and reports
-// whether its caller still has to tell providers: not when another stop's
-// finalizer already recorded the end and told them.
-func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) (watchstate.PlaybackStopResult, bool) {
+// what its caller still owes: nothing when another stop's finalizer already
+// recorded the end and told providers.
+func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) realtimeStopOutcome {
 	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
 	if !ok {
-		return h.persistStopAndHistory(parent, session), true
+		return unarbitratedRealtimeStop(h.persistStopAndHistory(parent, session))
 	}
 	ctx, cancel := context.WithTimeout(parent, stopFinalizationLease)
 	defer cancel()
@@ -140,10 +160,10 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	record, err := h.realtimeProgressAttempt(ctx, session.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to read realtime stop attempt", "session", session.ID, "error", err)
-		return watchstate.PlaybackStopResult{}, true
+		return unarbitratedRealtimeStop(watchstate.PlaybackStopResult{})
 	}
 	if record == nil {
-		return h.persistStopAndHistory(ctx, session), true // Unsequenced bridge play.
+		return unarbitratedRealtimeStop(h.persistStopAndHistory(ctx, session)) // Unsequenced bridge play.
 	}
 	var final *playback.ProgressSampleV3
 	if record.LastSample == nil && session.Position > 0 {
@@ -162,12 +182,12 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record realtime stop attempt", "session", session.ID, "error", err)
-		return watchstate.PlaybackStopResult{}, true
+		return unarbitratedRealtimeStop(watchstate.PlaybackStopResult{})
 	}
 	// An administrator end that finalized the receipt without a history row
 	// (nothing to record, or a failed write) is written from this snapshot.
-	// Whoever finalized a receipt told providers, so only this worker's own
-	// finalization leaves the notice to it.
+	// Whoever finalized a receipt wrote the admin log and told providers, so
+	// only this worker's own finalization leaves the notice to it.
 	markerWithoutHistory := receipt.Finalized && receipt.HistoryID == "" && receipt.StopID == adminStopID(session.ID)
 	notify := false
 	if !receipt.Finalized {
@@ -201,7 +221,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
-	return result, notify
+	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
 }
 
 // finalizeRealtimeStop runs stop finalization for the one queued realtime

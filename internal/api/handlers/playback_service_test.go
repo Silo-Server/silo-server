@@ -1139,8 +1139,10 @@ func (s *stopAfterReadsPlanStoreV3) GetAttempt(ctx context.Context, sessionID st
 
 // TestRealtimeConfirmedStopNotifiesProvidersOnce covers a player-confirmed
 // administrator stop: whether its queued worker finalizes the attempt, the
-// client's stop finalized it first, or the client's stop holds the lease and
-// finishes while the worker waits, providers hear the end once.
+// client's stop or a terminate finalized it first, the client's stop holds
+// the lease and finishes while the worker waits, or the worker finishes an
+// abort whose server died, providers hear the end once and the admin log
+// keeps the reason of the stop that won the row.
 func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 	clientStop := func(t *testing.T, f *playbackServiceFixture, stopID string) {
 		if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID}); err != nil {
@@ -1151,19 +1153,25 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 		name string
 		// position is the last progress before the stop; at 0 no watch
 		// history row is written.
-		position float64
-		race     func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
+		position   float64
+		wantReason PlaybackEndReason
+		race       func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
 	}{
-		{name: "worker finalizes", position: 900},
-		{name: "client stop finalized first", position: 900, race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+		{name: "worker finalizes", position: 900, wantReason: PlaybackEndTerminated},
+		{name: "client stop finalized first", position: 900, wantReason: PlaybackEndStopped, race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
 			clientStop(t, f, uuid.NewString())
 		}},
-		{name: "terminate finalized first without a history row", race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+		{name: "worker finishes an abort whose server died", position: 900, wantReason: PlaybackEndAborted, race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, abortStopID(f.session.ID), nil); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "terminate finalized first without a history row", wantReason: PlaybackEndTerminated, race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
 			if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{name: "client stop finalizes while the worker waits", position: 900, race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+		{name: "client stop finalizes while the worker waits", position: 900, wantReason: PlaybackEndStopped, race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
 			stopID := uuid.NewString()
 			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil {
 				t.Fatal(err)
@@ -1174,7 +1182,8 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlaybackServiceFixture(t)
 			scrobbler := &recordingPlaybackWatchScrobbler{}
-			f.handler.AdminStore = &recordingPlaybackAdminStore{}
+			admin := &recordingPlaybackAdminStore{}
+			f.handler.AdminStore = admin
 			f.handler.WatchScrobbler = scrobbler
 			f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
 			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
@@ -1194,6 +1203,12 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 			f.handler.recordRealtimeStoppedSession(context.Background(), snapshot)
 			if got := len(scrobbler.stops) + len(scrobbler.pauses); got != 1 {
 				t.Fatalf("provider end events = %d stops + %d pauses, want 1", len(scrobbler.stops), len(scrobbler.pauses))
+			}
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.wantReason {
+				t.Fatalf("admin history = %+v, want one %s row", admin.history, tc.wantReason)
+			}
+			if tc.wantReason == PlaybackEndAborted && (len(scrobbler.pauses) != 1 || !scrobbler.pauses[0].SessionEnded) {
+				t.Fatalf("abort provider events = %+v, want one pause that ends the session", scrobbler.pauses)
 			}
 		})
 	}
