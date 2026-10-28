@@ -945,7 +945,7 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 			f.handler.expireSessionCopy(context.Background(), snapshot)
 		},
 		wantReason: PlaybackEndExpired, wantWatched: 1500, wantProviders: 1,
-	}}, nativeTerminateRaceCases(t)...)
+	}}, append(nativeTerminateRaceCases(t), nativeTakeoverRaceCases(t)...)...)
 }
 
 // nativeTerminateRaceCases are the administrator ends among
@@ -978,20 +978,51 @@ func nativeTerminateRaceCases(t *testing.T) []nativeEndRaceCase {
 			}
 		},
 		wantReason: PlaybackEndTerminated, wantWatched: 900, wantProviders: 1,
-	}, {
-		name: "terminate finishes an abort whose replica died",
+	}}
+}
+
+// nativeTakeoverRaceCases are the ends among nativeEndRaceCases that find the
+// row stopped by an end whose replica died before finishing it, and finish
+// it as that end.
+func nativeTakeoverRaceCases(t *testing.T) []nativeEndRaceCase {
+	stoppedBy := func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3, stopID string, dropCopy bool) {
+		if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !dropCopy {
+			return
+		}
+		if err := f.manager.StopSession(f.session.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terminate := func(f *playbackServiceFixture) {
+		if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return []nativeEndRaceCase{{
+		name: "terminate without the copy finishes an abort",
 		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
-			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, abortStopID(f.session.ID), nil); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.manager.StopSession(f.session.ID); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
-				t.Fatal(err)
-			}
+			stoppedBy(f, memory, abortStopID(f.session.ID), true)
+			terminate(f)
 		},
 		wantReason: PlaybackEndAborted, wantWatched: 900, wantProviders: 1, noWatchHistory: true,
+	}, {
+		name: "terminate with the copy finishes an abort",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			stoppedBy(f, memory, abortStopID(f.session.ID), false)
+			terminate(f)
+		},
+		wantReason: PlaybackEndAborted, wantWatched: 900, wantProviders: 1, noWatchHistory: true,
+	}, {
+		name: "expiry finishes an expiry",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			snapshot, _ := f.manager.GetSession(f.session.ID)
+			stoppedBy(f, memory, expiredStopID(f.session.ID), true) // The reaper already removed this copy.
+			f.handler.expireSessionCopy(context.Background(), snapshot)
+		},
+		wantReason: PlaybackEndExpired, wantWatched: 900, wantProviders: 1,
 	}}
 }
 
@@ -1030,6 +1061,9 @@ func TestNativeEndWritesOnceWhoeverWinsTheRow(t *testing.T) {
 			}
 			if got := len(scrobbler.stops) + len(scrobbler.pauses); got != tc.wantProviders {
 				t.Fatalf("provider end events = %d stops + %d pauses, want %d", len(scrobbler.stops), len(scrobbler.pauses), tc.wantProviders)
+			}
+			if tc.noWatchHistory && (len(scrobbler.pauses) != 1 || !scrobbler.pauses[0].SessionEnded) {
+				t.Fatalf("abort provider events = %+v, want one pause that ends the session", scrobbler.pauses)
 			}
 			record, err := memory.GetAttempt(context.Background(), f.session.ID)
 			if err != nil || record.StoppedAt == nil {

@@ -1284,10 +1284,10 @@ func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *pla
 }
 
 // notifyStoppedSession tells watch providers and the live admin view that the
-// session stopped. An expiry ends the attempt for good, except for a Jellyfin
-// play's upstream session: its client's Stopped report still finds the play
-// after the expiry and sends that play's own stop, so its expiry stays a
-// plain pause.
+// session stopped. An abort or an expiry ends the attempt for good, except
+// for a Jellyfin play's upstream session: its client's Stopped report still
+// finds the play after an expiry and sends that play's own stop, so its
+// expiry stays a plain pause.
 func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, reason PlaybackEndReason) {
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (reason.userInitiated() || stopResult.Completed) {
@@ -1295,7 +1295,7 @@ func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *pla
 				slog.WarnContext(ctx, "failed to queue watch provider stop scrobble", "component", "api", "session", session.ID, "error", err)
 			}
 		} else if ok {
-			event.SessionEnded = reason == PlaybackEndExpired && !session.IsJellyfinCompat
+			event.SessionEnded = reason == PlaybackEndAborted || (reason == PlaybackEndExpired && !session.IsJellyfinCompat)
 			if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
 				slog.WarnContext(ctx, "failed to queue watch provider pause scrobble", "component", "api", "session", session.ID, "error", err)
 			}
@@ -1454,14 +1454,20 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 	// progress after this copy went idle, or that is already stopped,
 	// means this copy is stale, not the session. Drop it without writing
 	// history, the deny marker, or a stop over the other replica's.
-	if h.attemptStoppedElsewhere(ctx, session.ID) {
+	//
+	// A stopped row goes to the claim below when the store arbitrates ends:
+	// a stop whose finalizer died before finishing is finished here as that
+	// stop once its lease lapses, and a finished one drops this copy.
+	_, arbitrated := h.PlanStoreV3.(playback.ProgressStoreV3)
+	stopped := h.attemptStoppedElsewhere(ctx, session.ID)
+	if stopped && !arbitrated {
 		slog.InfoContext(ctx, "dropped stale local playback session copy", "session", session.ID, "playback_session_id", session.ID)
 		// The attempt is over, so nothing still serves this copy's transport,
 		// and the replica that recorded the stop may not have known it.
 		h.closeTranscodeForSession(session)
 		return
 	}
-	if h.attemptActiveElsewhere(ctx, session) {
+	if !stopped && h.attemptActiveElsewhere(ctx, session) {
 		slog.InfoContext(ctx, "dropped stale local playback session copy", "session", session.ID, "playback_session_id", session.ID)
 		// Only this replica's own transcode goes. The remote transport is the
 		// other replica's to keep or stop: a stop here would kill the job it is

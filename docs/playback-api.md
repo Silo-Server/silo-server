@@ -325,8 +325,11 @@ and abort), so a later client stop replays and a start replay reports
 `session_expired`. Every way a session ends, on any API server, stops the row
 and claims the receipt's finalization before it writes watch history, provider
 events or the admin log; an end that loses that race writes none of them and
-only releases what its own server holds. The admin log records the reason of
-the stop that won the row.
+only releases what its own server holds. An end that finds the row stopped by
+an end whose server died before finishing it, and whose claim has lapsed,
+finishes it as that end, with its provider events; an expiry of a copy on
+another server does the same. The admin log records the reason of the stop
+that won the row.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a
