@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -31,6 +32,8 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		locked    bool
 		// episodeSeason is the season of the refresh's one episode; 0 means 1.
 		episodeSeason int
+		// failWrite makes every write of season 1 fail.
+		failWrite bool
 		// offered is nil when the refresh brought no season record, only
 		// the season's episode.
 		offered                *string
@@ -56,6 +59,8 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 		{name: "a season the refresh names nowhere keeps it", authority: seasonBackdropsAnswered, episodeSeason: 2,
 			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
 		{name: "identify clears a season the new match names nowhere", authority: seasonBackdropsReidentified, episodeSeason: 2},
+		{name: "identify keeps a named season whose write failed", authority: seasonBackdropsReidentified, offered: offer(""), failWrite: true,
+			wantPath: cachedA, wantSource: sourceA, wantThumbhash: thumbhashA},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
@@ -64,6 +69,10 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 			service.SetImageCacheJobEnqueuer(enqueuer)
 			existing := stored
 			seasonRepo.seasons[seasonKey(seriesID, 1)] = &existing
+			if tc.failWrite {
+				seasonRepo.bulkUpsertErr = errors.New("write failed")
+				seasonRepo.upsertErrors[seasonKey(seriesID, 1)] = errors.New("write failed")
+			}
 
 			series := &models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "9"}
 			if tc.locked {

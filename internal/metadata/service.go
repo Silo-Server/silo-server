@@ -6070,8 +6070,15 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	// seasons nor its episodes, such as one known only from file names, may
 	// still show the previous match's backdrop.
 	if backdropAuthority == seasonBackdropsReidentified && !imagesLocked {
-		keep := make([]int32, 0, len(seasonIDs))
-		for seasonNumber := range seasonIDs {
+		named := make(map[int]struct{}, len(seasons)+len(episodes))
+		for _, season := range seasons {
+			named[season.SeasonNumber] = struct{}{}
+		}
+		for _, episode := range episodes {
+			named[episode.SeasonNumber] = struct{}{}
+		}
+		keep := make([]int32, 0, len(named))
+		for seasonNumber := range named {
 			if catalog.FitsPostgresInteger(seasonNumber) {
 				keep = append(keep, int32(seasonNumber)) //nolint:gosec // FitsPostgresInteger checked the range
 			}
