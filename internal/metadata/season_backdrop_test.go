@@ -102,12 +102,7 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 				t.Errorf("backdrop = %q from %q (thumbhash %q), want %q from %q (thumbhash %q)",
 					got.BackdropPath, got.BackdropSourcePath, got.BackdropThumbhash, tc.wantPath, tc.wantSource, tc.wantThumbhash)
 			}
-			var job *EnqueueImageCacheJobInput
-			for i := range enqueuer.inputs {
-				if enqueuer.inputs[i].ImageType == ImageCacheImageBackdrop {
-					job = &enqueuer.inputs[i]
-				}
-			}
+			job := backdropJob(enqueuer.inputs)
 			switch {
 			case tc.wantJob == "" && job != nil:
 				t.Errorf("queued a backdrop job for %q, want none", job.SourcePath)
@@ -116,4 +111,13 @@ func TestPersistSeasonBackdrops(t *testing.T) {
 			}
 		})
 	}
+}
+
+func backdropJob(inputs []EnqueueImageCacheJobInput) *EnqueueImageCacheJobInput {
+	for i := range inputs {
+		if inputs[i].ImageType == ImageCacheImageBackdrop {
+			return &inputs[i]
+		}
+	}
+	return nil
 }
