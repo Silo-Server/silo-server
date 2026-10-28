@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // TestPlaybackLifecycleTransitionsDB pins the lifecycle store's rules: a
@@ -307,6 +309,44 @@ func TestLifecycleSweepSelectsWhatItCanEndDB(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the abandoned session was not selected among %d candidates", len(candidates))
+	}
+}
+
+// TestLifecycleSweepPassesLiveJellyfinPlaysDB pins that unheld Jellyfin plays
+// still reporting never starve the sweep: a hundred plays the expiry claim
+// refuses (a report arrived) are moved behind sessions idle for longer, so
+// the next selection reaches the abandoned play queued after them.
+func TestLifecycleSweepPassesLiveJellyfinPlaysDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	insert := func(idle time.Duration) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at)
+			VALUES ($1, 'jellyfin', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3, NOW() - interval '3 hours', $4)`,
+			id, account, file, time.Now().Add(-idle)); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	reporting := map[string]bool{}
+	for range lifecycleSweepBatch {
+		reporting[insert(2*time.Hour)] = true
+	}
+	abandoned := insert(time.Hour)
+	mgr := playback.NewSessionManager(0, 0)
+	mgr.SetCompatExpiryClaimer(func(context.Context, []playback.SessionExpiryCandidate) (map[string]bool, error) {
+		return map[string]bool{}, nil // every play reported after the cutoff
+	})
+	now := time.Now()
+	NewPlaybackHandler(mgr).sweepLifecycle(ctx, pool, now)
+	candidates, err := loadLifecycleCandidates(ctx, pool, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 || candidates[0].sessionID != abandoned || reporting[candidates[0].sessionID] {
+		t.Fatalf("first candidate after the sweep = %+v, want the abandoned play %s", candidates, abandoned)
 	}
 }
 

@@ -340,6 +340,7 @@
 ./internal/api/handlers TestNativeSessionsListLifecycleDB
 ./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
+./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB

@@ -86,11 +86,28 @@ func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool
 		slog.WarnContext(ctx, "lifecycle sweep failed", "component", "api", "error", err)
 		return
 	}
+	var unheld []lifecycleCandidate
+	var native []playback.Session
 	for _, c := range candidates {
 		if _, err := h.sessionMgr.GetSession(c.sessionID); err == nil {
 			continue // held here: this server's reaper decides
 		}
-		h.sweepLifecycleCandidate(ctx, pool, c, now)
+		unheld = append(unheld, c)
+		if c.attemptLive {
+			native = append(native, playback.Session{ID: c.sessionID, UserID: c.userID, ProfileID: c.profileID})
+		}
+	}
+	// One lookup reads node delivery for every native candidate. Without it
+	// they wait for the next sweep rather than expire on a guess.
+	deliveries, err := h.deliveryActivity(ctx, native)
+	if err != nil {
+		slog.WarnContext(ctx, "lifecycle sweep could not read node delivery", "component", "api", "sessions", len(native), "error", err)
+	}
+	for _, c := range unheld {
+		if c.attemptLive && err != nil {
+			continue
+		}
+		h.sweepLifecycleCandidate(ctx, pool, c, deliveries[c.sessionID], now)
 	}
 }
 
@@ -129,7 +146,7 @@ func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.T
 	})
 }
 
-func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, now time.Time) {
+func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, delivered, now time.Time) {
 	grace := lifecyclePlayingGrace
 	if c.paused {
 		grace = lifecyclePausedGrace
@@ -137,7 +154,7 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 	idleBefore := now.Add(-grace)
 	switch {
 	case c.attemptLive:
-		h.expireIdleNativeSession(ctx, pool, c, idleBefore)
+		h.expireIdleNativeSession(ctx, pool, c, delivered, idleBefore)
 	case c.attemptFound && !c.finalized:
 		h.finishInterruptedNativeEnd(ctx, c.sessionID)
 	case c.attemptFound:
@@ -145,7 +162,7 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 		// (its writer failed, or ended before the upgrade): record it now.
 		h.endLifecycleFromFacts(ctx, c.sessionID, endReasonForStop(c.sessionID, c.stopID))
 	case c.frontend == LifecycleFrontendJellyfin:
-		h.expireIdleJellyfinSession(ctx, c, idleBefore)
+		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore)
 	case c.frontend == LifecycleFrontendABS:
 		if c.activity.Before(now.Add(-lifecycleABSGrace)) {
 			h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
@@ -158,19 +175,13 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 
 // expireIdleNativeSession ends a native session no server holds once its
 // client and its media have both been idle past the grace.
-func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore time.Time) {
+func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, delivered, idleBefore time.Time) {
 	// A node can keep serving media while nothing reports progress (a Cast
 	// receiver whose sender slept). Its delivery counts as activity, and is
 	// remembered on the lifecycle row beyond the node's short record.
-	if deliveries, err := h.sessionDeliveryActivity(ctx, c); err != nil {
-		slog.WarnContext(ctx, "lifecycle sweep could not read node delivery", "component", "api", "session", c.sessionID, "error", err)
-		return
-	} else if !deliveries.IsZero() {
-		if _, err := pool.Exec(ctx, `UPDATE playback_session_lifecycle SET activity_at = GREATEST(activity_at, $2) WHERE session_id = $1`,
-			c.sessionID, deliveries); err != nil {
-			slog.WarnContext(ctx, "lifecycle sweep could not record node delivery", "component", "api", "session", c.sessionID, "error", err)
-		}
-		if deliveries.After(idleBefore) {
+	if !delivered.IsZero() {
+		recordLifecycleActivity(ctx, pool, c.sessionID, delivered)
+		if delivered.After(idleBefore) {
 			return
 		}
 	}
@@ -197,15 +208,24 @@ func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgx
 	h.finishInterruptedNativeEnd(ctx, c.sessionID)
 }
 
-func (h *PlaybackHandler) sessionDeliveryActivity(ctx context.Context, c lifecycleCandidate) (time.Time, error) {
+// deliveryActivity reads when a node last delivered media for each session.
+func (h *PlaybackHandler) deliveryActivity(ctx context.Context, sessions []playback.Session) (map[string]time.Time, error) {
 	reader, ok := h.sessionMgr.(interface {
 		DeliveryActivity(context.Context, []playback.Session) (map[string]time.Time, error)
 	})
-	if !ok {
-		return time.Time{}, nil
+	if !ok || len(sessions) == 0 {
+		return nil, nil
 	}
-	activity, err := reader.DeliveryActivity(ctx, []playback.Session{{ID: c.sessionID, UserID: c.userID, ProfileID: c.profileID}})
-	return activity[c.sessionID], err
+	return reader.DeliveryActivity(ctx, sessions)
+}
+
+// recordLifecycleActivity remembers activity the sweep saw outside the
+// lifecycle row, so the row stops being a candidate until it is idle again.
+func recordLifecycleActivity(ctx context.Context, pool *pgxpool.Pool, sessionID string, at time.Time) {
+	if _, err := pool.Exec(ctx, `UPDATE playback_session_lifecycle SET activity_at = GREATEST(activity_at, $2) WHERE session_id = $1`,
+		sessionID, at); err != nil {
+		slog.WarnContext(ctx, "lifecycle sweep could not record a session's activity", "component", "api", "session", sessionID, "error", err)
+	}
 }
 
 // finishInterruptedNativeEnd finalizes a stopped attempt nobody finished,
@@ -240,7 +260,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 // expireIdleJellyfinSession ends a Jellyfin play no server holds through the
 // shared compatibility expiry claim, which marks its play row terminal so no
 // report revives it.
-func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, c lifecycleCandidate, idleBefore time.Time) {
+func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore time.Time) {
 	if c.activity.After(idleBefore) {
 		return
 	}
@@ -259,7 +279,11 @@ func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, c lifec
 		return
 	}
 	if configured && !claimed[c.sessionID] {
-		return // a report arrived; the play goes on
+		// A report arrived after idleBefore, and the play goes on. Recording
+		// that bound moves the row behind sessions idle for longer, so live
+		// plays never fill the sweep's batch.
+		recordLifecycleActivity(ctx, pool, c.sessionID, idleBefore)
+		return
 	}
 	h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
 }
@@ -279,7 +303,9 @@ func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID s
 		}
 		return
 	}
-	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil && record.LastSample.Position > session.Position {
+	// The attempt's last accepted sample is the play's position, including a
+	// seek back past where the shared row last saw it.
+	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil {
 		session.Position = record.LastSample.Position
 	}
 	h.recordAdminStopHistory(ctx, session, reason)

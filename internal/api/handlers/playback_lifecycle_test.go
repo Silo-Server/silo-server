@@ -94,3 +94,23 @@ func TestLifecycleEventsReachAdministratorsOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestSweptEndRecordsTheAcceptedPosition covers a native session the sweep
+// ends from its recorded facts after a seek back: the history takes the
+// attempt's last accepted position, not the further one the shared row last
+// saw.
+func TestSweptEndRecordsTheAcceptedPosition(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 100}); err != nil {
+		t.Fatal(err)
+	}
+	live := *f.session
+	live.Position = 1000
+	admin := &liveRowAdminStore{live: &live}
+	f.handler.AdminStore = admin
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+	f.handler.endLifecycleFromFacts(context.Background(), f.session.ID, PlaybackEndExpired)
+	if len(admin.history) != 1 || admin.history[0].WatchedSeconds != 100 {
+		t.Fatalf("admin history = %+v, want one row at the accepted 100", admin.history)
+	}
+}
