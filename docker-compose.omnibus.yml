@@ -8,7 +8,7 @@
 # docs/architecture/omnibus-image.md describes how the image works.
 services:
   silo:
-    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:latest-omnibus}
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
     restart: unless-stopped
     # Silo drains in-flight requests on stop and PostgreSQL shuts down after
     # it. Docker's default 10s would cut that short.
