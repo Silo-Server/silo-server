@@ -142,7 +142,8 @@ jobs:
 
   # The omnibus image layers PostgreSQL, Redis, Meilisearch, and s6-overlay on
   # the image this run just published, so it needs the merged manifest list.
-  # Its tags are the regular tags with an -omnibus suffix. Its digest artifacts
+  # Its tags are the regular tags with an -aio suffix, except that it moves
+  # aio, not latest, until it is validated for everyone. Its digest artifacts
   # are named so the regular merge's digests-* pattern never picks them up.
   omnibus:
     needs: [prepare, merge]
@@ -194,9 +195,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
           flavor: |
             latest=false
-            suffix=-omnibus,onlatest=true
+            suffix=-aio
           tags: |
-            type=raw,value=latest,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
+            type=raw,value=aio,suffix=,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
             type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
             type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
             type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
@@ -210,4 +211,4 @@ jobs:
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
 
       - name: Inspect manifest list
-        run: docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}-omnibus"
+        run: docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}-aio"

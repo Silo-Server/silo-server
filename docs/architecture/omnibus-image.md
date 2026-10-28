@@ -13,7 +13,9 @@ runs it.
 The `omnibus` job in `.github/workflows/docker.yml` runs after the regular
 image's manifest list is pushed. It builds `omnibus/Dockerfile` with
 `SILO_IMAGE` set to that commit's regular image and publishes the regular tags
-with an `-omnibus` suffix.
+with an `-aio` suffix (`build-N-aio`, `<full SHA>-aio`, `apiv2-aio`). In place
+of `latest` it moves `aio`; it takes over `latest` only once validated for
+every install, in a later change.
 
 Because the omnibus image starts from the regular one, both run the same Silo
 binary against the same libvips, FFmpeg build, GPU runtimes, and Node.js. Keep
