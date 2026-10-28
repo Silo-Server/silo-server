@@ -262,7 +262,8 @@ func (h *PlaybackHandler) SessionStarted(ctx context.Context, session *playback.
 	if !ok || session == nil || lifecycleIDParam(session.ID) == nil {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := lifecycleContext(ctx)
+	defer cancel()
 	var row json.RawMessage
 	if h.LiveRowJSON != nil {
 		var err error
@@ -292,7 +293,8 @@ func (h *PlaybackHandler) SessionPauseReported(ctx context.Context, sessionID st
 	if !ok || lifecycleIDParam(sessionID) == nil {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := lifecycleContext(ctx)
+	defer cancel()
 	t, changed, err := store.SetLifecyclePaused(ctx, sessionID, paused)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record a session pause", "component", "api", "session", sessionID, "error", err)
@@ -313,7 +315,20 @@ func (h *PlaybackHandler) publishSequencedPause(ctx context.Context, sessionID s
 		return
 	}
 	t := LifecycleTransition{SessionID: sessionID, Seq: change.Seq, At: change.At, State: lifecycleState(change.Paused)}
-	h.publishLifecycle(context.WithoutCancel(ctx), t, PlaybackSessionsQuery{SessionID: sessionID})
+	ctx, cancel := lifecycleContext(ctx)
+	defer cancel()
+	h.publishLifecycle(ctx, t, PlaybackSessionsQuery{SessionID: sessionID})
+}
+
+// lifecycleWriteTimeout bounds the lifecycle work a start or a progress
+// report does inline, so a stalled database or event bus delays the request
+// by at most this much.
+const lifecycleWriteTimeout = 5 * time.Second
+
+// lifecycleContext outlives the request (a client that disconnects right
+// after a start or a pause still gets it recorded) but not the bound.
+func lifecycleContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), lifecycleWriteTimeout)
 }
 
 // recordEnd writes an end's admin history row through the lifecycle, and
