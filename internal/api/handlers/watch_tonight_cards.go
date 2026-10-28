@@ -311,6 +311,7 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		// Resolve cast lookup ID: use series ID for episodes.

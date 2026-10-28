@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -302,7 +303,9 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 
 // serveWebSocket runs one events connection. When accessChanged closes, the
 // loop tells the client its access changed and closes the connection with
-// EventsCloseAccessChanged; a nil channel never fires.
+// EventsCloseAccessChanged; a nil channel never fires. Only the v2 handshake
+// passes one: the bridge socket never sends access_changed, and never
+// receives V2Only events either.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -471,7 +474,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 			if !ok {
 				return
 			}
-			if _, subscribed := subscriptions[env.Channel]; !subscribed {
+			if _, subscribed := subscriptions[env.Channel]; !subscribed || (env.V2Only && accessChanged == nil) {
 				continue
 			}
 			if !allowsEventForClaims(claims, boundProfileID, env) {
@@ -687,14 +690,25 @@ func parseDeclaredChannels(query url.Values) ([]evt.EventChannel, bool) {
 }
 
 // allowedChannelsForClaims is allowedChannelsForRole, less the household
-// channels a remote-playback handoff may not see: history imports cover every
-// profile on the account.
+// channels a remote-playback handoff may not see (history imports cover every
+// profile on the account), and narrowed to its scopes for a scoped API key.
 func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
 	if claims.IsRemotePlayback() {
 		return []evt.EventChannel{evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelUserSettings, evt.ChannelNotifications}
 	}
+	if len(claims.APIKeyScopes) > 0 {
+		if claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) {
+			return slices.Clone(monitorKeyChannels)
+		}
+		return nil
+	}
 	return allowedChannelsForRole(claims.Role)
 }
+
+// monitorKeyChannels are what an admin:monitor:read key may subscribe to:
+// live sessions and catalog changes. Jobs carry artifact URLs and request
+// payloads and scans carry library paths, which monitoring never reads.
+var monitorKeyChannels = []evt.EventChannel{evt.ChannelCatalog, evt.ChannelSessions}
 
 func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{

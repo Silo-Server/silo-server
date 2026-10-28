@@ -2,6 +2,9 @@
 
 `GET /api/v2/events/capabilities` describes the shared event subscription
 protocol. It requires an authenticated account; no active profile is required.
+`allowed` is true for a current access-token login session and for an
+administrator's `admin:monitor:read` API key sent with no profile, the callers
+that may mint an events socket ticket.
 When the event service is unavailable, the capability response remains `200` with `state: not_configured` and `allowed: false`.
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
@@ -23,8 +26,9 @@ native realtime discovery operation.
 ## Session-bound socket handshake
 
 `POST /api/v2/events/ws-ticket` delegates a current access-token login session
-for one connection. API keys and credentials without a bounded access-token
-expiry cannot mint this proof. A profile is optional; when present, its ownership
+for one connection. Credentials without a bounded access-token expiry cannot
+mint this proof, and an API key mints only as described in
+[API-key handshake](#api-key-handshake). A profile is optional; when present, its ownership
 and PIN proof must validate. The ticket is opaque, expires within 30 seconds,
 and binds the account, login session, account role, profile proof and resolved
 access policy. The response includes `ticket`, `expires_in`,
@@ -48,6 +52,9 @@ Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
 Without Redis, tickets are process-local and require affinity to the minting
 node; restarting that node invalidates them. This store is distinct from the
 bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
+The events and admin log stream sockets keep their tickets under one Redis
+prefix, so each ticket names the socket it was minted for and the other socket
+refuses it.
 
 Admission rechecks the current session, enabled account, account role and viewer
 policy/PIN proof. An admin account receives the administrator channels only while
@@ -69,6 +76,35 @@ grace period, inbound frame limits, snapshots, ping/pong and delivery filtering.
 The handshake version does not rewrite another domain's event payload.
 Web consumers capture account/profile authority before minting and discard
 connection results and frames after that authority changes.
+
+### API-key handshake
+
+A monitoring tool authenticates with an API key instead of a login session. An
+API key holding the `admin:monitor:read` scope may call
+`POST /api/v2/events/ws-ticket` with no `X-Profile-Id`; any other key, and a
+monitoring key that sends a profile, is refused with `403 permission_denied`.
+The key's account must be an enabled administrator that the acting-admin
+decision admits with no profile (API keys are exempt from the household
+profile requirement, as at the HTTP admin routes). The ticket binds the key, its
+account, its configuration revision and the events socket, and the response
+carries `max_connection_seconds` (14400). The handshake is the same as for a
+login session.
+
+A key connection may subscribe to `sessions` and `catalog` only; the hello
+frame's `available_channels` lists exactly those, and other declared channels
+come back rejected. Jobs and scans carry artifact URLs, request payloads and
+library paths, which the monitoring scope never reads. The admin log stream,
+playback-control, Watch Together and Apple push sockets stay login-only.
+
+The connection ends after four hours. Every 15 seconds it rechecks that the key
+exists with the same owner and revision, still holds `admin:monitor:read`, and
+that its account is enabled, still an administrator, and still admitted by the
+acting-admin decision. Deleting the key or disabling the account closes the
+connection. Editing the key (any change to its scopes, label or rate tier
+advances its revision), demoting the account, or an acting-admin refusal sends
+`access_changed` (see [Access changes](#access-changes)); the tool mints a new
+ticket, which a key that lost the scope or an account that lost the admin role
+cannot do.
 
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
@@ -104,6 +140,108 @@ On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
 profile. The handshake's `X-Profile-Id` decides administrator access but binds
 nothing, so a bridge socket opened with that header and no ticket is unbound and
 receives no `user_state`, including its own profile's.
+
+### Catalog item changes
+
+On the `catalog` channel, `catalog.item.changed` reports a change to one item.
+Every subscriber receives `change: "metadata_updated"`. An administrator connected through the v2 handshake
+also receives three changes that describe what the administrator catalog
+listing (`listAdminCatalogItems`, see
+[admin-catalog-api.md](admin-catalog-api.md#catalog-item-listing)) returns:
+
+| `change` | When |
+| --- | --- |
+| `added` | The item gained a membership in `library_id` |
+| `removed` | The item lost its membership in `library_id` |
+| `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), moved or renamed on disk, or changed what the listing shows (size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
+
+```json
+{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
+```
+
+`content_id` names a movie, series or episode. Books, podcasts and their
+episodes produce none of these, except when one is deleted outright and its type
+can no longer be checked; the listing never returns those ids. Changes are per
+library: an item in two
+libraries that leaves one gets `removed` for that library and stays in the
+listing with the other in `library_ids`. A content ID change is `removed` for
+the old ID and `added` for the new one. The events carry ids only. A consumer
+fetches the named items with the listing's `content_ids` filter (up to 200 per
+request) and treats an id the listing no longer returns as gone. Turning a
+library off or on sends no per-item changes; it changes `library_ids` and which
+items the listing returns, so re-list after a `catalog.library.changed`. Metadata
+edits arrive as `metadata_updated`, which names the item but not what changed. A
+few repairs send nothing, such as merging duplicate series, which moves their
+episodes to the surviving series; a mirror that must not drift re-lists
+periodically.
+
+Database triggers record these changes from every code path that writes library
+memberships or files, so a rescan that rewrites rows without changing what they
+show sends nothing. The server merges what is waiting per item and library: an
+add followed by a removal sends nothing, a removal followed by an add sends
+`added` (the re-created membership can have a new `added_at`), and an `added` or
+`removed` absorbs the item's `files_changed`. To leave room in each connection's buffer for
+other channels, the cluster publishes at most 32 of these changes every 100 ms,
+about 320 a second, so a large library's first scan arrives over minutes.
+Delivery is at most once, like every event on this socket. Changes still
+unpublished after a day are dropped. After a reconnect, re-list the whole
+catalog: `added_after` finds only new items, not file changes, metadata edits or
+removals.
+
+The v1 bridge socket does not carry `added`, `removed` or `files_changed`.
+
+### Playback session lifecycle events
+
+The admin-only `sessions` channel carries four events besides `sessions.replaced`:
+`session.started`, `session.paused`, `session.resumed` and `session.stopped`.
+`GET /api/v2/admin/sessions/capabilities` reports `lifecycle_events: true` when the
+server sends them. Each event's `data` is:
+
+- `session_id`, `seq`, `at` (the database clock when the transition was written,
+  UTC milliseconds; it orders nothing, `seq` does) and `state`: `playing`, `paused`
+  or `stopped`.
+- `session` on a started, paused or resumed event: the session's row as
+  `GET /api/v2/admin/sessions` returns it, with `lifecycle_seq` equal to `seq`.
+  Absent when no server has a live row for it.
+- `end_reason` and `history` on `session.stopped`: the history entry the end
+  recorded, as `GET /api/v2/admin/playback-history` returns it. Its figures are the
+  stored ones, so a later history read agrees with the event.
+
+The envelope's `event_id` is `playback-lifecycle:<seq>`.
+
+`seq` comes from one sequence the database advances with each transition, so a
+session's numbers rise in the order its transitions were accepted, whichever API
+server published them; numbers are not contiguous and are only comparable within one
+session. A native v2 session's pause and resume follow the client's progress
+sequence: a progress sample that arrives after a newer one changes nothing.
+Jellyfin, Audiobookshelf and v1 bridge reports carry no sequence and follow arrival
+order. A session starts once and ends once; its id never starts again.
+
+Delivery is at most once and nothing is replayed. A monitor reconciles:
+
+1. On subscribe, and after each `sessions.replaced`, read every page of
+   `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
+   snapshot keep the frozen v1 row shape and at most 200 rows; use them only as a
+   cue to re-read.
+2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
+   the session is live and whether it is paused. A row and an event with equal numbers
+   carry the same state. Position and stream fields are observations: take them from
+   the most recently received record.
+3. A history entry with `end_reason` is final. When it carries `lifecycle_seq`, that
+   number is higher than any its live session had; an entry without one was recorded
+   before lifecycle numbers existed and counts as number 0 for ordering, but is final
+   all the same.
+4. A session missing from a complete list, with no ended history entry yet, is moving
+   between servers or about to be ended by the cluster sweep. Keep it open and read
+   `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every
+   session announced by `session.started` (native or Jellyfin) gets one within its idle
+   grace plus one sweep interval (15 seconds) while an API server runs, longer only
+   while a backlog of more than 100 sessions per server drains
+   ([playback lifecycle](architecture/playback-lifecycle.md)).
+
+Rows and entries without `lifecycle_seq` (sessions that started before the server
+recorded lifecycle transitions) count as number 0. During a rolling deploy, servers
+without this change send no lifecycle events.
 
 ### Access changes
 

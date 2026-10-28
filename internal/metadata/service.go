@@ -9748,9 +9748,10 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 // scoped results, preventing an older plugin that ignores the request field
 // from leaking show artwork into a numbered season. If a provider has not yet
 // adopted the gallery contract, its exact primary poster from GetSeasons is a
-// compatibility fallback. Specials additionally include ordinary show posters
-// after every exact Specials result, giving users a useful fallback when no
-// dedicated Specials artwork exists.
+// compatibility fallback. The gallery holds posters and backdrops. Show
+// backdrops follow every exact result, since providers rarely carry season
+// landscape art, and Specials additionally get ordinary show posters, giving
+// users a useful fallback when no dedicated Specials artwork exists.
 func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]RemoteImage, map[string]string, error) {
 	chain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
@@ -9758,7 +9759,7 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 	}
 
 	var exactImages []RemoteImage
-	var specialsFallback []RemoteImage
+	var showFallback []RemoteImage
 	providerErrors := make(map[string]string)
 	// Exact and fallback results are deduplicated separately so a show poster
 	// from an earlier provider cannot shadow the same URL confirmed as exact
@@ -9766,8 +9767,8 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 	// are dropped once every provider has answered.
 	exactSeen := make(map[string]struct{})
 	fallbackSeen := make(map[string]struct{})
-	appendPoster := func(target *[]RemoteImage, seen map[string]struct{}, image RemoteImage) bool {
-		if image.Type != ImagePoster || strings.TrimSpace(image.URL) == "" {
+	appendImage := func(target *[]RemoteImage, seen map[string]struct{}, image RemoteImage) bool {
+		if (image.Type != ImagePoster && image.Type != ImageBackdrop) || strings.TrimSpace(image.URL) == "" {
 			return false
 		}
 		if _, duplicate := seen[image.URL]; duplicate {
@@ -9801,7 +9802,8 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 					if strings.TrimSpace(image.ProviderID) == "" {
 						image.ProviderID = p.Slug()
 					}
-					if appendPoster(&exactImages, exactSeen, image) {
+					// Only an exact poster stands in for the GetSeasons primary.
+					if appendImage(&exactImages, exactSeen, image) && image.Type == ImagePoster {
 						exactFound = true
 					}
 				}
@@ -9827,7 +9829,7 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 							continue
 						}
 						n := seasonNumber
-						appendPoster(&exactImages, exactSeen, RemoteImage{
+						appendImage(&exactImages, exactSeen, RemoteImage{
 							ProviderID:   p.Slug(),
 							URL:          season.PosterPath,
 							Type:         ImagePoster,
@@ -9839,32 +9841,32 @@ func (s *MetadataService) FetchSeasonImages(ctx context.Context, providerIDs map
 			}
 		}
 
-		if seasonNumber == 0 && imageCapable {
+		if imageCapable {
 			images, imageErr := ip.GetImages(ctx, ImageRequest{
 				ProviderIDs: providerIDs,
 				ContentType: "series",
 				Language:    language,
 			})
 			if imageErr != nil {
-				slog.WarnContext(ctx, "fetch season images: Specials show fallback error", "component", "metadata",
+				slog.WarnContext(ctx, "fetch season images: show fallback error", "component", "metadata",
 					"provider", p.Slug(), "error", imageErr)
 				providerErrors[p.Slug()] = imageErr.Error()
 				continue
 			}
 			for _, image := range images {
-				if image.SeasonNumber != nil {
+				if image.SeasonNumber != nil || (image.Type == ImagePoster && seasonNumber != 0) {
 					continue
 				}
 				if strings.TrimSpace(image.ProviderID) == "" {
 					image.ProviderID = p.Slug()
 				}
-				appendPoster(&specialsFallback, fallbackSeen, image)
+				appendImage(&showFallback, fallbackSeen, image)
 			}
 		}
 	}
 
-	fallbacks := specialsFallback[:0]
-	for _, image := range specialsFallback {
+	fallbacks := showFallback[:0]
+	for _, image := range showFallback {
 		if _, exact := exactSeen[image.URL]; !exact {
 			fallbacks = append(fallbacks, image)
 		}

@@ -15,7 +15,7 @@ import (
 
 // TestLadderBackfillCandidatesDB runs the ladder backfill candidate query
 // against the migrated schema. Every cached backdrop surface (the item, its
-// localization, and an extra backdrop) stays a candidate while its manifest
+// localization, an extra backdrop, and a season) stays a candidate while its manifest
 // predates the backdrop's widest rung, and drops out once the manifest lists
 // it.
 func TestLadderBackfillCandidatesDB(t *testing.T) {
@@ -28,7 +28,7 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 
 	contentID := fmt.Sprintf("zz-ladder-backfill-%d", time.Now().UnixNano())
 	originals, extraID := seedLadderBackdrops(t, pool, contentID)
-	all := []string{ImageCacheTargetItem, ImageCacheTargetItemBackdrop, ImageCacheTargetItemLocalization}
+	all := []string{ImageCacheTargetItem, ImageCacheTargetItemBackdrop, ImageCacheTargetItemLocalization, ImageCacheTargetSeason}
 
 	if got := ladderBackdropCandidates(t, pool, contentID, extraID); !slices.Equal(got, all) {
 		t.Fatalf("without manifests, candidates = %v, want %v", got, all)
@@ -47,8 +47,8 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 }
 
 // seedLadderBackdrops caches a provider backdrop on the item, its German
-// localization, and one extra backdrop row, returning each surface's original
-// key and the extra backdrop's row ID.
+// localization, one extra backdrop row, and a season, returning each
+// surface's original key and the extra backdrop's row ID.
 func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (map[string]string, int64) {
 	t.Helper()
 	ctx := t.Context()
@@ -57,6 +57,7 @@ func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (ma
 		ImageCacheTargetItem:             base + "/backdrop/original.r1.webp",
 		ImageCacheTargetItemLocalization: base + "/localizations/de/backdrop/original.r2.webp",
 		ImageCacheTargetItemBackdrop:     base + "/x1/backdrop/original.r3.webp",
+		ImageCacheTargetSeason:           base + "/seasons/1/backdrop/original.r4.webp",
 	}
 	cleanup := func() {
 		bg := context.Background()
@@ -86,6 +87,12 @@ func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (ma
 		RETURNING id
 	`, contentID, originals[ImageCacheTargetItemBackdrop]).Scan(&extraID); err != nil {
 		t.Fatalf("seed extra backdrop: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO seasons (content_id, series_id, season_number, backdrop_source_path, backdrop_path)
+		VALUES ($1 || '-s1', $1, 1, 'https://image.tmdb.org/t/p/original/season.jpg', $2)
+	`, contentID, originals[ImageCacheTargetSeason]); err != nil {
+		t.Fatalf("seed season: %v", err)
 	}
 	return originals, extraID
 }

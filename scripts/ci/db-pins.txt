@@ -315,3 +315,8 @@
 # A Jellyfin item request resolves the viewer access scope once, however many
 # catalog reads in the request need it.
 ./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB
+
+# Administrator catalog listing: present movies, series and episodes only, per-library
+# versus earliest first-seen times, every present file with one track's facts, and two
+# statements for a page with files, whatever else it holds.
+./internal/catalog TestListAdminCatalogItemsDB

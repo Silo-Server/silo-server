@@ -101,14 +101,15 @@ func (f *imageServiceFake) ApplyUploadedItemImage(context.Context, metadata.Appl
 
 func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 	tests := []struct {
-		name          string
-		contentID     string
-		seasonNumber  int
-		language      string
-		currentPoster string
+		name            string
+		contentID       string
+		seasonNumber    int
+		language        string
+		currentPoster   string
+		currentBackdrop string
 	}{
-		{name: "numbered season", contentID: "season-2", seasonNumber: 2, language: "fr", currentPoster: "cache://season-2.jpg"},
-		{name: "specials", contentID: "season-0", seasonNumber: 0, language: "", currentPoster: ""},
+		{name: "numbered season", contentID: "season-2", seasonNumber: 2, language: "fr", currentPoster: "cache://season-2.jpg", currentBackdrop: "cache://season-2-backdrop.jpg"},
+		{name: "specials", contentID: "season-0", seasonNumber: 0, language: "", currentPoster: "", currentBackdrop: ""},
 	}
 
 	for _, tt := range tests {
@@ -127,12 +128,14 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 					TvdbID:                  "456",
 					DefaultMetadataLanguage: tt.language,
 					PosterPath:              "cache://show-poster.jpg",
+					BackdropPath:            "cache://show-backdrop.jpg",
 				}},
 				imageSeasonLookupFake{tt.contentID: {
 					ContentID:    tt.contentID,
 					SeriesID:     seriesID,
 					SeasonNumber: tt.seasonNumber,
 					PosterPath:   tt.currentPoster,
+					BackdropPath: tt.currentBackdrop,
 				}},
 				imageEpisodeLookupFake{},
 				imageFolderLookupFake{folderID: 9},
@@ -174,6 +177,9 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 			}
 			if response.Current.PosterURL != tt.currentPoster {
 				t.Fatalf("current poster = %q, want season poster %q", response.Current.PosterURL, tt.currentPoster)
+			}
+			if response.Current.BackdropURL != tt.currentBackdrop {
+				t.Fatalf("current backdrop = %q, want season backdrop %q", response.Current.BackdropURL, tt.currentBackdrop)
 			}
 		})
 	}

@@ -1765,7 +1765,27 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, notificationSeriesFixtureCases()...)
 	cases = append(cases, notificationSeriesMuteFixtureCases()...)
 	cases = append(cases, seasonalThemeFixtureCases()...)
-	return append(cases, personalListMembershipFixtureCases()...)
+	cases = append(cases, personalListMembershipFixtureCases()...)
+	cases = append(cases, sectionItemLimitFixtureCases()...)
+	return append(cases, adminCatalogItemsFixtureCases()...)
+}
+
+// sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
+// section reads, which getHomeCapabilities advertises as
+// section_item_limit_max.
+func sectionItemLimitFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "list_home_sections_item_limit_out_of_range", operationID: opListHomeSections,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_library_sections_item_limit_out_of_range", operationID: "listLibrarySections",
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/library/1/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // personalListMembershipFixtureCases covers the favorites and watchlist
@@ -1890,12 +1910,12 @@ func resumePositionFixtureCases() []fixtureCase {
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
 // first sections, the include_items bound, and the capability document that
-// advertises it.
+// advertises it and the item_limit bound of the aggregate section reads.
 func homeLayoutItemsFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
 		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
-			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max, and listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max.",
 			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
 		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
@@ -2191,6 +2211,7 @@ func fixtureDeps() Dependencies {
 	deps.SubtitleReads = &fakeSubtitleReads{}
 	deps.AdminSubtitleList = &fakeAdminSubtitleList{}
 	deps.AdminPlaybackHistory = &fakeAdminPlaybackHistory{}
+	deps.AdminCatalogItems = &fakeAdminCatalogItems{}
 	deps.AdminSubtitleMetadata = fixtureAdminSubtitleMetadata()
 	deps.AdminSubtitleProviderConfiguration = fixtureAdminProviderConfiguration()
 	deps.SubtitleAICancel = &fakeSubtitleAICancel{}

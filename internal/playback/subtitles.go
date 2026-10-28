@@ -312,15 +312,21 @@ func ConvertToVTT(input []byte, fromFormat string) ([]byte, error) {
 }
 
 // ConvertToVTTWithFFmpeg converts subtitle formats that require a real parser
-// (notably ASS/SSA) from in-memory data. It keeps downloaded subtitle
-// conversion on the same executable path as external sidecar conversion.
+// (notably ASS/SSA, and .sub through the demuxer subtitles.SUBDemuxer names)
+// from in-memory data. It keeps downloaded subtitle conversion on the same
+// executable path as external sidecar conversion.
 func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpegPath string) ([]byte, error) {
 	if converted, err := ConvertToVTT(input, fromFormat); err == nil {
 		return converted, nil
 	}
 	inputFormat := strings.ToLower(strings.TrimSpace(fromFormat))
-	if inputFormat == "ssa" {
+	switch inputFormat {
+	case "ssa":
 		inputFormat = "ass"
+	case string(subtitles.FormatSUB):
+		if inputFormat = subtitles.SUBDemuxer(input); inputFormat == "" {
+			return nil, errors.New("sub subtitle is neither MicroDVD nor SubViewer text")
+		}
 	}
 	if inputFormat == "" {
 		return nil, errors.New("subtitle format is required")

@@ -134,7 +134,7 @@ func TestAdminUploadItemImageRejectsBeforeCaching(t *testing.T) {
 		{"oversized file", "movie", "poster", make([]byte, metadata.MaxUploadedImageBytes+1), http.StatusBadRequest},
 		{"unknown type read as a poster elsewhere", "movie", "cover", []byte("x"), http.StatusBadRequest},
 		{"type the picker does not offer", "movie", "still", []byte("x"), http.StatusBadRequest},
-		{"season backdrop", "season-2", "backdrop", []byte("x"), http.StatusBadRequest},
+		{"season logo", "season-2", "logo", []byte("x"), http.StatusBadRequest},
 		{"episode", "episode", "poster", []byte("x"), http.StatusBadRequest},
 		{"missing item", "missing", "poster", []byte("x"), http.StatusNotFound},
 	}

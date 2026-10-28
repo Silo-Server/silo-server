@@ -49,7 +49,8 @@ func overlayTestPool(t testing.TB) (*pgxpool.Pool, *overlayQueryTrace) {
    file_path text NOT NULL DEFAULT '', resolution text, codec_audio text,
    audio_tracks jsonb, hdr boolean NOT NULL DEFAULT false, video_tracks jsonb,
    codec_video text, audio_channels integer, container text,
-   subtitle_tracks jsonb, external_subtitles jsonb, edition_key text, missing_since timestamptz
+   subtitle_tracks jsonb, external_subtitles jsonb, edition_key text, missing_since timestamptz,
+   multi_episode_start integer, multi_episode_end integer
   );
   CREATE INDEX ON media_files(content_id);
   CREATE INDEX ON media_files(episode_id) WHERE episode_id IS NOT NULL;`)

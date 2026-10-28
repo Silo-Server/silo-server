@@ -26,11 +26,19 @@ func TestMixedCatalogMangaCounts(t *testing.T) {
 	for i := range 5 {
 		ids = append(ids, fmt.Sprintf("%s-chapter-%d", prefix, i))
 	}
+	var library int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type,name,enabled) VALUES ('mixed',$1,true) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, library)
 	})
 	if _, err := pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title)
    VALUES ($1,'manga','A'),($2,'manga','B'),($3,'movie','C'),($4,'ebook','D')`, manga, empty, movie, ebook); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO media_item_libraries (content_id,media_folder_id) SELECT id,$2 FROM unnest($1::text[]) id`, ids[:4], library); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title) SELECT id,'ebook','Chapter' FROM unnest($1::text[]) id`, ids[4:]); err != nil {

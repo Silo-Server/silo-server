@@ -48,6 +48,42 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+/profiles$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 	},
+	// Monitoring reads only. Operations that carry paths, node addresses,
+	// storage keys, setting values or credentials stay off this list (item
+	// files, storage, settings, logs, API keys, audit, per-device setting
+	// values, node sessions), and node rows are read through their summary.
+	// Host resources and download preparations withhold paths and failure
+	// text from scoped keys in their handlers.
+	auth.ScopeAdminMonitorRead: {
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/command-capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/summary$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/events/capabilities$`)},
+		// The one write: a ticket for the read-only events socket.
+		{http.MethodPost, regexp.MustCompile(`^/api/v2/events/ws-ticket$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(playback-activity|top-activity|downloads)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+/(profiles|devices|ips|downloads|downloads/summary|watch-summary)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/devices$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/devices/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/ips$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/downloads/(entries|devices|preparations|preparations/capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/system/resources$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/system/resources/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/nodes/summary$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/nodes/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/server/status$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
+	},
+	auth.ScopeAdminSessionsControl: {
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/command-capabilities$`)},
+		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/sessions/[^/]+/(pause|resume|stop|message|terminate)$`)},
+	},
 	auth.ScopeAdminAccessGroupsRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/access-groups$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/access-groups/[0-9]+$`)},

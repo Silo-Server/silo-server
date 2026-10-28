@@ -88,6 +88,17 @@ func (s *Service) RecordManualMarkWatchedWithResult(ctx context.Context, userID 
 	return s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourceManual)
 }
 
+// RecordSpannedEpisodesWatched marks the later episodes of a completed
+// multi-episode file watched, recorded as playback like the play of its first
+// episode. Episodes the profile already completed are left alone.
+func (s *Service) RecordSpannedEpisodesWatched(ctx context.Context, userID int, profileID string, targets []LeafWatchTarget, watchedAt time.Time) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	_, err := s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourcePlayback)
+	return err
+}
+
 // RecordManualMarkUnwatched clears the targets' watched state and resume
 // position and keeps their plays in watch history. Nothing goes to watch
 // providers, so their history keeps the plays too.

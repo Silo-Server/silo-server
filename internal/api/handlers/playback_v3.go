@@ -2159,6 +2159,10 @@ type playbackStartRequestDigestsV3 struct {
 // clients that report their app identity only there. All values stay opaque —
 // they are trimmed and length-clamped when the session stamps them.
 //
+// The device is the one the client declared for the profile device registry:
+// the X-Silo-Device-* headers on the v1 bridge, PlaybackCaller.DeclaredDevice
+// on /api/v2.
+//
 // The fallback applies only to a client that named itself. client_playback_context
 // carries no app name, so nothing in the body can identify a nameless client
 // anyway — it is labeled from its user agent, and its app_version is a
@@ -2168,8 +2172,13 @@ type playbackStartRequestDigestsV3 struct {
 // semver, on every browser session.
 func playbackClientInfoForStartV3(r *http.Request, clientContext playback.ClientPlaybackContextV3) playback.ClientInfo {
 	info := playback.ClientInfoFromRequest(r)
+	device := DeviceMetadataFromHeaders(r.Header)
+	if isNativeAPIV2(r.Context()) {
+		device, _ = r.Context().Value(playbackDeclaredDeviceContextKey{}).(DeviceMetadata)
+	}
+	info.DeviceID, info.DevicePlatform = device.DeviceID, device.DevicePlatform
 	if info.Name == "" {
-		return info
+		return info.Normalized()
 	}
 	if info.Version == "" {
 		info.Version = strings.TrimSpace(clientContext.AppVersion)
@@ -2257,7 +2266,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if err != nil {
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
 	}
-	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, false) }
+	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, "") }
 	if req.ProgressPersistence == playback.ProgressPersistenceClientV3 || !sessionOwnsResumeTimelineV3(effectiveFile) {
 		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
 			abort()
@@ -2339,6 +2348,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, commitErr
 	}
 	h.recordSessionRecipeV3(r.Context(), result.Plan.PlanID, &transport)
+	if started, err := h.sessionMgr.GetSession(session.ID); err == nil {
+		frontend := LifecycleFrontendBridge
+		if isNativeAPIV2(r.Context()) {
+			frontend = LifecycleFrontendNative
+		}
+		h.SessionStarted(r.Context(), started, frontend)
+	}
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
@@ -5225,7 +5241,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		}
 		if sessionRollbackErr != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", sessionRollbackErr)
-			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
+			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, "")
 		}
 		if errors.Is(err, playback.ErrReplanSupersededV3) {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")

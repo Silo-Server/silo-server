@@ -63,6 +63,8 @@ type RecipeCard struct {
 	ClientBuild      string `json:"client_build,omitempty"`
 	ClientChannel    string `json:"client_channel,omitempty"`
 	ClientUserAgent  string `json:"client_user_agent,omitempty"`
+	DeviceID         string `json:"device_id,omitempty"`
+	DevicePlatform   string `json:"device_platform,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
 	// Header-authenticated recovery. A session that negotiated

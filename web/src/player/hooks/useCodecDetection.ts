@@ -10,6 +10,13 @@ const VIDEO_CODEC_MAP: Record<string, string> = {
   vp9: "vp09.00.10.08",
 };
 
+// Probes per bit depth for codecs whose higher-depth profile browsers often
+// refuse. Firefox and Safari decode H.264 High but not High 10, which a bare
+// "h264" claim would cover; Chromium decodes both.
+const VIDEO_BIT_DEPTH_PROBES: Record<string, Record<number, string>> = {
+  h264: { 8: "avc1.640028", 10: "avc1.6e0028" },
+};
+
 // Silo's native Dolby Vision remux recipe preserves the DOVI configuration
 // record under a dvh1 sample entry — the one Apple's HLS authoring spec calls
 // for, and the only one Safari answers "probably" for. Probe exactly that
@@ -348,6 +355,14 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     }
   }
 
+  const videoBitDepths: Record<string, number[]> = {};
+  for (const [name, probes] of Object.entries(VIDEO_BIT_DEPTH_PROBES)) {
+    if (!codecsVideo.includes(name)) continue;
+    videoBitDepths[name] = Object.entries(probes)
+      .filter(([, codec]) => testMediaType(`video/mp4; codecs="${codec}"`))
+      .map(([depth]) => Number(depth));
+  }
+
   // Test audio codecs.
   for (const [name, mimeTypes] of Object.entries(AUDIO_CODEC_MAP)) {
     if (mimeTypes.some(testMediaType)) {
@@ -407,6 +422,7 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     containers,
     codecsVideo,
     progressiveCodecsVideo,
+    videoBitDepths,
     codecsAudio,
     progressiveCodecsAudio,
     maxResolution: UNPROBED_MAX_RESOLUTION,

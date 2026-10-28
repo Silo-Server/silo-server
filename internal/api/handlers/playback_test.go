@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -729,7 +730,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 	tests := []struct {
 		name               string
 		position           float64
-		userInitiated      bool
+		reason             PlaybackEndReason
 		disablePersistence bool
 		wantPauseCalls     int
 		wantStopCalls      int
@@ -738,7 +739,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		{
 			name:              "user exit stops below-resume-threshold scrobble",
 			position:          120,
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 120,
 		},
@@ -756,14 +757,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 		},
 		{
 			name:              "user exit at zero still stops scrobble",
-			userInitiated:     true,
+			reason:            PlaybackEndStopped,
 			wantStopCalls:     1,
 			wantEventPosition: 0,
 		},
 		{
 			name:               "disabled persistence does not scrobble",
 			position:           120,
-			userInitiated:      true,
+			reason:             PlaybackEndStopped,
 			disablePersistence: true,
 		},
 	}
@@ -790,7 +791,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.userInitiated)
+			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)
@@ -819,12 +820,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 
 // Expiry and abort retire the session id, so their pause tells providers the
 // session ended. A session that keeps no progress is not scrobbled on abort.
-// A Jellyfin play's upstream session can be revived under the same id, and
-// jellycompat sends that play's own stop, so its expiry stays a plain pause.
+// A Jellyfin play's own stop still reaches providers from its client's
+// Stopped report after the expiry, so its expiry stays a plain pause.
 func TestRetiredSessionsReportEndedPause(t *testing.T) {
-	expire := func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }
+	expire := func(h *PlaybackHandler, s *playback.Session) {
+		h.finalizeSessionStopWithResult(context.Background(), s, false, "", PlaybackEndExpired)
+	}
 	abort := func(h *PlaybackHandler, s *playback.Session) {
-		h.finalizeSessionAbort(context.Background(), s, false, "")
+		h.finalizeSessionAbort(context.Background(), s, false, "", nativeEndClaim{owned: true})
 	}
 	tests := []struct {
 		name               string
@@ -1495,5 +1498,62 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+type testSeasonEpisodeLookup struct {
+	testEpisodeLookup
+	season []*models.Episode
+}
+
+func (l testSeasonEpisodeLookup) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
+	return l.season, nil
+}
+
+// A completed multi-episode file marks the episodes of its range it serves
+// watched, so the next episode offered is not the same file again (issue
+// #739). Episodes past the lookup bound don't resolve to the file and stay
+// unwatched.
+func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "series-1",
+		EpisodeID:         "episode-1",
+		FilePath:          "/media/Show/Season 01/Show - S01E01-E12.mkv",
+		Duration:          3600,
+		MultiEpisodeStart: 1,
+		MultiEpisodeEnd:   12,
+	}
+	episode := func(number int) *models.Episode {
+		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	season := make([]*models.Episode, 0, 12)
+	for number := 1; number <= 12; number++ {
+		season = append(season, episode(number))
+	}
+	handler.EpisodeLookup = testSeasonEpisodeLookup{
+		testEpisodeLookup: testEpisodeLookup{episode: episode(1)},
+		season:            season,
+	}
+
+	handler.persistStopAndHistory(context.Background(), &playback.Session{
+		ID:          "session-1",
+		UserID:      1,
+		ProfileID:   "profile-1",
+		MediaFileID: 42,
+		Position:    3590,
+	})
+
+	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-11", "episode-12"})
+	if err != nil {
+		t.Fatalf("list progress: %v", err)
+	}
+	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-11": true, "episode-12": false} {
+		if got := progress[id].Completed; got != want {
+			t.Errorf("%s completed = %v, want %v", id, got, want)
+		}
 	}
 }

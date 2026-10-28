@@ -417,6 +417,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
+	} else if baseRelation == mediaItemsBaseRelation {
+		// No library named or denied: a media item must still belong to one.
+		// Other relations (episodes, the search cursor's pre-filtered union)
+		// carry their own membership.
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
 	}
 	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")

@@ -38,6 +38,77 @@ These are web administration utilities. The Apple and Android clients have no
 callers for them, and the Jellyfin compatibility surface has no equivalent catalog
 seed or administrator filesystem operation.
 
+## Catalog item listing
+
+`GET /api/v2/admin/catalog/items` (`listAdminCatalogItems`) lets an administrator,
+or a tool holding an administrator's key, mirror the video catalog. Unlike the
+discovery operations above it returns no paths or storage keys.
+
+It lists movies, series and episodes that have a membership row in an enabled
+library. Books, podcasts and their episodes are left out, as are items that only
+a disabled library holds and episodes the metadata provider knows but no library
+has. Items come in ascending `content_id` order (byte order), movies, series and
+episodes interleaved, with `limit` 1–200 (default 50) and an opaque `cursor`.
+
+| Filter | Effect |
+| --- | --- |
+| `library_id` | Items present in that library |
+| `type` | `movie`, `series` or `episode` |
+| `added_after` | Items whose `added_at` is at or after the instant |
+| `content_ids` | Only these items; repeat the parameter, at most 200 |
+
+The cursor is bound to the caller, `limit`, and every filter; a changed filter
+starts a new listing. `content_ids` is a set, so repeating or reordering ids
+keeps the cursor. Ids that are not present movies, series or episodes are left
+out without an error, which is how a caller learns an item left the catalog.
+Each page is read in one snapshot with at most two statements, whatever it
+holds; later pages read the live catalog, so an item added behind the cursor
+appears on the next full pass, not this one.
+
+Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
+`library_ids`: every enabled library it is present in, whatever `library_id`
+filters. A movie or series also has `status`, its metadata match state. An
+episode has `series_id`, `series_title`, `season_number` and `episode_number`;
+its `year` is its air-date year.
+
+`added_at` is when Silo first saw the item. Without `library_id` it is the
+earliest first-seen time across the item's enabled libraries. With `library_id`
+it is the item's first-seen time in that library, and `added_after` compares that
+value. A membership lasts while the item has a present file there; when its
+files go missing and return (a replaced release, a mount outage) while the
+missing file rows are still kept, the original time is restored. `added_at` is
+not a change cursor: metadata edits, refreshes and file replacements do not move
+it, so a mirror cannot find changed items by polling it.
+
+`versions` lists every present file of the item in an enabled library, ordered by
+`file_id`, extras excluded. A series has none of its own (`[]`); each episode
+lists its files, and a file spanning several episodes is listed under its first.
+A multi-part movie lists each part as its own version. Each version has
+`file_id` and `library_id` (opaque strings), `resolution`, `codec_video`,
+`dynamic_range` (`sdr`, `hdr10`, `hdr10_plus`, `hlg`, `dolby_vision`, or
+`hdr_unknown` for a file flagged HDR without track details), `codec_audio`,
+`audio_channels`, `atmos`, `container`, `bitrate_kbps`, `file_size` in bytes, and
+`edition`, the display label. Video fields describe the file's primary video
+track. Audio fields all describe one track, the one playback picks when the
+viewer has no language preference (the file's default track, else its first);
+a file-level value
+fills a field that track lacks. Fields the scanner has not probed are absent.
+
+To keep a mirror current between full passes, subscribe to the `catalog` channel
+of the v2 events socket. An API key with the `admin:monitor:read` scope can mint
+its ticket (see [realtime-api.md](realtime-api.md#api-key-handshake)), as can an
+administrator's access-token login session. Administrators receive `catalog.item.changed` with
+`change` `added`, `removed` or `files_changed`, carrying ids only (see
+[realtime-api.md](realtime-api.md#catalog-item-changes)); fetch the named items
+with `content_ids`, and drop any the listing no longer returns. Fetch on
+`metadata_updated` too: titles, years and provider ids change through it.
+
+`GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
+`item_listing_max_content_ids`, and `item_change_events`, true when the socket
+carries those changes. The listing and the events have no Apple, Android, or
+Jellyfin compatibility callers; Jellyfin clients read the catalog through their
+own item queries.
+
 ## Export and import
 
 | Endpoint | Acknowledgment |

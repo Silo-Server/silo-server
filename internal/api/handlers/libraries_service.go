@@ -878,9 +878,12 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		)`
 	}
 
-	guards := ` AND ` + catalog.MangaChapterExclusionWhere("mi") + ` AND mi.match_ignored_at IS NULL`
+	// An item in no library has no file left to match.
+	guards := ` AND ` + catalog.MangaChapterExclusionWhere("mi") + ` AND ` + catalog.InSomeLibraryWhere("mi.content_id")
 	if ignored {
-		guards = ` AND ` + catalog.MangaChapterExclusionWhere("mi") + ` AND mi.match_ignored_at IS NOT NULL`
+		guards += ` AND mi.match_ignored_at IS NOT NULL`
+	} else {
+		guards += ` AND mi.match_ignored_at IS NULL`
 	}
 
 	countSQL := `

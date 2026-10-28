@@ -432,7 +432,11 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	if err != nil {
 		return nil, err
 	}
-	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && file.EpisodeID != req.EpisodeID)) {
+	// A lookup by episode also returns a multi-episode file linked to an
+	// earlier episode of its range. That file serves the requested episode,
+	// and its download is registered under the file's first episode, as a
+	// season download registers it.
+	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && req.FileID > 0 && file.EpisodeID != req.EpisodeID)) {
 		return nil, catalog.ErrItemNotFound
 	}
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
@@ -827,13 +831,26 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
+	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
 		files := filesByEpisode[ep.ContentID]
 		if len(files) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
+		file := pref.pick(ep.ContentID, allowedCandidates(files, filter))
+		episodeID := ep.ContentID
+		// A multi-episode file serves each episode it spans; download it once,
+		// keyed on its first episode, so a later page of the same batch finds
+		// the entry an earlier page registered.
+		if file != nil && file.MultiEpisodeEnd > file.MultiEpisodeStart {
+			if queued[file.ID] {
+				continue
+			}
+			queued[file.ID] = true
+			episodeID = file.EpisodeID
+		}
+		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
 }
