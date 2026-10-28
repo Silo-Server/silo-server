@@ -1490,7 +1490,9 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 	// before this expiry owns the play's history instead.
 	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, expiredStopID(session.ID))
 	defer h.forgetProgressSideEffectLock(session.ID)
-	if !claim.owned {
+	// A row already stopped has its own end; one this copy cannot confirm it
+	// owns through the store is left to that end, never recorded again here.
+	if !claim.owned || (stopped && !claim.leased()) {
 		slog.InfoContext(ctx, "dropped stale local playback session copy", "session", session.ID, "playback_session_id", session.ID)
 		h.closeTranscodeForSession(session)
 		return

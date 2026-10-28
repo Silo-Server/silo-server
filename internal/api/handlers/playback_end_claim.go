@@ -109,6 +109,12 @@ func claimStopFinalization(ctx context.Context, store playback.ProgressStoreV3, 
 	return false
 }
 
+// leased reports whether the claim holds the finalization lease, as opposed
+// to owning the end by default because the store could not arbitrate it.
+func (c nativeEndClaim) leased() bool {
+	return c.store != nil
+}
+
 // ownEnd reports whether the claim finalizes the end its caller made, as
 // opposed to an earlier stop that won the row and never finished, which the
 // caller must finish with that stop's own writers (FinishOtherEnd).

@@ -1023,6 +1023,20 @@ func nativeTakeoverRaceCases(t *testing.T) []nativeEndRaceCase {
 			f.handler.expireSessionCopy(context.Background(), snapshot)
 		},
 		wantReason: PlaybackEndExpired, wantWatched: 900, wantProviders: 1,
+	}, {
+		name: "expiry of a finished stop whose claim cannot read the row",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			snapshot, _ := f.manager.GetSession(f.session.ID)
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.PlanStoreV3 = &failingReadsPlanStoreV3{MemoryPlanStoreV3: memory, okReads: 1}
+			f.handler.expireSessionCopy(context.Background(), snapshot)
+		},
+		wantReason: PlaybackEndStopped, wantWatched: 900, wantProviders: 1,
 	}}
 }
 
@@ -1071,6 +1085,21 @@ func TestNativeEndWritesOnceWhoeverWinsTheRow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// failingReadsPlanStoreV3 fails every attempt read after the first okReads,
+// as a store that stops answering would.
+type failingReadsPlanStoreV3 struct {
+	*playback.MemoryPlanStoreV3
+	okReads int
+}
+
+func (s *failingReadsPlanStoreV3) GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error) {
+	if s.okReads == 0 {
+		return nil, errors.New("store unavailable")
+	}
+	s.okReads--
+	return s.MemoryPlanStoreV3.GetAttempt(ctx, sessionID)
 }
 
 // lostClaimReplyPlanStoreV3 commits the first finalization claim but loses
