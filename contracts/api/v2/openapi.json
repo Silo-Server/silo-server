@@ -168077,7 +168077,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The home page's sections with their cards, as the acting profile sees them.",
+        "summary": "The home page's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "home"
         ],
@@ -175523,7 +175523,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The library's sections with their cards, as the acting profile sees them.",
+        "summary": "The library's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "libraries"
         ],

@@ -255,7 +255,7 @@ func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
 		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), reg.getHomeLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
-		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
+		"The home page's sections that have cards for the acting profile, with those cards.")), reg.listHomeSections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
 		"One section of the home page with its cards.")), reg.getHomeSectionItems)
 	// The recipe gallery is profile scoped without a required header, as
