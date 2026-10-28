@@ -37408,7 +37408,7 @@
         "path": "/api/v2/requests/discover",
         "operation_id": "listDiscoverSections"
       },
-      "notes": "Section personal-requests (profile_scoped). {sections:[...]} became {items:[...]} (bounded, no page). Section bodies as v1 incl. next_page. TMDB ids stay integers (external ids, not Silo IDs)."
+      "notes": "Section personal-requests (profile_scoped). {sections:[...]} became {items:[...]} (bounded, no page). Section bodies as v1 incl. next_page. v2 follows the admin's Discover layout (docs/architecture/request-discover-rows.md): items holds the enabled title rows that have titles, in layout order, and the required row_order lists every enabled row including the studios, networks and genres rows; FeatureStatus.discover_rows_supported advertises it. v1 keeps the six built-in rows whatever the layout. TMDB ids stay integers (external ids, not Silo IDs)."
     },
     {
       "listener": "api",
@@ -37858,7 +37858,7 @@
         "path": "/api/v2/requests/discover/{section}",
         "operation_id": "getDiscoverSection"
       },
-      "notes": "Section personal-requests (profile_scoped). section is a strict path enum of the six discovery rows (422, v1 answered 400); page is the provider page number. TMDB ids stay integers (external ids, not Silo IDs)."
+      "notes": "Section personal-requests (profile_scoped). section is a strict path enum of the six built-in discovery rows (422, v1 answered 400); page is the provider page number. v2 reads the row through the admin's Discover layout: a built-in row the admin turned off or removed answers 404, and getDiscoverRow serves every title row. TMDB ids stay integers (external ids, not Silo IDs)."
     },
     {
       "listener": "api",

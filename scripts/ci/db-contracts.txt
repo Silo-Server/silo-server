@@ -15,7 +15,12 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
+./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
+./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
+./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
+./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
@@ -177,6 +182,10 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# A re-cached sidecar leaves its old copy to the reference-checked revision
+# GC, which keeps a copy published again since the re-cache.
+./internal/metadata TestRecachedSidecarRetiresTheOldCopyThroughRevisionGCDB
+
 # With metadata.cache_images off, stored artwork goes back to its provider
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB
@@ -193,6 +202,13 @@
 ./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
 ./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
 ./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
+
+# A refresh write keeps artwork an admin published after the refresh read the
+# item, season or episode, including a publication still committing and a row
+# another writer created and published in the meantime.
+./internal/catalog TestRefreshKeepsArtworkPublishedAfterItsReadDB
+./internal/catalog TestRefreshWaitingOnAPublicationKeepsItDB
+./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
@@ -258,6 +274,8 @@
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
+./internal/requests TestDiscoverLayoutDatabase
+./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
@@ -302,6 +320,11 @@
 ./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres
 ./internal/mediaartifact TestArtifactFailureReplacesListedUnusableDetailsPostgres
 
+# Identity changes that clear markers send local detection back to the file.
+./internal/intromarkers TestMarkerInvalidationTimeTracksIdentityChangesPostgres
+./internal/intromarkers TestMovieWithInvalidatedMarkersIsAnalyzedAgainPostgres
+./migrations TestTrackMarkerInvalidationBackfillPostgres
+
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
@@ -312,6 +335,18 @@
 # A resumed play's measured watch time survives repeated finalizations and is
 # what admin watch totals count.
 ./internal/api/handlers TestAdminPlaybackWatchTimeDB
+
+# A play's device, client and stream decisions are filled once by any
+# finalization, its end reason follows the latest one, and the history
+# window is inclusive below and exclusive above.
+./internal/api/handlers TestAdminPlaybackHistoryFactsDB
+./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
+./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
+./internal/api/handlers TestPlaybackLifecycleTransitionsDB
+./internal/api/handlers TestNativeSessionsListLifecycleDB
+./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
+./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
+./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
@@ -469,6 +504,7 @@
 ./internal/catalog TestItemBackdropReplaceWaitsForCacheWriteDB
 ./internal/catalog TestFilterUnreferencedImageDirsPostgres
 ./internal/metadata TestItemOnlyArtworkBackfillAndRepairDB
+./internal/metadata TestSeasonBackdropBackfillAndRepairDB
 ./internal/jellycompat TestRecommendationsListEveryBackdropDB
 
 # The A–Z letter index files titles by sort title and reports each letter's
@@ -532,6 +568,7 @@
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
+./internal/playback/planstore TestProgressCommitsLifecycleStateDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
@@ -579,3 +616,10 @@
 # A Watch Together room's suggestion cap holds when creators on two API servers
 # race on the v1 and v2 create paths.
 ./internal/watchtogether TestSuggestionRoomLimitPG
+
+# The catalog item change outbox: what each membership and file write queues
+# (and what routine scan writes do not), key moves, coalescing, the cluster-wide
+# drain spacing, and retention.
+./internal/catalog TestCatalogItemChangeOutboxDB
+
+./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB

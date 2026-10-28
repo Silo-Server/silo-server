@@ -656,6 +656,42 @@ func TestPlanPlaybackV3EvidenceTiersReachTierAppropriateRoutes(t *testing.T) {
 	}
 }
 
+// A declared decode entry can only narrow the flat claim. The web sends an
+// 8-bit H.264 entry when the browser refuses High 10, and a 10-bit source
+// must then be encoded on every route instead of being copied.
+func TestPlanPlaybackV3DeclaredDecodeEntryNarrowsFlatClaim(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.CodecVideo = "h264"
+	file.Resolution = "1080p"
+	file.Bitrate = 8_000
+	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High 10", Level: 40, Width: 1920, Height: 1038, FrameRate: "24", Bitrate: 8_000, BitDepth: 10, VideoRange: "SDR", VideoRangeType: "SDR", ColorRange: "tv"}
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.CodecsVideo = []string{"h264"}
+	req.Capabilities.CodecsVideoHardware = []string{"h264"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", BitDepths: []int{8}}}
+	plan := func() PlannerResultV3 {
+		return PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	}
+
+	result := plan()
+	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 || result.Plan.EffectiveRecipe.VideoCodec != transcodeCodecH264 {
+		t.Fatalf("10-bit source = %s", ExplainPlannerResultV3(result))
+	}
+
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High", 8
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("8-bit source = %s", ExplainPlannerResultV3(result))
+	}
+
+	// An entry for another codec says nothing about H.264.
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High 10", 10
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", BitDepths: []int{8}}}
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("unrelated entry = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestVideoProfileSupportedV3(t *testing.T) {
 	tests := []struct {
 		name           string

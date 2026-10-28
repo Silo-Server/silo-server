@@ -2490,6 +2490,11 @@ func (s *Scanner) syncPresentState(ctx context.Context, folderID int, scope pres
 	if err := tx.QueryRow(ctx, restoreEpisodeMembershipsSQL, args...).Scan(&linkedSeriesIDs); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}
+	spannedSeriesIDs, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1"+filePredicate, args...)
+	if err != nil {
+		return err
+	}
+	linkedSeriesIDs = append(linkedSeriesIDs, spannedSeriesIDs...)
 	// New links move the series' membership denorms ("Latest Episodes",
 	// issue #202; "Latest Episode Air Date", issue #2741). Recompute them in
 	// a later statement: one that waited on a concurrent air-date

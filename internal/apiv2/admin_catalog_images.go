@@ -43,7 +43,7 @@ type AdminImageApplyInput struct {
 	}
 }
 type AdminImageUploadForm struct {
-	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster only."`
+	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster or backdrop."`
 	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp,application/octet-stream" required:"true" doc:"The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when its bytes are a JPEG, PNG or WebP image."`
 }
 type AdminImageUploadInput struct {

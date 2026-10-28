@@ -428,7 +428,7 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 		TranscodeNodeURL: node.URL, TranscodeTransportID: transportID,
 	}
 
-	handler.finalizeSessionStop(context.Background(), session, false, "", true)
+	handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 
 	select {
 	case request := <-requests:
@@ -476,7 +476,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	handler := NewPlaybackHandler(manager)
 	recipes := &recordingRecipeCardStoreV3{deleteErr: errors.New("redis is down")}
 	handler.NodeRecipeStore = recipes
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err == nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err == nil {
 		t.Fatal("stop succeeded without durable progressive authority revocation")
 	}
 	if _, err := manager.GetSession(session.ID); err != nil {
@@ -487,7 +487,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	}
 
 	recipes.deleteErr = nil
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err != nil {
 		t.Fatalf("retry stop after authority recovery: %v", err)
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
@@ -535,7 +535,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t 
 		transportID: {SessionID: session.ID, TranscodeTransportID: transportID},
 	}}
 	handler.NodeRecipeStore = recipes
-	stopErr := handler.stopPlaybackSession(t.Context(), session, true)
+	stopErr := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped)
 	if stopErr == nil || !strings.Contains(stopErr.Error(), "cancel progressive remux transport") {
 		t.Fatalf("stop error = %v, want remote cancellation failure", stopErr)
 	}
@@ -549,7 +549,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t 
 		t.Fatalf("remote cancellation requests = %d, want 1", requests)
 	}
 
-	if err := handler.stopPlaybackSession(t.Context(), session, true); err != nil {
+	if err := handler.stopPlaybackSession(t.Context(), session, PlaybackEndStopped); err != nil {
 		t.Fatalf("retry stop after node recovery: %v", err)
 	}
 	if _, err := manager.GetSession(session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
@@ -615,7 +615,7 @@ func TestStopPlaybackWaitsForReplacementAndRevokesItsCurrentAuthority(t *testing
 	}
 	stopDone := make(chan error, 1)
 	go func() {
-		stopDone <- handler.stopPlaybackSession(t.Context(), staleSession, true)
+		stopDone <- handler.stopPlaybackSession(t.Context(), staleSession, PlaybackEndStopped)
 	}()
 	select {
 	case stopErr := <-stopDone:

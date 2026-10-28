@@ -67,12 +67,14 @@ GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
+GET /api/v2/admin/catalog/capabilities	non-media
 POST /api/v2/admin/catalog/export	non-media
 POST /api/v2/admin/catalog/export-jobs	non-media
 POST /api/v2/admin/catalog/export-jobs/{id}/publish	non-media
 POST /api/v2/admin/catalog/import	non-media
 POST /api/v2/admin/catalog/import-jobs	non-media
 GET /api/v2/admin/catalog/import-sources	non-media
+GET /api/v2/admin/catalog/items	non-media
 GET /api/v2/admin/catalog/local-import-sources	non-media
 GET /api/v2/admin/catalog/search/status	non-media
 GET /api/v2/admin/collection-groups/{group_id}/collections/order	non-media
@@ -230,6 +232,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
@@ -251,6 +254,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
@@ -301,6 +305,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -794,6 +803,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media
@@ -1367,12 +1377,14 @@ GET /api/v2/admin/autoscan/status	non-media
 POST /api/v2/admin/autoscan/trigger	non-media
 DELETE /api/v2/admin/branding/assets/{kind}	non-media
 POST /api/v2/admin/branding/assets/{kind}	non-media
+GET /api/v2/admin/catalog/capabilities	non-media
 POST /api/v2/admin/catalog/export	non-media
 POST /api/v2/admin/catalog/export-jobs	non-media
 POST /api/v2/admin/catalog/export-jobs/{id}/publish	non-media
 POST /api/v2/admin/catalog/import	non-media
 POST /api/v2/admin/catalog/import-jobs	non-media
 GET /api/v2/admin/catalog/import-sources	non-media
+GET /api/v2/admin/catalog/items	non-media
 GET /api/v2/admin/catalog/local-import-sources	non-media
 GET /api/v2/admin/catalog/search/status	non-media
 GET /api/v2/admin/collection-groups/{group_id}/collections/order	non-media
@@ -1530,6 +1542,7 @@ GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
 GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
+GET /api/v2/admin/nodes/summary	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
@@ -1551,6 +1564,7 @@ POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
+GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
@@ -1601,6 +1615,11 @@ POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
 POST /api/v2/admin/recommendations/trigger/recommendations	non-media
 POST /api/v2/admin/recommendations/trigger/taste-profiles	non-media
+DELETE /api/v2/admin/request-discover/layout	non-media
+GET /api/v2/admin/request-discover/layout	non-media
+PUT /api/v2/admin/request-discover/layout	non-media
+POST /api/v2/admin/request-discover/preview	non-media
+GET /api/v2/admin/request-discover/watch-providers	non-media
 GET /api/v2/admin/request-groups/{group_id}/limit	non-media
 PUT /api/v2/admin/request-groups/{group_id}/limit	non-media
 GET /api/v2/admin/request-integrations	non-media
@@ -2094,6 +2113,7 @@ GET /api/v2/requests/discover/browse/network/{slug}	non-media
 GET /api/v2/requests/discover/browse/studio/{slug}	non-media
 GET /api/v2/requests/discover/genres	non-media
 GET /api/v2/requests/discover/networks	non-media
+GET /api/v2/requests/discover/rows/{row_id}	non-media
 GET /api/v2/requests/discover/studios	non-media
 GET /api/v2/requests/discover/{section}	non-media
 DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}	non-media

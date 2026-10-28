@@ -65,6 +65,10 @@ const (
 	PlaybackPreferredQuality = "playback.preferred_quality"
 	// Show forced subtitles
 	PlaybackShowForcedSubtitles = "playback.show_forced_subtitles"
+	// Show marker confidence
+	PlaybackShowMarkerConfidence = "playback.show_marker_confidence"
+	// Show marker source
+	PlaybackShowMarkerSource = "playback.show_marker_source"
 	// Subtitle appearance
 	PlaybackSubtitleAppearance = "playback.subtitle_appearance"
 	// Preferred subtitle language
@@ -185,6 +189,8 @@ var Remote = []string{
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
 	PlaybackShowForcedSubtitles,
+	PlaybackShowMarkerConfidence,
+	PlaybackShowMarkerSource,
 	PlaybackSubtitleAppearance,
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,

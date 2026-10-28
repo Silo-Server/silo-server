@@ -231,6 +231,9 @@ type Candidate struct {
 	FileHash        string
 	FileSize        int64
 	DurationSeconds float64
+	// MarkersInvalidatedAt is when the database last cleared the file's
+	// derived markers because its identity changed; nil when it never did.
+	MarkersInvalidatedAt *time.Time
 	// CodecVideo and CodecAudio are the probed codecs of the file's first
 	// video and audio streams, empty when it has none.
 	CodecVideo string

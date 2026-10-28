@@ -32,6 +32,14 @@ hides them, as the row does. Each page request rebuilds the list, so a row
 whose source moves (trending over a sliding window) can shift between pages. The
 frozen `/api/v1` catalog keeps answering row-backed sections with no items.
 
+A Home or library row is the first page of its section: clients show a few cards
+in the row and open the full list here. To download only the cards a row shows,
+`listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
+which caps every row's item limit for that request. Send it only when
+`getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
+the parameter. See the home section of
+[the native API contract](architecture/api-contract.md) for the details.
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and

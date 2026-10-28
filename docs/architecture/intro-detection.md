@@ -178,6 +178,16 @@ tombstone is no marker to clients, as a manual clear is.
   statuses. Intro detection writes only `complete` rows.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
   re-run every season comparison over cached fingerprints.
+- A season group whose stored state settled it is skipped while its input
+  signature is unchanged. The database clears a file's derived markers when
+  its identity changes (hash, size, modification time, duration, item,
+  episode, extra, or season and episode numbers) and stamps
+  `media_files.markers_invalidated_at`. A rematch or a touched file changes
+  nothing else the analysis reads, so the signature includes that stamp:
+  the group is analyzed again and its markers come back, even when the
+  invalidation lands while a run is analyzing the group. A file never
+  invalidated adds nothing to the signature. Credits season state follows
+  the same rule.
 - Algorithm identifiers are stored with each marker. Between two scanner
   results, `markers.scannerAlgorithmPriority` decides which may replace the
   other before confidence is compared. A new identifier needs a rank above the
@@ -431,7 +441,12 @@ lock and ffmpeg limit. It lists movies whose movie tail is not stored for the
 file as it is now (complete, unusable, or failed on this server and still
 backing off), newest first; files retried after a failure come last. Once a movie's tail is stored, the run does not
 look at it again until the file changes; admin refresh and playback place its
-credits again from the stored tail. As for episodes, a tail ruled out by probe
+credits again from the stored tail. A tail records the file's invalidation
+time it was stored with (see [Versions and caches](#versions-and-caches)),
+and settles the movie only while the file still has that time. After an
+invalidation the run lists the movie, places its credits from the tail
+without sampling it again, and stores the tail again with the new time,
+which settles it, even when its silence pass times out. As for episodes, a tail ruled out by probe
 metadata (no video, or an all-intra codec) is decided on every analysis and
 never stored, and an unusable row an earlier build stored that way does not
 keep a movie out. Such movies, like movies whose credits come from a chapter,

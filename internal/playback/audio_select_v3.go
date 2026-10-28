@@ -113,13 +113,15 @@ func betterUnconvertedAudioTrack(candidate StartAudioOutcomeV3, track models.Aud
 	if candidate.Channels != current.Channels {
 		return candidate.Channels > current.Channels
 	}
-	if a, b := atmosAudioTrack(track), atmosAudioTrack(currentTrack); a != b {
+	if a, b := AtmosAudioTrack(track), AtmosAudioTrack(currentTrack); a != b {
 		return a
 	}
 	return audioCodecQualityRank(track.Codec) > audioCodecQualityRank(currentTrack.Codec)
 }
 
-func atmosAudioTrack(track models.AudioTrack) bool {
+// AtmosAudioTrack reports whether the track's profile or layout names Dolby
+// Atmos (JOC is the E-AC-3 carriage).
+func AtmosAudioTrack(track models.AudioTrack) bool {
 	detail := strings.ToLower(track.Profile + " " + track.Layout)
 	return strings.Contains(detail, "atmos") || strings.Contains(detail, "joc")
 }

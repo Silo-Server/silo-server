@@ -24,8 +24,8 @@ raise its owner's shared allowance.
 
 By default a key is **unscoped** and can reach every route its owner can. A key
 created with `scopes` is an allowlist credential instead: the auth middleware
-admits it only to the routes those scopes name and answers `403` everywhere
-else, including routes added after the key was issued.
+admits it only to the routes those scopes name and answers `403 permission_denied`
+everywhere else, including routes added after the key was issued.
 
 Scopes only narrow. They never grant, and they never bypass the owner's role
 check. `admin:users` on a key owned by a non-admin account still cannot manage
@@ -37,9 +37,9 @@ credential: provisioning and managing ordinary accounts is in scope.
 
 | Attempted write on `/api/v2/admin/users` | Result |
 |------------------------------------------|--------|
-| `POST` with `role: "admin"` | `403 insufficient_scope` |
-| `PUT` with `role: "admin"` | `403 insufficient_scope` |
-| `PUT` with `password` or `role` when the target account is currently an admin | `403 insufficient_scope` |
+| `POST` with `role: "admin"` | `403 permission_denied` |
+| `PUT` with `role: "admin"` | `403 permission_denied` |
+| `PUT` with `password` or `role` when the target account is currently an admin | `403 permission_denied` |
 | `POST` with `password` and a non-admin `role` | allowed |
 | `PUT` with `password` when the target account is not an admin | allowed |
 
@@ -148,13 +148,60 @@ These additions do not change existing unscoped credentials or add client-specif
 permission rules. Existing native clients need no migration; scope catalogs and
 capability documents remain additive.
 
+## Monitoring and session control scopes
+
+Two scopes serve an outside monitoring tool, such as a dashboard that watches
+playback and keeps its own history. Every admin operation they admit requires a
+key owned by an administrator account; on any other account it answers
+`403 permission_denied`. `/events/capabilities` is not an admin operation and
+answers any owner.
+
+`admin:monitor:read` admits these reads, all `GET`:
+
+| Area | Paths under `/api/v2` |
+|---|---|
+| Live sessions | `/admin/sessions`, `/admin/sessions/summary`, `/admin/sessions/capabilities`, `/admin/sessions/command-capabilities`, `/events/capabilities` |
+| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
+| Accounts | `/admin/users`, `/admin/users/capabilities`, `/admin/users/{id}`, and `/admin/users/{id}/` `profiles`, `devices`, `ips`, `downloads`, `downloads/summary`, `watch-summary` |
+| Devices and addresses | `/admin/devices`, `/admin/devices/capabilities`, `/admin/ips` |
+| Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
+| Hosts and nodes | `/admin/system/resources`, `/admin/system/resources/capabilities`, `/admin/nodes/summary`, `/admin/nodes/capabilities`, `/admin/server/status` |
+| Catalog | `/admin/catalog/items`, `/admin/catalog/capabilities` |
+
+The scope never returns filesystem paths, node addresses, storage keys, setting
+values or credentials. Operations that carry them stay outside it: item files, download
+storage, settings, logs, API keys, audit, per-device setting values and node
+sessions. Three monitored reads withhold details from scoped keys:
+
+- `/admin/system/resources` omits each disk's `path`.
+- `/admin/downloads/preparations` omits each job's `error`.
+- Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
+  overrides or capability documents. `/admin/nodes` stays outside the scope.
+
+The stats reads ignore `refresh` for scoped keys and answer from the shared
+cached aggregate, so a polling tool cannot force the aggregate queries.
+
+Unscoped keys and login sessions keep the full documents.
+
+The scope also admits one write, `POST /api/v2/events/ws-ticket`, which opens
+the realtime events socket for the `sessions` and `catalog` channels for up to
+four hours. The key's revision and scope are rechecked every 15 seconds; see
+[API-key handshake](realtime-api.md#api-key-handshake).
+
+`admin:sessions:control` admits `POST /api/v2/admin/sessions/{session_id}/`
+`pause`, `resume`, `stop`, `message` and `terminate`, plus
+`GET /api/v2/admin/sessions/command-capabilities`. It grants no reads beyond
+that; combine it with `admin:monitor:read` to find the sessions to act on.
+
 ## Bridge note
 
 The frozen alpha surface serves the same features at `/api/v1/api-keys`,
 `/api/v1/api-keys/scopes`, `/api/v1/admin/api-keys`,
 `/api/v1/admin/users/{userId}/api-keys`, and `/api/v1/admin/api-keys/{id}/tier`. It
 uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
-cursor pagination, and does not use `ETag`/`If-Match` preconditions. Those routes are
+cursor pagination, and does not use `ETag`/`If-Match` preconditions. V1 answers
+the admin-boundary refusals under [Scopes](#scopes) with `403 insufficient_scope`
+rather than `permission_denied`. Those routes are
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
 against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require

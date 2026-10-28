@@ -1,6 +1,6 @@
 import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
-import { Navigate, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
@@ -248,7 +248,19 @@ export default function ItemDetail() {
         />
       );
     case "podcast":
-      return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
+      // Podcasts are listed in libraries, but no web page shows one yet.
+      return (
+        <PageUnavailable
+          title="Podcasts can't be opened in the web app yet"
+          description={`"${item.title}" is in your library, but the web app has no podcast page.`}
+        >
+          {libraryId !== undefined && (
+            <Button asChild variant="outline">
+              <ViewTransitionLink to={`/library/${libraryId}`}>Browse library</ViewTransitionLink>
+            </Button>
+          )}
+        </PageUnavailable>
+      );
     default:
       return (
         <div className="page-shell text-muted-foreground py-8">

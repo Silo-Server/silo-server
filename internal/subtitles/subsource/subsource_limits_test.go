@@ -49,7 +49,7 @@ func TestDownloadExtractsZippedSubtitle(t *testing.T) {
 	vtt := "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n"
 	p := serveDownload(t, "application/zip", zipArchive(t, "movie.vtt", strings.NewReader(vtt)))
 
-	data, format, err := p.Download(t.Context(), "42")
+	data, format, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestDownloadReturnsPlainSubtitle(t *testing.T) {
 	srt := "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
 	p := serveDownload(t, "application/x-subrip", []byte(srt))
 
-	data, format, err := p.Download(t.Context(), "42")
+	data, format, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDownloadReturnsPlainSubtitle(t *testing.T) {
 func TestDownloadRejectsOversizedResponse(t *testing.T) {
 	p := serveDownload(t, "application/x-subrip", make([]byte, subtitles.MaxProviderResponseSize+1))
 
-	if _, _, err := p.Download(t.Context(), "42"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestDownloadRejectsHighRatioZipEntry(t *testing.T) {
 	archive := zipArchive(t, "movie.srt", io.LimitReader(zeros{}, 64<<20))
 	p := serveDownload(t, "application/zip", archive)
 
-	if _, _, err := p.Download(t.Context(), "42"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(t.Context(), "42", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestDownloadRefusesRedirectOffTheAPIHost(t *testing.T) {
 	}))
 	defer api.Close()
 
-	if _, _, err := New(Config{APIKey: "synthetic", BaseURL: api.URL}).Download(t.Context(), "42"); err == nil {
+	if _, _, err := New(Config{APIKey: "synthetic", BaseURL: api.URL}).Download(t.Context(), "42", subtitles.DownloadTarget{}); err == nil {
 		t.Fatal("download followed an off-host redirect")
 	}
 	// The key travels in a header that Go keeps on a redirect to another

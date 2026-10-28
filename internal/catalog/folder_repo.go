@@ -1169,7 +1169,7 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 		UNION ALL
 		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = ANY($1)
 		UNION ALL
-		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
+		SELECT poster_path, backdrop_path, '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
 		UNION ALL
@@ -1205,7 +1205,7 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 
 // filterUnreferencedImageDirs returns the candidate directories that no
 // surviving row still has artwork under: no item artwork slot, extra backdrop,
-// season poster or episode still outside deletingContentIDs has a path that
+// season poster or backdrop, or episode still outside deletingContentIDs has a path that
 // starts with the directory.
 //
 // The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
@@ -1269,8 +1269,9 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			SELECT b.path FROM media_item_backdrops b
 				WHERE NOT (b.content_id = ANY($2::text[])) AND b.path <> ''
 			UNION ALL
-			SELECT s.poster_path FROM seasons s
-				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''
+			SELECT a.path FROM seasons s
+				CROSS JOIN LATERAL (VALUES (s.poster_path), (s.backdrop_path)) AS a(path)
+				WHERE NOT (s.series_id = ANY($2::text[])) AND a.path <> ''
 			UNION ALL
 			SELECT e.still_path FROM episodes e
 				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''

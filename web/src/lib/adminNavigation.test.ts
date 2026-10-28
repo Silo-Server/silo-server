@@ -12,6 +12,7 @@ describe("admin command palette", () => {
 
     expect(requests?.items.map((item) => [item.label, item.href])).toEqual([
       ["Queue", "/admin/requests"],
+      ["Discover Page", "/admin/requests/discover"],
       ["Settings", "/admin/settings/requests"],
     ]);
   });

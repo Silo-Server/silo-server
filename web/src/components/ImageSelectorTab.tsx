@@ -16,8 +16,8 @@ const IMAGE_TABS: { key: ImageTab; label: string; singular: string; aspect: stri
   { key: "logo", label: "Logos", singular: "logo", aspect: "aspect-video" },
 ];
 
-// Seasons only store a poster; the server rejects other image types for them.
-const SEASON_TABS = IMAGE_TABS.filter((tab) => tab.key === "poster");
+// Seasons store a poster and a backdrop; the server rejects logos for them.
+const SEASON_TABS = IMAGE_TABS.filter((tab) => tab.key !== "logo");
 
 // The server takes JPEG, PNG and WebP uploads up to 10 MiB.
 const UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp"];

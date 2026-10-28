@@ -1,6 +1,7 @@
 package naming
 
 import (
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -599,4 +600,24 @@ func parseCompactEpisode(name string, match []int, season int, hasSeason bool) e
 	}
 	episode := parseEpisodeNumber(name[match[2]+1 : match[3]])
 	return finishEpisodeToken(name, episodeToken{season: compactSeason, seasonKnown: true, compact: true, episode: episode, start: match[0], end: match[3]})
+}
+
+// ExplicitEpisodeCoordinates reads the season and episode range a name labels
+// explicitly, as in S01E05, 1x05, or S01E01E02. Bare numbers such as
+// "Room.104" or "24" are not read as episodes. end equals start for a single
+// episode. Only the base name is read.
+func ExplicitEpisodeCoordinates(name string) (season, start, end int, ok bool) {
+	name = path.Base(filepath.ToSlash(name))
+	if !hasExplicitEpisodeToken(strings.TrimSuffix(name, path.Ext(name))) {
+		return 0, 0, 0, false
+	}
+	hints := ParseFilename(name, seriesContentType)
+	if !hints.SeasonKnown || hints.EpisodeNum == 0 {
+		return 0, 0, 0, false
+	}
+	start, end = hints.EpisodeNum, hints.EpisodeNum
+	if variant := ParseVariantHints(name, seriesContentType); variant.MultiEpisodeStart == start && variant.MultiEpisodeEnd > start {
+		end = variant.MultiEpisodeEnd
+	}
+	return hints.SeasonNum, start, end, true
 }

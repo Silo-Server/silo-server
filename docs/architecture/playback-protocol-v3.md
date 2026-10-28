@@ -482,7 +482,7 @@ required and are one of:
 | --- | --- | --- |
 | `exact` | Android (`MediaCodecList`) | Full strict validation. The server walks `video_decode[]` and requires a hardware entry matching codec, profile, level, bit depth, and every `max_*` bound. Only this tier can earn a validated audio **passthrough** claim. |
 | `platform_attested` | Apple (platform-backed Aether decoder stack) | Same walk. Profile and level are **skipped for hardware entries** because the platform cannot enumerate them; explicitly opted-in software entries enforce any profiles/levels the pinned stack supplies. All other bounds still apply. |
-| `declared` | Web (`isTypeSupported`) | Flat list match only: `codecs_video` / `codecs_video_hardware` membership. No `video_decode[]` walk. |
+| `declared` | Web (`isTypeSupported`) | Flat list match: `codecs_video` / `codecs_video_hardware` membership. A `video_decode[]` entry naming the source codec can only narrow that match (its bounds must admit the source; `hardware` is ignored); it never grants a codec the flat lists lack. The web sends the H.264 bit depths its probes accepted, such as `{"codec":"h264","bit_depths":[8]}` when the browser refuses H.264 High 10. |
 
 Four rules follow from the table and are easy to get wrong:
 
@@ -494,8 +494,8 @@ direct route. The plan is downgraded and carries the decision reason
 `evidence_insufficient_for_direct` plus the matching degradation warning, which
 distinguishes "your evidence didn't support this" from "your device said no." A
 client advertising a strict tier must populate `video_decode[]`; the flat lists
-alone earn it nothing. On `declared` the flat lists are the whole mechanism, so
-that tier never produces this signal.
+alone earn it nothing. On `declared` the flat lists grant eligibility and any
+`video_decode[]` entry only restricts it, so that tier never produces this signal.
 
 Note the precise trigger: the signal fires only when *no* entry named the codec.
 If an entry matched the codec but the source exceeded one of its bounds — a
@@ -513,7 +513,7 @@ Download creation reuses this bounded vocabulary additively inside `caps`:
 `client_features`, `video_evidence`, and `video_decode` have the same meanings
 and limits. Opting in requires a non-empty exact/platform-attested detailed
 list; malformed partial opt-ins are rejected rather than falling back to flat
-claims. This matters when hardware and software decoders have different
+claims, so the `declared` narrowing entries playback accepts are refused there. This matters when hardware and software decoders have different
 ceilings: the flat `max_resolution` remains a coarse device ceiling, while the
 detailed entry decides whether a particular original file is safe. Apple keeps
 the legacy coarse ceiling at 1080p so older servers fail safely; a detailed

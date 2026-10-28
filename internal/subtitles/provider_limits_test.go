@@ -48,26 +48,51 @@ func TestProviderErrorBodyIsBounded(t *testing.T) {
 	}
 }
 
-func TestExtractSubtitleFromZipReturnsFirstSubtitle(t *testing.T) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for name, content := range map[string]string{"readme.txt": "ignore", "movie.en.ass": "[Script Info]\n"} {
-		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.WriteString(w, content)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
+func TestExtractSubtitleFromZipPicksTargetEpisode(t *testing.T) {
+	s01e02 := DownloadTarget{Season: 1, Episode: 2}
+	for _, tc := range []struct {
+		name    string
+		entries []string
+		target  DownloadTarget
+		want    string // entry whose content is returned; "" expects ErrNoEpisodeSubtitle
+	}{
+		{"movie takes the first subtitle", []string{"readme.txt", "movie.en.ass", "movie.fr.srt"}, DownloadTarget{}, "movie.en.ass"},
+		{"season pack", []string{"Show.S01/Show.S01E01.ar.srt", "Show.S01/Show.S01E02.ar.srt", "Show.S01/Show.S01E03.ar.srt"}, s01e02, "Show.S01/Show.S01E02.ar.srt"},
+		{"NxNN names", []string{"Show - 1x01.srt", "Show - 1x02.srt"}, s01e02, "Show - 1x02.srt"},
+		{"season must match", []string{"Show.S02E02.srt", "Show.S01E02.srt"}, s01e02, "Show.S01E02.srt"},
+		{"macOS resource forks are skipped", []string{"__MACOSX/._Show.S01E02.srt", "Show.S01E02.srt"}, s01e02, "Show.S01E02.srt"},
+		{"multi-episode file takes the range", []string{"Show.S01E01.srt", "Show.S01E01E02.srt"}, DownloadTarget{Season: 1, Episode: 1, EndEpisode: 2}, "Show.S01E01E02.srt"},
+		{"multi-episode file falls back to its first episode", []string{"Show.S01E02.srt", "Show.S01E01.srt"}, DownloadTarget{Season: 1, Episode: 1, EndEpisode: 2}, "Show.S01E01.srt"},
+		{"single episode skips a range", []string{"Show.S01E01E02.srt", "Show.S01E01.srt"}, DownloadTarget{Season: 1, Episode: 1}, "Show.S01E01.srt"},
+		{"unlabeled entries keep the first", []string{"Show.en.srt", "Show.en.sdh.srt"}, s01e02, "Show.en.srt"},
+		{"another episode alone fails", []string{"Show.S01E01.srt"}, s01e02, ""},
+		{"bare numbers are not episodes", []string{"Room.102.srt", "Show.S01E01.srt"}, s01e02, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			zw := zip.NewWriter(&buf)
+			for _, name := range tc.entries {
+				w, err := zw.Create(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.WriteString(w, name)
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-	content, format, err := ExtractSubtitleFromZip(buf.Bytes())
-	if err != nil {
-		t.Fatalf("ExtractSubtitleFromZip() error = %v", err)
-	}
-	if string(content) != "[Script Info]\n" || format != FormatASS {
-		t.Fatalf("got %q %q", content, format)
+			content, _, err := ExtractSubtitleFromZip(buf.Bytes(), tc.target)
+			if tc.want == "" {
+				if !errors.Is(err, ErrNoEpisodeSubtitle) {
+					t.Fatalf("got %q, %v; want ErrNoEpisodeSubtitle", content, err)
+				}
+				return
+			}
+			if err != nil || string(content) != tc.want {
+				t.Fatalf("got %q, %v; want %q", content, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -88,7 +113,7 @@ func TestExtractSubtitleFromZipRejectsOversizedEntry(t *testing.T) {
 		t.Fatalf("archive is %d bytes, want a high-ratio archive under 1 MiB", buf.Len())
 	}
 
-	if _, _, err := ExtractSubtitleFromZip(buf.Bytes()); !errors.Is(err, ErrSubtitleTooLarge) {
+	if _, _, err := ExtractSubtitleFromZip(buf.Bytes(), DownloadTarget{}); !errors.Is(err, ErrSubtitleTooLarge) {
 		t.Fatalf("ExtractSubtitleFromZip() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -125,7 +150,7 @@ func TestExtractSubtitleFromZipStopsAtDeclaredSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, _, err := ExtractSubtitleFromZip(buf.Bytes())
+	content, _, err := ExtractSubtitleFromZip(buf.Bytes(), DownloadTarget{})
 	if err == nil {
 		t.Fatalf("ExtractSubtitleFromZip() returned %d bytes, want an error", len(content))
 	}

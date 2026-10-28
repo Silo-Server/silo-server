@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 // A local root holds every blob kind under one namespace since operational
@@ -186,6 +187,55 @@ func TestPrivateOnlyTransitionKeepsAliasedArtworkIdentity(t *testing.T) {
 	}
 	if got := settings.values[blobstore.IdentitySettingKey]; got != "" && got != source.Identity() {
 		t.Fatalf("recorded artwork identity = %q, want it left as %q", got, source.Identity())
+	}
+}
+
+// The active store keeps the identity recorded under a link. If the link is
+// later pointed at another directory, a transition to that directory is a
+// real move: the artwork is still where the store opened it.
+func TestTransitionToRetargetedLinkCopiesArtwork(t *testing.T) {
+	base := t.TempDir()
+	first, second := filepath.Join(base, "first"), filepath.Join(base, "second")
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(filepath.Join(dir, "artwork"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(first, linked); err != nil {
+		t.Fatal(err)
+	}
+	recorded := &memorySettings{values: map[string]string{blobstore.IdentitySettingKey: "local|" + filepath.Join(linked, "artwork")}}
+	stores, _, err := blobstore.Open(t.Context(), blobstore.Options{Backend: blobstore.BackendLocal, LocalPath: filepath.Join(linked, "artwork"), Settings: recorded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.Assets.Put(t.Context(), "tmdb/movie/1/poster/a.webp", []byte("artwork")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(second, linked); err != nil {
+		t.Fatal(err)
+	}
+	target, err := blobstore.NewFilesystem(filepath.Join(second, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(second, "artwork")})
+	service := New(nil, settings, nil, stores.Assets, nil)
+	service.reconcile = func(context.Context, blobstore.Store, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
+		return metadata.ArtworkReconcileStats{}, nil
+	}
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return nil }
+
+	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
+		t.Fatalf("transition to the directory the link now names failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second, "artwork", "tmdb", "movie", "1", "poster", "a.webp")); err != nil {
+		t.Fatalf("artwork not copied to the new directory: %v", err)
 	}
 }
 

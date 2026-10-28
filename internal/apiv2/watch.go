@@ -179,6 +179,19 @@ type WatchChapter struct {
 type WatchMarker struct {
 	StartSeconds float64 `json:"start_seconds" example:"0"`
 	EndSeconds   float64 `json:"end_seconds" example:"90"`
+	// Source is the class of source that produced the range: "scanner" for
+	// local detection, "plugin" or "online" for a marker provider, "manual" for
+	// one a person set. Absent when the file row recorded no source.
+	Source string `json:"source,omitempty" enum:"scanner,online,plugin,s3,manual"`
+	// Provider is the provider that supplied the range — a plugin capability id
+	// such as "introdb", or "built_in" — empty for local detection.
+	Provider string `json:"provider,omitempty"`
+	// Confidence is the source's own rating, 0-1, absent when the marker was
+	// never rated. It is a pointer because an unrated marker is stored as 0, and
+	// a client rendering that as a real "0%" would be inventing a measurement.
+	Confidence *float64 `json:"confidence,omitempty" minimum:"0" maximum:"1"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4" or "introdb:v4".
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
 // WatchPlaybackVariant is one logical watch choice.
@@ -494,7 +507,16 @@ func watchMarkerOf(m *catalogpkg.Marker) *WatchMarker {
 	if m == nil {
 		return nil
 	}
-	return &WatchMarker{StartSeconds: m.Start, EndSeconds: m.End}
+	out := &WatchMarker{
+		StartSeconds: m.Start,
+		EndSeconds:   m.End,
+		Source:       m.Source,
+		Provider:     m.Provider,
+		Algorithm:    m.Algorithm,
+	}
+	// Absent, not zero: an unrated marker must not read as a rated 0.
+	out.Confidence = m.Confidence
+	return out
 }
 
 func watchUserDataOf(u *catalogpkg.SeasonUserData) *WatchUserData {

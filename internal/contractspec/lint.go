@@ -125,7 +125,9 @@ func lintStatuses(fail func(string, ...any), where, path, method string, op oper
 	if !success {
 		fail("%s: no success status is documented", where)
 	}
-	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"), guarded, conditional, createOnly)
+	// The document does not name rate-limit buckets, so the 429 a bucket
+	// implies on a public operation is checked in internal/apiv2 instead.
+	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"), guarded, conditional, createOnly, false)
 	if protocol != "" {
 		if strings.TrimSpace(stringExt(op.Extensions, "x-silo-raw-reason")) == "" {
 			fail("%s: raw protocol requires its exclusion reason", where)

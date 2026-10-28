@@ -303,7 +303,8 @@ global position through `POST /api/v2/sync/progress`.
 Stop accepts `{installation_id, stop_id}` plus an optional final sample
 `{sequence, position, is_paused}`; `sequence` and `position` appear together or
 not at all. `stop_id` is a canonical UUID the client mints once and keeps on
-every retry. The first stop wins a compare-and-set on `stopped_at`: it applies
+every retry; a `stop_id` the server mints for its own ends (below) is refused
+with `400`. The first stop wins a compare-and-set on `stopped_at`: it applies
 the final sample when it is newer than the last progress, runs the stop and
 history writer, stops the local session and transcode, writes the stream deny
 marker and stores the receipt on the row. The reply is
@@ -319,8 +320,16 @@ stop call allows up to 30 seconds for pending progress, then a separate
 expires. A page reload discards this in-memory retry state.
 
 A session that expires or is aborted server-side is stopped under a
-server-minted `stop_id` (UUID v5 of the session id), so a later client stop
-replays and a start replay reports `session_expired`.
+server-minted `stop_id` (a UUID v5 of the session id, one for each of expiry
+and abort), so a later client stop replays and a start replay reports
+`session_expired`. Every way a session ends, on any API server, stops the row
+and claims the receipt's finalization before it writes watch history, provider
+events or the admin log; an end that loses that race writes none of them and
+only releases what its own server holds. An end that finds the row stopped by
+an end whose server died before finishing it, and whose claim has lapsed,
+finishes it as that end, with its provider events; an expiry of a copy on
+another server does the same. The admin log records the reason of the stop
+that won the row.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a

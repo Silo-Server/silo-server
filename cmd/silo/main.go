@@ -112,6 +112,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -1350,6 +1351,20 @@ func main() {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
 
+	// One TMDB client serves every feature in this process, so they share its
+	// response caches and spend one budget of tmdb.RequestsPerSecond: with
+	// Redis, one budget for every node together. Each wait bounds its own
+	// Redis call, so that client must let the deadline end a stalled read.
+	tmdbRedisClient, tmdbRedisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+	if tmdbRedisErr != nil {
+		slog.Warn("redis client init failed; TMDB requests are limited per process", "error", tmdbRedisErr)
+	} else if tmdbRedisClient != nil {
+		defer func() { _ = cache.CloseRedisClient(tmdbRedisClient) }()
+	}
+	tmdbClient := tmdb.NewClientWithLimiter(cfg.TMDBAPIKey,
+		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", tmdb.RequestsPerSecond))
+	defer tmdbClient.Close()
+
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
 		streamTelemetryRegistry.Start(appCtx)
@@ -1395,6 +1410,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		TMDB:                         tmdbClient,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -1509,6 +1525,12 @@ func main() {
 		watchProviderService = watchsync.NewService(watchProviderRepo, watchProviderRegistry)
 		deps.WatchProviderService = watchProviderService
 		deps.WatchProviderRegistry = watchProviderRegistry
+	}
+
+	// Every API server drains the catalog item change outbox; a row in the
+	// database spaces the drains out across the cluster.
+	if mode == "integrated" || mode == "api" {
+		go realtimeHub.RunItemChangePublisher(appCtx, catalog.NewItemChangeOutbox(pool))
 	}
 
 	// Initialize node pools for integrated/api modes.
@@ -1766,28 +1788,14 @@ func main() {
 			BaseDir: pluginCacheDir,
 		})
 
-		libDataSource := pluginhost.LibraryDataSourceFunc(
-			func(ctx context.Context, _ string) ([]pluginhost.LibraryRecord, error) {
-				// TODO: scope by userID when the requests plugin needs it (Plan B).
-				// For now, all callers see admin-scope.
-				if deps.FolderRepo == nil {
-					return nil, nil
-				}
-				folders, err := deps.FolderRepo.List(ctx)
-				if err != nil {
-					return nil, err
-				}
-				out := make([]pluginhost.LibraryRecord, 0, len(folders))
-				for _, f := range folders {
-					out = append(out, pluginhost.LibraryRecord{
-						ID:        strconv.Itoa(f.ID),
-						Name:      f.Name,
-						MediaType: mapFolderTypeToMediaType(f.Type),
-					})
-				}
-				return out, nil
-			},
-		)
+		libSource := pluginLibrarySource{groups: accessGroupStore}
+		if deps.FolderRepo != nil {
+			libSource.folders = deps.FolderRepo
+		}
+		if deps.DB != nil {
+			libSource.users = auth.NewUserRepository(deps.DB)
+		}
+		var libDataSource pluginhost.LibraryDataSource = libSource
 		presenceItemRepo := catalog.NewItemRepository(deps.DB)
 		catalogPresence := pluginhost.NewCatalogPresence(
 			func(ctx context.Context, mediaType string, tmdbIDs []string) ([]pluginhost.LibraryPresenceRecord, error) {
@@ -2260,11 +2268,9 @@ func main() {
 				},
 			)
 			// Local file:// artwork (NFO sidecars): confine reads to the owning
-			// library's roots and sweep stale hashed local/ prefixes on re-cache.
-			// The process whose refresh discovers a sidecar copies it, so a
-			// server without the library mount never has to.
+			// library's roots. The process whose refresh discovers a sidecar
+			// copies it, so a server without the library mount never has to.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
-			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
 			metadataService.SetLocalArtworkCopier(metadataImageCacheProcessor)
 			// The admin image picker previews and applies the same local files,
 			// under the same confinement.
@@ -2769,6 +2775,9 @@ func main() {
 			}
 		}
 		deps.SessionSyncer = reconciler
+		deps.LiveSessionRowJSON = func(s *playback.Session) (json.RawMessage, error) {
+			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity), nodeIdentity)
+		}
 
 		nodeURL := fmt.Sprintf("http://%s%s", nodeIdentity, cfg.Server.Listen)
 		heartbeatWriter = worker.NewHeartbeatWriter(deps.DB, nodeIdentity, mode, nodeURL)
@@ -3063,7 +3072,7 @@ func main() {
 		collItemRepo := catalog.NewItemRepository(deps.DB)
 		libraryItemRepo := catalog.NewLibraryItemRepository(deps.DB)
 		collectionService := catalog.NewLibraryCollectionService(collectionRepo, collItemRepo, libraryItemRepo, nil)
-		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(cfg.TMDBAPIKey)
+		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(tmdbClient)
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
 
@@ -3413,7 +3422,7 @@ func main() {
 				brandingReconciler,
 				identity,
 				deps.DB,
-			)
+			).WithLocation(blobstore.Location(deps.Blobs.Assets))
 			taskMgr.Register(reconcileArtwork)
 			go func() {
 				if err := reconcileArtwork.CheckStorageIdentity(appCtx); err != nil {
@@ -3456,7 +3465,7 @@ func main() {
 		// request was created.
 		requestReconcileSvc := mediarequests.NewService(
 			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
-			tmdb.NewClient(cfg.TMDBAPIKey, 40),
+			tmdbClient,
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
 				catalog.NewProviderIDRepository(deps.DB),
@@ -3486,6 +3495,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100, deps.DB))
 		taskMgr.Register(tasks.NewRefreshRequestDownloadsTask(requestReconcileSvc, 200, deps.DB))
+		taskMgr.Register(tasks.NewRefreshRequestDiscoverListsTask(discoverrows.NewRefresher(
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
+			discoverrows.NewSnapshotRepository(deps.DB),
+			tmdbClient,
+		)))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {

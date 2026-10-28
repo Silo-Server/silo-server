@@ -633,6 +633,36 @@
       "notes": "The replacement for playback.auto_skip_intro, which could only say \"prompt\" or \"count down then skip\" and had no way to turn the prompt off. The default is \"ask\", which is exactly what auto_skip_intro=false did, so an untouched profile behaves identically across the cutover. The schema has no segmented control, so this is a select; clients that have a segmented control should use it. See docs/design/2026-08-16-intro-skip-mode.md."
     },
     {
+      "key": "playback.show_marker_confidence",
+      "introduced_in": 24,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "category": "playback",
+      "label": "Show marker confidence",
+      "description": "Show how confident the source is above the Skip Intro button. Each source rates on its own scale, so the percentage is only comparable within one source; turn the source line on to see which one it is.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.show_marker_source",
+      "introduced_in": 24,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "category": "playback",
+      "label": "Show marker source",
+      "description": "Show where the skip came from above the Skip Intro button: Silo's own detection, a person, or the provider that supplied the marker.",
+      "recommended_control": "switch"
+    },
+    {
       "key": "playback.auto_skip_credits",
       "introduced_in": 1,
       "persistence": "remote",
