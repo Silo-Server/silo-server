@@ -47,6 +47,18 @@ const (
 // nothing about whether any optional step was configured.
 const SetupCompletedSettingKey = "setup.completed"
 
+// DashboardHiddenAttentionSettingKey lists the setup notices (by health item
+// id, such as "email") an admin hid from the Dashboard's Needs attention
+// panel, as a JSON array of strings. It is server-wide, so a server that
+// deliberately runs without mail stops asking every admin. Only the web
+// client reads it; empty hides nothing.
+const DashboardHiddenAttentionSettingKey = "ui.dashboard.hidden_attention"
+
+const (
+	maxDashboardHiddenAttentionIDs   = 32
+	maxDashboardHiddenAttentionIDLen = 64
+)
+
 // CatalogScopeVersionsToLibrarySettingKey makes a library-scoped catalog read
 // (library_id on the v2 item, versions, and episode operations) return only
 // the files stored in that library. Off, the default, keeps every accessible
@@ -903,6 +915,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
+	case DashboardHiddenAttentionSettingKey:
+		return normalizeDashboardHiddenAttention(value)
+
 	case "defaults.card_overlays", "opslog.bucket_policies", "ui.admin_theme_vars":
 		if value == "" {
 			return "", nil
@@ -1332,6 +1347,40 @@ func normalizeRatingSourceList(key, value string) (string, error) {
 		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
 	}
 	return strings.Join(sources, ","), nil
+}
+
+// normalizeDashboardHiddenAttention canonicalizes the hidden notice list:
+// trimmed, unique, non-empty ids in their original order. An empty list
+// stores as empty.
+func normalizeDashboardHiddenAttention(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(value), &ids); err != nil {
+		return "", fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	}
+	kept := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if len(id) > maxDashboardHiddenAttentionIDLen {
+			return "", fmt.Errorf("%s ids must be at most %d characters", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDLen)
+		}
+		seen[id] = true
+		kept = append(kept, id)
+	}
+	if len(kept) > maxDashboardHiddenAttentionIDs {
+		return "", fmt.Errorf("%s may list at most %d ids", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDs)
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	encoded, _ := json.Marshal(kept)
+	return string(encoded), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
