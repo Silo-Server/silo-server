@@ -95,9 +95,9 @@ a file-level value
 fills a field that track lacks. Fields the scanner has not probed are absent.
 
 To keep a mirror current between full passes, subscribe to the `catalog` channel
-of the v2 events socket, which takes a ticket minted by an access-token login
-session (see [realtime-api.md](realtime-api.md#session-bound-socket-handshake)).
-Administrators receive `catalog.item.changed` with
+of the v2 events socket. An API key with the `admin:monitor:read` scope can mint
+its ticket (see [realtime-api.md](realtime-api.md#api-key-handshake)), as can an
+administrator's access-token login session. Administrators receive `catalog.item.changed` with
 `change` `added`, `removed` or `files_changed`, carrying ids only (see
 [realtime-api.md](realtime-api.md#catalog-item-changes)); fetch the named items
 with `content_ids`, and drop any the listing no longer returns. Fetch on
