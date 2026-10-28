@@ -2,8 +2,10 @@ package metadata
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -74,4 +76,31 @@ func setProviderSeasonBackdrop(season, existing *models.Season, offered string, 
 		return
 	}
 	season.BackdropPath, season.BackdropSourcePath, season.BackdropThumbhash = offered, offered, ""
+}
+
+// clearOmittedSeasonBackdrops clears, after Identify, the backdrop of each
+// stored season of seriesID that the corrected match names in neither its
+// seasons nor its episodes, such as one known only from file names: it may
+// still show the previous match's art. The caller checks the images lock.
+func (s *MetadataService) clearOmittedSeasonBackdrops(ctx context.Context, seriesID string, seasons []SeasonResult, episodes []EpisodeResult) {
+	if s.seasonRepo == nil {
+		return
+	}
+	named := make(map[int]struct{}, len(seasons)+len(episodes))
+	for _, season := range seasons {
+		named[season.SeasonNumber] = struct{}{}
+	}
+	for _, episode := range episodes {
+		named[episode.SeasonNumber] = struct{}{}
+	}
+	keep := make([]int32, 0, len(named))
+	for seasonNumber := range named {
+		if catalog.FitsPostgresInteger(seasonNumber) {
+			keep = append(keep, int32(seasonNumber)) //nolint:gosec // FitsPostgresInteger checked the range
+		}
+	}
+	if err := s.seasonRepo.ClearBackdropsExcept(ctx, seriesID, keep); err != nil {
+		slog.WarnContext(ctx, "metadata: failed to clear backdrops of seasons the new match omits", "component", "metadata",
+			"series_id", seriesID, "error", err)
+	}
 }

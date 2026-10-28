@@ -121,3 +121,32 @@ func backdropJob(inputs []EnqueueImageCacheJobInput) *EnqueueImageCacheJobInput 
 	}
 	return nil
 }
+
+// An Identify whose corrected match has no seasons or episodes at all still
+// clears the previous match's season backdrops.
+func TestIdentifyWithoutChildMetadataClearsSeasonBackdrops(t *testing.T) {
+	h := newTestHarness()
+	seasonRepo := newFakeSeasonRepo()
+	h.service.seasonRepo = seasonRepo
+	ctx := withSeasonBackdropAuthority(context.Background(), seasonBackdropsReidentified)
+	const contentID = "series:tvdb:200"
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID, Type: "series", Title: "Corrected Show", Status: "matched", TvdbID: "200",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seasonRepo.seasons[seasonKey(contentID, 1)] = &models.Season{
+		ContentID: "season-1", SeriesID: contentID, SeasonNumber: 1,
+		BackdropPath: "tvdb://previous-show.jpg", BackdropSourcePath: "tvdb://previous-show.jpg",
+	}
+
+	if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeIdentify, Language: "en"},
+		&MetadataResult{HasMetadata: true, Title: "Corrected Show", ProviderIDs: map[string]string{"tvdb": "200"}},
+		nil, nil, nil, "series"); err != nil {
+		t.Fatal(err)
+	}
+	if got := seasonRepo.seasons[seasonKey(contentID, 1)]; got.BackdropPath != "" || got.BackdropSourcePath != "" {
+		t.Fatalf("season backdrop = %q from %q, want it cleared", got.BackdropPath, got.BackdropSourcePath)
+	}
+}

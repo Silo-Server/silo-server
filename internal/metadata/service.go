@@ -3197,6 +3197,9 @@ func (s *MetadataService) mergeAndPersist(
 	if contentType == "series" && !req.writesFieldsOnly() {
 		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
+		} else if isCanonicalWrite && seasonBackdropAuthorityOf(ctx) == seasonBackdropsReidentified && !artworkLocked(item) {
+			// The corrected match has no seasons or episodes at all.
+			s.clearOmittedSeasonBackdrops(ctx, contentID, nil, nil)
 		}
 		if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to synthesize fallback series structure", "component", "metadata",
@@ -6066,27 +6069,8 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		}
 	}
 
-	// After Identify, a stored season the corrected match names in neither its
-	// seasons nor its episodes, such as one known only from file names, may
-	// still show the previous match's backdrop.
 	if backdropAuthority == seasonBackdropsReidentified && !imagesLocked {
-		named := make(map[int]struct{}, len(seasons)+len(episodes))
-		for _, season := range seasons {
-			named[season.SeasonNumber] = struct{}{}
-		}
-		for _, episode := range episodes {
-			named[episode.SeasonNumber] = struct{}{}
-		}
-		keep := make([]int32, 0, len(named))
-		for seasonNumber := range named {
-			if catalog.FitsPostgresInteger(seasonNumber) {
-				keep = append(keep, int32(seasonNumber)) //nolint:gosec // FitsPostgresInteger checked the range
-			}
-		}
-		if err := s.seasonRepo.ClearBackdropsExcept(ctx, seriesID, keep); err != nil {
-			slog.WarnContext(ctx, "metadata: failed to clear backdrops of seasons the new match omits", "component", "metadata",
-				"series_id", seriesID, "error", err)
-		}
+		s.clearOmittedSeasonBackdrops(ctx, seriesID, seasons, episodes)
 	}
 
 	// Phase 3: Prefetch the requested episode rows, including provider-only rows
