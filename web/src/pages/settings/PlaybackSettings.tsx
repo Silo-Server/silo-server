@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { TheIntroDbReportSettings } from "@/components/settings/TheIntroDbReportSettings";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -435,15 +436,25 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
   );
+  // The two provenance keys arrived together, so one gate covers both. Rows for
+  // keys the server does not define are left out rather than rendered dead: a
+  // switch that cannot save is worse than no switch.
+  const supportsMarkerProvenance = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
+  );
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
       ...(supportsBuffering ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
+      ...(supportsMarkerProvenance
+        ? [SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE]
+        : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsBuffering],
+    [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
@@ -571,6 +582,42 @@ export default function PlaybackSettings() {
           />
         )}
 
+        {supportsMarkerProvenance && (
+          <SettingRow
+            label={SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE].label}
+            description={
+              SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE].description
+            }
+            control={(id) => (
+              <Switch
+                id={id}
+                checked={read<boolean>(SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE)}
+                disabled={pending}
+                onCheckedChange={(checked) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, checked)
+                }
+              />
+            )}
+          />
+        )}
+
+        {supportsMarkerProvenance && (
+          <SettingRow
+            label={SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE].label}
+            description={SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE].description}
+            control={(id) => (
+              <Switch
+                id={id}
+                checked={read<boolean>(SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE)}
+                disabled={pending}
+                onCheckedChange={(checked) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE, checked)
+                }
+              />
+            )}
+          />
+        )}
+
         <SettingRow
           label="Auto-skip recaps"
           description="Skip 'previously on…' recaps automatically when Silo can detect them."
@@ -601,6 +648,11 @@ export default function PlaybackSettings() {
           )}
         />
       </SettingsGroup>
+
+      {/* Sits with the marker settings above: these are the same feature seen
+          from the reporting side, and the viewer's own key lives here rather
+          than on the admin plugin page, which is server-wide. */}
+      <TheIntroDbReportSettings />
 
       <SettingsGroup title="Next episode">
         <SettingRow

@@ -36,10 +36,10 @@ export interface PlayerFileVersion {
   video_tracks?: PlayerVideoTrack[];
   audio_tracks?: PlayerAudioTrack[];
   chapters?: PlayerChapter[];
-  intro?: PlayerTimeRange | null;
-  credits?: PlayerTimeRange | null;
-  recap?: PlayerTimeRange | null;
-  preview?: PlayerTimeRange | null;
+  intro?: PlayerMarkerRange | null;
+  credits?: PlayerMarkerRange | null;
+  recap?: PlayerMarkerRange | null;
+  preview?: PlayerMarkerRange | null;
   marker_segments?: PlayerMarkerSegment[];
   /** Seek-bar previews are published for this file. */
   trickplay_available?: boolean;
@@ -180,6 +180,28 @@ export interface PlayerTimeRange {
 }
 
 /**
+ * Where a marker came from, as the server recorded it beside the range.
+ *
+ * Provenance is per file and kind, not per occurrence: one row holds one
+ * origin for intro, so every occurrence of a kind shares it.
+ *
+ * [confidence] is absent rather than 0 for an unrated marker — the server
+ * stores "nobody rated this" as 0, and rendering that as a real "0%" would
+ * invent a measurement. It also has no single scale: local detection, a
+ * chapter, and each provider each rate on their own, so it is only meaningful
+ * shown next to the source it came from.
+ */
+export interface PlayerMarkerProvenance {
+  source?: string | null;
+  provider?: string | null;
+  confidence?: number | null;
+  algorithm?: string | null;
+}
+
+/** A marker range with the provenance recorded beside it. */
+export interface PlayerMarkerRange extends PlayerTimeRange, PlayerMarkerProvenance {}
+
+/**
  * The four editable marker/segment kinds. Note "credits" is what the
  * Jellyfin-compatible API exposes as "Outro" — there is no separate outro kind.
  */
@@ -204,7 +226,7 @@ export interface MarkerDraft {
 }
 
 /** A marker range positioned on the seek bar, tagged with its kind for color. */
-export interface MarkerRegionView {
+export interface MarkerRegionView extends PlayerMarkerProvenance {
   thumbnail_url?: string;
   thumbnail_thumbhash?: string;
   thumbnail_capture_seconds?: number;
@@ -297,9 +319,13 @@ export interface WatchPageProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  intro: PlayerTimeRange | null;
+  intro: PlayerMarkerRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */
   introSkipMode?: IntroSkipMode | null;
+  /** Show the marker's confidence above the skip prompt. Off by default. */
+  showMarkerConfidence?: boolean;
+  /** Show which source the skip came from above the skip prompt. Off by default. */
+  showMarkerSource?: boolean;
   /** Effective profile mode, seeded by the host before its settings read resolves. */
   bufferingMode?: BufferingMode;
   credits: PlayerTimeRange | null;

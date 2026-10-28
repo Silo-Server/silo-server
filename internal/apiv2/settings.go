@@ -182,13 +182,14 @@ type PluginAsset struct {
 // PluginSettingsInstallation is an enabled installation's user settings
 // surface.
 type PluginSettingsInstallation struct {
-	ID               ID                    `json:"id" doc:"Installation identifier" example:"3"`
-	PluginID         string                `json:"plugin_id" doc:"The plugin's stable identifier" example:"org.example.subtitles"`
-	Version          string                `json:"version" doc:"Installed version" example:"1.2.0"`
-	UserConfigSchema []PluginSettingSchema `json:"user_config_schema" doc:"Settings the plugin asks each account for; empty when it only exposes navigable routes"`
-	Routes           []PluginRoute         `json:"routes" doc:"Routes the plugin exposes; empty, never null"`
-	Assets           []PluginAsset         `json:"assets" doc:"Packaged assets; empty, never null"`
-	Category         string                `json:"category,omitempty" doc:"Slash-delimited grouping for the Apps navigation; absent when the manifest declares none" example:"Tools/Utilities"`
+	ID                   ID                    `json:"id" doc:"Installation identifier" example:"3"`
+	PluginID             string                `json:"plugin_id" doc:"The plugin's stable identifier" example:"org.example.subtitles"`
+	Version              string                `json:"version" doc:"Installed version" example:"1.2.0"`
+	UserConfigSchema     []PluginSettingSchema `json:"user_config_schema" doc:"Settings the plugin asks each account for; empty when it only exposes navigable routes"`
+	Routes               []PluginRoute         `json:"routes" doc:"Routes the plugin exposes; empty, never null"`
+	Assets               []PluginAsset         `json:"assets" doc:"Packaged assets; empty, never null"`
+	Category             string                `json:"category,omitempty" doc:"Slash-delimited grouping for the Apps navigation; absent when the manifest declares none" example:"Tools/Utilities"`
+	ConfiguredGlobalKeys []string              `json:"configured_global_keys" doc:"Global config keys the operator has filled in; a per-account setting that depends on one can only be offered when it is present. Values are never included. Empty, never null."`
 }
 
 // PluginSettingsInstallationCollection is the listPluginSettings response
@@ -630,13 +631,14 @@ func pluginSettingsInstallationFromView(v handlers.PluginUserSettingsView) Plugi
 		assets = append(assets, PluginAsset(a))
 	}
 	return PluginSettingsInstallation{
-		ID:               IDFromInt(int64(v.ID)),
-		PluginID:         v.PluginID,
-		Version:          v.Version,
-		UserConfigSchema: schemas,
-		Routes:           routes,
-		Assets:           assets,
-		Category:         v.Category,
+		ID:                   IDFromInt(int64(v.ID)),
+		PluginID:             v.PluginID,
+		Version:              v.Version,
+		UserConfigSchema:     schemas,
+		Routes:               routes,
+		Assets:               assets,
+		Category:             v.Category,
+		ConfiguredGlobalKeys: append([]string{}, v.ConfiguredGlobalKeys...),
 	}
 }
 

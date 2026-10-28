@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { markerProvenanceLabel } from "@/lib/markerProvenance";
+import type { PlayerMarkerProvenance } from "../types";
 
 interface IntroSkipButtonProps {
   onSkip: () => void;
@@ -12,6 +15,21 @@ interface IntroSkipButtonProps {
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
   controlsVisible?: boolean;
   focusOnMount?: boolean;
+  /**
+   * Where the marked range came from. Rendered as a muted line above the pill
+   * when one of the provenance settings is on; absent — or unrated with only
+   * the confidence setting on — draws nothing, so the pill keeps the shape it
+   * had before these settings existed.
+   */
+  provenance?: PlayerMarkerProvenance | null;
+  showConfidence?: boolean;
+  showSource?: boolean;
+  /**
+   * Rendered UNDER the pill, as the next child of the prompt's own column — the
+   * report control. Absent draws nothing, so a viewer without the integration sees
+   * the prompt exactly as it was.
+   */
+  trailing?: ReactNode;
 }
 
 /**
@@ -25,6 +43,10 @@ export function IntroSkipButton({
   timer,
   controlsVisible = true,
   focusOnMount = false,
+  provenance,
+  showConfidence = false,
+  showSource = false,
+  trailing,
 }: IntroSkipButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -49,6 +71,13 @@ export function IntroSkipButton({
       ? Math.min(1, Math.max(0, 1 - timerRemaining / timer.durationMs))
       : null;
 
+  // Above the caption, not between it and the button: the `always` undo's
+  // confirmation is deliberately adjacent to its action, and a metadata line
+  // wedged in there would rebuild the two-instruction block that copy avoided.
+  const provenanceLabel = provenance
+    ? markerProvenanceLabel(provenance, { showConfidence, showSource })
+    : null;
+
   const button = (
     <button
       ref={buttonRef}
@@ -72,10 +101,22 @@ export function IntroSkipButton({
     <div
       className={`animate-in fade-in absolute right-5 z-50 flex flex-col items-end gap-1.5 duration-150 sm:right-7 ${controlsVisible ? "bottom-24 sm:bottom-28" : "bottom-5 sm:bottom-7"}`}
     >
+      {provenanceLabel ? (
+        <span
+          data-marker-provenance="true"
+          className="pr-3 text-xs font-medium text-white/75 drop-shadow"
+        >
+          {provenanceLabel}
+        </span>
+      ) : null}
       {caption ? (
         <span className="pr-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
       ) : null}
-      {button}
+      {/* The action row holds the pill and nothing else. Anything trailing (the
+          report control) is a sibling of this row, so it lands UNDER the pill —
+          the column already right-aligns its children. */}
+      <span className="flex items-center gap-2">{button}</span>
+      {trailing}
     </div>
   );
 }

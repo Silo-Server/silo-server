@@ -30,6 +30,13 @@ vi.mock("@/hooks/queries/trickplay", async (importOriginal) => {
 });
 vi.mock("../start-v2", () => ({ playbackCapabilitiesV2: playbackCapabilitiesMock }));
 
+// The report control reads the plugin's per-account settings. Its own test covers
+// that gate; here it stays unavailable so it contributes no requests to the exact
+// call counts asserted below.
+vi.mock("@/hooks/queries/markerReportSettings", () => ({
+  useMarkerReportSettings: () => ({ available: false, enabled: false, installationId: null }),
+}));
+
 vi.mock("../hooks/usePlaybackSession", () => ({
   usePlaybackSession: playbackSessionMock,
 }));

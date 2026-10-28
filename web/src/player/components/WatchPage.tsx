@@ -16,6 +16,7 @@ import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
 import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
+import { useMarkerReportSettings } from "@/hooks/queries/markerReportSettings";
 import { toast } from "sonner";
 
 function patchChapterThumbnail(
@@ -163,6 +164,8 @@ function WatchPagePlayer({
   subtitleMode,
   showForcedSubtitles,
   introSkipMode,
+  showMarkerConfidence = false,
+  showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
@@ -594,6 +597,14 @@ function WatchPagePlayer({
     [session.mediaFileId, session.sessionId],
   );
 
+  // The viewer's own TheIntroDB settings for the report control.
+  //
+  // This MUST stay above the session guard below. The guard returns early while
+  // the playback session loads, so a hook placed after it runs on the second
+  // render and not the first, and React rejects a component whose hook count
+  // changes between renders — the whole player fails to mount.
+  const markerReport = useMarkerReportSettings({ enabled: true });
+
   // The plan is the player's contract: without one there is no transport, no
   // timeline and no track inventory to render against.
   if (!session.plan || !session.streamUrl || !session.sessionId) {
@@ -690,6 +701,10 @@ function WatchPagePlayer({
       showForcedSubtitles={session.initialSubtitleError ? false : showForcedSubtitles}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      showMarkerConfidence={showMarkerConfidence}
+      showMarkerSource={showMarkerSource}
+      markerReportInstallationId={markerReport.installationId}
+      markerReportContentId={contentId}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
       bufferingTitleId={contentId}

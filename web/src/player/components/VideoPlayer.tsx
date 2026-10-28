@@ -21,6 +21,7 @@ import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
+import { MarkerReportButton } from "./MarkerReportButton";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
@@ -302,6 +303,17 @@ interface VideoPlayerProps {
    * server to leave alone.
    */
   introSkipMode?: IntroSkipMode | null;
+  /** Show the marked range's confidence above the skip prompt. Off by default. */
+  showMarkerConfidence?: boolean;
+  /** Show the marked range's source above the skip prompt. Off by default. */
+  showMarkerSource?: boolean;
+  /**
+   * The marker plugin installation serving the report route, present only when the
+   * viewer has enabled reporting. Null draws no report control at all.
+   */
+  markerReportInstallationId?: number | null;
+  /** The item's content id, which carries the ids a report is addressed by. */
+  markerReportContentId?: string | null;
   /** Effective profile mode, seeded by the host before its settings read resolves. */
   bufferingMode?: BufferingMode;
   /**
@@ -516,6 +528,10 @@ export function VideoPlayer({
   showForcedSubtitles,
   intro,
   introSkipMode = "ask",
+  showMarkerConfidence = false,
+  showMarkerSource = false,
+  markerReportInstallationId = null,
+  markerReportContentId = null,
   bufferingMode = "always",
   bandwidthCapKbps,
   bufferingTitleId,
@@ -3455,6 +3471,20 @@ export function VideoPlayer({
   }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
 
   const introPromptVisible = activeIntroPrompt !== null;
+
+  // The report control is handed to whichever pill is showing, so both the skip and
+  // the undo prompt offer it in the same place. It carries the installation serving
+  // the route: without one there is nothing to call. The kind is taken per prompt,
+  // so the tooltip names the segment actually on screen.
+  const markerReportAction = (kind?: string) =>
+    markerReportInstallationId && markerReportContentId ? (
+      <MarkerReportButton
+        installationId={markerReportInstallationId}
+        contentId={markerReportContentId}
+        kind={kind}
+      />
+    ) : null;
+
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
 
@@ -5464,6 +5494,10 @@ export function VideoPlayer({
           timer={activeIntroPrompt}
           controlsVisible={controlsVisible}
           focusOnMount={focusIntroPromptOnMount}
+          provenance={activeIntro}
+          showConfidence={showMarkerConfidence}
+          showSource={showMarkerSource}
+          trailing={markerReportAction(activeIntro?.kind)}
         />
       )}
       {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
@@ -5471,6 +5505,10 @@ export function VideoPlayer({
           onSkip={skipMarker}
           label={MARKER_SKIP_LABELS[activeSkipMarker.kind]}
           controlsVisible={controlsVisible}
+          provenance={activeSkipMarker}
+          showConfidence={showMarkerConfidence}
+          showSource={showMarkerSource}
+          trailing={markerReportAction(activeSkipMarker.kind)}
         />
       )}
 

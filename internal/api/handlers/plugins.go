@@ -311,6 +311,11 @@ type PluginUserSettingsView struct {
 	// user-facing Apps navigation. Empty (omitted) when the manifest
 	// declares no category. Additive-only per v1 API rules.
 	Category string `json:"category,omitempty"`
+	// ConfiguredGlobalKeys names the plugin's global_config_schema keys an
+	// administrator has set. A screen gates a per-account setting on one of them
+	// when the feature behind it needs a credential the account does not hold.
+	// Values are never included: some are secrets.
+	ConfiguredGlobalKeys []string `json:"configured_global_keys"`
 }
 
 type pluginUserSettingsListResponse struct {
@@ -1183,7 +1188,7 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 		if len(manifest.GetUserConfigSchema()) == 0 && !manifestHasUserNavigableRoute(manifest) {
 			continue
 		}
-		views = append(views, toUserPluginSettingsSummary(installation, manifest))
+		views = append(views, toUserPluginSettingsSummary(installation, manifest, h.configuredGlobalKeys(ctx, installation.ID)))
 	}
 	return views, nil
 }
@@ -1228,7 +1233,7 @@ func (h *PluginHandler) GetUserPluginSettings(ctx context.Context, userID, insta
 	}
 
 	return PluginUserSettingsDetailView{
-		Installation: toUserPluginSettingsSummary(installation, manifest),
+		Installation: toUserPluginSettingsSummary(installation, manifest, h.configuredGlobalKeys(ctx, installation.ID)),
 		Values:       values,
 	}, nil
 }
@@ -1540,6 +1545,7 @@ func toPluginCatalogSettingsResponse(settings plugins.CatalogSettings) pluginCat
 func toUserPluginSettingsSummary(
 	installation *plugins.Installation,
 	manifest *pluginv1.PluginManifest,
+	configuredGlobalKeys []string,
 ) PluginUserSettingsView {
 	return PluginUserSettingsView{
 		ID:               installation.ID,
@@ -1549,7 +1555,29 @@ func toUserPluginSettingsSummary(
 		Routes:           routesToJSON(manifest.GetHttpRoutes()),
 		Assets:           assetsToJSON(manifest.GetAssets()),
 		Category:         manifest.GetCategory(),
+		// Never nil: the field is present on every entry so a client can read it
+		// without a nil check, matching the other list fields here.
+		ConfiguredGlobalKeys: append([]string{}, configuredGlobalKeys...),
 	}
+}
+
+// configuredGlobalKeys names the installation's stored global config entries that hold
+// a usable value, reading only their keys.
+//
+// A cleared entry still has a row, so presence alone would keep a dependent setting on
+// offer after an operator removed the credential behind it. A read failure reports none
+// rather than failing the request: the answer decides whether a screen may offer a
+// setting, and an unprovable yes is worse than no.
+func (h *PluginHandler) configuredGlobalKeys(ctx context.Context, installationID int) []string {
+	if h.configs == nil {
+		return nil
+	}
+	keys, err := h.configs.ListConfiguredGlobalConfigKeys(ctx, installationID)
+	if err != nil {
+		slog.WarnContext(ctx, "listing plugin global config keys", "component", "api", "installation_id", installationID, "error", err)
+		return nil
+	}
+	return keys
 }
 
 func configSchemasToJSON(schemas []*pluginv1.ConfigSchema) []PluginConfigSchemaView {

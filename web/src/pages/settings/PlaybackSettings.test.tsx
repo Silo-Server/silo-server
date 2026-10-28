@@ -47,6 +47,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
+// The TheIntroDB section reads plugin settings through react-query and has its own
+// test. Here the plugin is not installed, so this file tests the settings page alone
+// without standing up a query client for a section it does not cover.
+vi.mock("@/hooks/queries/pluginSettings", () => ({
+  usePluginInstallation: () => ({ installation: null }),
+  usePluginSettingsValues: () => ({ data: undefined }),
+  useUpdatePluginSettings: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/hooks/queries/settingValues", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/queries/settingValues")>(
     "@/hooks/queries/settingValues",

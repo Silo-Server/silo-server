@@ -42809,6 +42809,13 @@
             ],
             "type": "string"
           },
+          "configured_global_keys": {
+            "description": "Global config keys the operator has filled in; a per-account setting that depends on one can only be offered when it is present. Values are never included. Empty, never null.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "description": "Installation identifier",
             "examples": [
@@ -42852,7 +42859,8 @@
           "version",
           "user_config_schema",
           "routes",
-          "assets"
+          "assets",
+          "configured_global_keys"
         ],
         "type": "object"
       },
@@ -51629,12 +51637,34 @@
       "WatchMarker": {
         "additionalProperties": false,
         "properties": {
+          "algorithm": {
+            "type": "string"
+          },
+          "confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
           "end_seconds": {
             "examples": [
               90
             ],
             "format": "double",
             "type": "number"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "scanner",
+              "online",
+              "plugin",
+              "s3",
+              "manual"
+            ],
+            "type": "string"
           },
           "start_seconds": {
             "examples": [

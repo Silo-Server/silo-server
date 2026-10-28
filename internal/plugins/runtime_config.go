@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -202,6 +204,58 @@ func (s *RuntimeConfigStore) ListGlobalConfigs(ctx context.Context, installation
 		return nil, fmt.Errorf("iterating plugin runtime configs: %w", err)
 	}
 	return configs, nil
+}
+
+// ListConfiguredGlobalConfigKeys names the global configuration entries an installation
+// holds a usable value for.
+//
+// A stored row is not the same answer as a configured one. Clearing a credential leaves
+// the row behind with nothing in it, and a caller reading presence would then keep
+// offering a feature that cannot work — the operator removed the key and the toggle
+// stayed live. Values are decoded here only to judge whether the entry carries anything,
+// and are never returned, so a secret still cannot leave through this path.
+func (s *RuntimeConfigStore) ListConfiguredGlobalConfigKeys(ctx context.Context, installationID int) ([]string, error) {
+	configs, err := s.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]string, 0, len(configs))
+	for _, config := range configs {
+		if config.Key == "" || !runtimeConfigCarriesValue(config.Value) {
+			continue
+		}
+		keys = append(keys, config.Key)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// runtimeConfigCarriesValue reports whether a stored entry holds anything an operator
+// filled in. Empty strings, nulls and empty containers are the shape a cleared field
+// leaves behind, and none of them is a value a feature can use.
+func runtimeConfigCarriesValue(value map[string]any) bool {
+	for _, field := range value {
+		switch typed := field.(type) {
+		case nil:
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return true
+			}
+		case []any:
+			if len(typed) > 0 {
+				return true
+			}
+		case map[string]any:
+			if runtimeConfigCarriesValue(typed) {
+				return true
+			}
+		default:
+			// Numbers and booleans are choices an operator made, including 0 and false.
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeConfigAAD(installationID int, key string) string {

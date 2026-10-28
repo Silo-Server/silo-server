@@ -1061,6 +1061,15 @@ export interface SubtitleTrackSignature {
 export interface TimeRange {
   start: number;
   end: number;
+  /**
+   * Where the marked range came from, carried through the v1-shaped view model
+   * the player reads. Absent for a server that does not report provenance, and
+   * absent rather than 0 for a marker nobody rated.
+   */
+  source?: string | null;
+  provider?: string | null;
+  confidence?: number | null;
+  algorithm?: string | null;
 }
 
 /** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */

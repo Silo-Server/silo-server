@@ -588,10 +588,10 @@ type FileVersion struct {
 
 // SetMarkers refreshes the marker projection without rebuilding file metadata.
 func (v *FileVersion) SetMarkers(file *models.MediaFile) {
-	v.Intro = markerFromRange(file.IntroStart, file.IntroEnd)
-	v.Credits = markerFromRange(file.CreditsStart, file.CreditsEnd)
-	v.Recap = markerFromRange(file.RecapStart, file.RecapEnd)
-	v.Preview = markerFromRange(file.PreviewStart, file.PreviewEnd)
+	v.Intro = markerFromFile(file, markerKindIntro)
+	v.Credits = markerFromFile(file, markerKindCredits)
+	v.Recap = markerFromFile(file, markerKindRecap)
+	v.Preview = markerFromFile(file, markerKindPreview)
 	v.MarkerSegments = models.EffectiveMarkerSegments(file)
 	previews := make([]VersionMarkerPreview, 0, len(v.MarkerPreviews))
 	for _, image := range v.MarkerPreviews {
@@ -680,10 +680,35 @@ type SubtitleInfo struct {
 	Title           string `json:"title,omitempty"`
 }
 
-// Marker represents a time range (intro or credits).
+// Marker represents a time range (intro or credits) together with the provenance
+// of whatever produced it.
+//
+// Confidence has no single scale — local detection, a chapter, and each online
+// provider rate on their own — so a bare number means nothing without Source
+// beside it. Every provenance field is absent on a marker whose file row
+// recorded none.
 type Marker struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
+	// The provenance fields are excluded from JSON on purpose. This struct is the
+	// wire shape of the frozen GET /api/v1/watch/{id} response, which carries these
+	// markers directly, so a tag here would add fields to a contract that is closed.
+	// Clients that should see provenance read the v2 marker, which maps from these
+	// Go fields rather than from their JSON.
+	//
+	// Source is the class of source (models.MarkerSource*): "scanner" for local
+	// detection, "plugin"/"online" for a provider, "manual" for a person.
+	Source string `json:"-"`
+	// Provider is the provider that supplied the range — a plugin capability id
+	// such as "introdb", or "built_in" — and is empty for a locally detected or
+	// manually set marker.
+	Provider string `json:"-"`
+	// Confidence is the source's own rating, 0-1, absent when the marker was never
+	// rated. It is a pointer for that reason: an unrated marker is stored as 0, so
+	// a bare float would report a real "0%" for a range nobody rated.
+	Confidence *float64 `json:"-"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4" or "introdb:v4".
+	Algorithm string `json:"-"`
 }
 
 // SeasonUserData is the profile-scoped progress payload shared across item,
@@ -4236,14 +4261,66 @@ func bestPlayableFile(files []*models.MediaFile) *models.MediaFile {
 	return best
 }
 
-// markerFromRange converts a (start, end) pair into a *Marker, returning nil
-// when either bound is missing. Used to lift the four per-file segment kinds
-// (intro/credits/recap/preview) into the api response shape.
-func markerFromRange(start, end *float64) *Marker {
+// The four per-file segment kinds, as the marker columns and the API name them.
+const (
+	markerKindIntro   = "intro"
+	markerKindCredits = "credits"
+	markerKindRecap   = "recap"
+	markerKindPreview = "preview"
+)
+
+// markerFromFile lifts one segment kind out of a media file: its range when both
+// bounds are stored, plus the provenance recorded beside it.
+//
+// The provenance lives only in the per-kind column groups
+// (intro_markers_source, …_provider, …_confidence, …_algorithm), so the caller
+// passes the file rather than the bounds.
+func markerFromFile(file *models.MediaFile, kind string) *Marker {
+	if file == nil {
+		return nil
+	}
+
+	var (
+		start, end       *float64
+		source, provider *string
+		confidence       *float64
+		algorithm        *string
+	)
+	switch kind {
+	case markerKindIntro:
+		start, end = file.IntroStart, file.IntroEnd
+		source, provider, confidence, algorithm = file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm
+	case markerKindCredits:
+		start, end = file.CreditsStart, file.CreditsEnd
+		source, provider, confidence, algorithm = file.CreditsMarkersSource, file.CreditsMarkersProvider, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm
+	case markerKindRecap:
+		start, end = file.RecapStart, file.RecapEnd
+		source, provider, confidence, algorithm = file.RecapMarkersSource, file.RecapMarkersProvider, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm
+	case markerKindPreview:
+		start, end = file.PreviewStart, file.PreviewEnd
+		source, provider, confidence, algorithm = file.PreviewMarkersSource, file.PreviewMarkersProvider, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm
+	default:
+		return nil
+	}
 	if start == nil || end == nil {
 		return nil
 	}
-	return &Marker{Start: *start, End: *end}
+
+	marker := &Marker{Start: *start, End: *end}
+	if source != nil {
+		marker.Source = *source
+	}
+	if provider != nil {
+		marker.Provider = *provider
+	}
+	if algorithm != nil {
+		marker.Algorithm = *algorithm
+	}
+	if confidence != nil {
+		value := *confidence
+		marker.Confidence = &value
+	}
+	return marker
 }
 
 func sortAudiobookMediaFiles(files []*models.MediaFile) {
@@ -4299,19 +4376,19 @@ func (s *DetailService) buildPlaybackInfoWith(
 			continue
 		}
 		effectiveAudioSelection := s.effectiveAudioSelectionWith(ctx, audioResolver, f)
-		versionIntro := markerFromRange(f.IntroStart, f.IntroEnd)
+		versionIntro := markerFromFile(f, markerKindIntro)
 		if versionIntro != nil && firstIntro == nil {
 			firstIntro = versionIntro
 		}
-		versionCredits := markerFromRange(f.CreditsStart, f.CreditsEnd)
+		versionCredits := markerFromFile(f, markerKindCredits)
 		if versionCredits != nil && firstCredits == nil {
 			firstCredits = versionCredits
 		}
-		versionRecap := markerFromRange(f.RecapStart, f.RecapEnd)
+		versionRecap := markerFromFile(f, markerKindRecap)
 		if versionRecap != nil && firstRecap == nil {
 			firstRecap = versionRecap
 		}
-		versionPreview := markerFromRange(f.PreviewStart, f.PreviewEnd)
+		versionPreview := markerFromFile(f, markerKindPreview)
 		if versionPreview != nil && firstPreview == nil {
 			firstPreview = versionPreview
 		}

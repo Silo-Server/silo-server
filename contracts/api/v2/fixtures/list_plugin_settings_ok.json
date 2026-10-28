@@ -26,7 +26,8 @@
         }
       ],
       "assets": [],
-      "category": "Tools"
+      "category": "Tools",
+      "configured_global_keys": []
     }
   ]
 }
