@@ -16,10 +16,12 @@ another `tmdb.Client` in production code; take the shared one. The router
 builds its own only when `Dependencies.TMDB` is nil, which only tests do.
 
 Each HTTP attempt waits on the limiter, retries after a 429 or 5xx included,
-so a throttled burst cannot spend more than the budget. Chart pages, discover
-pages, and external ID lookups run on the first caller's context, so a request
-that gives up stops waiting for the budget at once; a background refresh that
-joined it fails that one page and retries on its next run.
+so a throttled burst cannot spend more than the budget. Concurrent callers of
+the same chart page, discover page, or external ID lookup share one fetch
+(`sharedFetch`). It keeps running while any caller still waits, so a page
+request that gives up does not fail a collection sync that joined it, and it
+is cancelled once every caller has given up, so an abandoned fetch does not
+keep waiting for the budget.
 
 ## The budget
 

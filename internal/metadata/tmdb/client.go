@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -61,6 +62,8 @@ type Client struct {
 	certificationCache   *cache.TTLCache[string]
 	mediaDetailCache     *cache.TTLCache[*MediaDetail]
 	cacheGroup           singleflight.Group
+	flightsMu            sync.Mutex
+	flights              map[string]*sharedFlight
 	responseCacheTTL     time.Duration
 }
 
@@ -302,7 +305,7 @@ func (c *Client) ChartPage(ctx context.Context, params ChartParams, page int) (*
 		}
 	}
 
-	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
+	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
 		if c.discoverSectionCache != nil {
 			if cached, ok := c.discoverSectionCache.Get(cacheKey); ok {
 				return cached, nil
@@ -693,7 +696,7 @@ func (c *Client) DiscoverPage(ctx context.Context, mediaType string, params Disc
 		}
 	}
 
-	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
+	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
 		if c.discoverPageCache != nil {
 			if cached, ok := c.discoverPageCache.Get(cacheKey); ok {
 				return cached, nil
@@ -1389,7 +1392,7 @@ func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (
 		}
 	}
 
-	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
+	value, err := c.sharedFetch(ctx, cacheKey, func(ctx context.Context) (any, error) {
 		if c.externalIDCache != nil {
 			if cached, ok := c.externalIDCache.Get(cacheKey); ok {
 				return cached, nil
@@ -1517,6 +1520,71 @@ func certificationPath(mediaType string, id int) (string, error) {
 
 // cachedCertification fetches one certification value once across concurrent
 // callers and caches it.
+// sharedFlight is one fetch that concurrent callers of the same key share.
+type sharedFlight struct {
+	done    chan struct{}
+	val     any
+	err     error
+	waiters int
+	cancel  context.CancelFunc
+}
+
+// sharedFetch runs fetch once for every concurrent caller with key. The fetch
+// is detached from the caller that started it, so one caller giving up (a
+// closed page) does not fail another still waiting (a collection sync), and
+// each caller stops waiting when its own context ends. Once every caller has
+// given up, the fetch is canceled too, so an abandoned fetch does not keep
+// waiting for the shared request budget.
+func (c *Client) sharedFetch(ctx context.Context, key string, fetch func(context.Context) (any, error)) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.flightsMu.Lock()
+	f := c.flights[key]
+	if f == nil {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		f = &sharedFlight{done: make(chan struct{}), cancel: cancel}
+		if c.flights == nil {
+			c.flights = make(map[string]*sharedFlight)
+		}
+		c.flights[key] = f
+		go func() {
+			defer cancel()
+			f.val, f.err = fetch(fetchCtx)
+			c.endFlight(key, f)
+			close(f.done)
+		}()
+	}
+	f.waiters++
+	c.flightsMu.Unlock()
+
+	select {
+	case <-f.done:
+		return f.val, f.err
+	case <-ctx.Done():
+		c.flightsMu.Lock()
+		f.waiters--
+		if f.waiters == 0 {
+			// Nobody waits any more. A caller arriving after this starts a
+			// new fetch rather than joining a canceled one.
+			f.cancel()
+			if c.flights[key] == f {
+				delete(c.flights, key)
+			}
+		}
+		c.flightsMu.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
+func (c *Client) endFlight(key string, f *sharedFlight) {
+	c.flightsMu.Lock()
+	defer c.flightsMu.Unlock()
+	if c.flights[key] == f {
+		delete(c.flights, key)
+	}
+}
+
 func (c *Client) cachedCertification(ctx context.Context, cacheKey string, fetch func(context.Context) (string, error)) (string, error) {
 	if c.certificationCache != nil {
 		if cached, ok := c.certificationCache.Get(cacheKey); ok {

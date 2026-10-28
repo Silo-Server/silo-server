@@ -101,6 +101,103 @@ func TestRetryWaitsOnTheLimiter(t *testing.T) {
 	}
 }
 
+// A shared lookup outlives the caller that started it while another caller
+// still waits, so a closed page does not fail a collection sync that joined
+// it; once every caller has given up, the fetch stops too, so it does not
+// keep waiting for the request budget.
+func TestSharedFetchEndsWithItsLastCaller(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	t.Cleanup(client.Close)
+
+	t.Run("a caller giving up leaves the others their result", func(t *testing.T) {
+		started, release := make(chan struct{}), make(chan struct{})
+		fetch := func(ctx context.Context) (any, error) {
+			close(started)
+			select {
+			case <-release:
+				return "ids", nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		first, cancelFirst := context.WithCancel(t.Context())
+		firstDone := make(chan error, 1)
+		go func() {
+			_, err := client.sharedFetch(first, "k1", fetch)
+			firstDone <- err
+		}()
+		<-started
+		secondDone := make(chan any, 1)
+		go func() {
+			v, err := client.sharedFetch(t.Context(), "k1", func(context.Context) (any, error) {
+				t.Error("second caller started its own fetch instead of joining")
+				return nil, nil
+			})
+			if err != nil {
+				t.Errorf("second caller: %v", err)
+			}
+			secondDone <- v
+		}()
+		waitUntilWaiters(t, client, "k1", 2)
+		cancelFirst()
+		if err := <-firstDone; !errors.Is(err, context.Canceled) {
+			t.Fatalf("first caller returned %v, want context.Canceled", err)
+		}
+		close(release)
+		if got := <-secondDone; got != "ids" {
+			t.Fatalf("second caller got %v, want the shared result", got)
+		}
+	})
+
+	t.Run("the fetch stops once every caller has given up", func(t *testing.T) {
+		fetchEnded := make(chan error, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = client.sharedFetch(ctx, "k2", func(fetchCtx context.Context) (any, error) {
+				<-fetchCtx.Done()
+				fetchEnded <- fetchCtx.Err()
+				return nil, fetchCtx.Err()
+			})
+		}()
+		waitUntilWaiters(t, client, "k2", 1)
+		cancel()
+		<-done
+		select {
+		case err := <-fetchEnded:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("fetch ended with %v, want it canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("fetch kept running after its last caller gave up")
+		}
+	})
+}
+
+// waitUntilWaiters waits until n callers are waiting on key's shared fetch.
+func waitUntilWaiters(t *testing.T, c *Client, key string, n int) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		c.flightsMu.Lock()
+		f := c.flights[key]
+		got := 0
+		if f != nil {
+			got = f.waiters
+		}
+		c.flightsMu.Unlock()
+		if got == n {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%d callers waiting on %s, want %d", got, key, n)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	arrived := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
