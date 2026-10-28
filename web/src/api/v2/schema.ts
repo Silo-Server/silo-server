@@ -17578,6 +17578,8 @@ export interface components {
       end_reason_values: string[];
       /** @description The list accepts ended_before */
       ended_before: boolean;
+      /** @description Entries carry lifecycle_seq */
+      lifecycle_seq: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -17633,6 +17635,11 @@ export interface components {
        * @description Episode number; null when not an episode
        */
       episode_number: number | null;
+      /**
+       * Format: int64
+       * @description Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed
+       */
+      lifecycle_seq: number | null;
       /** @description Whether the play has a watch-time measurement; played_seconds, start_position_seconds, paused_seconds, measured_since and measured_until are null without one */
       measured: boolean;
       /**
@@ -17764,6 +17771,11 @@ export interface components {
       is_jellyfin_client?: boolean;
       is_paused: boolean;
       /**
+       * Format: int64
+       * @description Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions.
+       */
+      lifecycle_seq?: number;
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -17874,6 +17886,8 @@ export interface components {
       effective_play_method: boolean;
       effective_play_method_values: string[];
       is_jellyfin_client: boolean;
+      /** @description The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq */
+      lifecycle_events: boolean;
       network_access_route: boolean;
       node_observations: boolean;
       node_routing: boolean;

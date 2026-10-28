@@ -2373,6 +2373,13 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 		}
 	}
+	// Jellyfin reports carry no sequence: the pause state they report is
+	// announced in arrival order. A Stopped report ends the play instead.
+	if !stop && h.sessionMgr != nil {
+		if announcer, ok := h.sessionMgr.(lifecycleAnnouncer); ok {
+			announcer.ReportPause(r.Context(), playSession.UpstreamSessionID, req.IsPaused)
+		}
+	}
 	// An ID-less Stopped report can't end the play (see below): it may be a
 	// stale stop from an earlier play of the same item. It must not touch the
 	// pause state either, since a paused session's long idle grace is what
@@ -2736,6 +2743,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, ErrSessionNotFound
 	}
 	h.syncSessionsNow(ctx, "compat_start")
+	if announcer, ok := h.sessionMgr.(lifecycleAnnouncer); ok {
+		announcer.AnnounceStart(ctx, session.ID, "jellyfin")
+	}
 	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
 }

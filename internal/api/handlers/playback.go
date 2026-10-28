@@ -199,10 +199,18 @@ type PlaybackHandler struct {
 	AdminStore             PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 	EventsHub              *evt.Hub
-	MissingMarker          MissingFileMarker
-	NodePlanner            nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret              string                    // needed for signing stream tokens
-	StreamTelemetry        *streamtelemetry.Registry // local observation-only telemetry
+	// LifecycleEncoder and LifecycleViews render and read the session.*
+	// events on the admin sessions channel; without both, no lifecycle
+	// transition is announced.
+	LifecycleEncoder PlaybackLifecycleEncoder
+	LifecycleViews   PlaybackLifecycleViews
+	// LiveRowJSON renders a session as the live row a sync would store for
+	// it (worker.SessionSyncRowJSON), for a start announced before a sync.
+	LiveRowJSON     func(*playback.Session) (json.RawMessage, error)
+	MissingMarker   MissingFileMarker
+	NodePlanner     nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
+	JWTSecret       string                    // needed for signing stream tokens
+	StreamTelemetry *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
 	// a stopped session keeps serving from a valid token until the token expires.
@@ -410,6 +418,9 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	}
 	if adder, ok := sessionMgr.(sessionFinishHookAdder); ok {
 		adder.AddFinishHook(h.handleFinishedSession)
+	}
+	if adder, ok := sessionMgr.(interface{ AddLifecycleHooks(playback.LifecycleHooks) }); ok {
+		adder.AddLifecycleHooks(playback.LifecycleHooks{Started: h.SessionStarted, PauseReported: h.SessionPauseReported})
 	}
 	return h
 }
@@ -1345,6 +1356,11 @@ func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *p
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
 	} else if entry != nil && h.AdminStore != nil {
 		entry.EndReason = reason
+		// An end goes through the session's lifecycle, which announces it;
+		// a teardown the client can recover from records its stretch only.
+		if reason != "" && h.recordEnd(ctx, session, *entry) {
+			return
+		}
 		if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
 			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
 		}
@@ -1827,6 +1843,9 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.syncSessionsOnPauseChange(r.Context(), wasPaused, req.IsPaused)
+	// Bridge progress carries no sequence: its pause state is announced in
+	// arrival order (a native v2 session's row ignores it).
+	h.SessionPauseReported(r.Context(), sessionID, req.IsPaused)
 
 	// Persist progress to UserStore (best-effort).
 	if sess, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil {

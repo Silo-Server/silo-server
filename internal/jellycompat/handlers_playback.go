@@ -296,6 +296,13 @@ type sessionFinisher interface {
 	FinishSession(ctx context.Context, sessionID string) error
 }
 
+// lifecycleAnnouncer tells the admin lifecycle a Jellyfin play started and
+// what pause state its reports carry (playback.SessionManager).
+type lifecycleAnnouncer interface {
+	AnnounceStart(ctx context.Context, sessionID, frontend string)
+	ReportPause(ctx context.Context, sessionID string, paused bool)
+}
+
 // detachedFinisher records the end of a play this replica no longer holds a
 // native copy of (playback.SessionManager.FinishDetached).
 type detachedFinisher interface {

@@ -336,6 +336,8 @@
 ./internal/api/handlers TestAdminPlaybackHistoryFactsDB
 ./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
 ./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
+./internal/api/handlers TestPlaybackLifecycleTransitionsDB
+./internal/api/handlers TestNativeSessionsListLifecycleDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
@@ -556,6 +558,7 @@
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
+./internal/playback/planstore TestProgressCommitsLifecycleStateDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
@@ -608,3 +611,5 @@
 # (and what routine scan writes do not), key moves, coalescing, the cluster-wide
 # drain spacing, and retention.
 ./internal/catalog TestCatalogItemChangeOutboxDB
+
+./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB

@@ -190,6 +190,55 @@ removals.
 
 The v1 bridge socket does not carry `added`, `removed` or `files_changed`.
 
+### Playback session lifecycle events
+
+The admin-only `sessions` channel carries four events besides `sessions.replaced`:
+`session.started`, `session.paused`, `session.resumed` and `session.stopped`.
+`GET /api/v2/admin/sessions/capabilities` reports `lifecycle_events: true` when the
+server sends them. Each event's `data` is:
+
+- `session_id`, `seq`, `at` (when the database committed the transition, UTC
+  milliseconds) and `state`: `playing`, `paused` or `stopped`.
+- `session` on a started, paused or resumed event: the session's row as
+  `GET /api/v2/admin/sessions` returns it, with `lifecycle_seq` equal to `seq`.
+  Absent when no server has a live row for it.
+- `end_reason` and `history` on `session.stopped`: the history entry the end
+  recorded, as `GET /api/v2/admin/playback-history` returns it. Its figures are the
+  stored ones, so a later history read agrees with the event.
+
+The envelope's `event_id` is `playback-lifecycle:<seq>`.
+
+`seq` comes from one sequence the database advances with each transition, so a
+session's numbers rise in the order its transitions were accepted, whichever API
+server published them; numbers are not contiguous and are only comparable within one
+session. A native v2 session's pause and resume follow the client's progress
+sequence: a progress sample that arrives after a newer one changes nothing.
+Jellyfin, Audiobookshelf and v1 bridge reports carry no sequence and follow arrival
+order. A session starts once and ends once; its id never starts again.
+
+Delivery is at most once and nothing is replayed. A monitor reconciles:
+
+1. On subscribe, and after each `sessions.replaced`, read every page of
+   `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
+   snapshot keep the frozen v1 row shape and at most 200 rows; use them only as a
+   cue to re-read.
+2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
+   the session is live and whether it is paused. A row and an event with equal numbers
+   carry the same state. Position and stream fields are observations: take them from
+   the most recently received record.
+3. A history entry with `end_reason` is final, and its `lifecycle_seq` is higher than
+   any number its live session had.
+4. A session missing from a complete list, with no ended history entry yet, is moving
+   between servers or about to be ended by the cluster sweep. Keep it open and read
+   `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every
+   session announced by `session.started` (native or Jellyfin) gets one within its idle
+   grace while an API server runs
+   ([playback lifecycle](architecture/playback-lifecycle.md)).
+
+Rows and entries without `lifecycle_seq` (sessions that started before the server
+recorded lifecycle transitions) count as number 0. During a rolling deploy, servers
+without this change send no lifecycle events.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the

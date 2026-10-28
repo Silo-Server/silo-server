@@ -2789,6 +2789,9 @@ func main() {
 			}
 		}
 		deps.SessionSyncer = reconciler
+		deps.LiveSessionRowJSON = func(s *playback.Session) (json.RawMessage, error) {
+			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity), nodeIdentity)
+		}
 
 		nodeURL := fmt.Sprintf("http://%s%s", nodeIdentity, cfg.Server.Listen)
 		heartbeatWriter = worker.NewHeartbeatWriter(deps.DB, nodeIdentity, mode, nodeURL)

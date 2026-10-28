@@ -61,6 +61,18 @@ type ProgressReceiptV3 struct {
 	// caller's sample when applied or replayed, the newer stored sample when
 	// stale, nil when nothing has been applied yet.
 	Accepted *ProgressSampleV3
+	// Lifecycle is the pause or resume the applied sample made to the
+	// session's announced lifecycle state, committed with the sample; nil
+	// when the state did not change or the store keeps no lifecycle.
+	Lifecycle *LifecycleChangeV3
+}
+
+// LifecycleChangeV3 is a lifecycle pause transition an accepted progress
+// sample made: its sequence number, commit time and new pause state.
+type LifecycleChangeV3 struct {
+	Seq    int64
+	At     time.Time
+	Paused bool
 }
 
 // StopReceiptV3 is what a stop returns, and what every later stop of the same

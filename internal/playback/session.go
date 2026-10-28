@@ -360,6 +360,7 @@ type SessionManager struct {
 	pausedGrace          time.Duration
 	expireHooks          []func(*Session)
 	finishHooks          []func(context.Context, *Session)
+	lifecycleHooks       []LifecycleHooks
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
 	// deliveryActivityReader reports media that another node served for a
@@ -1808,6 +1809,55 @@ func (m *SessionManager) FinishSession(ctx context.Context, sessionID string) er
 		hook(ctx, &finished)
 	}
 	return nil
+}
+
+// LifecycleHooks hear a playback frontend announce a session's start and
+// report a pause without a progress sequence (Jellyfin, Audiobookshelf, the
+// v1 bridge), for the admin lifecycle events.
+type LifecycleHooks struct {
+	Started       func(ctx context.Context, s *Session, frontend string)
+	PauseReported func(ctx context.Context, sessionID string, paused bool)
+}
+
+// AddLifecycleHooks registers hooks for AnnounceStart and ReportPause.
+func (m *SessionManager) AddLifecycleHooks(hooks LifecycleHooks) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lifecycleHooks = append(m.lifecycleHooks, hooks)
+}
+
+// AnnounceStart tells the lifecycle hooks a frontend started this session.
+// frontend names the surface: native, bridge, jellyfin or abs.
+func (m *SessionManager) AnnounceStart(ctx context.Context, sessionID, frontend string) {
+	m.mu.RLock()
+	s, ok := m.sessions[sessionID]
+	var started Session
+	if ok {
+		started = *s
+	}
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	for _, hook := range hooks {
+		if hook.Started != nil {
+			hook.Started(ctx, &started, frontend)
+		}
+	}
+}
+
+// ReportPause tells the lifecycle hooks a client reported this pause state
+// without a progress sequence.
+func (m *SessionManager) ReportPause(ctx context.Context, sessionID string, paused bool) {
+	m.mu.RLock()
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	for _, hook := range hooks {
+		if hook.PauseReported != nil {
+			hook.PauseReported(ctx, sessionID, paused)
+		}
+	}
 }
 
 // FinishDetached runs the finish hooks for a play this replica no longer

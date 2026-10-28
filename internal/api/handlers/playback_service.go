@@ -387,6 +387,7 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
+	h.publishSequencedPause(ctx, sessionID, receipt.Lifecycle)
 	view := PlaybackMutationView{Outcome: receipt.Outcome, Accepted: acceptedProgressV2(receipt.Accepted)}
 	// An applied sample persists. A replayed one (the exact latest sample
 	// again) persists too: the client retried because the first reply was

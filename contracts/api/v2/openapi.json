@@ -12707,6 +12707,10 @@
             "description": "The list accepts ended_before",
             "type": "boolean"
           },
+          "lifecycle_seq": {
+            "description": "Entries carry lifecycle_seq",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -12740,6 +12744,7 @@
           "stream_decisions",
           "end_reason",
           "end_reason_values",
+          "lifecycle_seq",
           "revision",
           "state",
           "allowed"
@@ -12852,6 +12857,14 @@
           },
           "episode_number": {
             "description": "Episode number; null when not an episode",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lifecycle_seq": {
+            "description": "Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed",
             "format": "int64",
             "type": [
               "integer",
@@ -13022,7 +13035,8 @@
           "client_version",
           "video_decision",
           "audio_decision",
-          "end_reason"
+          "end_reason",
+          "lifecycle_seq"
         ],
         "type": "object"
       },
@@ -13192,6 +13206,11 @@
           },
           "is_paused": {
             "type": "boolean"
+          },
+          "lifecycle_seq": {
+            "description": "Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions.",
+            "format": "int64",
+            "type": "integer"
           },
           "media_file_id": {
             "description": "Opaque identifier",
@@ -13470,6 +13489,10 @@
           "is_jellyfin_client": {
             "type": "boolean"
           },
+          "lifecycle_events": {
+            "description": "The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq",
+            "type": "boolean"
+          },
           "network_access_route": {
             "type": "boolean"
           },
@@ -13546,6 +13569,7 @@
           "output_format",
           "source_video_height",
           "device_identity",
+          "lifecycle_events",
           "revision",
           "state",
           "allowed"

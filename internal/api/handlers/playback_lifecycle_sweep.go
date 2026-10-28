@@ -1,0 +1,273 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
+)
+
+// The lifecycle sweep ends sessions no API server holds in memory: one whose
+// server died or restarted while its client went away, or whose end was
+// interrupted before it recorded history. A live row a server keeps syncing
+// means that server's own reaper decides; otherwise the sweep ends an idle
+// session through the same durable claim the reaper uses, revalidated inside
+// the claim, so a session that saw activity after the sweep looked keeps
+// playing. docs/architecture/playback-lifecycle.md states the guarantee.
+
+const (
+	lifecycleSweepInterval = 15 * time.Second
+	// A live row synced this recently means a server holds the session.
+	lifecycleHeldGrace = 45 * time.Second
+	// How long a session nobody holds may stay idle before it is ended:
+	// the reaper's paused grace, and its idle floor for a remote transport
+	// while playing, which also outlasts a rolling restart.
+	lifecyclePlayingGrace = 5 * time.Minute
+	lifecyclePausedGrace  = playback.DefaultPausedSessionGrace
+	// An Audiobookshelf (beta) session nobody holds ends after the ABS
+	// abandoned-session window.
+	lifecycleABSGrace = 24 * time.Hour
+	// Stopped rows are kept this long so a late start or pause for the
+	// same session announces nothing: longer than an attempt's life.
+	lifecycleTombstoneRetention = 25 * time.Hour
+	lifecycleSweepBatch         = 100
+)
+
+// lifecycleCandidate is a live lifecycle row no server has synced lately.
+type lifecycleCandidate struct {
+	sessionID    string
+	frontend     string
+	userID       int
+	profileID    string
+	paused       bool
+	activity     time.Time
+	attemptFound bool
+	attemptLive  bool
+	finalized    bool
+	stopID       string
+}
+
+// StartLifecycleSweep runs the sweep on every API server until ctx ends.
+func (h *PlaybackHandler) StartLifecycleSweep(ctx context.Context, pool *pgxpool.Pool) {
+	if h == nil || pool == nil || ctx == nil {
+		return
+	}
+	go func() {
+		// Servers start together after a deploy; spread their sweeps.
+		jitter := time.Duration(time.Now().UnixNano() % int64(lifecycleSweepInterval))
+		timer := time.NewTimer(lifecycleSweepInterval + jitter)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
+			sweepCtx, cancel := context.WithTimeout(ctx, lifecycleSweepInterval)
+			h.sweepLifecycle(sweepCtx, pool, time.Now())
+			cancel()
+			timer.Reset(lifecycleSweepInterval)
+		}
+	}()
+}
+
+func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool, now time.Time) {
+	if _, err := pool.Exec(ctx, `DELETE FROM playback_session_lifecycle WHERE state = 'stopped' AND updated_at < $1`,
+		now.Add(-lifecycleTombstoneRetention)); err != nil {
+		slog.WarnContext(ctx, "lifecycle tombstone cleanup failed", "component", "api", "error", err)
+	}
+	candidates, err := loadLifecycleCandidates(ctx, pool, now)
+	if err != nil {
+		slog.WarnContext(ctx, "lifecycle sweep failed", "component", "api", "error", err)
+		return
+	}
+	for _, c := range candidates {
+		if _, err := h.sessionMgr.GetSession(c.sessionID); err == nil {
+			continue // held here: this server's reaper decides
+		}
+		h.sweepLifecycleCandidate(ctx, pool, c, now)
+	}
+}
+
+func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.Time) ([]lifecycleCandidate, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT lc.session_id, lc.frontend, lc.user_id, lc.profile_id, lc.state = 'paused',
+			GREATEST(lc.updated_at, COALESCE(lc.activity_at, lc.updated_at), COALESCE(a.updated_at, lc.updated_at)),
+			a.session_id IS NOT NULL, a.session_id IS NOT NULL AND a.stopped_at IS NULL,
+			COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE), COALESCE(a.stop_receipt->>'stop_id', '')
+		FROM playback_session_lifecycle lc
+		LEFT JOIN playback_v3_attempts a ON a.session_id::text = lc.session_id AND a.expires_at > $1
+		WHERE lc.state <> 'stopped' AND lc.updated_at < $2
+		  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live
+			WHERE live.session_id = lc.session_id AND live.last_sync_at > $3)
+		ORDER BY lc.updated_at
+		LIMIT $4`, now, now.Add(-lifecycleHeldGrace), now.Add(-lifecycleHeldGrace), lifecycleSweepBatch)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (lifecycleCandidate, error) {
+		var c lifecycleCandidate
+		err := row.Scan(&c.sessionID, &c.frontend, &c.userID, &c.profileID, &c.paused, &c.activity,
+			&c.attemptFound, &c.attemptLive, &c.finalized, &c.stopID)
+		return c, err
+	})
+}
+
+func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, now time.Time) {
+	grace := lifecyclePlayingGrace
+	if c.paused {
+		grace = lifecyclePausedGrace
+	}
+	idleBefore := now.Add(-grace)
+	switch {
+	case c.attemptLive:
+		h.expireIdleNativeSession(ctx, pool, c, idleBefore)
+	case c.attemptFound && !c.finalized:
+		h.finishInterruptedNativeEnd(ctx, c.sessionID)
+	case c.attemptFound:
+		// The attempt's end was finalized without stopping the lifecycle
+		// (its writer failed, or ended before the upgrade): record it now.
+		h.endLifecycleFromFacts(ctx, c.sessionID, endReasonForStop(c.sessionID, c.stopID))
+	case c.frontend == LifecycleFrontendJellyfin:
+		h.expireIdleJellyfinSession(ctx, c, idleBefore)
+	case c.frontend == LifecycleFrontendABS:
+		if c.activity.Before(now.Add(-lifecycleABSGrace)) {
+			h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+		}
+	case c.activity.Before(idleBefore):
+		// A native session whose attempt is gone (expired and cleaned up).
+		h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+	}
+}
+
+// expireIdleNativeSession ends a native session no server holds once its
+// client and its media have both been idle past the grace.
+func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore time.Time) {
+	// A node can keep serving media while nothing reports progress (a Cast
+	// receiver whose sender slept). Its delivery counts as activity, and is
+	// remembered on the lifecycle row beyond the node's short record.
+	if deliveries, err := h.sessionDeliveryActivity(ctx, c); err != nil {
+		slog.WarnContext(ctx, "lifecycle sweep could not read node delivery", "component", "api", "session", c.sessionID, "error", err)
+		return
+	} else if !deliveries.IsZero() {
+		if _, err := pool.Exec(ctx, `UPDATE playback_session_lifecycle SET activity_at = GREATEST(activity_at, $2) WHERE session_id = $1`,
+			c.sessionID, deliveries); err != nil {
+			slog.WarnContext(ctx, "lifecycle sweep could not record node delivery", "component", "api", "session", c.sessionID, "error", err)
+		}
+		if deliveries.After(idleBefore) {
+			return
+		}
+	}
+	if c.activity.After(idleBefore) {
+		return
+	}
+	expirer, ok := h.PlanStoreV3.(interface {
+		ExpireIdleAttempt(ctx context.Context, sessionID, stopID string, idleBefore time.Time) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	h.StreamDeny.Deny(ctx, c.sessionID)
+	stopped, err := expirer.ExpireIdleAttempt(ctx, c.sessionID, expiredStopID(c.sessionID), idleBefore)
+	if err != nil || !stopped {
+		if err != nil {
+			slog.WarnContext(ctx, "lifecycle sweep could not expire an idle session", "component", "api", "session", c.sessionID, "error", err)
+		}
+		return
+	}
+	slog.InfoContext(ctx, "expired a playback session no server holds", "component", "api", "session", c.sessionID, "playback_session_id", c.sessionID)
+	h.finishInterruptedNativeEnd(ctx, c.sessionID)
+}
+
+func (h *PlaybackHandler) sessionDeliveryActivity(ctx context.Context, c lifecycleCandidate) (time.Time, error) {
+	reader, ok := h.sessionMgr.(interface {
+		DeliveryActivity(context.Context, []playback.Session) (map[string]time.Time, error)
+	})
+	if !ok {
+		return time.Time{}, nil
+	}
+	activity, err := reader.DeliveryActivity(ctx, []playback.Session{{ID: c.sessionID, UserID: c.userID, ProfileID: c.profileID}})
+	return activity[c.sessionID], err
+}
+
+// finishInterruptedNativeEnd finalizes a stopped attempt nobody finished,
+// once its finalization lease is free, from the attempt row.
+func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessionID string) {
+	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
+	if !ok {
+		return
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	if err != nil || record.StoppedAt == nil {
+		return
+	}
+	if !claimStopFinalization(ctx, store, sessionID, record.StopID) {
+		return
+	}
+	receipt, _, err := store.StopAttempt(ctx, sessionID, record.StopID, nil)
+	if err != nil {
+		return
+	}
+	historyID, err := h.finishStop(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
+	if err != nil {
+		// Left unfinalized: the lease lapses and a later sweep retries.
+		slog.WarnContext(ctx, "lifecycle sweep could not finish a session's end", "component", "api", "session", sessionID, "error", err)
+		return
+	}
+	claim := nativeEndClaim{store: store, record: record, receipt: receipt, owned: true}
+	claim.finish(ctx, sessionID, historyID)
+	h.forgetProgressSideEffectLock(sessionID)
+}
+
+// expireIdleJellyfinSession ends a Jellyfin play no server holds through the
+// shared compatibility expiry claim, which marks its play row terminal so no
+// report revives it.
+func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, c lifecycleCandidate, idleBefore time.Time) {
+	if c.activity.After(idleBefore) {
+		return
+	}
+	claimer, ok := h.sessionMgr.(interface {
+		ClaimCompatExpiry(context.Context, []playback.SessionExpiryCandidate) (map[string]bool, bool, error)
+	})
+	if !ok {
+		return
+	}
+	claimed, configured, err := claimer.ClaimCompatExpiry(ctx, []playback.SessionExpiryCandidate{{
+		Session:        playback.Session{ID: c.sessionID, UserID: c.userID, ProfileID: c.profileID},
+		InactiveBefore: idleBefore,
+	}})
+	if err != nil {
+		slog.WarnContext(ctx, "lifecycle sweep could not claim a Jellyfin expiry", "component", "api", "session", c.sessionID, "error", err)
+		return
+	}
+	if configured && !claimed[c.sessionID] {
+		return // a report arrived; the play goes on
+	}
+	h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+}
+
+// endLifecycleFromFacts records the end of a session nothing richer is left
+// for: the row it recorded when it started, at the last position the shared
+// state knows.
+func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID string, reason PlaybackEndReason) {
+	reader, ok := h.AdminStore.(liveSessionReader)
+	if !ok {
+		return
+	}
+	session, err := reader.LiveSession(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, playback.ErrSessionNotFound) {
+			slog.WarnContext(ctx, "lifecycle sweep could not read a session's start", "component", "api", "session", sessionID, "error", err)
+		}
+		return
+	}
+	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil && record.LastSample.Position > session.Position {
+		session.Position = record.LastSample.Position
+	}
+	h.recordAdminStopHistory(ctx, session, reason)
+}

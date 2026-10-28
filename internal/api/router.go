@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -181,11 +182,14 @@ type Dependencies struct {
 	NodeCapabilityInvalidator func(nodeURL string)
 	ResourceSampler           *nodemetrics.Sampler           // this host's own resource sampler (may be nil)
 	SessionSyncer             handlers.PlaybackSessionSyncer // optional; immediate playback session sync trigger
-	EventBus                  cache.EventBus
-	AdminStatsProvider        handlers.AdminStatsSource
-	Recommender               recommendations.Recommender // nil when disabled
-	RecWorker                 *recommendations.Worker     // nil when disabled
-	CatalogSearchVectorizer   catalog.CatalogSearchQueryVectorizer
+	// LiveSessionRowJSON renders a session as the live row a sync would
+	// store for it, so a session.started event can carry it before a sync.
+	LiveSessionRowJSON      func(*playback.Session) (json.RawMessage, error)
+	EventBus                cache.EventBus
+	AdminStatsProvider      handlers.AdminStatsSource
+	Recommender             recommendations.Recommender // nil when disabled
+	RecWorker               *recommendations.Worker     // nil when disabled
+	CatalogSearchVectorizer catalog.CatalogSearchQueryVectorizer
 	// CatalogSearchSettings is the process-lifetime startup snapshot shared by
 	// every native/jellycompat provider and the index maintenance worker.
 	CatalogSearchSettings *catalog.CatalogSearchSettings
@@ -1411,6 +1415,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Maintenance also bounds the in-memory fallback store: without it a
 		// DB-less deployment accumulates attempts and replans forever.
 		playbackHandler.StartV3Maintenance(deps.AppContext)
+		playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
@@ -1424,6 +1429,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		playbackHandler.AdminStore = playbackAdminStore
 		playbackHandler.EventsHub = deps.EventsHub
+		playbackHandler.LifecycleEncoder = apiv2.PlaybackLifecycleEncoder{}
+		playbackHandler.LiveRowJSON = deps.LiveSessionRowJSON
 		if deps.FileRepo != nil {
 			playbackHandler.MissingMarker = deps.FileRepo
 		}
@@ -2729,6 +2736,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.AdminWatchSummary = adminHandler
 		}
 		v2deps.AdminPlaybackSessions = adminHandler
+		if playbackHandler != nil && deps.DB != nil {
+			playbackHandler.LifecycleViews = adminHandler
+			v2deps.PlaybackLifecycleEvents = deps.EventsHub != nil
+		}
 		if deps.DB != nil && deps.ArtifactManager != nil {
 			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
 			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager

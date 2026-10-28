@@ -1550,15 +1550,19 @@ that row takes the start time, client and device from the shared live row when o
 left. The one exception is a Jellyfin session copy that never reported progress: it may
 only have served media while another copy took the play's reports, so it leaves the row
 to that copy and records nothing. A play whose media file left the catalog before the end
-was recorded still gets its row, without the item and duration only the file gave. When an attempt is finalized more than once, for example expired and then
-rebuilt and stopped, the latest finalization's reason wins. Every one of these fields is
+was recorded still gets its row, without the item and duration only the file gave. When
+an attempt is finalized more than once (copies on several servers, a retried stop), the
+end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
+that end's sequence number on the sessions channel (null on rows recorded before
+lifecycle numbers existed). Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
 is also null for a server teardown the client never recovered from (an encoder exit, a
 withdrawn plan).
 
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
-`stream_decisions`, `end_reason` and `end_reason_values`, for feature detection.
+`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
+detection.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
@@ -1992,6 +1996,18 @@ restart from the server's recovery card keeps its device; one rebuilt from a
 stream token comes back without it, as it does without its client name. The
 fields are absent when the client declared none, and the frozen v1 row never
 carries them.
+
+With `lifecycle_events: true` in the capabilities, the admin sessions channel
+announces session starts, pauses, resumes and ends
+([realtime-api.md](realtime-api.md#playback-session-lifecycle-events)), and detailed
+rows carry `lifecycle_seq`: the number of the session's last lifecycle transition.
+A row's `is_paused` then comes from that same transition, so a row and an event with
+equal numbers agree. A session whose lifecycle has ended is left out of the list, and
+a native session no server holds in memory but whose attempt is still live (media a
+node keeps serving after its API server restarted) is listed from the row recorded at
+its start, at the attempt's last position, with an empty `reporting_node`. Rows for
+sessions that started before the server recorded lifecycle transitions omit
+`lifecycle_seq` and keep the observed `is_paused`.
 
 `GET /api/v2/admin/node-sessions` returns `{items, page, undecodable}` using the
 owning node-session reader. Optional positive string `node_id` filters by the

@@ -104,6 +104,11 @@ func (h *Handler) startNativePlaybackSession(
 	}
 
 	h.syncNativeSessionsNow(r.Context(), "abs_start")
+	if announcer, ok := h.deps.NativeSessions.(interface {
+		AnnounceStart(ctx context.Context, sessionID, frontend string)
+	}); ok {
+		announcer.AnnounceStart(r.Context(), session.ID, "abs")
+	}
 	return session, nil
 }
 

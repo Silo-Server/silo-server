@@ -2348,6 +2348,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, commitErr
 	}
 	h.recordSessionRecipeV3(r.Context(), result.Plan.PlanID, &transport)
+	if started, err := h.sessionMgr.GetSession(session.ID); err == nil {
+		frontend := LifecycleFrontendBridge
+		if isNativeAPIV2(r.Context()) {
+			frontend = LifecycleFrontendNative
+		}
+		h.SessionStarted(r.Context(), started, frontend)
+	}
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
