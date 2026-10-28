@@ -103,8 +103,21 @@ func (r *Repository) ResetDiscoverLayoutConditional(ctx context.Context, expecte
 	if err := lockRevision(ctx, tx, `SELECT revision FROM request_discover_layout WHERE id FOR UPDATE`, nil, expected, true); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM request_discover_layout WHERE id`); err != nil {
+	// A missing row cannot be locked: a reset of the default layout must not
+	// delete a first save that committed after the check, so the delete
+	// carries the revision and a row that appeared makes the reset stale.
+	tag, err := tx.Exec(ctx, `DELETE FROM request_discover_layout WHERE id AND ($1::bigint = -1 OR revision = $1)`, expected)
+	if err != nil {
 		return fmt.Errorf("reset discover layout: %w", err)
+	}
+	if tag.RowsAffected() == 0 && expected != -1 {
+		var appeared bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM request_discover_layout)`).Scan(&appeared); err != nil {
+			return fmt.Errorf("reset discover layout: %w", err)
+		}
+		if appeared {
+			return ErrStaleRevision
+		}
 	}
 	return tx.Commit(ctx)
 }

@@ -262,8 +262,9 @@ function RowFields({
   const hideId = useId();
   const kind = ROW_KINDS[row.type];
   const brand = isBrandRow(row);
-  // The server needs a name to preview a row; a blank one doesn't change its titles.
-  const previewRow = { ...row, title: savedTitle(row) || kind.label };
+  // The server needs a name to preview a row, but the name doesn't change its
+  // titles: a fixed one keeps typing a name from reading the source again.
+  const previewRow = { ...row, title: kind.label };
   const preview = useDiscoverRowPreview(brand || rowProblem(previewRow) ? null : previewRow);
   let offText = "Pick a chart to see its titles.";
   if (row.list) offText = "Pick a list or paste its link to see its titles.";

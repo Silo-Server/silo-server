@@ -127,7 +127,7 @@ func TestRefresherKeepsTheLastGoodListAndRetriesOnSchedule(t *testing.T) {
 		wantCalls int
 	}{
 		{
-			name:    "first fetch, in list order, IMDb fallback picks the entry's type, unknown types and 404s skipped",
+			name:    "first fetch, in list order, IMDb fallback picks the entry's type, unknown types, 404s and repeats skipped",
 			entries: []MDBListEntry{{ID: "5", MediaType: "movie"}, {MediaType: "show", IMDbID: "tt1"}, {ID: "9", MediaType: "person"}, {ID: "6", MediaType: "show"}, {ID: "5", MediaType: "movie"}},
 			cardErr: map[int]error{6: fmt.Errorf("gone: %w", tmdb.ErrNotFound)},
 			want:    outcomeRefreshed,
@@ -135,7 +135,8 @@ func TestRefresherKeepsTheLastGoodListAndRetriesOnSchedule(t *testing.T) {
 				{ID: 5, MediaType: "movie", Title: "Title 5", PosterPath: "/p.jpg"},
 				{ID: 77, MediaType: "series", Title: "Found by tt1"},
 			},
-			wantCalls: 3,
+			// Movie 5 is listed twice and looked up once.
+			wantCalls: 2,
 		},
 		{name: "fresh copy is not fetched", stored: &Snapshot{Cards: good, LastStatus: snapshotOK, RefreshedAt: new(now.Add(-time.Hour))}, want: outcomeFresh, wantCards: good},
 		{name: "download failure keeps the copy", stored: &Snapshot{Cards: good, LastStatus: snapshotOK, RefreshedAt: &stale}, fetch: errors.New("mdblist down"), want: outcomeFailed, wantCards: good},

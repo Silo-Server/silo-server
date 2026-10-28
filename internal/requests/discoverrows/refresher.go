@@ -275,6 +275,8 @@ func (r *Refresher) mdblistCards(ctx context.Context, entries []MDBListEntry) ([
 	cards := make([]*Card, len(entries))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cardLookupConcurrency)
+	// A list can name a title twice; look each one up once, at its first place.
+	scheduled := map[string]bool{}
 	for i, entry := range entries {
 		mediaType := ""
 		switch entry.MediaType {
@@ -285,6 +287,11 @@ func (r *Refresher) mdblistCards(ctx context.Context, entries []MDBListEntry) ([
 		default:
 			continue
 		}
+		lookup := mediaType + "/" + entry.ID.String() + "/" + entry.IMDbID
+		if scheduled[lookup] {
+			continue
+		}
+		scheduled[lookup] = true
 		g.Go(func() error {
 			card, err := r.lookupCard(gctx, mediaType, entry)
 			if errors.Is(err, tmdb.ErrNotFound) {

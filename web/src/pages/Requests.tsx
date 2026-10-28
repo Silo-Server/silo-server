@@ -259,7 +259,12 @@ function DiscoverRow({
   return (
     <MediaCarousel
       title={section.title}
-      viewAllHref={section.total_pages > 1 ? requestDiscoverSectionHref(section.key) : undefined}
+      // A row trimmed to its size has more titles even on a one-page source.
+      viewAllHref={
+        section.total_pages > 1 || section.total_results > section.results.length
+          ? requestDiscoverSectionHref(section.key)
+          : undefined
+      }
     >
       {section.results.map((item) => (
         <RequestPosterCard

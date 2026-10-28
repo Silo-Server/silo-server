@@ -55,6 +55,8 @@ export function useDiscoverRowPreview(row: DiscoverRowBody | null): PreviewState
     retry: false,
   });
   if (current === null) return { status: "off" };
+  // A failed read shows as failed, not as the titles of an earlier row.
+  if (query.isError) return { status: "error" };
   if (query.data)
     return {
       status: "ready",
@@ -66,7 +68,6 @@ export function useDiscoverRowPreview(row: DiscoverRowBody | null): PreviewState
       totalCount: query.data.total_results,
       refreshing: settled !== current || query.isFetching,
     };
-  if (query.isError) return { status: "error" };
   return { status: "loading" };
 }
 
