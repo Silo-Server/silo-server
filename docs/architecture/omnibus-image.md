@@ -289,7 +289,10 @@ How it stays safe to repeat and to roll back:
   changed since. A run that finds both markers, left by a kill just after the
   done marker was written, only removes the pending record. A data directory
   an unfinished `initdb` left is set aside the same way. A failure removes
-  everything staged, and the closing log lists every copy set aside.
+  everything staged, and the closing log lists every copy set aside. While the
+  pending record exists, `init-postgres` refuses to start, whatever the
+  environment: Silo writing to a half-moved cluster that the next run sets
+  aside would leave those writes behind.
 - `cp` does not flush, and PostgreSQL never syncs a cleanly stopped cluster it
   starts on, so the script syncs the file system after staging and writing the
   pending record, after the moves, and after the done marker. Otherwise a power
@@ -300,7 +303,8 @@ How it stays safe to repeat and to roll back:
 - The done marker, `/config/.compose-cluster-copied`, is written to a
   temporary name and renamed into place once everything else is, so it is
   whole or absent. It records the source cluster's system identifier and latest
-  checkpoint location (`pg_controldata`), or `none` when Silo's database is
+  checkpoint location (`pg_controldata`, read in the C locale; a cluster it
+  cannot read stops the script), or `none` when Silo's database is
   elsewhere. Any later start of the old cluster, even a clean start and stop,
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
