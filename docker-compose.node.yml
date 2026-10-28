@@ -9,7 +9,8 @@ services:
     restart: unless-stopped
     # On stop a transcode node drains: it takes no new work and lets its
     # sessions finish for up to SILO_NODE_DRAIN_TIMEOUT (default 10m, 0 turns it
-    # off). The grace period covers the drain plus a minute for the shutdown.
+    # off). The grace period covers the drain plus a minute for the shutdown;
+    # raising SILO_NODE_DRAIN_TIMEOUT means raising this to match.
     stop_grace_period: 11m
     environment:
       MODE: ${MODE:-transcode}

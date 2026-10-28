@@ -108,6 +108,9 @@ fi
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 if [[ -n "${REDIS_URL:-}" ]]; then
   redis_state="external"
+  if [[ "$node_access" == true ]]; then
+    warn "ENABLE_NODE_ACCESS opens only the bundled Redis; nodes reach the one REDIS_URL names directly"
+  fi
 elif [[ "$node_access" == true ]]; then
   # Nodes need Redis, and the one the main server uses. The password goes
   # into a URL, so keep it to characters that need no escaping there.
