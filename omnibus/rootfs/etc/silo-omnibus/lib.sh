@@ -65,7 +65,9 @@ exec_clean() {
 # life. postmaster.pid only guards against servers in one PID namespace; a
 # second container on the same /config sees a stale-looking pid file and would
 # start a second server on the same data directory. It lives in /config, which
-# only root writes, so the postgres account cannot swap it for a new file.
+# only root writes, so the postgres account cannot swap it for a new file. It
+# is root:postgres 0660 and opened read-write: NFS emulates flock(2) with a
+# POSIX lock, and an exclusive one needs a writable descriptor.
 # shellcheck disable=SC2034 # used by init-config, init-postgres, svc-postgres
 PG_LOCK=/config/.postgres.lock
 

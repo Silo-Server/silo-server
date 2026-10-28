@@ -15,7 +15,7 @@ export HOME=/config/postgres
 # something else, which PostgreSQL would take for a live server.
 # shellcheck disable=SC2016 # expanded by the inner shell
 exec_clean '' s6-notifyoncheck -d -n 0 -w 1000 \
-  s6-setuidgid postgres bash -c 'exec 9<"$1" && flock -n 9 || {
+  s6-setuidgid postgres bash -c 'exec 9<>"$1" && flock -n 9 || {
       echo "another PostgreSQL server holds $1; is a second container using this /config?" >&2
       exit 1
     }

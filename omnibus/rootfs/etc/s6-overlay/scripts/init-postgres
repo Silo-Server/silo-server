@@ -39,7 +39,8 @@ MSG
   fi
   # Fail early, before changing anything, when another container's server
   # holds the lock. svc-postgres takes it for good before touching the pid file.
-  if ! s6-setuidgid postgres flock -n "$PG_LOCK" true; then
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  if ! s6-setuidgid postgres bash -c 'exec 9<>"$1" && flock -n 9' _ "$PG_LOCK"; then
     echo "another PostgreSQL server is using $PGDATA; is a second container using this /config?" >&2
     exit 1
   fi

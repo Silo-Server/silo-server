@@ -1156,10 +1156,10 @@ func storageNamespacesOverlap(sourceIdentity, targetIdentity string) bool {
 	return false
 }
 
-// resolvedLocalRoot is the directory a local identity names with existing
-// symlinks resolved. A store can keep the identity recorded under another path
-// to its directory (blobstore.SameLocalRoot), so containment compares where
-// the roots are, not how they are written.
+// resolvedLocalRoot is the root a local identity names with symlinks in its
+// parent directories resolved, the same rule blobstore.SameLocalRoot uses. A
+// store can keep the identity recorded under another path to its directory,
+// so containment compares where the roots are, not how they are written.
 func resolvedLocalRoot(identity string) string {
 	root := strings.TrimPrefix(identity, blobstore.BackendLocal+"|")
 	if resolved, err := blobstore.LocalIdentity(root); err == nil {

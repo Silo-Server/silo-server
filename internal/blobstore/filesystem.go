@@ -552,12 +552,15 @@ func (f *Filesystem) Identity() string {
 	return BackendLocal + "|" + f.root
 }
 
-// SameLocalRoot reports whether two local identities name the same existing
-// directory. The paths can differ when a symlink was added to, or removed from,
-// the path after the identity was recorded: an image that keeps its state
-// under a linked directory resolves a root the regular image recorded at
-// another path. Identities name storage, not paths, so callers that compare
-// them treat such a pair as one location.
+// SameLocalRoot reports whether two local identities name the same root once
+// each is resolved the way a store resolves its own root (LocalIdentity):
+// symlinks in the parent directories are followed, the root's own name is
+// not. The paths can differ when a link was added to, or removed from, a
+// parent after the identity was recorded: an image that keeps its state under
+// a linked directory resolves a root the regular image recorded at another
+// path. A recorded root that is itself a link is not followed, because a
+// store refuses a linked root (ensureRoot), so it never matches the directory
+// the link points to.
 func SameLocalRoot(a, b string) bool {
 	rootA, okA := strings.CutPrefix(a, BackendLocal+"|")
 	rootB, okB := strings.CutPrefix(b, BackendLocal+"|")
@@ -567,9 +570,9 @@ func SameLocalRoot(a, b string) bool {
 	if rootA == rootB {
 		return true
 	}
-	infoA, errA := os.Stat(rootA)
-	infoB, errB := os.Stat(rootB)
-	return errA == nil && errB == nil && infoA.IsDir() && infoB.IsDir() && os.SameFile(infoA, infoB)
+	resolvedA, errA := LocalIdentity(rootA)
+	resolvedB, errB := LocalIdentity(rootB)
+	return errA == nil && errB == nil && resolvedA == resolvedB
 }
 
 var _ Store = (*Filesystem)(nil)

@@ -19,8 +19,12 @@ install -d -o silo -g silo /config/silo
 install -d -o postgres -g postgres -m 0750 /config/postgres
 install -d -o redis -g redis -m 0750 /config/redis
 install -d -o meilisearch -g meilisearch -m 0750 /config/meilisearch
-# Root-owned, so only opened, never replaced, by the postgres account.
-[[ -f "$PG_LOCK" ]] || install -o root -g root -m 0644 /dev/null "$PG_LOCK"
+# Root-owned, so the postgres account opens it read-write (see lib.sh) but
+# never replaces it. A file from an earlier image is fixed in place: replacing
+# it would let a second container lock a different file.
+[[ -f "$PG_LOCK" ]] || install /dev/null "$PG_LOCK"
+chown root:postgres "$PG_LOCK"
+chmod 0660 "$PG_LOCK"
 # Local artwork can put millions of files under /config/silo, too many to walk
 # on every start. Walk it when the silo account's ids differ from the last
 # walk's, or when an entry in the top two levels is owned wrong, as in a
