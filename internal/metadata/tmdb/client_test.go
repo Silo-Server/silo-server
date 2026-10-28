@@ -67,6 +67,40 @@ func TestRequestErrorsLeaveOutTheAPIKey(t *testing.T) {
 	}
 }
 
+// countingLimiter counts the requests that wait on it.
+type countingLimiter struct{ waits atomic.Int32 }
+
+func (l *countingLimiter) Wait(context.Context) error {
+	l.waits.Add(1)
+	return nil
+}
+
+// A shared budget holds only if every request spends from it, so a retry
+// after TMDB throttles waits on the limiter like the first attempt.
+func TestRetryWaitsOnTheLimiter(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	limiter := &countingLimiter{}
+	client := NewClientWithLimiter("test-key", limiter)
+	t.Cleanup(client.Close)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.SearchMedia(t.Context(), "movie", "Alien", 1); err != nil {
+		t.Fatalf("SearchMedia: %v", err)
+	}
+	if got, want := limiter.waits.Load(), requests.Load(); got != want || want != 2 {
+		t.Fatalf("%d requests waited on the limiter %d times, want 2 and 2", want, got)
+	}
+}
+
 func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	arrived := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

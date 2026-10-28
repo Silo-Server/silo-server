@@ -53,7 +53,7 @@ type Client struct {
 	httpClient           *http.Client
 	apiKey               string
 	baseURL              string
-	limiter              *rate.Limiter
+	limiter              Limiter
 	discoverSectionCache *cache.TTLCache[*MediaPage]
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
@@ -64,14 +64,25 @@ type Client struct {
 	responseCacheTTL     time.Duration
 }
 
-// NewClient creates a TMDB API client with the given API key and rate limit
-// (requests per second). If apiKey is empty, Silo's public project API key is
-// used.
-
 // ErrNotFound is wrapped by errors for titles TMDB does not have (HTTP 404).
 var ErrNotFound = errors.New("tmdb: not found")
 
+// Limiter paces a client's requests: Wait returns once the next request may
+// go, or with an error once ctx ends first. *rate.Limiter is one.
+type Limiter interface {
+	Wait(ctx context.Context) error
+}
+
+// NewClient creates a TMDB API client with the given API key and its own rate
+// limit (requests per second). If apiKey is empty, Silo's public project API
+// key is used.
 func NewClient(apiKey string, rateLimit int) *Client {
+	return NewClientWithLimiter(apiKey, rate.NewLimiter(rate.Limit(rateLimit), rateLimit))
+}
+
+// NewClientWithLimiter creates a TMDB API client whose requests wait on
+// limiter, which other clients may share.
+func NewClientWithLimiter(apiKey string, limiter Limiter) *Client {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		apiKey = projectAPIKey
@@ -80,7 +91,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		httpClient:           &http.Client{Timeout: 30 * time.Second},
 		apiKey:               apiKey,
 		baseURL:              defaultBaseURL,
-		limiter:              rate.NewLimiter(rate.Limit(rateLimit), rateLimit),
+		limiter:              limiter,
 		discoverSectionCache: cache.NewTTLCache[*MediaPage](),
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
@@ -122,12 +133,9 @@ func (c *Client) Close() {
 }
 
 // doGet executes a GET request against the TMDB API with rate limiting,
-// exponential backoff on 5xx/429, and JSON decoding into dest.
+// exponential backoff on 5xx/429, and JSON decoding into dest. Every attempt
+// waits on the limiter.
 func (c *Client) doGet(ctx context.Context, path string, dest any) error {
-	if err := c.limiter.Wait(ctx); err != nil {
-		return err
-	}
-
 	sep := "?"
 	if strings.Contains(path, "?") {
 		sep = "&"
@@ -135,6 +143,10 @@ func (c *Client) doGet(ctx context.Context, path string, dest any) error {
 	reqURL := c.baseURL + path + sep + "api_key=" + url.QueryEscape(c.apiKey)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// A retry is another request against the same budget.
+		if err := c.limiter.Wait(ctx); err != nil {
+			return err
+		}
 		// reqURL carries the API key and a *url.Error prints the whole URL, so
 		// these errors drop the query string before callers log or store them.
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)

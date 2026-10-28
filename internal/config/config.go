@@ -475,6 +475,9 @@ type Config struct {
 	ClientIP             ClientIPConfig             `yaml:"-"`
 	TMDBAPIKey           string                     `yaml:"-"`
 	MDBListAPIKey        string                     `yaml:"-"`
+
+	// TMDBRequestsPerSecond is tmdb.requests_per_second.
+	TMDBRequestsPerSecond int `yaml:"-"`
 }
 
 // configRaw is used for initial YAML unmarshaling with string durations.

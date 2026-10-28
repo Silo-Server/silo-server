@@ -40,7 +40,8 @@ self-service password reset only work with Silo passwords, so they sit with
 password sign-in on Sign-in. Logging holds every log setting, the server log
 and the activity log retention alike. General holds what the whole server runs
 on: its name and address, the trusted proxies beside the public URL (as the
-setup wizard presents them), the database pool, and Redis. Storage holds where
+setup wizard presents them), the database pool, the TMDB request budget
+every node shares, and Redis. Storage holds where
 files go, including whether provider artwork is copied there. Its bucket
 sections show for S3 and Automatic. Local disk keeps avatars, diagnostics, and
 catalog artifacts in the local path, so it hides both, keeping private storage

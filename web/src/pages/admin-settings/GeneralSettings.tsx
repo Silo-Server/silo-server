@@ -38,7 +38,12 @@ const NETWORK_KEYS = [
 // ordinary settings through the API.
 const DATABASE_KEYS = ["database.max_connections"];
 
-const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...DATABASE_KEYS, ...REDIS_KEYS];
+// One budget for every TMDB request the server makes itself (request
+// discovery, collections), shared by every node on the same Redis.
+const TMDB_RATE_KEY = "tmdb.requests_per_second";
+const TMDB_KEYS = [TMDB_RATE_KEY];
+
+const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...DATABASE_KEYS, ...TMDB_KEYS, ...REDIS_KEYS];
 
 export default function GeneralSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -195,6 +200,19 @@ export default function GeneralSettings() {
             value={form.getValue("database.max_connections")}
             onChange={(v) => form.setValue("database.max_connections", v)}
             restartRequired={restartKeys.has("database.max_connections")}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="TMDB" restartAll={allRestart(TMDB_KEYS)} dirty={anyDirty(TMDB_KEYS)}>
+          <SettingField
+            label="TMDB requests"
+            dirty={form.isDirty(TMDB_RATE_KEY)}
+            type="number"
+            unit="per second"
+            description="Covers request discovery and collections. With Redis, all servers share one budget. Metadata plugins are not counted."
+            value={form.getValue(TMDB_RATE_KEY)}
+            onChange={(v) => form.setValue(TMDB_RATE_KEY, v)}
+            restartRequired={restartKeys.has(TMDB_RATE_KEY)}
           />
         </FieldGroup>
 
