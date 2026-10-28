@@ -114,15 +114,23 @@ func (s *PGPlaybackAdminStore) StartLifecycle(ctx context.Context, start Lifecyc
 		facts = json.RawMessage("{}")
 	}
 	t := LifecycleTransition{SessionID: start.SessionID, State: LifecyclePlaying, Started: true}
+	// The state starts at the attempt's latest accepted sample, read under a
+	// share lock: progress accepted before the row exists is not lost, and
+	// progress after it waits for the row and then updates it.
 	err := s.pool.QueryRow(ctx, `
+		WITH accepted AS (
+			SELECT COALESCE((last_sample->>'is_paused')::boolean, FALSE) AS paused
+			FROM playback_v3_attempts WHERE session_id = $1 FOR SHARE
+		)
 		INSERT INTO playback_session_lifecycle
 			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id,
 			 progress_persistence_disabled, started_at, start_facts, updated_at)
-		VALUES ($1, $2, 'playing', nextval('playback_session_lifecycle_seq'), $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+		VALUES ($1, $2, CASE WHEN (SELECT paused FROM accepted) THEN 'paused' ELSE 'playing' END,
+			nextval('playback_session_lifecycle_seq'), $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
 		ON CONFLICT (session_id) DO NOTHING
-		RETURNING seq, updated_at`,
+		RETURNING seq, updated_at, state`,
 		start.SessionID, start.Frontend, start.UserID, start.ProfileID, start.MediaFileID,
-		start.RequestedMediaFileID, start.PersistenceDisabled, start.StartedAt, string(facts)).Scan(&t.Seq, &t.At)
+		start.RequestedMediaFileID, start.PersistenceDisabled, start.StartedAt, string(facts)).Scan(&t.Seq, &t.At, &t.State)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LifecycleTransition{}, false, nil
 	}
@@ -171,7 +179,10 @@ func (s *PGPlaybackAdminStore) RecordEnd(ctx context.Context, entry AdminPlaybac
 			 requested_media_file_id, started_at, updated_at)
 		VALUES ($1, $2, 'stopped', $3, nextval('playback_session_lifecycle_seq'), $4, $5, $6, $6, $7::timestamptz, NOW())
 		ON CONFLICT (session_id) DO UPDATE SET
-			state = 'stopped', end_reason = EXCLUDED.end_reason, seq = EXCLUDED.seq, updated_at = NOW()
+			-- The number is taken under the row lock, not with the VALUES:
+			-- a pause that commits while this waits must stay lower.
+			state = 'stopped', end_reason = EXCLUDED.end_reason,
+			seq = nextval('playback_session_lifecycle_seq'), updated_at = NOW()
 		WHERE playback_session_lifecycle.state <> 'stopped'
 		RETURNING seq, updated_at, xmax = 0`,
 		entry.SessionID, frontend, string(entry.EndReason), entry.UserID, entry.ProfileID, entry.MediaFileID,
@@ -248,7 +259,7 @@ func (h *PlaybackHandler) lifecycleEventsReady() (playbackLifecycleStore, bool) 
 // arrived first) announces nothing.
 func (h *PlaybackHandler) SessionStarted(ctx context.Context, session *playback.Session, frontend string) {
 	store, ok := h.lifecycleEventsReady()
-	if !ok || session == nil || session.ID == "" {
+	if !ok || session == nil || lifecycleIDParam(session.ID) == nil {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
@@ -278,7 +289,7 @@ func (h *PlaybackHandler) SessionStarted(ctx context.Context, session *playback.
 // announces it when it changed the session's state.
 func (h *PlaybackHandler) SessionPauseReported(ctx context.Context, sessionID string, paused bool) {
 	store, ok := h.lifecycleEventsReady()
-	if !ok || sessionID == "" {
+	if !ok || lifecycleIDParam(sessionID) == nil {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
@@ -311,7 +322,7 @@ func (h *PlaybackHandler) publishSequencedPause(ctx context.Context, sessionID s
 // writes the history row the old way.
 func (h *PlaybackHandler) recordEnd(ctx context.Context, session *playback.Session, entry AdminPlaybackHistoryEntry) bool {
 	store, ok := h.AdminStore.(playbackLifecycleStore)
-	if !ok {
+	if !ok || lifecycleIDParam(session.ID) == nil {
 		return false
 	}
 	t, won, err := store.RecordEnd(ctx, entry, sessionFrontend(session))

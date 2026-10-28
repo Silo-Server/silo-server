@@ -96,17 +96,28 @@ func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool
 
 func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.Time) ([]lifecycleCandidate, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT lc.session_id, lc.frontend, lc.user_id, lc.profile_id, lc.state = 'paused',
-			GREATEST(lc.updated_at, COALESCE(lc.activity_at, lc.updated_at), COALESCE(a.updated_at, lc.updated_at)),
-			a.session_id IS NOT NULL, a.session_id IS NOT NULL AND a.stopped_at IS NULL,
-			COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE), COALESCE(a.stop_receipt->>'stop_id', '')
-		FROM playback_session_lifecycle lc
-		LEFT JOIN playback_v3_attempts a ON a.session_id::text = lc.session_id AND a.expires_at > $1
-		WHERE lc.state <> 'stopped' AND lc.updated_at < $2
-		  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live
-			WHERE live.session_id = lc.session_id AND live.last_sync_at > $3)
-		ORDER BY lc.updated_at
-		LIMIT $4`, now, now.Add(-lifecycleHeldGrace), now.Add(-lifecycleHeldGrace), lifecycleSweepBatch)
+		WITH live AS (
+			SELECT lc.session_id, lc.frontend, lc.user_id, lc.profile_id, lc.state = 'paused' AS paused,
+				GREATEST(lc.updated_at, COALESCE(lc.activity_at, lc.updated_at), COALESCE(a.updated_at, lc.updated_at)) AS activity,
+				a.session_id IS NOT NULL AS attempt_found, a.session_id IS NOT NULL AND a.stopped_at IS NULL AS attempt_live,
+				COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE) AS finalized, COALESCE(a.stop_receipt->>'stop_id', '') AS stop_id
+			FROM playback_session_lifecycle lc
+			LEFT JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.expires_at > $1
+			WHERE lc.state <> 'stopped' AND lc.updated_at < $2
+			  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync s
+				WHERE s.session_id = lc.session_id::text AND s.last_sync_at > $2)
+		)
+		-- Only rows the sweep can act on now: an attempt someone stopped, or a
+		-- session idle past its grace. Rows still active never fill the batch.
+		SELECT session_id::text, frontend, user_id, profile_id, paused, activity, attempt_found, attempt_live, finalized, stop_id
+		FROM live
+		WHERE (attempt_found AND NOT attempt_live)
+		   OR activity < $1 - CASE
+				WHEN frontend = 'abs' THEN $3::interval
+				WHEN paused THEN $4::interval
+				ELSE $5::interval END
+		ORDER BY activity
+		LIMIT $6`, now, now.Add(-lifecycleHeldGrace), lifecycleABSGrace, lifecyclePausedGrace, lifecyclePlayingGrace, lifecycleSweepBatch)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +183,6 @@ func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgx
 	if !ok {
 		return
 	}
-	h.StreamDeny.Deny(ctx, c.sessionID)
 	stopped, err := expirer.ExpireIdleAttempt(ctx, c.sessionID, expiredStopID(c.sessionID), idleBefore)
 	if err != nil || !stopped {
 		if err != nil {
@@ -180,6 +190,9 @@ func (h *PlaybackHandler) expireIdleNativeSession(ctx context.Context, pool *pgx
 		}
 		return
 	}
+	// Only a session this claim ended loses its tokens: one that saw
+	// progress after the sweep looked keeps playing.
+	h.StreamDeny.Deny(ctx, c.sessionID)
 	slog.InfoContext(ctx, "expired a playback session no server holds", "component", "api", "session", c.sessionID, "playback_session_id", c.sessionID)
 	h.finishInterruptedNativeEnd(ctx, c.sessionID)
 }

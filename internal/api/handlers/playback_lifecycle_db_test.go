@@ -51,7 +51,7 @@ func TestPlaybackLifecycleTransitionsDB(t *testing.T) {
 		return reason, seq
 	}
 
-	play := "jf-" + uuid.NewString()
+	play := uuid.NewString()
 	first, ok := start(play, LifecycleFrontendJellyfin)
 	if !ok || !first.Started || first.State != LifecyclePlaying {
 		t.Fatalf("start = %+v ok=%v", first, ok)
@@ -80,13 +80,13 @@ func TestPlaybackLifecycleTransitionsDB(t *testing.T) {
 		t.Fatal("a stopped session resumed")
 	}
 
-	native := "native-" + uuid.NewString()
+	native := uuid.NewString()
 	start(native, LifecycleFrontendNative)
 	if _, ok, _ := store.SetLifecyclePaused(ctx, native, true); ok {
 		t.Fatal("an unsequenced pause moved a native session")
 	}
 
-	early := "early-" + uuid.NewString()
+	early := uuid.NewString()
 	if tomb, won := end(early, PlaybackEndStopped, 60); won || tomb.Seq == 0 {
 		t.Fatalf("an end before the start = %+v won=%v; want a silent tombstone", tomb, won)
 	}
@@ -188,4 +188,137 @@ func lifecycleTestDB(t *testing.T) (context.Context, *pgxpool.Pool, int) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account)
 	})
 	return ctx, pool, account
+}
+
+// TestPlaybackLifecycleOrderAndStartStateDB covers two orderings the events
+// promise: an end that waits behind a pause still takes a higher number than
+// that pause, and a start announces the pause state the attempt had already
+// accepted rather than assuming playing.
+func TestPlaybackLifecycleOrderAndStartStateDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	file := lifecycleTestFile(t, ctx, pool)
+	started := time.Now().UTC()
+
+	play := uuid.NewString()
+	if _, ok, err := store.StartLifecycle(ctx, LifecycleStart{SessionID: play, Frontend: LifecycleFrontendJellyfin, UserID: account, ProfileID: "p-1", MediaFileID: file, RequestedMediaFileID: file, StartedAt: started}); err != nil || !ok {
+		t.Fatalf("start: %v %v", ok, err)
+	}
+	// A pause holds the row while the end is already waiting on it.
+	pause, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pause.Rollback(context.Background()) }()
+	if _, err := pause.Exec(ctx, `SELECT 1 FROM playback_session_lifecycle WHERE session_id = $1 FOR UPDATE`, play); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan LifecycleTransition, 1)
+	go func() {
+		end, _, err := store.RecordEnd(context.Background(), AdminPlaybackHistoryEntry{
+			SessionID: play, UserID: account, ProfileID: "p-1", MediaFileID: file, PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(time.Minute).Format(time.RFC3339Nano), EndReason: PlaybackEndStopped,
+		}, LifecycleFrontendJellyfin)
+		if err != nil {
+			t.Error(err)
+		}
+		ended <- end
+	}()
+	// Wait until the end is blocked on the row the pause holds.
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		var waiting int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%INSERT INTO playback_session_lifecycle%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the end never waited on the paused row")
+		}
+		<-time.After(10 * time.Millisecond)
+	}
+	var pauseSeq int64
+	if err := pause.QueryRow(ctx, `UPDATE playback_session_lifecycle SET state='paused', seq=nextval('playback_session_lifecycle_seq')
+		WHERE session_id = $1 RETURNING seq`, play).Scan(&pauseSeq); err != nil {
+		t.Fatal(err)
+	}
+	if err := pause.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if end := <-ended; end.Seq <= pauseSeq {
+		t.Fatalf("end seq %d is not above the pause it waited for (%d)", end.Seq, pauseSeq)
+	}
+
+	native := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO playback_v3_attempts
+		(playback_attempt_id, session_id, user_id, profile_id, requested_media_file_id, effective_media_file_id,
+		 current_plan_id, current_plan, normalized_request, expires_at, last_sequence, last_sample)
+		VALUES ($1, $2::uuid, $3, 'p-1', $4, $4, 'plan-1', '{}', '{}', NOW() + interval '1 hour', 1,
+		 '{"sequence":1,"position":30,"is_paused":true}')`, uuid.NewString(), native, account, file); err != nil {
+		t.Fatal(err)
+	}
+	start, ok, err := store.StartLifecycle(ctx, LifecycleStart{SessionID: native, Frontend: LifecycleFrontendNative, UserID: account, ProfileID: "p-1", MediaFileID: file, RequestedMediaFileID: file, StartedAt: started})
+	if err != nil || !ok || start.State != LifecyclePaused {
+		t.Fatalf("start after an accepted pause = %+v ok=%v err=%v; want paused", start, ok, err)
+	}
+}
+
+// TestLifecycleSweepSelectsWhatItCanEndDB pins that sessions still active
+// never fill the sweep's batch: a hundred unheld sessions with fresh
+// progress are left out, and the abandoned one behind them is selected.
+func TestLifecycleSweepSelectsWhatItCanEndDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	insert := func(attemptAge time.Duration) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at)
+			VALUES ($1, 'native', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3, NOW() - interval '2 hours', NOW() - interval '2 hours')`,
+			id, account, file); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_v3_attempts
+			(playback_attempt_id, session_id, user_id, profile_id, requested_media_file_id, effective_media_file_id,
+			 current_plan_id, current_plan, normalized_request, expires_at, updated_at)
+			VALUES ($1, $2::uuid, $3, 'p-1', $4, $4, 'plan-1', '{}', '{}', NOW() + interval '1 hour', $5)`,
+			uuid.NewString(), id, account, file, time.Now().Add(-attemptAge)); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	active := map[string]bool{}
+	for range lifecycleSweepBatch {
+		active[insert(time.Second)] = true
+	}
+	abandoned := insert(time.Hour)
+	candidates, err := loadLifecycleCandidates(ctx, pool, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range candidates {
+		if active[c.sessionID] {
+			t.Fatalf("an active session was selected: %s", c.sessionID)
+		}
+		found = found || c.sessionID == abandoned
+	}
+	if !found {
+		t.Fatalf("the abandoned session was not selected among %d candidates", len(candidates))
+	}
+}
+
+func lifecycleTestFile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
+	t.Helper()
+	var folder, file int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('movies',$1) RETURNING id`, "lc-"+uuid.NewString()).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, folder) })
+	if err := pool.QueryRow(ctx, `INSERT INTO media_files(media_folder_id,file_path) VALUES($1,$2) RETURNING id`, folder, "/lc/"+uuid.NewString()+".mkv").Scan(&file); err != nil {
+		t.Fatal(err)
+	}
+	return file
 }

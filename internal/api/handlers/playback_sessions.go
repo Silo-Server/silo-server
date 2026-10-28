@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -203,6 +204,15 @@ type PlaybackSessionsQuery struct {
 	Detached json.RawMessage
 }
 
+// lifecycleIDParam is a session id as the lifecycle table keys it (a UUID),
+// or nil for an id that is not one, which has no lifecycle row.
+func lifecycleIDParam(sessionID string) any {
+	if id, err := uuid.Parse(sessionID); err == nil {
+		return id.String()
+	}
+	return nil
+}
+
 // lifecycleOnlySessions lists native sessions whose lifecycle row is live
 // and whose attempt is live, but that no server has a live row for: one a
 // node still serves while no API server holds it in memory. The row is the
@@ -215,9 +225,9 @@ const lifecycleOnlySessions = `
 		'is_paused', lc.state = 'paused',
 		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0)))).*
 	FROM playback_session_lifecycle lc
-	JOIN playback_v3_attempts a ON a.session_id::text = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
+	JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
 	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
-	  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live WHERE live.session_id = lc.session_id)`
+	  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live WHERE live.session_id = lc.session_id::text)`
 
 type playbackSessionsReader interface {
 	Load(ctx context.Context, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
@@ -305,13 +315,19 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	case len(query.Detached) > 0:
 		args = append(args, string(query.Detached))
 		source = "jsonb_populate_record(NULL::playback_sessions_sync, $1::jsonb)"
+	case query.Lifecycle && query.SessionID != "":
+		// One session: filter both branches before the fallback renders its
+		// record, so neither scans other sessions.
+		args = append(args, query.SessionID, lifecycleIDParam(query.SessionID))
+		source = fmt.Sprintf("(SELECT * FROM playback_sessions_sync WHERE session_id = $%d UNION ALL %s AND lc.session_id = $%d::uuid)",
+			len(args)-1, lifecycleOnlySessions, len(args))
 	case query.Lifecycle:
 		source = "(SELECT * FROM playback_sessions_sync UNION ALL " + lifecycleOnlySessions + ")"
 	}
 	lifecycleColumns, lifecycleJoin, pausedColumn := "NULL::bigint", "", "COALESCE(s.is_paused, FALSE)"
 	if query.Lifecycle {
 		lifecycleColumns = "lc.seq"
-		lifecycleJoin = " LEFT JOIN playback_session_lifecycle lc ON lc.session_id = s.session_id"
+		lifecycleJoin = " LEFT JOIN playback_session_lifecycle lc ON lc.session_id::text = s.session_id"
 		pausedColumn = "CASE WHEN lc.state IN ('playing', 'paused') THEN lc.state = 'paused' ELSE COALESCE(s.is_paused, FALSE) END"
 	}
 	sql := `

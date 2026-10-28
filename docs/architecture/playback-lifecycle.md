@@ -29,7 +29,9 @@ It starts once and ends once; an id never starts again.
 its last transition, taken from one global sequence in the statement that makes the
 transition.
 
-- A start inserts the row and announces only if none existed. An end that finds no row
+- A start inserts the row and announces only if none existed. Its state is the
+  attempt's latest accepted pause state, read under a share lock on the attempt row,
+  so progress accepted before the row existed is not lost. An end that finds no row
   inserts a stopped tombstone and announces nothing, so a start that arrives later stays
   silent. Tombstones are kept 25 hours, longer than an attempt lives.
 - Native v2 pause and resume commit in `ApplyProgress`'s transaction, after the
@@ -56,15 +58,17 @@ copy-safety) is not an end: it records its stretch and announces nothing.
 ## Sessions no server holds
 
 A purge of a live row is not an end: the client may continue on another server.
-`StartLifecycleSweep` runs every 15 seconds on each API server and looks at live
-lifecycle rows that no server has synced for 45 seconds and that this server does not
+`StartLifecycleSweep` runs every 15 seconds on each API server. It selects only rows it
+can act on now: live lifecycle rows no server has synced for 45 seconds, whose attempt
+was stopped or whose last activity is past their grace, oldest activity first, so
+sessions that are still active never fill its batch. For each one this server does not
 hold:
 
 - A native session with a live attempt ends once its client and its media have been
   idle for 5 minutes while playing or 30 minutes while paused. Node delivery counts as
   activity and is remembered on the lifecycle row. The claim stops the attempt only
   while no progress has landed since the cutoff (`ExpireIdleAttempt`, under the row
-  lock `ApplyProgress` takes).
+  lock `ApplyProgress` takes), and only a session it ended loses its stream tokens.
 - A native session whose attempt is stopped but unfinalized is finalized once its
   lease is free; one whose attempt is finalized or gone is ended from the lifecycle row.
 - A Jellyfin session ends through the shared compatibility expiry claim
@@ -72,7 +76,8 @@ hold:
 - An Audiobookshelf session ends after 24 hours without a holder.
 
 An end the sweep makes records history from the row the session stored when it
-started, at the last position the attempt knows.
+started, at the last position the attempt knows; a play whose media file left the
+catalog is recorded without the item and duration only the file gave.
 
 **Guarantee.** Every session announced by `session.started` (native or Jellyfin) gets
 an admin history row with an `end_reason` and `lifecycle_seq` within its idle grace

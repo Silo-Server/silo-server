@@ -226,8 +226,8 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 				'session_id', lc.session_id, 'user_id', lc.user_id, 'profile_id', lc.profile_id,
 				'media_file_id', lc.media_file_id, 'requested_media_file_id', lc.requested_media_file_id,
 				'started_at', lc.started_at) || lc.start_facts)).*
-			FROM playback_session_lifecycle lc WHERE lc.session_id = $1
-		) s ORDER BY source LIMIT 1`, sessionID).Scan(
+			FROM playback_session_lifecycle lc WHERE lc.session_id = $2::uuid
+		) s ORDER BY source LIMIT 1`, sessionID, lifecycleIDParam(sessionID)).Scan(
 		&live.UserID, &live.ProfileID, &live.MediaFileID, &live.RequestedMediaFileID,
 		&playMethod, &startedAt, &live.ClientIP,
 		&live.ClientName, &live.ClientVersion, &live.ClientBuild,

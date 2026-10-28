@@ -338,6 +338,8 @@
 ./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
 ./internal/api/handlers TestPlaybackLifecycleTransitionsDB
 ./internal/api/handlers TestNativeSessionsListLifecycleDB
+./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
+./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB

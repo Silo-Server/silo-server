@@ -18,7 +18,9 @@
 CREATE SEQUENCE IF NOT EXISTS playback_session_lifecycle_seq;
 
 CREATE TABLE IF NOT EXISTS playback_session_lifecycle (
-    session_id TEXT PRIMARY KEY,
+    -- Every playback session id is a UUID; the type lets the attempt join
+    -- (playback_v3_attempts.session_id) use its index.
+    session_id UUID PRIMARY KEY,
     frontend TEXT NOT NULL CHECK (frontend IN ('native', 'bridge', 'jellyfin', 'abs')),
     state TEXT NOT NULL CHECK (state IN ('playing', 'paused', 'stopped')),
     end_reason TEXT,
