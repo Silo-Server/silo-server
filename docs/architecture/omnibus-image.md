@@ -38,10 +38,14 @@ The s6-rc services under `omnibus/rootfs/etc/s6-overlay/s6-rc.d` start in this
 order:
 
 1. `init-envfile` turns each `FILE__NAME=/path` variable into `NAME`. The path
-   must resolve to a root-owned regular file in directories only root can
-   change (sticky directories count), and outside `/config`; otherwise a
-   service account could point it at `SECRET_KEY` and have root export that
-   under another name. Docker secrets and Kubernetes secret volumes qualify.
+   must resolve, outside `/config`, to a regular file that group and others
+   cannot write and that no service account owns, in directories only root can
+   change (sticky directories count); otherwise a service account could point
+   it at `SECRET_KEY` and have root export that under another name. The service
+   accounts are the four in the table below, with `silo` at the `PUID` that
+   `init-adduser` applies next. Docker and Kubernetes secrets, which are
+   root's, qualify, and so does a Compose file secret, which keeps its host
+   owner, such as uid 1000, unless that uid is `PUID`.
 2. `init-adduser` maps the `silo` account onto `PUID` and `PGID` and adds it to
    the groups of any passed-in GPU devices. A device owned by group 0 is
    skipped, so Silo, which never runs as root here, cannot open it. Unprivileged
@@ -69,7 +73,9 @@ container's stop timeout bounds them.
 `init-config` empties `/run/silo-omnibus` on every start, so no flag from a
 previous start of the same container outlives its setting. The PostgreSQL
 server holds a `flock(2)` lock on `/config/.postgres.lock` for its life; the
-file is root's, so the `postgres` account cannot replace it. `postmaster.pid`
+file is `root:postgres` 0660 in root's `/config`, so the `postgres` account
+opens it read-write but cannot replace it. NFS emulates `flock(2)` with a POSIX
+lock, and an exclusive one needs a writable descriptor. `postmaster.pid`
 only guards servers in one PID namespace, so `svc-postgres` deletes a left-over
 pid file only once it holds that lock, and a second container started on the
 same `/config` refuses to start PostgreSQL. Bundled Redis keeps an append-only
@@ -99,7 +105,9 @@ account, so this matters for `/config/postgres` as much as for `/config/silo`. `
 `silo` account with a full walk only when its ids differ from the ones recorded
 in `/config/.silo-owner` by the last walk, or when an entry in the top
 two levels is owned wrong; local artwork can hold millions of files. Deleting
-the marker forces a walk.
+the marker forces a walk. The `silo` account's home is `/nonexistent`, because
+`usermod -u` re-owns everything in the home and a `PUID` change would otherwise
+walk `/config/silo` twice; the scripts set `HOME` for each service.
 
 Silo reaches its state through `/var/lib/silo`, a link to `/config/silo`, so
 paths stored in the database keep working. Local artwork storage is recorded by
@@ -149,9 +157,12 @@ them as set by the environment
 ([admin settings API](../admin-settings-api.md)).
 
 When the image chose the provider, it leaves a marker,
-`/config/.silo-search-provider`. On the first start with Meilisearch
-off again, a marker makes `init-config` export `SILO_SEARCH_PROVIDER=postgres`
-and delete it. Search returns to PostgreSQL, and from the next start the
-administrator can choose a provider again. Without a marker the stored provider
+`/config/.silo-search-provider`. While Meilisearch is off and the marker
+exists, `init-config` exports `SILO_SEARCH_PROVIDER=postgres` on each start.
+`svc-search-marker` deletes the marker once Silo answers `/api/v1/health`,
+which it does only after storing that provider, so a start that fails earlier
+keeps the marker and the next start tries again. Search returns to PostgreSQL,
+and from the start after the marker is gone the administrator can choose a
+provider again. Without a marker the stored provider
 is left alone, so an external Meilisearch configured in the admin UI keeps
 working.
