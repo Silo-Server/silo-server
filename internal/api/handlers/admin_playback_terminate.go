@@ -27,7 +27,8 @@ import (
 //     never promises that buffered media stops instantly.
 //
 // Repeating terminate on a session this replica no longer holds is unknown
-// (404), as on the bridge.
+// (404), as on the bridge. In a cluster the terminate runs on the replica
+// holding the session's control lane (see Terminate).
 
 const (
 	AdminTerminateDeliveryDispatched  = "dispatched"
@@ -68,8 +69,26 @@ func (h *AdminPlaybackControlHandler) AdminTerminateAvailable() bool {
 	return h != nil && h.playback != nil && h.playback.sessionMgr != nil
 }
 
-// Terminate stops first, then notifies best effort.
+// Terminate stops first, then notifies best effort. It runs on the replica
+// holding the session's control lane, so that replica ends its live session
+// and the player is told; a request that lands elsewhere is relayed there
+// (admin_playback_relay.go). Without a reachable lane owner it revokes from
+// here.
 func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTerminateInput) (AdminTerminateView, error) {
+	if !h.AdminTerminateAvailable() {
+		return AdminTerminateView{}, ErrAdminTerminateUnavailable
+	}
+	if in.SessionID == "" || in.ActorID <= 0 {
+		return AdminTerminateView{}, ErrAdminPlaybackCommandInvalid
+	}
+	if view, relayed, err := h.relayTerminate(ctx, in); relayed {
+		return view, err
+	}
+	return h.terminateLocal(ctx, in)
+}
+
+// terminateLocal terminates the session from this replica.
+func (h *AdminPlaybackControlHandler) terminateLocal(ctx context.Context, in AdminTerminateInput) (AdminTerminateView, error) {
 	if !h.AdminTerminateAvailable() {
 		return AdminTerminateView{}, ErrAdminTerminateUnavailable
 	}

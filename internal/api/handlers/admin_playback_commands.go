@@ -38,11 +38,14 @@ import (
 //     instead of being locked out for as long as the skew lasts.
 //
 // The ledger lives with the realtime lane the command is delivered on: both
-// are per-process, like the v1 dispatch itself. It is bounded per session and
-// released once the session is gone: terminate and the stop fallback drop it
-// directly, and a throttled sweep on the command path prunes the ledgers of
-// sessions that ended by any other route (client stop, liveness reap), so a
-// long-lived replica does not retain one entry per session ever commanded.
+// are per-process. A command that reaches a replica without the lane is
+// relayed to the replica holding it (admin_playback_relay.go), so the one
+// ledger next to the lane orders every command for the session. It is
+// bounded per session and released once the session is gone: terminate and
+// the stop fallback drop it directly, and a throttled sweep on the command
+// path prunes the ledgers of sessions that ended by any other route (client
+// stop, liveness reap), so a long-lived replica does not retain one entry per
+// session ever commanded.
 
 // Command outcomes and delivery states on the wire.
 const (
@@ -144,27 +147,54 @@ func (h *AdminPlaybackControlHandler) AdminPlaybackCommandsAvailable() bool {
 }
 
 // Command applies one sequenced administrator command to a playback session.
+// It runs on the replica holding the session's control lane: a request that
+// lands elsewhere is relayed there (admin_playback_relay.go), so one ledger
+// orders every command for the session.
 func (h *AdminPlaybackControlHandler) Command(ctx context.Context, in AdminPlaybackCommandInput) (AdminPlaybackCommandView, error) {
 	if !h.AdminPlaybackCommandsAvailable() {
 		return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandUnavailable
 	}
+	if _, err := validateAdminPlaybackCommand(in); err != nil {
+		return AdminPlaybackCommandView{}, err
+	}
+	if view, relayed, err := h.relayCommand(ctx, in); relayed {
+		return view, err
+	}
+	return h.commandLocal(ctx, in)
+}
+
+// validateAdminPlaybackCommand checks the input and returns the command's
+// payload.
+func validateAdminPlaybackCommand(in AdminPlaybackCommandInput) (json.RawMessage, error) {
 	if in.SessionID == "" || in.Sequence <= 0 || in.Sequence > AdminPlaybackCommandMaxSequence || in.ActorID <= 0 || !canonicalCommandID(in.CommandID) {
-		return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandInvalid
+		return nil, ErrAdminPlaybackCommandInvalid
 	}
 	var payload json.RawMessage
 	switch in.Name {
 	case playback.CommandPause, playback.CommandUnpause, playback.CommandStop:
 	case playback.CommandDisplayMessage:
 		if in.Message == "" {
-			return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandInvalid
+			return nil, ErrAdminPlaybackCommandInvalid
 		}
 		encoded, err := json.Marshal(map[string]string{displayMessageTitleKey: in.Title, displayMessageTextKey: in.Message})
 		if err != nil {
-			return AdminPlaybackCommandView{}, err
+			return nil, err
 		}
 		payload = encoded
 	default:
-		return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandInvalid
+		return nil, ErrAdminPlaybackCommandInvalid
+	}
+	return payload, nil
+}
+
+// commandLocal applies the command on this replica's lane and ledger.
+func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in AdminPlaybackCommandInput) (AdminPlaybackCommandView, error) {
+	if !h.AdminPlaybackCommandsAvailable() {
+		return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandUnavailable
+	}
+	payload, err := validateAdminPlaybackCommand(in)
+	if err != nil {
+		return AdminPlaybackCommandView{}, err
 	}
 
 	receipt := adminPlaybackCommandReceipt{sequence: in.Sequence, name: in.Name, actorID: in.ActorID, payload: string(payload) + "\x00" + in.Reason}

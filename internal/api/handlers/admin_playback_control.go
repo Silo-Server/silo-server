@@ -35,6 +35,10 @@ type AdminPlaybackControlHandler struct {
 	// holds or waits for it.
 	terminateMu    sync.Mutex
 	terminateLocks map[string]*adminTerminateLock
+	// relay runs commands and terminates on the replica holding the
+	// session's control lane (admin_playback_relay.go); nil serves every
+	// request here.
+	relay *playback.ControlRelay
 }
 
 type playbackControlRequest struct {
