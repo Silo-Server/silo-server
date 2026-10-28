@@ -23,14 +23,25 @@ pg_stage="$config/postgres/.data.migrating"
 # Both in /config, which only root writes, like the image's other markers.
 # done: written last; the source cluster's identifier and latest checkpoint,
 # or "none" when Silo's database is elsewhere. pending: present while staged
-# results move into place.
+# results move into place. checked: this step finished, whatever it found;
+# under REQUIRE_COMPOSE_MIGRATION, init-postgres creates no cluster without it,
+# since one would come up empty beside an earlier install this step has yet
+# to move.
 done_marker="$config/.compose-cluster-copied"
 pending_marker="$config/.compose-migration-pending"
+checked_marker="$config/.compose-migration-checked"
 silo_dirs=(plugins artwork compat)
 
 fail() {
   printf '[omnibus] error: %s\n' "$*" >&2
   exit 1
+}
+
+# mark_checked: record that this step ran. /config stays root's, as
+# init-config lays it out.
+mark_checked() {
+  install -d -o root -g root -m 0755 "$config"
+  : > "$checked_marker"
 }
 
 # host PATH: PATH under /silo-data as the host names it.
@@ -114,10 +125,24 @@ if [[ -s "$done_marker" ]]; then
       fail "the earlier stack has used $(host "${clusters[0]}") since it was copied to $(host "$pgdata"). To copy it again, move $(host "$config") aside; to keep the copy, delete $(host "${clusters[0]}")"
     fi
   fi
+  mark_checked
   exit 0
 fi
-# An omnibus install of its own.
-[[ ! -e "$pgdata/PG_VERSION" ]] || exit 0
+# An omnibus install of its own. Beside an earlier install this step has not
+# moved, its cluster was created first, most likely by Silo started on its
+# own: copying over it would drop what it holds, and going on without the
+# earlier install would leave that data behind unannounced.
+if [[ -e "$pgdata/PG_VERSION" ]]; then
+  if (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; then
+    found=()
+    for name in postgres "${silo_dirs[@]}"; do
+      [[ -e "$root/$name" || -L "$root/$name" ]] && found+=("$name")
+    done
+    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root (${found[*]}) was moved, likely by starting Silo before this step (docker compose up --no-deps). If $(host "$pgdata") holds nothing you need, move it aside and start again. To keep it, delete the earlier stack's directories in $host_root"
+  fi
+  mark_checked
+  exit 0
+fi
 
 if (( ${#clusters[@]} == 0 )) && [[ "$earlier_install" == false ]]; then
   # Nothing of the earlier stack here. An .env written for it means its data
@@ -127,6 +152,7 @@ if (( ${#clusters[@]} == 0 )) && [[ "$earlier_install" == false ]]; then
     [[ -n "${POSTGRES_PASSWORD_SET:-}" || -n "${SILO_IMAGE:-}" ]]; then
     fail ".env sets POSTGRES_PASSWORD or SILO_IMAGE, which only the earlier stack used, but $host_root has none of its data. If its data is in named volumes or other paths, move it to $host_root (postgres, plugins, artwork, compat) and start again. If this is a new install, remove those two settings from .env"
   fi
+  mark_checked
   exit 0
 fi
 
@@ -365,7 +391,9 @@ sync -f "$config"
 for stage in "${staged_dirs[@]}"; do
   name="${stage##*/.}"
   name="${name%.migrating}"
-  [[ ! -e "$config/silo/$name" ]] || set_aside "$config/silo/$name"
+  # An empty one is what init-config makes when Silo started before this
+  # step and init-postgres turned it away; nothing to keep.
+  [[ ! -e "$config/silo/$name" ]] || rmdir "$config/silo/$name" 2>/dev/null || set_aside "$config/silo/$name"
   mv -T "$stage" "$config/silo/$name"
   log "linked $(host "$root/$name") into $(host "$config/silo/$name")"
 done
@@ -383,6 +411,8 @@ printf '%s\n' "$fingerprint" > "$done_marker.new"
 mv -T "$done_marker.new" "$done_marker"
 sync -f "$config"
 rm -f "$pending_marker"
+# Last: init-postgres may create a cluster once this exists.
+mark_checked
 trap - EXIT
 [[ -z "$work" ]] || rm -rf "$work"
 
