@@ -1,9 +1,10 @@
 # TMDB client and request budget
 
 Silo calls TMDB itself for request discovery, the request reconcile and
-Discover list refresh tasks, and library and personal collections (charts,
-franchises, discover queries, lists, and their scheduled syncs). Metadata
-plugins call TMDB on their own and are outside this document.
+Discover list refresh tasks, watchlist title repair, and library and personal
+collections (charts, franchises, discover queries, lists, and their scheduled
+syncs). Metadata plugins call TMDB on their own and are outside this
+document.
 
 ## One client per process
 
@@ -15,7 +16,10 @@ another `tmdb.Client` in production code; take the shared one. The router
 builds its own only when `Dependencies.TMDB` is nil, which only tests do.
 
 Each HTTP attempt waits on the limiter, retries after a 429 or 5xx included,
-so a throttled burst cannot spend more than the budget.
+so a throttled burst cannot spend more than the budget. Concurrent callers of
+the same cached page or lookup share one fetch, which runs detached from any
+one caller (`sharedFetch`), so a page request that gives up does not fail a
+scheduled refresh waiting on the same key.
 
 ## The budget
 
@@ -23,13 +27,14 @@ so a throttled burst cannot spend more than the budget.
 is the budget for the whole deployment, not per feature or per node.
 `ratelimit.NewOutboundLimiter` picks the backend:
 
-- **Redis configured** (`REDIS_URL`, whatever `ratelimit.backend` says): every
-  node spends one budget through `RedisLimiter`, counted in the key
-  `outbound:tmdb` in wall-clock second windows. A call the window refuses
-  waits for the next second and tries again, until its context ends. Calls
-  queue rather than fail, so a busy moment loads more slowly instead of
-  returning errors. Window keys come from each node's clock, so nodes should
-  keep their clocks in sync.
+- **Redis configured** (`REDIS_URL` or the saved Redis settings, whatever
+  `ratelimit.backend` says): every node spends one budget through
+  `RedisLimiter`, counted in the key `outbound:tmdb` in wall-clock second
+  windows. A call the window refuses waits for the next second and tries
+  again, until its context ends, so a busy moment loads more slowly instead of
+  returning errors. Waiters are not served in order: at each second every
+  waiter tries again and Redis decides who gets a slot. Window keys come from
+  each node's clock, so nodes should keep their clocks in sync.
 - **No Redis**: a per-process token bucket with a burst of the budget, the
   limiter each client used to build for itself.
 

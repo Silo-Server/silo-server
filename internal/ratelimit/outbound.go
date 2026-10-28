@@ -60,7 +60,9 @@ func (w *sharedWaiter) Wait(ctx context.Context) error {
 		}
 		now := w.now()
 		if w.limiter.allowAt(ctx, w.key, w.rate, now).Allowed {
-			return nil
+			// A check whose caller gave up mid-call is counted on this node
+			// and may be allowed; the caller still gets its context error.
+			return ctx.Err()
 		}
 		// The minute window holds sixty seconds' worth, so only the second
 		// window refuses, and it opens again at the next wall-clock second.
