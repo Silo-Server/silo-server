@@ -1415,7 +1415,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Maintenance also bounds the in-memory fallback store: without it a
 		// DB-less deployment accumulates attempts and replans forever.
 		playbackHandler.StartV3Maintenance(deps.AppContext)
-		playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
@@ -4832,6 +4831,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
 	}
+	// The sweep ends sessions through the handler's fields, so it starts
+	// once every route above has finished wiring them.
+	playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 	return r
 }
 
