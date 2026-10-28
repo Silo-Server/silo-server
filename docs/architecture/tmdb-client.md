@@ -25,8 +25,8 @@ keep waiting for the budget.
 
 ## The budget
 
-`tmdb.requests_per_second` (Server › General, default 40, restart required)
-is the budget for the whole deployment, not per feature or per node.
+`tmdb.RequestsPerSecond` (40) is the budget for the whole deployment, not per
+feature or per node. It is a constant, not a setting.
 `ratelimit.NewOutboundLimiter` picks the backend:
 
 - **Redis configured** (`REDIS_URL` or the saved Redis settings, whatever

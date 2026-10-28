@@ -45,6 +45,10 @@ const (
 	mediaDetailCacheTTL = 2 * time.Minute
 )
 
+// RequestsPerSecond is the budget for the TMDB requests Silo sends itself:
+// for every node together when Redis is configured, per process otherwise.
+const RequestsPerSecond = 40
+
 // maxPages is TMDB's own ceiling on its paged feeds (trending, popular,
 // discover): it answers no page past 500, at 20 results a page.
 const maxPages = 500

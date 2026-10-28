@@ -76,8 +76,6 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "postgres",
       "database",
       "pool",
-      "tmdb",
-      "rate limit",
     ],
     settings: settingIndex(
       "Identity",
@@ -90,8 +88,6 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Trusted proxies",
       "Database",
       "Maximum Postgres connections",
-      "TMDB",
-      "TMDB requests",
       "Redis",
       "Use Redis",
       "Connection URL",

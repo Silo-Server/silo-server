@@ -1352,7 +1352,7 @@ func main() {
 	}
 
 	// One TMDB client serves every feature in this process, so they share its
-	// response caches and spend one budget of tmdb.requests_per_second: with
+	// response caches and spend one budget of tmdb.RequestsPerSecond: with
 	// Redis, one budget for every node together. Each wait bounds its own
 	// Redis call, so that client must let the deadline end a stalled read.
 	tmdbRedisClient, tmdbRedisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
@@ -1362,7 +1362,7 @@ func main() {
 		defer func() { _ = cache.CloseRedisClient(tmdbRedisClient) }()
 	}
 	tmdbClient := tmdb.NewClientWithLimiter(cfg.TMDBAPIKey,
-		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", cfg.TMDBRequestsPerSecond))
+		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", tmdb.RequestsPerSecond))
 	defer tmdbClient.Close()
 
 	if mode == "" || mode == "integrated" || mode == "api" {

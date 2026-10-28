@@ -451,7 +451,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
-		deps.TMDB = tmdb.NewClient(tmdbAPIKey, config.DefaultTMDBRequestsPerSecond)
+		deps.TMDB = tmdb.NewClient(tmdbAPIKey, tmdb.RequestsPerSecond)
 	}
 
 	useBaseMiddleware(r, deps)

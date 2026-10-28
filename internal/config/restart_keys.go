@@ -69,8 +69,7 @@ var restartRequiredKeys = map[string]bool{
 
 	// External API clients built once at startup. The watch-sync client
 	// credentials are deliberately absent: the OAuth flows read them live.
-	"tmdb.api_key":                  true,
-	TMDBRequestsPerSecondSettingKey: true,
+	"tmdb.api_key": true,
 
 	// The LAN discovery responder starts once with the API listener.
 	ServerLANDiscoverySettingKey: true,

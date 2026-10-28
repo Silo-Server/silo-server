@@ -85,16 +85,6 @@ const (
 	maxBandwidthProbeMaxAgeDays     = 30
 )
 
-// TMDBRequestsPerSecondSettingKey bounds the requests Silo's own TMDB client
-// (request discovery, collections) sends: per deployment when Redis is
-// configured, per process otherwise. Metadata plugins call TMDB on their own
-// and are not counted.
-const (
-	TMDBRequestsPerSecondSettingKey = "tmdb.requests_per_second"
-	DefaultTMDBRequestsPerSecond    = 40
-	maxTMDBRequestsPerSecond        = 1000
-)
-
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
 // sources metadata plugins declare, such as rt_critic. Empty, the
@@ -529,8 +519,6 @@ var adminSettingDefaults = map[string]string{
 
 	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
 	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
-
-	TMDBRequestsPerSecondSettingKey: strconv.Itoa(DefaultTMDBRequestsPerSecond),
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -725,8 +713,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
 	case "playback.trickplay_workers":
 		return normalizeAdminInt(key, value, 1, 64)
-	case TMDBRequestsPerSecondSettingKey:
-		return normalizeAdminInt(key, value, 1, maxTMDBRequestsPerSecond)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":

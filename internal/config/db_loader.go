@@ -233,14 +233,6 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// TMDB collection presets (independent of metadata providers)
 	cfg.TMDBAPIKey = stringOr(m, "tmdb.api_key", "")
-	tmdbRequestsPerSecond, err := intOr(m, TMDBRequestsPerSecondSettingKey, DefaultTMDBRequestsPerSecond)
-	if err != nil {
-		return nil, err
-	}
-	if tmdbRequestsPerSecond < 1 || tmdbRequestsPerSecond > maxTMDBRequestsPerSecond {
-		return nil, fmt.Errorf("%s must be between 1 and %d", TMDBRequestsPerSecondSettingKey, maxTMDBRequestsPerSecond)
-	}
-	cfg.TMDBRequestsPerSecond = tmdbRequestsPerSecond
 
 	// MDBList list search/browse (lists themselves are public; only discovery
 	// endpoints require an apikey).
