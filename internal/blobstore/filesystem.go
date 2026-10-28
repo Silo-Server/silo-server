@@ -575,6 +575,24 @@ func SameLocalRoot(a, b string) bool {
 	return errA == nil && errB == nil && resolvedA == resolvedB
 }
 
+// Location names where a store's objects are. For a local store it is the
+// directory the store opened, through any wrappers; that can differ from an
+// identity recorded under another path, whose links may since point elsewhere.
+// Any other store's location is its identity.
+func Location(store Store) string {
+	for store != nil {
+		switch s := store.(type) {
+		case *Filesystem:
+			return BackendLocal + "|" + s.root
+		case interface{ unwrapStore() Store }:
+			store = s.unwrapStore()
+		default:
+			return store.Identity()
+		}
+	}
+	return ""
+}
+
 var _ Store = (*Filesystem)(nil)
 
 // Remove only abandoned temporary files. Writers hold the lock

@@ -245,6 +245,8 @@ type recordingStore struct {
 	recorded bool
 }
 
+func (s *recordingStore) unwrapStore() Store { return s.Store }
+
 type recordingDirectStore struct {
 	*recordingStore
 	DirectURLer

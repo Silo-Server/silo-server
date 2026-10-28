@@ -800,9 +800,11 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 	if err != nil {
 		return nil, err
 	}
-	// A target naming the active directory by another path is the active
-	// store, which may carry the identity recorded under that other path.
-	if blobstore.SameLocalRoot(target.Identity(), s.source.Identity()) {
+	// A target naming the directory the active store opened is the active
+	// store, which may carry the identity recorded under another path. Compare
+	// with that directory, not the recorded path: a link on it may since point
+	// somewhere else.
+	if blobstore.SameLocalRoot(target.Identity(), blobstore.Location(s.source)) {
 		target = s.source
 	}
 	targetPrivate := s.openPrivate(staged.Values)
@@ -1215,7 +1217,7 @@ func namespacesOverlapObserved(ctx context.Context, source, target blobstore.Sto
 	if source == nil || target == nil {
 		return false, nil
 	}
-	if storageNamespacesOverlap(source.Identity(), target.Identity()) {
+	if storageNamespacesOverlap(blobstore.Location(source), blobstore.Location(target)) {
 		return true, nil
 	}
 	for _, probe := range namespaceProbes(source.Identity(), target.Identity()) {
@@ -2374,8 +2376,9 @@ func (s *Service) targetIdentities(values map[string]string) (assets, private st
 			return "", "", err
 		}
 		// The active store may carry the identity recorded under another path
-		// to the same directory; that is still the active location.
-		if s.source != nil && blobstore.SameLocalRoot(assets, s.source.Identity()) {
+		// to the directory it opened; that directory is still the active
+		// location.
+		if s.source != nil && blobstore.SameLocalRoot(assets, blobstore.Location(s.source)) {
 			assets = s.source.Identity()
 		}
 	} else {
