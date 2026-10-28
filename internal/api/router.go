@@ -4959,7 +4959,8 @@ func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, 
 			COALESCE(mi.year, 0),
 			COALESCE(mi.imdb_id, ''),
 			COALESCE(e.season_number, 0),
-			COALESCE(e.episode_number, 0)
+			COALESCE(e.episode_number, 0),
+			COALESCE(mf.multi_episode_end, 0)
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		LEFT JOIN episodes e ON e.content_id = mf.episode_id
@@ -4977,6 +4978,7 @@ func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, 
 		&meta.IMDbID,
 		&meta.Season,
 		&meta.Episode,
+		&meta.EpisodeEnd,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
