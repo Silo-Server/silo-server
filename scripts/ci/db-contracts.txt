@@ -335,6 +335,7 @@
 # window is inclusive below and exclusive above.
 ./internal/api/handlers TestAdminPlaybackHistoryFactsDB
 ./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
+./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB

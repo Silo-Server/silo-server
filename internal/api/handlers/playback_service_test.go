@@ -269,24 +269,42 @@ func TestStopPlaybackV2WithoutLiveSessionStillStopsTheRow(t *testing.T) {
 // TestReplayedStopFinishesTheWinningStopsEnd covers a stop that replays an
 // administrator stop whose finalizer never finished: the play is recorded
 // as terminated, the end that won the row, not as the client's stop.
+//
+// An unfinished abort stays an abort: the admin log only, no watch history.
 func TestReplayedStopFinishesTheWinningStopsEnd(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	admin := &recordingPlaybackAdminStore{}
-	f.handler.AdminStore = admin
-	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-	if err := f.manager.StopSession(f.session.ID); err != nil {
-		t.Fatal(err)
-	}
-	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-	if _, _, err := store.StopAttempt(context.Background(), f.session.ID, adminStopID(f.session.ID), &playback.ProgressSampleV3{Sequence: 1, Position: 600}); err != nil {
-		t.Fatal(err)
-	}
-	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
-	if err != nil || view.Outcome != PlaybackOutcomeReplayed {
-		t.Fatalf("view = %+v, %v", view, err)
-	}
-	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndTerminated || admin.history[0].WatchedSeconds != 600 {
-		t.Fatalf("admin history = %+v, want one terminated row at 600", admin.history)
+	for _, tc := range []struct {
+		stopID      func(string) string
+		reason      PlaybackEndReason
+		watchedRows int
+	}{
+		{adminStopID, PlaybackEndTerminated, 1},
+		{abortStopID, PlaybackEndAborted, 0},
+	} {
+		t.Run(string(tc.reason), func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			admin := &recordingPlaybackAdminStore{}
+			userStore := newPlaybackTestStore(t)
+			f.handler.AdminStore = admin
+			f.handler.StoreProvider = testUserStoreProvider{store: userStore}
+			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			if _, _, err := store.StopAttempt(context.Background(), f.session.ID, tc.stopID(f.session.ID), &playback.ProgressSampleV3{Sequence: 1, Position: 600}); err != nil {
+				t.Fatal(err)
+			}
+			view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
+			if err != nil || view.Outcome != PlaybackOutcomeReplayed {
+				t.Fatalf("view = %+v, %v", view, err)
+			}
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.reason || admin.history[0].WatchedSeconds != 600 {
+				t.Fatalf("admin history = %+v, want one %s row at 600", admin.history, tc.reason)
+			}
+			if history, _ := userStore.ListHistory(t.Context(), "profile-1", 10, 0); len(history) != tc.watchedRows {
+				t.Fatalf("watch history rows = %d, want %d", len(history), tc.watchedRows)
+			}
+		})
 	}
 }
 

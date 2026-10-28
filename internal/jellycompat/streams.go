@@ -1909,12 +1909,11 @@ func (h *PlaybackHandler) cleanupPlaySession(
 		if finisher, ok := h.sessionMgr.(sessionFinisher); ok {
 			err := finisher.FinishSession(ctx, playSession.UpstreamSessionID)
 			// The stop reached a replica without the native copy. Record the
-			// play from the stop's snapshot; the copy elsewhere, if any, is
-			// recorded under the same history rows when it goes.
-			if detached, ok := h.sessionMgr.(detachedFinisher); ok && errors.Is(err, playback.ErrSessionNotFound) && upstreamSession != nil {
-				snapshot := *upstreamSession
-				snapshot.IsJellyfinCompat = true
-				detached.FinishDetached(ctx, snapshot)
+			// play from the stop's snapshot, or, when the stop reported no
+			// position, from the play's identity, which the finish hook
+			// completes from the shared live row.
+			if detached, ok := h.sessionMgr.(detachedFinisher); ok && errors.Is(err, playback.ErrSessionNotFound) {
+				detached.FinishDetached(ctx, compatDetachedSnapshot(playSession, upstreamSession))
 			}
 		} else {
 			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
@@ -2632,6 +2631,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
 			snapshot := *current
 			replaced = &snapshot
+		} else {
+			// The old session's copy is on another replica, or a concurrent
+			// switch already removed it here. Its play still ends once this
+			// switch moves the play off it.
+			replaced = &playback.Session{
+				ID: oldUpstreamSessionID, UserID: compatSession.StreamAppUserID, ProfileID: compatSession.ProfileID,
+				MediaFileID: playSession.UpstreamMediaFileID, IsJellyfinCompat: true, Position: playback.PositionUnknown,
+			}
 		}
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
@@ -2722,6 +2729,23 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	return updated, nil
 }
 
+// compatDetachedSnapshot is the session a Jellyfin stop records when no copy
+// of it is left here: the stop's own snapshot, or the play's identity with
+// its position unknown.
+func compatDetachedSnapshot(playSession *PlaybackSession, upstreamSession *playback.Session) playback.Session {
+	snapshot := playback.Session{
+		ID:                         playSession.UpstreamSessionID,
+		MediaFileID:                playSession.UpstreamMediaFileID,
+		Position:                   playback.PositionUnknown,
+		DisableProgressPersistence: !playSession.ProgressPersistenceKnown || playSession.DisableProgressPersistence,
+	}
+	if upstreamSession != nil {
+		snapshot = *upstreamSession
+	}
+	snapshot.IsJellyfinCompat = true
+	return snapshot
+}
+
 // finishReplacedUpstream records the end of an upstream session a method
 // switch replaced, after the switch has moved the play off it. The play goes
 // on under the new session, so only the admin log records the old one.
@@ -2730,7 +2754,9 @@ func (h *PlaybackHandler) finishReplacedUpstream(ctx context.Context, replaced *
 		return
 	}
 	if finisher, ok := h.sessionMgr.(detachedFinisher); ok {
-		finisher.FinishDetached(playback.WithEndReason(context.WithoutCancel(ctx), playback.EndReasonReplaced), *replaced)
+		snapshot := *replaced
+		snapshot.IsJellyfinCompat = true
+		finisher.FinishDetached(playback.WithEndReason(context.WithoutCancel(ctx), playback.EndReasonReplaced), snapshot)
 	}
 }
 

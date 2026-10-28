@@ -655,3 +655,33 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 		t.Fatalf("missing row: err = %v, want ErrSessionNotFound", err)
 	}
 }
+
+// TestDetachedSnapshotsKeepWhatTheyReported covers the position of a stop
+// recorded from a snapshot: one the stop did not report is taken from the
+// shared live row, along with the account a Jellyfin play row does not keep,
+// and a reported zero stays zero, so a Jellyfin copy that saw no progress
+// records nothing even when an older live row shows some.
+func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
+	live := compatFinishSession()
+	live.StartedAt, live.Position = time.Now().Add(-time.Hour), 1500
+	for _, tc := range []struct {
+		name     string
+		position float64
+		wantRows int
+	}{
+		{"unreported", playback.PositionUnknown, 1},
+		{"reported zero", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admin := &liveRowAdminStore{live: &live}
+			replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
+			replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, MediaFileID: 42, Position: tc.position, IsJellyfinCompat: true})
+			if len(admin.history) != tc.wantRows {
+				t.Fatalf("admin history = %+v, want %d rows", admin.history, tc.wantRows)
+			}
+			if tc.wantRows == 1 && (admin.history[0].WatchedSeconds != 1500 || admin.history[0].UserID != live.UserID) {
+				t.Fatalf("row = %+v, want the live row's account and position", admin.history[0])
+			}
+		})
+	}
+}

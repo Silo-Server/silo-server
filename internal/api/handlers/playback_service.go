@@ -663,11 +663,12 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 	// No copy here to finalize: the copy on another replica, if any, finds
 	// the attempt stopped and is dropped without history, so the admin log
 	// is written from the attempt row and the live row that copy synced.
+	if accepted == nil {
+		position = playback.PositionUnknown
+	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
-	historyID := h.persistStopAndHistory(ctx, session).HistoryID
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
-	h.recordAdminStopHistory(ctx, session, reason)
-	return historyID
+	return h.recordStopHistory(ctx, session, reason).HistoryID
 }
 
 // attemptSessionV2 synthesizes the session the v1 writers read when this
@@ -819,7 +820,7 @@ func validatePlaybackSessionID(sessionID string) error {
 }
 
 // expiredStopID is the server-minted stop identity recorded on the attempt
-// row when a session ends without a client stop (expiry, abort).
+// row when the liveness reaper ends a session.
 func expiredStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-expired:"+sessionID)).String()
 }
@@ -834,6 +835,12 @@ func (h *PlaybackHandler) markAttemptStoppedServerSide(ctx context.Context, sess
 	}
 	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID)
 	h.forgetProgressSideEffectLock(sessionID)
+}
+
+// abortStopID is the server-minted stop id of an attempt the server
+// abandoned: its media went missing, or a replacement transport failed.
+func abortStopID(sessionID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-abort:"+sessionID)).String()
 }
 
 // adminStopID is the server-minted stop id of an attempt an administrator
@@ -865,6 +872,8 @@ func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
 		return PlaybackEndTerminated
 	case expiredStopID(sessionID):
 		return PlaybackEndExpired
+	case abortStopID(sessionID):
+		return PlaybackEndAborted
 	default:
 		return PlaybackEndStopped
 	}

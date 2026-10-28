@@ -1324,8 +1324,16 @@ func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, se
 
 // recordStopHistory writes a stopped session to watch history and the admin
 // playback log. The admin log keeps one row per session.
+//
+// An aborted or replaced play goes to the admin log only: an abort never
+// wrote watch history, and a replaced play continues under the session that
+// replaced it.
 func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) watchstate.PlaybackStopResult {
 	if compatCopyWithoutProgress(session) {
+		return watchstate.PlaybackStopResult{}
+	}
+	if reason == PlaybackEndAborted || reason == PlaybackEndReplaced {
+		h.recordAdminStopHistory(ctx, session, reason)
 		return watchstate.PlaybackStopResult{}
 	}
 	result := h.persistStopAndHistory(ctx, session)
@@ -1469,9 +1477,7 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 // through FinishSession or FinishDetached. That frontend owns the rest of its
 // stop: transcode and transport teardown, watch-provider scrobbles, and the
 // live-session sync. The end reason travels in ctx; without one the client
-// stopped the play. An aborted or replaced play goes to the admin log only:
-// it recorded no watch history before, and a replaced one continues under
-// the session that replaced it.
+// stopped the play.
 func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *playback.Session) {
 	if h == nil || session == nil || session.ID == "" {
 		return
@@ -1487,12 +1493,9 @@ func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *pl
 	}
 	if playback.IsDetachedFinish(ctx) {
 		h.fillDetachedSession(ctx, session, time.Time{})
-	}
-	if reason == PlaybackEndAborted || reason == PlaybackEndReplaced {
-		if !compatCopyWithoutProgress(session) {
-			h.recordAdminStopHistory(ctx, session, reason)
+		if session.UserID == 0 {
+			return // nothing left that says whose play it was
 		}
-		return
 	}
 	h.recordStopHistory(ctx, session, reason)
 }
@@ -1513,16 +1516,26 @@ type liveSessionReader interface {
 // replica does not hold, so its admin history row carries what the play's
 // own copy would have: the start time, client, device and stream facts come
 // from the shared live row when one is left. Fields the snapshot already has
-// are kept. A start time still unknown after that is startedAt, then now.
+// are kept, and so is a reported position, zero included; only a
+// playback.PositionUnknown is filled. A snapshot that names no account (one
+// built from a Jellyfin play row, which keeps only a pseudo-account) takes
+// the live row's. A start time still unknown after that is startedAt, then
+// now.
 func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
-	if reader, ok := h.AdminStore.(liveSessionReader); ok && session.StartedAt.IsZero() {
+	if reader, ok := h.AdminStore.(liveSessionReader); ok && (session.StartedAt.IsZero() || session.Position < 0) {
 		live, err := reader.LiveSession(ctx, session.ID)
 		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
 		}
+		if live != nil && session.UserID == 0 {
+			session.UserID, session.ProfileID = live.UserID, live.ProfileID
+		}
 		if live != nil && live.UserID == session.UserID {
 			fillEmptySessionFacts(session, live)
 		}
+	}
+	if session.Position < 0 {
+		session.Position = 0
 	}
 	if session.StartedAt.IsZero() {
 		session.StartedAt = startedAt
@@ -1555,7 +1568,7 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	fill(&session.DeviceID, live.DeviceID)
 	fill(&session.DevicePlatform, live.DevicePlatform)
 	session.IsJellyfinCompat = session.IsJellyfinCompat || live.IsJellyfinCompat
-	if session.Position <= 0 {
+	if session.Position < 0 {
 		session.Position = live.Position
 	}
 	if session.MediaFileID == 0 {

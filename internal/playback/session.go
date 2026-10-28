@@ -1826,6 +1826,11 @@ func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
 	}
 }
 
+// PositionUnknown marks a FinishDetached snapshot whose position nobody
+// reported: the finish hooks take it from shared state. An explicit zero is
+// a reported position and is kept.
+const PositionUnknown = -1
+
 // EndReasonReplaced is the end reason of a session another one replaced
 // mid-play: a Jellyfin client switched play method.
 const EndReasonReplaced = "replaced"

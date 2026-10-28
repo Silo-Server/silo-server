@@ -837,7 +837,7 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	if finisher, ok := h.sessionMgr.(detachedFinisher); ok {
 		finisher.FinishDetached(playback.WithEndReason(ctx, string(PlaybackEndAborted)), *session)
 	}
-	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
+	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
 	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 

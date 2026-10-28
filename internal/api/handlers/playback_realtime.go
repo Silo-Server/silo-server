@@ -197,7 +197,8 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 		return err
 	}
 	h.finalizeSessionAbort(ctx, session, true, "abort")
-	h.markAttemptStoppedServerSide(ctx, session.ID)
+	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID, abortStopID(session.ID))
+	h.forgetProgressSideEffectLock(session.ID)
 	return nil
 }
 
