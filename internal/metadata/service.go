@@ -2229,6 +2229,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				return nil, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
 			}
 			if err != nil {
+				// Any failed season provider, a 404 included, leaves the stored
+				// season backdrops alone.
+				seasonsComplete = false
 				// A missing season endpoint is scoped metadata, not proof that the
 				// parent series identity is stale.
 				if handleScopedProvider404(p.Slug(), accumulatedIDs, err,
@@ -2239,7 +2242,6 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
-				seasonsComplete = false
 				if !errors.Is(err, ErrLocalMetadataUnavailable) {
 					continue
 				}
@@ -4697,12 +4699,12 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			return nil, 0, false, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
 		}
 		if err != nil {
+			complete = false
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
 			slog.WarnContext(ctx, "metadata: target season provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
-			complete = false
 			continue
 		}
 		if !s.localArtworkUsable() {

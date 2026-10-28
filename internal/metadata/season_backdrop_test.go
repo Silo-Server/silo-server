@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -148,5 +149,33 @@ func TestIdentifyWithoutChildMetadataClearsSeasonBackdrops(t *testing.T) {
 	}
 	if got := seasonRepo.seasons[seasonKey(contentID, 1)]; got.BackdropPath != "" || got.BackdropSourcePath != "" {
 		t.Fatalf("season backdrop = %q from %q, want it cleared", got.BackdropPath, got.BackdropSourcePath)
+	}
+}
+
+// Only a season fetch where every provider answered may decide backdrops: a
+// scoped 404 is no answer either.
+func TestTargetSeasonFetchIsCompleteOnlyWhenEveryProviderAnswered(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"provider answered", nil, true},
+		{"provider returned 404", errors.New("tvdb: HTTP 404"), false},
+		{"provider failed", errors.New("tvdb: timeout"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &localHintEpisodeProvider{seasonArtProvider: seasonArtProvider{slug: "tvdb"}, err: tc.err}
+			service := &MetadataService{chainCache: map[string]chainCacheEntry{
+				"0:season": {providers: []Provider{provider}, expiresAt: time.Now().Add(time.Hour)},
+			}}
+			_, _, complete, err := service.fetchTargetSeasonResults(context.Background(), nil, 0, "en", 1, seriesChildLocalContext{}, false)
+			if err != nil {
+				t.Fatalf("fetch seasons: %v", err)
+			}
+			if complete != tc.want {
+				t.Fatalf("complete = %v, want %v", complete, tc.want)
+			}
+		})
 	}
 }
