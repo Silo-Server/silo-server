@@ -197,8 +197,9 @@ The admin-only `sessions` channel carries four events besides `sessions.replaced
 `GET /api/v2/admin/sessions/capabilities` reports `lifecycle_events: true` when the
 server sends them. Each event's `data` is:
 
-- `session_id`, `seq`, `at` (when the database committed the transition, UTC
-  milliseconds) and `state`: `playing`, `paused` or `stopped`.
+- `session_id`, `seq`, `at` (the database clock when the transition was written,
+  UTC milliseconds; it orders nothing, `seq` does) and `state`: `playing`, `paused`
+  or `stopped`.
 - `session` on a started, paused or resumed event: the session's row as
   `GET /api/v2/admin/sessions` returns it, with `lifecycle_seq` equal to `seq`.
   Absent when no server has a live row for it.
@@ -226,13 +227,15 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
    the session is live and whether it is paused. A row and an event with equal numbers
    carry the same state. Position and stream fields are observations: take them from
    the most recently received record.
-3. A history entry with `end_reason` is final, and its `lifecycle_seq` is higher than
-   any number its live session had.
+3. A history entry with `end_reason` is final. When it carries `lifecycle_seq`, that
+   number is higher than any its live session had; an entry without one was recorded
+   before lifecycle numbers existed and counts as number 0 for ordering, but is final
+   all the same.
 4. A session missing from a complete list, with no ended history entry yet, is moving
    between servers or about to be ended by the cluster sweep. Keep it open and read
    `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every
    session announced by `session.started` (native or Jellyfin) gets one within its idle
-   grace while an API server runs
+   grace plus one sweep interval (15 seconds) while an API server runs
    ([playback lifecycle](architecture/playback-lifecycle.md)).
 
 Rows and entries without `lifecycle_seq` (sessions that started before the server

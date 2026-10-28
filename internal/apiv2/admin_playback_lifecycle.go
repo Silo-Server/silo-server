@@ -9,7 +9,8 @@ type AdminPlaybackLifecycleEvent struct {
 	SessionID string `json:"session_id"`
 	// Seq orders a session's transitions: a higher number is newer.
 	Seq int64 `json:"seq"`
-	// At is when the database committed the transition.
+	// At is the database clock when the transition was written; Seq, not
+	// At, orders a session's transitions.
 	At Instant `json:"at"`
 	// State is the session's state after the transition: playing, paused
 	// or stopped.
