@@ -627,6 +627,8 @@ var guardedWithoutLegacyRow = map[string]string{
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"updateRequestDiscoverLayout":  "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
+	"resetRequestDiscoverLayout":   "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
 	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
 	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
@@ -1013,6 +1015,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"updateRequestRouting":                     "V2-only request routing mode switch, guarded by If-Match on the mode's revision; a replay after success answers 412.",
 	"reorderRequestRoutes":                     "V2-only reorder of a media type's routing rules. The body names the full order, so a replay sets the same positions; it is non-retryable because it moves every rule to a new revision.",
 	"previewRequestRoute":                      "V2-only read-only route preview (POST for the request body). It reads TMDB and the rules and writes nothing, so a replay returns the same answer.",
+	"updateRequestDiscoverLayout":              "V2-only Discover layout replacement, guarded by If-Match on the layout's revision; a replay after success answers 412.",
+	"resetRequestDiscoverLayout":               "V2-only return to the default Discover layout, guarded by If-Match on the stored layout's revision; a replay after success answers 412.",
+	"previewRequestDiscoverRow":                "V2-only read-only Discover row preview (POST for the row body). It reads TMDB or the list and writes nothing, so a replay returns the same page.",
 	"queryCatalogLetters":                      "V2-only read-only letter index for an alphabetical jump bar (POST for the rule-group body, like queryCatalogItems). It counts titles and writes nothing, so a replay returns the same answer.",
 	"followRequestMedia":                       "V2-only title follow (Requests acceptance AC1/AC5): v1 had no way to follow a title someone else requested. The follow row is keyed by title and profile, so a replay converges on the same follow.",
 	"unfollowRequestMedia":                     "V2-only title unfollow, the inverse of followRequestMedia. Deleting an absent follow is a no-op, so a replay converges on no follow.",

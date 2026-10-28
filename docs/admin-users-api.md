@@ -17,6 +17,7 @@ configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
 `account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
 and series monitors), `request_usage` and `profile_sections` (profile page layouts). A read whose flag is false answers 503.
+`profile_avatars` reports that the profile collection below carries avatars.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -277,7 +278,7 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names and `last_seen_at` |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names, `last_seen_at`, and the `avatar`, `avatar_url` and `avatar_source` that `GET /api/v2/profiles` returns for the same profile |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
 | `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |

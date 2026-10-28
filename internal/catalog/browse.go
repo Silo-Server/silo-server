@@ -568,12 +568,11 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
+	// Without the membership join an item must still belong to some library.
+	if !needsLibJoin {
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if !needsLibJoin {
-			conditions = append(conditions,
-				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-			)
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
 			argIdx,
@@ -751,15 +750,18 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		))
 	}
 
+	// With no library named, an item must still belong to one (see
+	// InSomeLibraryWhere), so a filter value never comes only from an item the
+	// listing leaves out. The membership table follows the scope here.
+	if len(positiveLibraryConditions) == 0 && (len(filters.DisabledLibraryIDs) > 0 || !isEpisodeCatalogScope(mediaScope)) {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
+			membershipTable,
+			membershipKey,
+			libraryContentExpr,
+		))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if len(positiveLibraryConditions) == 0 {
-			conditions = append(conditions, fmt.Sprintf(
-				"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
-				membershipTable,
-				membershipKey,
-				libraryContentExpr,
-			))
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s mil_scope_out WHERE mil_scope_out.%s = %s AND mil_scope_out.media_folder_id = ANY($%d))",
 			membershipTable,

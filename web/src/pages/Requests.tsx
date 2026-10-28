@@ -180,59 +180,71 @@ function RequestsHub() {
 
 function DiscoverTab() {
   const discovery = useRequestDiscovery();
-  const studios = useDiscoverStudios();
-  const networks = useDiscoverNetworks();
-  const genres = useDiscoverGenres();
   const watchlist = useWatchlistTitleToggle();
 
   if (discovery.isLoading) return <DiscoverRowsSkeleton />;
 
+  if (discovery.isError) {
+    return (
+      <div className={cn(PAGE_GUTTER, "flex flex-col items-center gap-4 py-16 text-center")}>
+        <p className="text-muted-foreground text-sm">
+          TMDB couldn&rsquo;t be reached, so there is nothing to discover right now.
+        </p>
+        <button
+          type="button"
+          onClick={() => void discovery.refetch()}
+          className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // The admin's layout sets the rows and their order; a title row without
+  // titles is not in sections and draws nothing.
+  const sections = new Map((discovery.data?.sections ?? []).map((s) => [s.key, s]));
   return (
     <div className="space-y-10">
-      {discovery.isError ? (
-        <div className={cn(PAGE_GUTTER, "flex flex-col items-center gap-4 py-16 text-center")}>
-          <p className="text-muted-foreground text-sm">
-            TMDB couldn&rsquo;t be reached, so there is nothing to discover right now.
-          </p>
-          <button
-            type="button"
-            onClick={() => void discovery.refetch()}
-            className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Retry
-          </button>
-        </div>
-      ) : (
-        (discovery.data ?? []).map((section) => (
-          <DiscoverRow key={section.key} section={section} watchlist={watchlist} />
-        ))
-      )}
-      <BrandCarousel
-        kind="studio"
-        title="Studios"
-        cards={studios.data}
-        isLoading={studios.isLoading}
-        isError={studios.isError}
-        onRetry={() => void studios.refetch()}
-      />
-      <BrandCarousel
-        kind="network"
-        title="Networks"
-        cards={networks.data}
-        isLoading={networks.isLoading}
-        isError={networks.isError}
-        onRetry={() => void networks.refetch()}
-      />
-      <BrandCarousel
-        kind="genre"
-        title="Genres"
-        cards={genres.data}
-        isLoading={genres.isLoading}
-        isError={genres.isError}
-        onRetry={() => void genres.refetch()}
-      />
+      {(discovery.data?.rows ?? []).map((row) => {
+        if (isBrandSourceType(row.type)) {
+          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+        }
+        const section = sections.get(row.key);
+        return section ? (
+          <DiscoverRow key={row.key} section={section} watchlist={watchlist} />
+        ) : null;
+      })}
     </div>
+  );
+}
+
+const BRAND_ROW_SOURCES = {
+  studios: { kind: "studio", useCards: useDiscoverStudios },
+  networks: { kind: "network", useCards: useDiscoverNetworks },
+  genres: { kind: "genre", useCards: useDiscoverGenres },
+} as const;
+
+type BrandSourceType = keyof typeof BRAND_ROW_SOURCES;
+
+function isBrandSourceType(type: string): type is BrandSourceType {
+  return Object.hasOwn(BRAND_ROW_SOURCES, type);
+}
+
+/** A carousel of studios, networks or genres; its list loads only when the layout shows it. */
+function BrandRow({ type, title }: { type: BrandSourceType; title: string }) {
+  const { kind, useCards } = BRAND_ROW_SOURCES[type];
+  const cards = useCards();
+  return (
+    <BrandCarousel
+      kind={kind}
+      title={title}
+      cards={cards.data}
+      isLoading={cards.isLoading}
+      isError={cards.isError}
+      onRetry={() => void cards.refetch()}
+    />
   );
 }
 
@@ -247,7 +259,12 @@ function DiscoverRow({
   return (
     <MediaCarousel
       title={section.title}
-      viewAllHref={section.total_pages > 1 ? requestDiscoverSectionHref(section.key) : undefined}
+      // A row trimmed to its size has more titles even on a one-page source.
+      viewAllHref={
+        section.total_pages > 1 || section.total_results > section.results.length
+          ? requestDiscoverSectionHref(section.key)
+          : undefined
+      }
     >
       {section.results.map((item) => (
         <RequestPosterCard

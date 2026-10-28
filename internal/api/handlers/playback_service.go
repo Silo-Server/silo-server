@@ -217,6 +217,11 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 type nativeAPIV2ContextKey struct{}
 type playbackConnectionDeviceContextKey struct{}
 
+// playbackDeclaredDeviceContextKey carries PlaybackCaller.DeclaredDevice. The
+// request playbackCallerRequest builds maps the v2 X-Device-ID onto the v1
+// device header, so the device a v2 client declared travels beside it.
+type playbackDeclaredDeviceContextKey struct{}
+
 // WithNativeAPIV2 marks ctx as serving /api/v2. The playback and stream
 // handlers are shared with the frozen /api/v1 routes, and contract additions
 // made after that freeze (subrip_sidecar_v1) apply only under this mark.
@@ -305,6 +310,7 @@ func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.D
 func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Request {
 	headers := make(http.Header)
 	ctx = context.WithValue(ctx, playbackConnectionDeviceContextKey{}, caller.ConnectionDeviceID)
+	ctx = context.WithValue(ctx, playbackDeclaredDeviceContextKey{}, caller.DeclaredDevice)
 	headers.Set(deviceIDHeader, caller.DeviceID)
 	headers.Set(deviceNameHeader, caller.DeviceName)
 	headers.Set(devicePlatformHeader, caller.Platform)
@@ -641,7 +647,7 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 				slog.WarnContext(ctx, "failed to apply final playback position", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}
 		}
-		result, err := h.stopPlaybackSessionWithResult(ctx, session, true)
+		result, err := h.stopPlaybackSessionWithResult(ctx, session, PlaybackEndStopped)
 		if err == nil {
 			return result.HistoryID
 		}

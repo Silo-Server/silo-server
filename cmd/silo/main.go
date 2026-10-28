@@ -112,6 +112,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -1350,6 +1351,20 @@ func main() {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
 
+	// One TMDB client serves every feature in this process, so they share its
+	// response caches and spend one budget of tmdb.RequestsPerSecond: with
+	// Redis, one budget for every node together. Each wait bounds its own
+	// Redis call, so that client must let the deadline end a stalled read.
+	tmdbRedisClient, tmdbRedisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+	if tmdbRedisErr != nil {
+		slog.Warn("redis client init failed; TMDB requests are limited per process", "error", tmdbRedisErr)
+	} else if tmdbRedisClient != nil {
+		defer func() { _ = cache.CloseRedisClient(tmdbRedisClient) }()
+	}
+	tmdbClient := tmdb.NewClientWithLimiter(cfg.TMDBAPIKey,
+		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", tmdb.RequestsPerSecond))
+	defer tmdbClient.Close()
+
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
 		streamTelemetryRegistry.Start(appCtx)
@@ -1395,6 +1410,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		TMDB:                         tmdbClient,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -3061,7 +3077,7 @@ func main() {
 		collItemRepo := catalog.NewItemRepository(deps.DB)
 		libraryItemRepo := catalog.NewLibraryItemRepository(deps.DB)
 		collectionService := catalog.NewLibraryCollectionService(collectionRepo, collItemRepo, libraryItemRepo, nil)
-		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(cfg.TMDBAPIKey)
+		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(tmdbClient)
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
 
@@ -3454,7 +3470,7 @@ func main() {
 		// request was created.
 		requestReconcileSvc := mediarequests.NewService(
 			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
-			tmdb.NewClient(cfg.TMDBAPIKey, 40),
+			tmdbClient,
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
 				catalog.NewProviderIDRepository(deps.DB),
@@ -3484,6 +3500,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100, deps.DB))
 		taskMgr.Register(tasks.NewRefreshRequestDownloadsTask(requestReconcileSvc, 200, deps.DB))
+		taskMgr.Register(tasks.NewRefreshRequestDiscoverListsTask(discoverrows.NewRefresher(
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
+			discoverrows.NewSnapshotRepository(deps.DB),
+			tmdbClient,
+		)))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {

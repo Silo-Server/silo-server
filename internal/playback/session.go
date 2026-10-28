@@ -48,7 +48,11 @@ type Session struct {
 	ClientBuild                   string // opaque reported client build identifier, when available
 	ClientChannel                 string // opaque reported client distribution channel, when available
 	ClientUserAgent               string // trimmed request user agent for the playback session
-	IsJellyfinCompat              bool   // immutable origin identity for Jellyfin compatibility sessions
+	// DeviceID and DevicePlatform are the device the client declared when the
+	// session started (see ClientInfo); empty when it declared none.
+	DeviceID         string
+	DevicePlatform   string
+	IsJellyfinCompat bool // immutable origin identity for Jellyfin compatibility sessions
 	// RequireMediaAuthorization distinguishes v3 transports whose session ID is
 	// only a route identifier from legacy HLS transports where that UUID also
 	// acts as the bearer capability. Secure transports carry no reconstruction
@@ -257,7 +261,14 @@ type ClientInfo struct {
 	// against an enum so a new channel needs no server change.
 	Channel   string
 	UserAgent string
-	IsCompat  bool
+	// DeviceID and DevicePlatform name the device: the profile device
+	// registry's identity (X-Silo-Device-Id and X-Silo-Device-Platform) on the
+	// native API, the MediaBrowser DeviceId on a Jellyfin play. The platform
+	// is only ever what the client declared; it is never derived from the
+	// user agent.
+	DeviceID       string
+	DevicePlatform string
+	IsCompat       bool
 }
 
 // Normalized returns the identity with every field trimmed and clamped to the
@@ -273,6 +284,8 @@ func (c ClientInfo) Normalized() ClientInfo {
 	c.Build = normalizeClientMetadataValue(c.Build, 64)
 	c.Channel = normalizeClientMetadataValue(c.Channel, 32)
 	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, 512)
+	c.DeviceID = normalizeClientMetadataValue(c.DeviceID, 128)
+	c.DevicePlatform = normalizeClientMetadataValue(c.DevicePlatform, 40)
 	return c
 }
 
@@ -307,12 +320,14 @@ func (s *Session) ClientInfo() ClientInfo {
 		return ClientInfo{}
 	}
 	return ClientInfo{
-		Name:      s.ClientName,
-		Version:   s.ClientVersion,
-		Build:     s.ClientBuild,
-		Channel:   s.ClientChannel,
-		UserAgent: s.ClientUserAgent,
-		IsCompat:  s.IsJellyfinCompat,
+		Name:           s.ClientName,
+		Version:        s.ClientVersion,
+		Build:          s.ClientBuild,
+		Channel:        s.ClientChannel,
+		UserAgent:      s.ClientUserAgent,
+		DeviceID:       s.DeviceID,
+		DevicePlatform: s.DevicePlatform,
+		IsCompat:       s.IsJellyfinCompat,
 	}
 }
 
@@ -691,6 +706,8 @@ func newSession(
 		ClientBuild:            clientInfo.Build,
 		ClientChannel:          clientInfo.Channel,
 		ClientUserAgent:        clientInfo.UserAgent,
+		DeviceID:               clientInfo.DeviceID,
+		DevicePlatform:         clientInfo.DevicePlatform,
 		IsJellyfinCompat:       clientInfo.IsCompat,
 		StartedAt:              now,
 		UpdatedAt:              now,

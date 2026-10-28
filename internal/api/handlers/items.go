@@ -356,6 +356,9 @@ type itemListResponse struct {
 	WorkID                 string                      `json:"work_id,omitempty"`
 	WorkTitle              string                      `json:"work_title,omitempty"`
 	WorkFormats            []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+
+	// ParentArtwork reaches the v2 card only; v1 is frozen.
+	ParentArtwork EpisodeParentArtworkView `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -375,6 +378,7 @@ type itemListImageURLs struct {
 	posterURL   string
 	backdropURL string
 	logoURL     string
+	parents     episodeParentImageURLs
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -1053,16 +1057,21 @@ func (h *ItemsHandler) localizeItemListModels(ctx context.Context, items []*mode
 	return localized
 }
 
-func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*models.MediaItem, art imagesize.Request) map[string]itemListImageURLs {
+// episodeMetadata supplies episode cards' parent artwork, which signs at the
+// card's poster and backdrop sizes in the same batch.
+func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*models.MediaItem, episodeMetadata map[string]episodeBrowseMetadata, art imagesize.Request) map[string]itemListImageURLs {
 	urls := make(map[string]itemListImageURLs, len(items))
 	if h == nil || h.detailSvc == nil || len(items) == 0 {
 		return urls
 	}
 
 	type pendingImages struct {
-		contentID    string
-		posterPath   string
-		backdropPath string
+		contentID          string
+		posterPath         string
+		backdropPath       string
+		seriesPosterPath   string
+		seriesBackdropPath string
+		seasonPosterPath   string
 	}
 
 	pending := make([]pendingImages, 0, len(items))
@@ -1080,9 +1089,17 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 			posterPath:   sizedCardPath(item.PosterPath, artworkkey.ImagePoster, posterSize),
 			backdropPath: sizedCardBackdropPath(item.BackdropPath, backdropSize),
 		}
+		if p := episodeMetadata[item.ContentID].ParentArtwork; p != nil && item.Type == "episode" {
+			images.seriesPosterPath = sizedCardPath(p.SeriesPosterPath, artworkkey.ImagePoster, posterSize)
+			images.seriesBackdropPath = sizedCardBackdropPath(p.SeriesBackdropPath, backdropSize)
+			images.seasonPosterPath = sizedCardPath(p.SeasonPosterPath, artworkkey.ImagePoster, posterSize)
+		}
 		pending = append(pending, images)
 		batch.Add(images.posterPath, posterHint)
 		batch.Add(images.backdropPath, backdropHint)
+		batch.Add(images.seriesPosterPath, posterHint)
+		batch.Add(images.seriesBackdropPath, backdropHint)
+		batch.Add(images.seasonPosterPath, posterHint)
 		logoPaths[item.ContentID] = item.LogoPath
 	}
 
@@ -1093,6 +1110,11 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 			posterURL:   resolved.Get(images.posterPath, posterHint).URL,
 			backdropURL: resolved.Get(images.backdropPath, backdropHint).URL,
 			logoURL:     logoURLs[images.contentID],
+			parents: episodeParentImageURLs{
+				seriesPosterURL:   resolved.Get(images.seriesPosterPath, posterHint).URL,
+				seriesBackdropURL: resolved.Get(images.seriesBackdropPath, backdropHint).URL,
+				seasonPosterURL:   resolved.Get(images.seasonPosterPath, posterHint).URL,
+			},
 		}
 	}
 	return urls
@@ -1154,6 +1176,7 @@ type episodeBrowseMetadata struct {
 	SeriesTitle   string
 	SeasonNumber  *int
 	EpisodeNumber *int
+	ParentArtwork *models.EpisodeParentArtwork
 }
 
 func (h *ItemsHandler) listEpisodeBrowseMetadata(
@@ -1175,49 +1198,21 @@ func (h *ItemsHandler) listEpisodeBrowseMetadata(
 		return map[string]episodeBrowseMetadata{}
 	}
 
-	episodes, err := h.episodeRepo.GetByIDs(ctx, episodeIDs)
-	if err != nil || len(episodes) == 0 {
+	contexts, err := h.episodeRepo.ListCardContexts(ctx, episodeIDs)
+	if err != nil || len(contexts) == 0 {
 		return map[string]episodeBrowseMetadata{}
 	}
 
-	seriesIDs := make([]string, 0, len(episodes))
-	seenSeriesIDs := make(map[string]struct{}, len(episodes))
-	for _, episode := range episodes {
-		if episode == nil || strings.TrimSpace(episode.SeriesID) == "" {
-			continue
-		}
-		if _, ok := seenSeriesIDs[episode.SeriesID]; ok {
-			continue
-		}
-		seenSeriesIDs[episode.SeriesID] = struct{}{}
-		seriesIDs = append(seriesIDs, episode.SeriesID)
-	}
-
-	seriesTitles := make(map[string]string, len(seriesIDs))
-	if len(seriesIDs) > 0 {
-		if seriesItems, err := h.itemRepo.GetByIDs(ctx, seriesIDs); err == nil {
-			for _, seriesItem := range seriesItems {
-				if seriesItem == nil {
-					continue
-				}
-				seriesTitles[seriesItem.ContentID] = seriesItem.Title
-			}
-		}
-	}
-
-	result := make(map[string]episodeBrowseMetadata, len(episodes))
-	for _, episode := range episodes {
-		if episode == nil {
-			continue
-		}
-		seasonNumber := episode.SeasonNumber
-		episodeNumber := episode.EpisodeNumber
-		result[episode.ContentID] = episodeBrowseMetadata{
-			StillPath:     episode.StillPath,
-			SeriesID:      episode.SeriesID,
-			SeriesTitle:   seriesTitles[episode.SeriesID],
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
+	result := make(map[string]episodeBrowseMetadata, len(contexts))
+	for contentID, c := range contexts {
+		parent := c.ParentArtwork
+		result[contentID] = episodeBrowseMetadata{
+			StillPath:     c.StillPath,
+			SeriesID:      c.SeriesID,
+			SeriesTitle:   c.SeriesTitle,
+			SeasonNumber:  &c.SeasonNumber,
+			EpisodeNumber: &c.EpisodeNumber,
+			ParentArtwork: &parent,
 		}
 	}
 	return result

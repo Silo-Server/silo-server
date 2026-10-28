@@ -166,6 +166,7 @@ GET /api/v2/images/capabilities
   },
   "season_list_artwork_param": "include_artwork",
   "episode_still_provenance": true,
+  "episode_parent_artwork": true,
   "extended_item_artwork": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
@@ -272,6 +273,23 @@ the server knows the image's source; an absent field means unknown, even when th
 capability is true. Clients that hide unwatched episode stills use them to keep
 series and season artwork visible. See
 [episode spoiler protection](catalog-api.md#episode-spoiler-protection).
+
+## Episode parent artwork
+
+`"episode_parent_artwork": true` means episode cards can carry their series'
+and season's artwork next to their own: `series_poster_url`,
+`series_backdrop_url` and `season_poster_url`, each with a matching
+`*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
+without fetching the episode's detail, since an episode card's `backdrop_url`
+is usually the episode still. The poster fields follow `poster_width` and the
+backdrop field follows `backdrop_width`, like `poster_url` and `backdrop_url`
+on the same card.
+
+They appear on episode cards in Home and library sections (Continue Watching
+and Next Up included), catalog browse and search, Watch Tonight, and on episode
+detail (`getCatalogItem`). Each field is absent when the series or season has
+no such image. Seasons store no backdrop, so there is no season backdrop field.
+The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
 

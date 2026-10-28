@@ -807,6 +807,54 @@ func (r *EpisodeRepository) GetByIDs(ctx context.Context, contentIDs []string) (
 	return scanEpisodes(rows)
 }
 
+// EpisodeCardContext is what a listing card needs about an episode beyond its
+// catalog row: its numbers, its own still, its series' title, and its season's
+// and series' artwork.
+type EpisodeCardContext struct {
+	SeriesID      string
+	SeriesTitle   string
+	SeasonNumber  int
+	EpisodeNumber int
+	StillPath     string
+	ParentArtwork models.EpisodeParentArtwork
+}
+
+// ListCardContexts loads the card context of each episode in one query,
+// keyed by episode content ID. Unknown IDs are absent.
+func (r *EpisodeRepository) ListCardContexts(ctx context.Context, contentIDs []string) (map[string]EpisodeCardContext, error) {
+	out := make(map[string]EpisodeCardContext, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, e.series_id, COALESCE(si.title, ''), e.season_number, e.episode_number, COALESCE(e.still_path, ''),
+			COALESCE(si.poster_path, ''), COALESCE(si.poster_thumbhash, ''),
+			COALESCE(si.backdrop_path, ''), COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, '')
+		FROM episodes e
+		LEFT JOIN media_items si ON si.content_id = e.series_id
+		LEFT JOIN seasons s ON s.content_id = e.season_id
+		WHERE e.content_id = ANY($1::text[])`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing episode card contexts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id string
+			c  EpisodeCardContext
+			p  = &c.ParentArtwork
+		)
+		if err := rows.Scan(&id, &c.SeriesID, &c.SeriesTitle, &c.SeasonNumber, &c.EpisodeNumber, &c.StillPath,
+			&p.SeriesPosterPath, &p.SeriesPosterThumbhash, &p.SeriesBackdropPath, &p.SeriesBackdropThumbhash,
+			&p.SeasonPosterPath, &p.SeasonPosterThumbhash); err != nil {
+			return nil, fmt.Errorf("scanning episode card context: %w", err)
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
 // ListBySeriesAndNumbers returns the requested episode rows for one series in a
 // single query. It intentionally does not apply episodeAvailabilityPredicate:
 // metadata persistence must see provider-only episodes before library links

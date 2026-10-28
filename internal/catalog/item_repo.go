@@ -2284,10 +2284,10 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 	// passing and a disabled library must not slip through. The old JOIN +
 	// NOT(mil.media_folder_id = ANY(...)) form let the passing membership row
 	// satisfy the deny check (audit 2026-05-01 §3.3), so both the FTS search and
-	// the fuzzy fallback that share this helper used it. appendLibraryAccessConditions
-	// emits independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and
-	// needs no JOIN.
-	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
+	// the fuzzy fallback that share this helper used it. The helper emits
+	// independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and needs
+	// no JOIN, and as a listing it leaves out an item in no library.
+	appendListedLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
 
 	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 

@@ -250,6 +250,15 @@ type ItemDetail struct {
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
 
+	// An episode's series poster and backdrop and its season poster, sized
+	// like its own poster and backdrop. apiv2 emits them; /api/v1 is frozen.
+	SeriesPosterURL         string `json:"-"`
+	SeriesPosterThumbhash   string `json:"-"`
+	SeriesBackdropURL       string `json:"-"`
+	SeriesBackdropThumbhash string `json:"-"`
+	SeasonPosterURL         string `json:"-"`
+	SeasonPosterThumbhash   string `json:"-"`
+
 	// Banner, thumb, clear art and disc art, and every backdrop in display
 	// order with the primary first, for movies and series. Kept out of this
 	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
@@ -1874,6 +1883,12 @@ type seriesDetailContext struct {
 	crewCredits []CrewCredit
 	versionPref versionDefaults
 	backdropURL string
+	posterURL   string
+	// seasonPosters caches each season's signed poster, so a batch of one
+	// season's episodes signs it once. seasons holds the series' localized
+	// seasons when a batch prefetched them.
+	seasonPosters map[string]seasonPoster
+	seasons       map[string]*models.Season
 	// The viewer's audio and subtitle preferences depend only on the series
 	// and the library a file lives in, so a batch resolves them once per
 	// series (and library) instead of once per episode.
@@ -1904,6 +1919,8 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 		crewCredits:      crewCredits,
 		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
 		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop))),
+		posterURL:        s.PresignImageURL(ctx, series.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+		seasonPosters:    map[string]seasonPoster{},
 		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
 		subtitleDefaults: map[int]subtitleDefaults{},
 		trickplay:        s.trickplay,
@@ -1957,6 +1974,7 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 	if err != nil {
 		return nil, err
 	}
+	s.prefetchSeasons(ctx, seriesCtx, filter)
 	if fetcher, ok := s.fileFetcher.(interface {
 		ListByEpisodeIDs(context.Context, []string) (map[string][]*models.MediaFile, error)
 	}); ok {
@@ -3383,6 +3401,86 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 	return detail, nil
 }
 
+// seasonPoster is a season's signed poster and its ThumbHash.
+type seasonPoster struct {
+	url       string
+	thumbhash string
+}
+
+// episodeSeasonPoster returns the poster of an episode's season, signing each
+// season once per series context. Seasons prefetchSeasons loaded are used as
+// they are; any other season is loaded and localized on its own. A missing
+// season has none.
+func (s *DetailService) episodeSeasonPoster(ctx context.Context, seriesCtx *seriesDetailContext, seasonID string, filter AccessFilter) seasonPoster {
+	if seasonID == "" || s.seasonRepo == nil {
+		return seasonPoster{}
+	}
+	if poster, ok := seriesCtx.seasonPosters[seasonID]; ok {
+		return poster
+	}
+	var poster seasonPoster
+	season, ok := seriesCtx.seasons[seasonID]
+	if !ok {
+		var err error
+		season, err = s.seasonRepo.GetByID(ctx, seasonID)
+		switch {
+		case err == nil:
+			season = s.localizeEpisodeSeason(ctx, seriesCtx, season, filter)
+		case !errors.Is(err, ErrSeasonNotFound):
+			// Decoration only: a failed read leaves the season poster absent
+			// rather than failing the detail.
+			slog.WarnContext(ctx, "loading episode season poster", "component", "catalog", "season_id", seasonID, "error", err)
+		}
+	}
+	if season != nil {
+		poster = seasonPoster{
+			url:       s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+			thumbhash: season.PosterThumbhash,
+		}
+	}
+	if seriesCtx.seasonPosters != nil {
+		seriesCtx.seasonPosters[seasonID] = poster
+	}
+	return poster
+}
+
+// localizeEpisodeSeason localizes a season the way buildSeasonDetail does, so
+// an episode shows the season poster season detail shows this viewer. A
+// failed localization keeps the stored row.
+func (s *DetailService) localizeEpisodeSeason(ctx context.Context, seriesCtx *seriesDetailContext, season *models.Season, filter AccessFilter) *models.Season {
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+	if localized, err := s.LocalizeSeasonModel(ctx, season, localizationFilter); err == nil && localized != nil {
+		return localized
+	}
+	return season
+}
+
+// prefetchSeasons loads and localizes every season of the context's series in
+// one batch, so a series-wide episode batch reads seasons once rather than
+// once per season. A failed read leaves the per-season reads in place.
+func (s *DetailService) prefetchSeasons(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter) {
+	if s.seasonRepo == nil {
+		return
+	}
+	seasons, err := s.seasonRepo.ListBySeries(ctx, seriesCtx.series.ContentID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading series seasons for episode posters", "component", "catalog", "series_id", seriesCtx.series.ContentID, "error", err)
+		return
+	}
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+	if localized, err := s.LocalizeSeasonModels(ctx, seasons, localizationFilter); err == nil && len(localized) == len(seasons) {
+		seasons = localized
+	}
+	seriesCtx.seasons = make(map[string]*models.Season, len(seasons))
+	for _, season := range seasons {
+		if season != nil {
+			seriesCtx.seasons[season.ContentID] = season
+		}
+	}
+}
+
 func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.Episode, seriesCtx *seriesDetailContext, filter AccessFilter) (*ItemDetail, error) {
 	localizationFilter := filter
 	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
@@ -3431,6 +3529,10 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 
 	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	detail.BackdropURL = seriesCtx.backdropURL
+	detail.SeriesPosterURL, detail.SeriesPosterThumbhash = seriesCtx.posterURL, series.PosterThumbhash
+	detail.SeriesBackdropURL, detail.SeriesBackdropThumbhash = seriesCtx.backdropURL, series.BackdropThumbhash
+	seasonArt := s.episodeSeasonPoster(ctx, seriesCtx, episode.SeasonID, filter)
+	detail.SeasonPosterURL, detail.SeasonPosterThumbhash = seasonArt.url, seasonArt.thumbhash
 
 	files := seriesCtx.filesByEpisode[episode.ContentID]
 	if seriesCtx.filesByEpisode == nil {

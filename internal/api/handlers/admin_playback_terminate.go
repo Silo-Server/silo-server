@@ -89,7 +89,7 @@ func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTer
 	// replan after a terminate answer 410 and a start replay reports
 	// session_expired on every replica, not just the one that held the live
 	// session.
-	if err := h.playback.stopPlaybackSessionByID(ctx, in.SessionID, true); err != nil {
+	if err := h.playback.stopPlaybackSessionByID(ctx, in.SessionID, PlaybackEndTerminated); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) || !h.playback.attemptLive(ctx, in.SessionID) {
 			return AdminTerminateView{}, err
 		}

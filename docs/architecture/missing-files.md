@@ -3,7 +3,10 @@
 A library membership (`media_item_libraries` for items, `episode_libraries`
 for episodes) exists while its item or episode has a present file in that
 library. Catalog reads hide anything without one, so removing a membership is
-how a title with no playable file leaves the library. The scanner marks a
+how a title with no playable file leaves the library. That includes listings
+that name no library, for an administrator too: catalog browse, search, Home
+rows, and the unmatched-items list. Only a read by ID still opens such an
+item for a viewer whose library access is unrestricted. The scanner marks a
 vanished file `missing_since`; membership reconciliation then removes the
 memberships left without a present file, in the same pass.
 

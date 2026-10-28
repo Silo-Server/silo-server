@@ -49,6 +49,8 @@ type AdminPlaybackSession struct {
 	ClientLabel              string  `json:"client_label,omitempty"`
 	ClientLabelFull          string  `json:"client_label_full,omitempty"`
 	ClientUserAgent          string  `json:"client_user_agent,omitempty"`
+	DeviceID                 string  `json:"device_id,omitempty" doc:"Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared."`
+	DevicePlatform           string  `json:"device_platform,omitempty" doc:"Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play."`
 	AudioTrackIndex          int     `json:"audio_track_index"`
 	TranscodeAudio           bool    `json:"transcode_audio"`
 	StreamBitrateKbps        *int    `json:"stream_bitrate_kbps"`
@@ -147,6 +149,8 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		ClientLabel:              v.ClientLabel,
 		ClientLabelFull:          v.ClientLabelFull,
 		ClientUserAgent:          v.ClientUserAgent,
+		DeviceID:                 v.DeviceID,
+		DevicePlatform:           v.DevicePlatform,
 		AudioTrackIndex:          v.AudioTrackIndex,
 		TranscodeAudio:           v.TranscodeAudio,
 		StreamBitrateKbps:        v.StreamBitrateKbps,
@@ -221,6 +225,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	NodeRouting               bool     `json:"node_routing"`
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 	SourceVideoHeight         bool     `json:"source_video_height" doc:"Rows may carry source_video_height"`
+	DeviceIdentity            bool     `json:"device_identity" doc:"Rows may carry device_id and device_platform"`
 }
 
 const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
@@ -254,6 +259,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.StreamLocation = true
 		out.Body.OutputFormat = true
 		out.Body.SourceVideoHeight = true
+		out.Body.DeviceIdentity = true
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

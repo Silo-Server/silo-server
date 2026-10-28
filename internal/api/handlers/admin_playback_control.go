@@ -255,7 +255,7 @@ func boundedPlaybackControlDeadline(deadlineMS int) time.Duration {
 // renewing into a fresh session.
 func (h *AdminPlaybackControlHandler) endSessionForAdmin(sessionID string) error {
 	ctx := context.Background()
-	err := h.playback.stopPlaybackSessionByID(ctx, sessionID, true)
+	err := h.playback.stopPlaybackSessionByID(ctx, sessionID, PlaybackEndTerminated)
 	if err == nil || errors.Is(err, playback.ErrSessionNotFound) {
 		h.playback.markAttemptStoppedByAdmin(ctx, sessionID)
 	}

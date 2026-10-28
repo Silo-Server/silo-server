@@ -80,3 +80,36 @@ func TestSectionCardKeepsProvenanceOfCachedArtwork(t *testing.T) {
 		t.Fatalf("cached still served as %v", card.BackdropIsEpisodeStill)
 	}
 }
+
+// An episode card takes its parent artwork from the row that loaded it, or
+// from the episode metadata lookup when its row didn't load any, and keeps it
+// off the frozen v1 wire along with its release date.
+func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
+	parent := &models.EpisodeParentArtwork{SeriesPosterPath: "series/poster", SeriesPosterThumbhash: "sp", SeriesBackdropPath: "series/backdrop", SeriesBackdropThumbhash: "sb", SeasonPosterPath: "season/poster", SeasonPosterThumbhash: "ss"}
+	urls := sectionItemImageURLs{parents: episodeParentImageURLs{seriesPosterURL: "https://example.invalid/sp", seriesBackdropURL: "https://example.invalid/sb", seasonPosterURL: "https://example.invalid/ss"}}
+	want := EpisodeParentArtworkView{SeriesPosterURL: "https://example.invalid/sp", SeriesPosterThumbhash: "sp", SeriesBackdropURL: "https://example.invalid/sb", SeriesBackdropThumbhash: "sb", SeasonPosterURL: "https://example.invalid/ss", SeasonPosterThumbhash: "ss"}
+	h := &SectionHandler{}
+	for name, tc := range map[string]struct {
+		item *models.MediaItem
+		meta *sections.SectionItemMeta
+	}{
+		"own row":       {&models.MediaItem{ContentID: "episode-1", Type: "episode", ParentArtwork: parent}, &sections.SectionItemMeta{EpisodeAirDate: new("2021-06-11"), RatingTMDB: new(8.39)}},
+		"metadata only": {&models.MediaItem{ContentID: "episode-1", Type: "episode"}, &sections.SectionItemMeta{ParentArtwork: parent}},
+	} {
+		card := h.toSectionItemResponse(sections.SectionNextUp, tc.item, tc.meta, nil, nil, urls, "")
+		if card.ParentArtwork != want {
+			t.Errorf("%s: parent artwork = %+v", name, card.ParentArtwork)
+		}
+		if tc.meta.EpisodeAirDate != nil && (card.ReleaseDate == nil || *card.ReleaseDate != "2021-06-11" || card.EpisodeRatingTMDB == nil || *card.EpisodeRatingTMDB != 8.39) {
+			t.Errorf("%s: v2 air date and TMDB rating = %v, %v", name, card.ReleaseDate, card.EpisodeRatingTMDB)
+		}
+		wire, err := json.Marshal(card)
+		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") || strings.Contains(string(wire), "release_date") || strings.Contains(string(wire), "8.39") {
+			t.Fatalf("%s: v1 leaks parent artwork: %s (%v)", name, wire, err)
+		}
+	}
+	movie := h.toSectionItemResponse(sections.SectionNextUp, &models.MediaItem{ContentID: "movie-1", Type: "movie"}, &sections.SectionItemMeta{ParentArtwork: parent}, nil, nil, urls, "")
+	if movie.ParentArtwork != (EpisodeParentArtworkView{}) {
+		t.Fatalf("non-episode card carries parent artwork: %+v", movie.ParentArtwork)
+	}
+}

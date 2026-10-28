@@ -1408,6 +1408,9 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: calendarDatePtr(d.ReleaseDate), LastAirDate: calendarDatePtr(d.LastAirDate),
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
+		SeriesPosterURL: d.SeriesPosterURL, SeriesPosterThumbhash: d.SeriesPosterThumbhash,
+		SeriesBackdropURL: d.SeriesBackdropURL, SeriesBackdropThumbhash: d.SeriesBackdropThumbhash,
+		SeasonPosterURL: d.SeasonPosterURL, SeasonPosterThumbhash: d.SeasonPosterThumbhash,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
 	}

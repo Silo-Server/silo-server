@@ -47,7 +47,7 @@ func (r finishHistoryReplica) holdCopy(t *testing.T, session playback.Session, p
 
 // expire finalizes this replica's copy the way idle cleanup does.
 func (r finishHistoryReplica) expire(session *playback.Session) {
-	r.handler.finalizeSessionStop(context.Background(), session, false, "", false)
+	r.handler.finalizeSessionStop(context.Background(), session, false, "", "")
 }
 
 func compatFinishSession() playback.Session {
@@ -295,9 +295,9 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 		Position: 1800, StartedAt: time.Now().Add(-time.Hour),
 	}
 
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", false)
+	replica.handler.finalizeSessionStop(context.Background(), session, false, "", "")
 	session.Position = 3500
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", true)
+	replica.handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 
 	if got := len(listFinishHistory(t, store)); got != 2 {
 		t.Fatalf("watch history rows = %d, want 2", got)
@@ -393,5 +393,118 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 	}
 	if played != 300 {
 		t.Fatalf("rebuilt session played = %v, want 300 (two stretches of 120 and 180)", played)
+	}
+}
+
+// TestAdminPlaybackHistoryFactsDB proves the device, client and stream
+// decisions are filled once whether or not a finalization advanced the
+// counters, the end reason follows the latest finalization, and the listing
+// windows ended_at inclusive below and exclusive above.
+func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "history-facts-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	// Deleting the account cascades to its playback history.
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	session := "facts-" + suffix
+	finalize := func(position float64, ended time.Duration, entry AdminPlaybackHistoryEntry) {
+		t.Helper()
+		if entry.SessionID == "" {
+			entry.SessionID = session
+		}
+		entry.UserID, entry.ProfileID, entry.PlayMethod = account, "p-1", "direct_play"
+		entry.StartedAt, entry.EndedAt = started.Format(time.RFC3339Nano), started.Add(ended).Format(time.RFC3339Nano)
+		entry.WatchedSeconds = position
+		if err := store.RecordHistory(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A copy that knew nothing about the device expires first. A later copy
+	// that did not get further still records the facts, and a third, with
+	// other values, replaces none of them. A stop after the expiry replaces
+	// its reason; an admin terminate and a delayed expiry recorded with
+	// earlier ends do not replace the stop.
+	finalize(600, 10*time.Minute, AdminPlaybackHistoryEntry{EndReason: PlaybackEndExpired})
+	finalize(500, 9*time.Minute, AdminPlaybackHistoryEntry{DeviceID: "tv-1", DevicePlatform: "tvOS", ClientName: "Silo tvOS", ClientVersion: "2.1.0", VideoDecision: "direct", AudioDecision: "transcode"})
+	finalize(700, 12*time.Minute, AdminPlaybackHistoryEntry{DeviceID: "tv-2", DevicePlatform: "iOS", ClientName: "Other", ClientVersion: "9", VideoDecision: "transcode", AudioDecision: "direct", EndReason: PlaybackEndStopped})
+	finalize(700, 11*time.Minute, AdminPlaybackHistoryEntry{EndReason: PlaybackEndTerminated})
+	// The same holds when the stop got no further, so ended_at never moved
+	// past the expiry.
+	stalled := "stalled-" + suffix
+	finalize(300, 10*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndExpired})
+	finalize(300, 12*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndStopped})
+	finalize(300, 11*time.Minute, AdminPlaybackHistoryEntry{SessionID: stalled, EndReason: PlaybackEndExpired})
+	var stalledReason string
+	if err = pool.QueryRow(ctx, `SELECT end_reason FROM admin_playback_history WHERE session_id=$1`, stalled).Scan(&stalledReason); err != nil {
+		t.Fatal(err)
+	}
+	if stalledReason != string(PlaybackEndStopped) {
+		t.Errorf("stalled play end_reason = %s, want stopped: a delayed earlier expiry must not replace a later stop", stalledReason)
+	}
+	// A play recorded before any of these facts existed.
+	legacy := "legacy-" + suffix
+	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
+		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, legacy, account, started, started.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	admin := &AdminHandler{pool: pool}
+	list := func(after, before time.Time) []AdminPlaybackHistoryRow {
+		t.Helper()
+		page, err := admin.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{UserID: account, EndedAfter: &after, EndedBefore: &before}, nil, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page.Items
+	}
+	rows := list(started.Add(12*time.Minute), started.Add(time.Hour))
+	if len(rows) != 1 || rows[0].SessionID != session {
+		t.Fatalf("window [12m, 1h) = %+v, want only the finalized play (ended_after inclusive, ended_before exclusive)", rows)
+	}
+	got := rows[0]
+	text := func(v *string) string {
+		if v == nil {
+			return "<nil>"
+		}
+		return *v
+	}
+	for _, check := range []struct{ field, got, want string }{
+		{"device_id", text(got.DeviceID), "tv-1"},
+		{"device_platform", text(got.DevicePlatform), "tvOS"},
+		{"client_name", text(got.ClientName), "Silo tvOS"},
+		{"client_version", text(got.ClientVersion), "2.1.0"},
+		{"video_decision", text(got.VideoDecision), "direct"},
+		{"audio_decision", text(got.AudioDecision), "transcode"},
+		{"end_reason", text(got.EndReason), "stopped"},
+	} {
+		if check.got != check.want {
+			t.Errorf("%s = %s, want %s", check.field, check.got, check.want)
+		}
+	}
+	if !got.EndedAt.Equal(started.Add(12*time.Minute)) || got.WatchedSeconds != 700 {
+		t.Errorf("ended_at %v watched %v, want the furthest finalization", got.EndedAt, got.WatchedSeconds)
+	}
+
+	rows = list(started.Add(time.Hour), started.Add(2*time.Hour))
+	if len(rows) != 1 || rows[0].SessionID != legacy {
+		t.Fatalf("window [1h, 2h) = %+v, want only the legacy play", rows)
+	}
+	if old := rows[0]; old.DeviceID != nil || old.ClientName != nil || old.VideoDecision != nil || old.EndReason != nil || old.Measured || old.StartPositionSeconds != nil || old.ClientIP != nil {
+		t.Errorf("legacy row = %+v, want unknown facts as nil", old)
 	}
 }

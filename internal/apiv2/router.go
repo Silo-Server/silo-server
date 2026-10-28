@@ -1086,8 +1086,8 @@ type RecommendationService interface {
 // handlers.RequestService) the profile-facing request operations use.
 type MediaRequestService interface {
 	Search(ctx context.Context, viewer mediarequests.Viewer, query string, mediaType mediarequests.MediaType, page int) (*mediarequests.MediaPage, error)
-	Discover(ctx context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error)
-	DiscoverAll(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error)
+	DiscoverRows(ctx context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error)
+	DiscoverRow(ctx context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error)
 	GetDetail(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error)
 	CreateRequest(ctx context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error)
 	ListMine(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)

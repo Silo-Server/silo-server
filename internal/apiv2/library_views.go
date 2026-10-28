@@ -23,7 +23,23 @@ type LibraryViewInput struct {
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
 	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	SectionItemLimitQuery
 	ArtworkQuery
+}
+
+// SectionItemLimitQuery is the optional per-row cap the aggregate section
+// reads (listHomeSections, listLibrarySections) accept. The maximum must
+// equal handlers.MaxSectionItemLimitCap, which getHomeCapabilities
+// advertises; TestHomeCapabilities pins the two.
+type SectionItemLimitQuery struct {
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards per section: each section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports section_item_limit_max; an older server rejects the parameter" example:"20"`
+}
+
+// sectionViewerCapped is sectionViewer with the request's per-row cap.
+func sectionViewerCapped(ctx context.Context, art imagesize.Request, itemLimit int) handlers.SectionViewer {
+	viewer := sectionViewer(ctx, art)
+	viewer.ItemLimitCap = itemLimit
+	return viewer
 }
 
 // LibrarySectionItemsInput is the getLibrarySectionItems query.
@@ -284,7 +300,7 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.LibrarySections(ctx, id, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
