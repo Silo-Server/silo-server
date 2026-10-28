@@ -73,6 +73,11 @@ interface WindowedItemGridProps extends SharedItemGridProps {
    * runway past the last loaded page; defaults to `totalItems`, an exact total.
    */
   knownItems?: number;
+  /**
+   * The pages are a previous query's, kept on screen while this one loads.
+   * The grid shows them but restores no scroll position against them.
+   */
+  stale?: boolean;
   pages: Map<number, BrowseItem[]>;
   pageSize: number;
   onVisibleRangeChange: (startIndex: number, endIndex: number) => void;
@@ -83,6 +88,7 @@ interface StaticItemGridProps extends SharedItemGridProps {
   items: BrowseItem[];
   totalItems?: never;
   knownItems?: never;
+  stale?: never;
   pages?: never;
   pageSize?: never;
   onVisibleRangeChange?: never;
@@ -178,6 +184,7 @@ export default function ItemGrid(props: ItemGridProps) {
   // total only reaches it once the page holding it loads. Once the total is
   // final, or that page is in, the list ended sooner than when it was saved.
   const restoreAnchor = pendingGridRestore();
+  const stale = props.stale === true;
   const extentFinal =
     hasStaticItems(props) || (props.knownItems ?? props.totalItems) >= props.totalItems;
   const restoreRowSettled =
@@ -190,7 +197,7 @@ export default function ItemGrid(props: ItemGridProps) {
     const anchor = pendingGridRestore();
     // Until the wrapper mounts, the scroll margin doesn't yet count the page
     // content above the grid.
-    if (!anchor || !showsItems || !anchorEl) return;
+    if (!anchor || !showsItems || !anchorEl || stale) return;
     const savedRow = Math.floor(anchor.index / columnCount);
     if (savedRow >= rowCount && !restoreRowSettled) return;
     const row = Math.min(savedRow, rowCount - 1);
@@ -204,6 +211,7 @@ export default function ItemGrid(props: ItemGridProps) {
   }, [
     restoreVersion,
     restoreRowSettled,
+    stale,
     showsItems,
     anchorEl,
     columnCount,

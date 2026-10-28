@@ -638,9 +638,8 @@ function CatalogResults({
           ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
             <ItemGrid
               totalItems={catalogQuery.data?.totalItems ?? 0}
-              // A previous search's results, kept on screen while this one
-              // loads, say nothing about how long this list is.
-              knownItems={catalogQuery.isPlaceholderData ? 0 : catalogQuery.data?.knownItems}
+              knownItems={catalogQuery.data?.knownItems}
+              stale={catalogQuery.isPlaceholderData}
               pages={catalogQuery.data?.pages ?? new Map()}
               pageSize={limit}
               loading={catalogQuery.isLoading}

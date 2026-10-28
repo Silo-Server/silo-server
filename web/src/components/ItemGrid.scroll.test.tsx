@@ -211,6 +211,24 @@ describe("ItemGrid scroll anchoring", () => {
       expect(window.scrollY).toBe(150 * 340 + 19);
     });
 
+    it("restores nothing against a previous query's pages", () => {
+      returnToRow150();
+      const props = {
+        pageSize: 100,
+        onVisibleRangeChange: vi.fn(),
+        totalItems: 400,
+        pages: new Map([...firstPage, [3, items.slice(300, 400)]]),
+      };
+      const { rerender } = render(<ItemGrid {...props} stale />);
+
+      expect(awaitingGridRestore()).toBe(true);
+
+      rerender(<ItemGrid {...props} />);
+
+      expect(awaitingGridRestore()).toBe(false);
+      expect(window.scrollY).toBe(150 * 340 + 19);
+    });
+
     it.each([
       {
         name: "the row's page came back empty",
