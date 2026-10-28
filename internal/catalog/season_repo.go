@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -143,8 +144,11 @@ func writeSeasonBackdrops(ctx context.Context, tx pgx.Tx, seasons []*models.Seas
 		if !s.WriteBackdrop {
 			continue
 		}
+		if s.SeasonNumber < math.MinInt32 || s.SeasonNumber > math.MaxInt32 {
+			return fmt.Errorf("writing season backdrops: season number %d is outside PostgreSQL integer range", s.SeasonNumber)
+		}
 		seriesIDs = append(seriesIDs, s.SeriesID)
-		numbers = append(numbers, int32(s.SeasonNumber)) //nolint:gosec // the upsert just stored it in an integer column
+		numbers = append(numbers, int32(s.SeasonNumber))
 		paths = append(paths, s.BackdropPath)
 		sources = append(sources, s.BackdropSourcePath)
 		thumbhashes = append(thumbhashes, s.BackdropThumbhash)
