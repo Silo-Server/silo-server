@@ -108,7 +108,10 @@ Open <http://localhost:8090> and complete onboarding.
 An install from before the omnibus image moves to it on the first
 `docker compose up -d` with this Compose file. Its earlier data directories stay
 in place until you delete them. Remove any `docker-compose.override.yml`
-entries for the old `postgres`, `redis`, or `meilisearch` services first. If its
+entries for the old `postgres`, `redis`, or `meilisearch` services first. The
+earlier stack ran Silo as root; the omnibus image runs it as `PUID` (default
+1000), so set `PUID` and `PGID` in `.env` to an account that can read
+`MEDIA_ROOT`. If its
 `.env` sets `SILO_SEARCH_PROVIDER`,
 `SILO_MEILISEARCH_URL`, or `SILO_MEILISEARCH_API_KEY` for the separate
 Meilisearch service, remove them and set `ENABLE_MEILISEARCH=true` to use the

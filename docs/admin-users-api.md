@@ -250,8 +250,17 @@ They check the caller's standing when the request arrives; they do not order
 simultaneous requests around an ownership transfer, which a server sees rarely.
 
 When the Owner account is lost or locked out, someone with shell access to a node
-and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for
-example `docker compose exec silo silo owner set alice`. The command makes that
+and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`.
+In the omnibus image, `DATABASE_URL` lives in the s6 container environment, which
+`docker exec` does not load, and the bundled PostgreSQL admits the `silo` role only
+from the `silo` account, so the command runs as:
+
+```sh
+docker compose exec silo /command/s6-envdir /run/s6/container_environment \
+  /command/s6-setuidgid silo silo owner set alice
+```
+
+`silo auth local-login enable` runs the same way. The command makes that
 account the Owner, enables it, and grants it the administrator role if needed; a
 role or status change signs the account out. The previous Owner stays an
 administrator.

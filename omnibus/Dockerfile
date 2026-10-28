@@ -15,8 +15,8 @@ ARG S6_OVERLAY_NOARCH_SHA256=5379750ed30a84bbd2e2dd74847ba6b5bd29cd0b2e3ea2ec580
 ARG S6_OVERLAY_X86_64_SHA256=e6befcc96a437a3831386ecfc51808c5d3e939dc5fe3c02ae9284599e8aa2408
 ARG S6_OVERLAY_AARCH64_SHA256=b17f17a82e7a515c682a91edaf2ffdabb73f891981b6c1fd712115693a2f8b4c
 ARG PG_MAJOR=18
-# Pinned: Meilisearch will not open data written by another version. Keep in
-# step with the meilisearch service in docker-compose.yml.
+# Pinned: Meilisearch will not open data written by another version. See
+# "Two versions are load-bearing" in docs/architecture/omnibus-image.md.
 ARG MEILISEARCH_VERSION=v1.54.0
 ARG MEILISEARCH_AMD64_SHA256=4c039396c19436c248d3429935559c990f6606d4ada781e7079325f32bbb7a3c
 ARG MEILISEARCH_AARCH64_SHA256=b7817c408620383b56e5b516df5bcf55ed1267dc755cadb79e6f97038fcded7c
@@ -37,11 +37,11 @@ RUN groupadd -r -g 999 postgres && \
     useradd -u 911 -g silo -d /nonexistent -s /usr/sbin/nologin -M silo
 
 # PostgreSQL from the PostgreSQL apt repository, the same build the
-# pgvector/pgvector image in docker-compose.yml uses. create_main_cluster is
-# turned off before postgresql-${PG_MAJOR} installs so the package does not
-# create a cluster under /var/lib/postgresql; the data directory lives under
-# /config/postgres instead. The cluster uses en_US.UTF-8, as the Compose stack
-# does, so sorting matches.
+# pgvector/pgvector image of the earlier multi-container Compose stack uses.
+# create_main_cluster is turned off before postgresql-${PG_MAJOR} installs so
+# the package does not create a cluster under /var/lib/postgresql; the data
+# directory lives under /config/postgres instead. The cluster uses
+# en_US.UTF-8, as that stack's does, so sorting matches.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends locales xz-utils && \
     sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen && \

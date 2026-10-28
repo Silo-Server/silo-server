@@ -26,9 +26,9 @@ current PostgreSQL and Redis packages.
 
 Two versions are load-bearing for existing installs:
 
-- `MEILISEARCH_VERSION` matches the `meilisearch` service in
-  `docker-compose.yml`. Meilisearch refuses data written by another version, so
-  a bump needs `MEILI_UPGRADE_DB=true` for one start in both deployments.
+- `MEILISEARCH_VERSION` pins the bundled Meilisearch. Meilisearch refuses data
+  written by another version, so a bump needs `MEILI_UPGRADE_DB=true` for one
+  start of each install that enabled it.
 - `PG_MAJOR` is the PostgreSQL major version. `init-postgres` refuses to open a
   data directory written by another major version, so a bump makes every
   existing omnibus install dump and restore. Treat it as a breaking change and
@@ -126,8 +126,8 @@ PostgreSQL listens only on `/run/postgresql`. The `silo` role is the cluster's
 superuser and authenticates by peer, so no database password exists. Silo needs
 the superuser role for `POSTGRES_TUNE`, which uses `ALTER SYSTEM`, and its
 migrations create the `vector`, `pg_trgm`, and `citext` extensions. The cluster
-uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the Compose
-stack. Each database records the C library collation version it was built
+uses `en_US.UTF-8`, the locale of the `pgvector/pgvector` image in the earlier
+multi-container Compose stack. Each database records the C library collation version it was built
 under, and an index on text sorted under another version can miss rows. On
 every start `init-postgres-db` compares the recorded version with the running
 one, and for each database that differs it rebuilds the indexes whose keys use
