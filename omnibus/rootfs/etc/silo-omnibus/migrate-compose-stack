@@ -62,9 +62,15 @@ url_host() {
 
 # control_fingerprint DIR: what changes whenever a server writes the cluster,
 # including a clean start and stop: its identifier and latest checkpoint.
+# Fails, rather than print nothing, when the cluster cannot be read, so an
+# unreadable cluster never matches. LC_ALL=C keeps the labels untranslated.
 control_fingerprint() {
-  s6-setuidgid postgres pg_controldata -D "$1" 2>/dev/null |
-    sed -nE 's/^(Database system identifier|Latest checkpoint location):[[:space:]]*//p' | paste -sd ' '
+  local out
+  out="$(LC_ALL=C s6-setuidgid postgres pg_controldata -D "$1" 2>&1)" ||
+    fail "pg_controldata cannot read $(host "$1"): ${out##*$'\n'}"
+  out="$(sed -nE 's/^(Database system identifier|Latest checkpoint location):[[:space:]]*//p' <<<"$out" | paste -sd ' ')"
+  [[ "$out" == *' '* ]] || fail "pg_controldata shows no system identifier and checkpoint for $(host "$1")"
+  printf '%s' "$out"
 }
 
 # set_aside PATH: move a result an earlier attempt left at PATH out of the way.
@@ -121,7 +127,9 @@ fi
 if [[ -s "$done_marker" ]]; then
   recorded="$(<"$done_marker")"
   if [[ "$recorded" != none && -n "${clusters[0]:-}" ]]; then
-    if [[ -e "${clusters[0]}/postmaster.pid" || "$(control_fingerprint "${clusters[0]}")" != "$recorded" ]]; then
+    now=""
+    [[ -e "${clusters[0]}/postmaster.pid" ]] || now="$(control_fingerprint "${clusters[0]}")" || exit 1
+    if [[ -e "${clusters[0]}/postmaster.pid" || "$now" != "$recorded" ]]; then
       fail "the earlier stack has used $(host "${clusters[0]}") since it was copied to $(host "$pgdata"). To copy it again, move $(host "$config") aside; to keep the copy, delete $(host "${clusters[0]}")"
     fi
   fi
@@ -375,9 +383,12 @@ for name in "${silo_dirs[@]}"; do
 done
 
 # The earlier stack must not have run while this copied.
-if [[ -n "$source_cluster" ]] &&
-  [[ -e "$source_cluster/postmaster.pid" || "$(control_fingerprint "$source_cluster")" != "$fingerprint" ]]; then
-  fail "the earlier stack started on $(host "$source_cluster") during the copy; stop it and start again"
+if [[ -n "$source_cluster" ]]; then
+  now=""
+  [[ -e "$source_cluster/postmaster.pid" ]] || now="$(control_fingerprint "$source_cluster")" || exit 1
+  if [[ -e "$source_cluster/postmaster.pid" || "$now" != "$fingerprint" ]]; then
+    fail "the earlier stack started on $(host "$source_cluster") during the copy; stop it and start again"
+  fi
 fi
 
 # --- Into place. -------------------------------------------------------------

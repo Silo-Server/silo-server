@@ -19,6 +19,19 @@ if [[ -L "$PGDATA" || -L "$PGDATA/PG_VERSION" ]]; then
   exit 1
 fi
 
+# migrate-compose-stack moves an earlier install into place under this record
+# and removes it when done. A cluster found with it present may be half of an
+# interrupted move, which the next run sets aside and redoes, so whatever Silo
+# wrote to it now would be left behind.
+if [[ -e /config/.compose-migration-pending ]]; then
+  cat >&2 <<'MSG'
+A move from the multi-container Compose stack into /config was interrupted
+(/config/.compose-migration-pending is present). Run `docker compose up -d`
+without --no-deps so the Compose file's postgres service can finish it.
+MSG
+  exit 1
+fi
+
 if [[ -e "$PGDATA/PG_VERSION" ]]; then
   # Read as root, before any ownership changes: a cluster another image wrote
   # can belong to another uid, and a refused one is left as it was. The read
