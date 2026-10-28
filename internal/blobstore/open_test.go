@@ -293,6 +293,24 @@ func TestOpenKeepsRecordedIdentityForLinkedRoot(t *testing.T) {
 	if SameLocalRoot(BackendS3+"|https://s3.example|artwork|", BackendLocal+"|"+filepath.Join(state, "artwork")) {
 		t.Fatal("an S3 identity matched a local root")
 	}
+
+	// The recorded root itself replaced by a link to where it moved: a store
+	// refuses a linked root, so the moved directory is another location.
+	recordedRoot := filepath.Join(base, "data", "artwork")
+	moved := filepath.Join(base, "mnt", "artwork")
+	if err := os.MkdirAll(moved, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(recordedRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, recordedRoot); err != nil {
+		t.Fatal(err)
+	}
+	settings = &testSettings{values: map[string]string{IdentitySettingKey: BackendLocal + "|" + recordedRoot}}
+	if _, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: moved, Settings: settings}); err == nil {
+		t.Fatal("a recorded root that is itself a link matched the directory it points to")
+	}
 }
 
 func TestOpenRetriesBackendRecordingAfterSettingsFailure(t *testing.T) {
