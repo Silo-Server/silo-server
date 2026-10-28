@@ -168,11 +168,14 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	// after this stop removed the live session found nothing to tear down, so
 	// its finalized receipt recorded no history. Write it from this snapshot.
 	markerWithoutHistory := receipt.Finalized && receipt.HistoryID == "" && receipt.StopID == adminStopID(session.ID)
-	notify := !receipt.Finalized || markerWithoutHistory
+	notify := markerWithoutHistory
 	if !receipt.Finalized {
 		// recordRealtimeStoppedSession tells providers once the history is
 		// written, from the confirmed snapshot; the finalizer must not too.
-		receipt = h.finalizeRealtimeStop(withProviderNoticeDeferred(parent), store, record, session.ID, receipt, stopFinalizationLease)
+		// A competing finalizer that finishes first told them itself.
+		finalizeCtx, notice := withProviderNoticeDeferred(parent)
+		receipt = h.finalizeRealtimeStop(finalizeCtx, store, record, session.ID, receipt, stopFinalizationLease)
+		notify = notice.left
 	}
 	// Finalization may have spent the first context's whole budget.
 	ctx, cancelResult := context.WithTimeout(parent, stopFinalizationLease)

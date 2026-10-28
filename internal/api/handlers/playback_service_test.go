@@ -1075,37 +1075,71 @@ func (s *stopAfterReadsPlanStoreV3) GetAttempt(ctx context.Context, sessionID st
 }
 
 // TestRealtimeConfirmedStopNotifiesProvidersOnce covers a player-confirmed
-// administrator stop: whether its queued worker finalizes the attempt or the
-// client's stop finalized it first, providers hear the end once.
+// administrator stop: whether its queued worker finalizes the attempt, the
+// client's stop finalized it first, or the client's stop holds the lease and
+// finishes while the worker waits, providers hear the end once.
 func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
-	t.Run("worker finalizes", func(t *testing.T) { testRealtimeConfirmedStopNotifiesOnce(t, false) })
-	t.Run("client stop finalized first", func(t *testing.T) { testRealtimeConfirmedStopNotifiesOnce(t, true) })
-}
-
-func testRealtimeConfirmedStopNotifiesOnce(t *testing.T, clientStopFirst bool) {
-	f := newPlaybackServiceFixture(t)
-	scrobbler := &recordingPlaybackWatchScrobbler{}
-	f.handler.AdminStore = &recordingPlaybackAdminStore{}
-	f.handler.WatchScrobbler = scrobbler
-	f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
-	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-	if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := f.manager.GetSession(f.session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.manager.StopSession(f.session.ID); err != nil {
-		t.Fatal(err)
-	}
-	if clientStopFirst {
-		if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
+	clientStop := func(t *testing.T, f *playbackServiceFixture, stopID string) {
+		if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f.handler.recordRealtimeStoppedSession(context.Background(), snapshot)
-	if got := len(scrobbler.stops) + len(scrobbler.pauses); got != 1 {
-		t.Fatalf("provider end events = %d stops + %d pauses, want 1", len(scrobbler.stops), len(scrobbler.pauses))
+	for _, tc := range []struct {
+		name string
+		race func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
+	}{
+		{name: "worker finalizes"},
+		{name: "client stop finalized first", race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+			clientStop(t, f, uuid.NewString())
+		}},
+		{name: "client stop finalizes while the worker waits", race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			stopID := uuid.NewString()
+			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.PlanStoreV3 = &claimRacePlanStoreV3{MemoryPlanStoreV3: memory, race: func() { clientStop(t, f, stopID) }}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			scrobbler := &recordingPlaybackWatchScrobbler{}
+			f.handler.AdminStore = &recordingPlaybackAdminStore{}
+			f.handler.WatchScrobbler = scrobbler
+			f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
+			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+			if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := f.manager.GetSession(f.session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if tc.race != nil {
+				tc.race(t, f, f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3))
+			}
+			f.handler.recordRealtimeStoppedSession(context.Background(), snapshot)
+			if got := len(scrobbler.stops) + len(scrobbler.pauses); got != 1 {
+				t.Fatalf("provider end events = %d stops + %d pauses, want 1", len(scrobbler.stops), len(scrobbler.pauses))
+			}
+		})
 	}
+}
+
+// claimRacePlanStoreV3 runs race just before the first finalization claim,
+// as another finalizer that claims and finishes first would.
+type claimRacePlanStoreV3 struct {
+	*playback.MemoryPlanStoreV3
+	race  func()
+	raced bool
+}
+
+func (s *claimRacePlanStoreV3) ClaimStopFinalization(ctx context.Context, sessionID string, lease time.Time) (bool, error) {
+	if !s.raced {
+		s.raced = true
+		s.race()
+	}
+	return s.MemoryPlanStoreV3.ClaimStopFinalization(ctx, sessionID, lease)
 }

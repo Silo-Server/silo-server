@@ -63,17 +63,28 @@ func claimNativeEnd(ctx context.Context, planStore playback.PlanStoreV3, deny *p
 	return nativeEndClaim{store: store, record: record, receipt: receipt, owned: true}
 }
 
-type providerNoticeDeferredKey struct{}
+// providerNotice marks a finalization whose caller sends the stop's
+// watch-provider event itself, so the finalizer does not send it too. left
+// records that the finalizer recorded the end and left the event to the
+// caller; one that only replayed another caller's finished receipt did not.
+type providerNotice struct{ left bool }
 
-// withProviderNoticeDeferred marks a finalization whose caller sends the
-// stop's watch-provider event itself, so the finalizer does not send it too.
-func withProviderNoticeDeferred(ctx context.Context) context.Context {
-	return context.WithValue(ctx, providerNoticeDeferredKey{}, true)
+type providerNoticeKey struct{}
+
+func withProviderNoticeDeferred(ctx context.Context) (context.Context, *providerNotice) {
+	notice := &providerNotice{}
+	return context.WithValue(ctx, providerNoticeKey{}, notice), notice
 }
 
-func providerNoticeDeferred(ctx context.Context) bool {
-	deferred, _ := ctx.Value(providerNoticeDeferredKey{}).(bool)
-	return deferred
+// leaveProviderNotice reports whether ctx defers the provider event to the
+// finalizer's caller, and records that this finalizer left it.
+func leaveProviderNotice(ctx context.Context) bool {
+	notice, _ := ctx.Value(providerNoticeKey{}).(*providerNotice)
+	if notice == nil {
+		return false
+	}
+	notice.left = true
+	return true
 }
 
 // claimStopFinalization claims a stopped attempt's finalization lease. A

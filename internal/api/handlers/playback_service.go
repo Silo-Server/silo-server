@@ -687,7 +687,7 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	// the end recorded here does, unless its caller tells them itself. An
 	// abort whose replica died before its provider event sends that event.
 	switch {
-	case providerNoticeDeferred(ctx):
+	case leaveProviderNotice(ctx):
 	case reason == PlaybackEndAborted:
 		h.scrobbleAbortedSession(ctx, session)
 	default:
