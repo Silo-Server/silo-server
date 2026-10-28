@@ -307,6 +307,11 @@ SQL
     [[ -n "$(db_exists "$db")" ]] || fail "the cluster has no $db database; set POSTGRES_DB in .env to the database the earlier stack used"
     stage_psql -d template1 -v name="$db" <<<'ALTER DATABASE :"name" RENAME TO silo'
     log "renamed database $db to silo"
+    # init-postgres-db connects to postgres, so put back the empty maintenance
+    # database initdb makes when Silo's data was in it.
+    if [[ "$db" == postgres ]]; then
+      stage_psql -d template1 <<<'CREATE DATABASE postgres'
+    fi
   elif [[ -z "$(db_exists silo)" ]]; then
     fail "the cluster has no silo database; set POSTGRES_DB in .env to the database the earlier stack used"
   fi
