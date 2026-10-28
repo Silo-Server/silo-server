@@ -164,11 +164,12 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		slog.WarnContext(ctx, "failed to record realtime stop attempt", "session", session.ID, "error", err)
 		return watchstate.PlaybackStopResult{}, true
 	}
-	// An administrator terminate or unconfirmed-command fallback that ran
-	// after this stop removed the live session found nothing to tear down, so
-	// its finalized receipt recorded no history. Write it from this snapshot.
+	// An administrator end that finalized the receipt without a history row
+	// (nothing to record, or a failed write) is written from this snapshot.
+	// Whoever finalized a receipt told providers, so only this worker's own
+	// finalization leaves the notice to it.
 	markerWithoutHistory := receipt.Finalized && receipt.HistoryID == "" && receipt.StopID == adminStopID(session.ID)
-	notify := markerWithoutHistory
+	notify := false
 	if !receipt.Finalized {
 		// recordRealtimeStoppedSession tells providers once the history is
 		// written, from the confirmed snapshot; the finalizer must not too.

@@ -1149,13 +1149,21 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name string
-		race func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
+		// position is the last progress before the stop; at 0 no watch
+		// history row is written.
+		position float64
+		race     func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3)
 	}{
-		{name: "worker finalizes"},
-		{name: "client stop finalized first", race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+		{name: "worker finalizes", position: 900},
+		{name: "client stop finalized first", position: 900, race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
 			clientStop(t, f, uuid.NewString())
 		}},
-		{name: "client stop finalizes while the worker waits", race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+		{name: "terminate finalized first without a history row", race: func(t *testing.T, f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
+			if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "client stop finalizes while the worker waits", position: 900, race: func(t *testing.T, f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
 			stopID := uuid.NewString()
 			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, stopID, nil); err != nil {
 				t.Fatal(err)
@@ -1170,7 +1178,7 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 			f.handler.WatchScrobbler = scrobbler
 			f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
 			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-			if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+			if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: tc.position}); err != nil {
 				t.Fatal(err)
 			}
 			snapshot, err := f.manager.GetSession(f.session.ID)
