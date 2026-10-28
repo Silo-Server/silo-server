@@ -1356,13 +1356,20 @@ func normalizeDashboardHiddenAttention(value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
-	var ids []string
-	if err := json.Unmarshal([]byte(value), &ids); err != nil {
-		return "", fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	// Decode loosely and check each element: a []string target would take
+	// JSON null, at the top or as an element, without an error.
+	notStrings := fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	var ids []any
+	if err := json.Unmarshal([]byte(value), &ids); err != nil || ids == nil {
+		return "", notStrings
 	}
 	kept := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
+	for _, element := range ids {
+		id, ok := element.(string)
+		if !ok {
+			return "", notStrings
+		}
 		id = strings.TrimSpace(id)
 		if id == "" || seen[id] {
 			continue

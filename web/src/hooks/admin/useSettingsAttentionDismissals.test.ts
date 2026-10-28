@@ -11,7 +11,9 @@ const attentionMock = vi.fn<() => SettingsAttentionState>();
 // The server's settings map; a save replaces it, as the refetch would.
 let settings: Record<string, string> = {};
 const writes: string[] = [];
+let fetching = 0;
 
+vi.mock("@tanstack/react-query", () => ({ useIsFetching: () => fetching }));
 vi.mock("./useSettingsHealth", () => ({
   useSettingsAttentionState: () => attentionMock(),
 }));
@@ -58,6 +60,7 @@ function setItems(items: SettingsHealthItem[], loaded = true) {
 
 beforeEach(() => {
   settings = {};
+  fetching = 0;
   setItems([email, publicUrl, storageRestart]);
 });
 
@@ -121,6 +124,35 @@ describe("useSettingsAttentionDismissals", () => {
     setItems([email, publicUrl]);
     rerender();
     expect(visibleIds(result)).toEqual(["email"]);
+  });
+
+  it("prunes again when the same list comes back while the Dashboard stays open", () => {
+    settings = { [KEY]: '["email"]' };
+    setItems([publicUrl]);
+    const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
+    expect(settings[KEY]).toBe("");
+
+    setItems([email, publicUrl]);
+    rerender();
+    act(() => result.current.dismiss(email));
+    rerender();
+    expect(settings[KEY]).toBe('["email"]');
+
+    setItems([publicUrl]);
+    rerender();
+    expect(settings[KEY]).toBe("");
+  });
+
+  it("waits for settings and server status to finish refetching before pruning", () => {
+    settings = { [KEY]: '["email"]' };
+    fetching = 1;
+    setItems([publicUrl]);
+    const { rerender } = renderHook(() => useSettingsAttentionDismissals());
+    expect(writes).toEqual([]);
+
+    fetching = 0;
+    rerender();
+    expect(settings[KEY]).toBe("");
   });
 
   it("keeps dismissals while the attention inputs are still loading", () => {

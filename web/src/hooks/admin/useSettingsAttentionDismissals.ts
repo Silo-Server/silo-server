@@ -1,6 +1,8 @@
+import { useIsFetching } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 
 import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
+import { adminKeys } from "@/hooks/queries/keys";
 import { useSettingsAttentionState, type SettingsHealthItem } from "./useSettingsHealth";
 
 /**
@@ -77,19 +79,26 @@ export function useSettingsAttentionDismissals(): SettingsAttentionDismissals {
   // Only an item that is gone — resolved — drops its dismissal. One passing
   // through another state keeps it: saving an unrelated playback setting turns
   // "Transcoding · Off" into "Restart pending" until the restart, after which
-  // it is "Off" again and should stay hidden. Items and dismissals come from
-  // the same settings read, so a missing item is not a stale cache. Each
-  // stored value is pruned at most once, so a failed write does not loop.
-  const pruned = useRef<string | undefined>(undefined);
+  // it is "Off" again and should stay hidden. Settings and server status
+  // refetch separately after a save, and new settings with the old status can
+  // read a pending restart as resolved, so nothing is pruned while either is
+  // fetching. Each settings read is pruned at most once, so a failed write
+  // waits for the next read instead of looping.
+  const settingsFetching = useIsFetching({ queryKey: adminKeys.serverSettings() });
+  const statusFetching = useIsFetching({ queryKey: adminKeys.serverStatus() });
+  const refreshing = settingsFetching > 0 || statusFetching > 0;
+  const pruned = useRef<object | undefined>(undefined);
   useEffect(() => {
-    if (!loaded || update.isPending || !stored || pruned.current === stored) return;
-    const current = new Set(items.map((item) => item.id));
+    if (!loaded || refreshing || update.isPending || !settings || pruned.current === settings) {
+      return;
+    }
     const ids = parseIds(stored);
+    const current = new Set(items.map((item) => item.id));
     const kept = ids.filter((id) => current.has(id));
     if (kept.length === ids.length) return;
-    pruned.current = stored;
+    pruned.current = settings;
     update.mutate({ key: SETTINGS_ATTENTION_HIDDEN_KEY, value: encodeIds(kept) });
-  }, [items, loaded, stored, update]);
+  }, [items, loaded, refreshing, settings, stored, update]);
 
   const visible = useMemo(
     () =>

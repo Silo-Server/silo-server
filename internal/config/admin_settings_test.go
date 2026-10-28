@@ -295,6 +295,8 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: DashboardHiddenAttentionSettingKey, value: "email"},
 		{key: DashboardHiddenAttentionSettingKey, value: `{"email":true}`},
 		{key: DashboardHiddenAttentionSettingKey, value: `[1]`},
+		{key: DashboardHiddenAttentionSettingKey, value: `null`},
+		{key: DashboardHiddenAttentionSettingKey, value: `["email",null]`},
 		{key: DashboardHiddenAttentionSettingKey, value: `["` + strings.Repeat("x", 65) + `"]`},
 	}
 	for _, tc := range tests {
