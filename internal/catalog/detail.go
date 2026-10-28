@@ -3404,8 +3404,9 @@ type seasonPoster struct {
 	thumbhash string
 }
 
-// episodeSeasonPoster returns the poster of an episode's season, loading and
-// signing each season once per series context. A missing season has none.
+// episodeSeasonPoster returns the poster of an episode's season, loading,
+// localizing and signing each season once per series context. A missing
+// season has none.
 func (s *DetailService) episodeSeasonPoster(ctx context.Context, seriesCtx *seriesDetailContext, seasonID string, filter AccessFilter) seasonPoster {
 	if seasonID == "" || s.seasonRepo == nil {
 		return seasonPoster{}
@@ -3416,6 +3417,13 @@ func (s *DetailService) episodeSeasonPoster(ctx context.Context, seriesCtx *seri
 	var poster seasonPoster
 	season, err := s.seasonRepo.GetByID(ctx, seasonID)
 	if err == nil {
+		// The poster season detail shows for this viewer, as buildSeasonDetail
+		// localizes it.
+		localizationFilter := filter
+		localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+		if localized, locErr := s.LocalizeSeasonModel(ctx, season, localizationFilter); locErr == nil && localized != nil {
+			season = localized
+		}
 		poster = seasonPoster{
 			url:       s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
 			thumbhash: season.PosterThumbhash,
