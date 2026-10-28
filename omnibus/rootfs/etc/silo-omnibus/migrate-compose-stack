@@ -78,9 +78,9 @@ set_aside() {
 [[ -d "$root" ]] || fail "mount SILO_DATA_ROOT at $root"
 
 # The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
-# would otherwise follow latest-omnibus past a pinned build.
-if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:latest-omnibus && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
-  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -omnibus added), or remove SILO_IMAGE to follow latest-omnibus"
+# would otherwise follow aio past a pinned build.
+if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
+  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
 fi
 
 # --- What is there. ----------------------------------------------------------
