@@ -422,7 +422,7 @@ func TestRealtimeStopReceiptKeepsCompletionAndBridgePosition(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			result := f.handler.realtimeStopHistory(t.Context(), snapshot)
+			result, _ := f.handler.realtimeStopHistory(t.Context(), snapshot)
 			if result.HistoryID == "" || (historyID != "" && result.HistoryID != historyID) || result.Completed != nativeSample || result.FinalPositionSeconds != position {
 				t.Fatalf("realtime stop result = %+v", result)
 			}

@@ -869,6 +869,8 @@ type nativeEndRaceCase struct {
 	wantReason    PlaybackEndReason
 	wantWatched   float64
 	wantProviders int
+	// noWatchHistory: the end is an abort, which writes no watch history.
+	noWatchHistory bool
 }
 
 // nativeEndRaceCases are TestNativeEndWritesOnceWhoeverWinsTheRow's ends.
@@ -880,7 +882,7 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 			}
 		}
 	}
-	return []nativeEndRaceCase{{
+	return append([]nativeEndRaceCase{{
 		name: "expiry loses to a stop that lands after its checks",
 		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
 			// The reaper already removed this copy.
@@ -943,7 +945,13 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 			f.handler.expireSessionCopy(context.Background(), snapshot)
 		},
 		wantReason: PlaybackEndExpired, wantWatched: 1500, wantProviders: 1,
-	}, {
+	}}, nativeTerminateRaceCases(t)...)
+}
+
+// nativeTerminateRaceCases are the administrator ends among
+// nativeEndRaceCases.
+func nativeTerminateRaceCases(t *testing.T) []nativeEndRaceCase {
+	return []nativeEndRaceCase{{
 		name: "terminate on a replica without the copy",
 		end: func(f *playbackServiceFixture, _ *playback.MemoryPlanStoreV3) {
 			if err := f.manager.StopSession(f.session.ID); err != nil {
@@ -970,6 +978,20 @@ func nativeEndRaceCases(t *testing.T) []nativeEndRaceCase {
 			}
 		},
 		wantReason: PlaybackEndTerminated, wantWatched: 900, wantProviders: 1,
+	}, {
+		name: "terminate finishes an abort whose replica died",
+		end: func(f *playbackServiceFixture, memory *playback.MemoryPlanStoreV3) {
+			if _, _, err := memory.StopAttempt(context.Background(), f.session.ID, abortStopID(f.session.ID), nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.handler.endSessionAsAdmin(context.Background(), f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+		},
+		wantReason: PlaybackEndAborted, wantWatched: 900, wantProviders: 1, noWatchHistory: true,
 	}}
 }
 
@@ -999,8 +1021,12 @@ func TestNativeEndWritesOnceWhoeverWinsTheRow(t *testing.T) {
 				t.Fatalf("admin history = %+v, want one %s row at %v", admin.history, tc.wantReason, tc.wantWatched)
 			}
 			history, err := userStore.ListHistory(t.Context(), "profile-1", 10, 0)
-			if err != nil || len(history) != 1 {
-				t.Fatalf("watch history = %+v, %v; want one row", history, err)
+			wantRows := 1
+			if tc.noWatchHistory {
+				wantRows = 0
+			}
+			if err != nil || len(history) != wantRows {
+				t.Fatalf("watch history = %+v, %v; want %d rows", history, err, wantRows)
 			}
 			if got := len(scrobbler.stops) + len(scrobbler.pauses); got != tc.wantProviders {
 				t.Fatalf("provider end events = %d stops + %d pauses, want %d", len(scrobbler.stops), len(scrobbler.pauses), tc.wantProviders)
@@ -1049,9 +1075,14 @@ func (s *stopAfterReadsPlanStoreV3) GetAttempt(ctx context.Context, sessionID st
 }
 
 // TestRealtimeConfirmedStopNotifiesProvidersOnce covers a player-confirmed
-// administrator stop: its finalization records the play from the attempt
-// row, and the providers hear the stop once, not from both writers.
+// administrator stop: whether its queued worker finalizes the attempt or the
+// client's stop finalized it first, providers hear the end once.
 func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
+	t.Run("worker finalizes", func(t *testing.T) { testRealtimeConfirmedStopNotifiesOnce(t, false) })
+	t.Run("client stop finalized first", func(t *testing.T) { testRealtimeConfirmedStopNotifiesOnce(t, true) })
+}
+
+func testRealtimeConfirmedStopNotifiesOnce(t *testing.T, clientStopFirst bool) {
 	f := newPlaybackServiceFixture(t)
 	scrobbler := &recordingPlaybackWatchScrobbler{}
 	f.handler.AdminStore = &recordingPlaybackAdminStore{}
@@ -1067,6 +1098,11 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 	}
 	if err := f.manager.StopSession(f.session.ID); err != nil {
 		t.Fatal(err)
+	}
+	if clientStopFirst {
+		if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	f.handler.recordRealtimeStoppedSession(context.Background(), snapshot)
 	if got := len(scrobbler.stops) + len(scrobbler.pauses); got != 1 {

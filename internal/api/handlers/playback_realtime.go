@@ -118,15 +118,20 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 // Authority is already removed, so the client may have finalized from the
 // attempt row while this provider work was queued.
 func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
-	result := h.realtimeStopHistory(ctx, session)
+	result, notify := h.realtimeStopHistory(ctx, session)
 	h.recordAdminStopHistory(ctx, session, PlaybackEndTerminated)
-	h.notifyStoppedSession(ctx, session, result, PlaybackEndTerminated)
+	if notify {
+		h.notifyStoppedSession(ctx, session, result, PlaybackEndTerminated)
+	}
 }
 
-func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) watchstate.PlaybackStopResult {
+// realtimeStopHistory records the confirmed stop's watch history and reports
+// whether its caller still has to tell providers: not when another stop's
+// finalizer already recorded the end and told them.
+func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) (watchstate.PlaybackStopResult, bool) {
 	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
 	if !ok {
-		return h.persistStopAndHistory(parent, session)
+		return h.persistStopAndHistory(parent, session), true
 	}
 	ctx, cancel := context.WithTimeout(parent, stopFinalizationLease)
 	defer cancel()
@@ -135,10 +140,10 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	record, err := h.realtimeProgressAttempt(ctx, session.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to read realtime stop attempt", "session", session.ID, "error", err)
-		return watchstate.PlaybackStopResult{}
+		return watchstate.PlaybackStopResult{}, true
 	}
 	if record == nil {
-		return h.persistStopAndHistory(ctx, session) // Unsequenced bridge play.
+		return h.persistStopAndHistory(ctx, session), true // Unsequenced bridge play.
 	}
 	var final *playback.ProgressSampleV3
 	if record.LastSample == nil && session.Position > 0 {
@@ -157,12 +162,13 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record realtime stop attempt", "session", session.ID, "error", err)
-		return watchstate.PlaybackStopResult{}
+		return watchstate.PlaybackStopResult{}, true
 	}
 	// An administrator terminate or unconfirmed-command fallback that ran
 	// after this stop removed the live session found nothing to tear down, so
 	// its finalized receipt recorded no history. Write it from this snapshot.
 	markerWithoutHistory := receipt.Finalized && receipt.HistoryID == "" && receipt.StopID == adminStopID(session.ID)
+	notify := !receipt.Finalized || markerWithoutHistory
 	if !receipt.Finalized {
 		// recordRealtimeStoppedSession tells providers once the history is
 		// written, from the confirmed snapshot; the finalizer must not too.
@@ -191,7 +197,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
-	return result
+	return result, notify
 }
 
 // finalizeRealtimeStop runs stop finalization for the one queued realtime

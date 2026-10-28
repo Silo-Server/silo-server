@@ -684,8 +684,13 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
 	result := h.recordStopHistory(ctx, session, reason)
 	// The copy on another replica is dropped without telling providers, so
-	// the end recorded here does, unless its caller tells them itself.
-	if reason != PlaybackEndAborted && !providerNoticeDeferred(ctx) {
+	// the end recorded here does, unless its caller tells them itself. An
+	// abort whose replica died before its provider event sends that event.
+	switch {
+	case providerNoticeDeferred(ctx):
+	case reason == PlaybackEndAborted:
+		h.scrobbleAbortedSession(ctx, session)
+	default:
 		h.notifyStoppedSession(ctx, session, result, reason)
 	}
 	return result.HistoryID, nil
