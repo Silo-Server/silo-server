@@ -23426,8 +23426,35 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_poster_thumbhash": {
+            "description": "On an episode card: the season poster's ThumbHash",
+            "type": "string"
+          },
+          "season_poster_url": {
+            "description": "On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "series_backdrop_thumbhash": {
+            "description": "On an episode card: the series backdrop's ThumbHash",
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_poster_thumbhash": {
+            "description": "On an episode card: the series poster's ThumbHash",
+            "type": "string"
+          },
+          "series_poster_url": {
+            "description": "On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
             "type": "string"
           },
           "series_title": {
@@ -23907,8 +23934,35 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_poster_thumbhash": {
+            "description": "On an episode card: the season poster's ThumbHash",
+            "type": "string"
+          },
+          "season_poster_url": {
+            "description": "On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "series_backdrop_thumbhash": {
+            "description": "On an episode card: the series backdrop's ThumbHash",
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_poster_thumbhash": {
+            "description": "On an episode card: the series poster's ThumbHash",
+            "type": "string"
+          },
+          "series_poster_url": {
+            "description": "On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
             "type": "string"
           },
           "series_title": {
@@ -31903,8 +31957,35 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_poster_thumbhash": {
+            "description": "On an episode card: the season poster's ThumbHash",
+            "type": "string"
+          },
+          "season_poster_url": {
+            "description": "On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "series_backdrop_thumbhash": {
+            "description": "On an episode card: the series backdrop's ThumbHash",
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_poster_thumbhash": {
+            "description": "On an episode card: the series poster's ThumbHash",
+            "type": "string"
+          },
+          "series_poster_url": {
+            "description": "On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
             "type": "string"
           },
           "series_title": {
@@ -32705,6 +32786,10 @@
             ],
             "type": "string"
           },
+          "episode_parent_artwork": {
+            "description": "Episode cards may carry series_poster_url, series_backdrop_url and season_poster_url with their thumbhashes, sized by the poster and backdrop slots, on Home and library sections (including Continue Watching and Next Up), catalog browse and search, Watch Tonight, and episode detail (getCatalogItem). Seasons store no backdrop, so there is no season backdrop",
+            "type": "boolean"
+          },
           "episode_still_provenance": {
             "description": "Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown",
             "type": "boolean"
@@ -32738,7 +32823,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is",
+            "description": "Per-slot width query parameters, keyed by slot: poster (poster_url, series_poster_url, season_poster_url), backdrop (backdrop_url, backdrop_urls, series_backdrop_url), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is",
             "type": "object"
           },
           "state": {
@@ -32767,6 +32852,7 @@
         },
         "required": [
           "episode_still_provenance",
+          "episode_parent_artwork",
           "extended_item_artwork",
           "season_list_artwork_param",
           "param",
@@ -52849,8 +52935,35 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_poster_thumbhash": {
+            "description": "On an episode card: the season poster's ThumbHash",
+            "type": "string"
+          },
+          "season_poster_url": {
+            "description": "On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "series_backdrop_thumbhash": {
+            "description": "On an episode card: the series backdrop's ThumbHash",
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_poster_thumbhash": {
+            "description": "On an episode card: the series poster's ThumbHash",
+            "type": "string"
+          },
+          "series_poster_url": {
+            "description": "On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
             "type": "string"
           },
           "series_title": {
@@ -53215,8 +53328,35 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_poster_thumbhash": {
+            "description": "On an episode card: the season poster's ThumbHash",
+            "type": "string"
+          },
+          "season_poster_url": {
+            "description": "On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "series_backdrop_thumbhash": {
+            "description": "On an episode card: the series backdrop's ThumbHash",
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
+            "type": "string"
+          },
+          "series_poster_thumbhash": {
+            "description": "On an episode card: the series poster's ThumbHash",
+            "type": "string"
+          },
+          "series_poster_url": {
+            "description": "On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it",
+            "format": "uri-reference",
             "type": "string"
           },
           "series_title": {

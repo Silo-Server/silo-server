@@ -40,7 +40,10 @@ type SectionWithItems struct {
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
 type SectionItemMeta struct {
 	// Raw still path, before image sizing or signing; nil means unavailable metadata.
-	EpisodeStillPath  *string
+	EpisodeStillPath *string
+	// ParentArtwork is the episode's season and series artwork, raw paths
+	// before sizing or signing; nil means unavailable metadata.
+	ParentArtwork     *models.EpisodeParentArtwork
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -3104,7 +3107,13 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
 			si.status,
-			COALESCE(e.still_path, '')
+			COALESCE(e.still_path, ''),
+			COALESCE(si.poster_path, ''),
+			COALESCE(si.poster_thumbhash, ''),
+			COALESCE(si.backdrop_path, ''),
+			COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(s.poster_path, ''),
+			COALESCE(s.poster_thumbhash, '')
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -3126,6 +3135,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			seriesTitle   string
 			airDate       *time.Time
 			stillPath     string
+			parent        models.EpisodeParentArtwork
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -3148,14 +3158,22 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.LogoPath,
 			&item.Status,
 			&stillPath,
+			&parent.SeriesPosterPath,
+			&parent.SeriesPosterThumbhash,
+			&parent.SeriesBackdropPath,
+			&parent.SeriesBackdropThumbhash,
+			&parent.SeasonPosterPath,
+			&parent.SeasonPosterThumbhash,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
 		markEpisodeStillProvenance(&item, stillPath)
+		item.ParentArtwork = &parent
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
 			EpisodeStillPath: new(stillPath),
+			ParentArtwork:    &parent,
 			SeriesID:         &seriesID,
 			SeriesTitle:      seriesTitle,
 			SeasonNumber:     &seasonNumber,

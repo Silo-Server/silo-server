@@ -15,6 +15,7 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB

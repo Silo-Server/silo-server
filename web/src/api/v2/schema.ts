@@ -21526,8 +21526,29 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      /** @description On an episode card: the season poster's ThumbHash */
+      season_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it
+       */
+      season_poster_url?: string;
+      /** @description On an episode card: the series backdrop's ThumbHash */
+      series_backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
+      /** @description On an episode card: the series poster's ThumbHash */
+      series_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_poster_url?: string;
       series_title?: string;
       /** @description Airing state of a series */
       show_status?: string;
@@ -21762,8 +21783,29 @@ export interface components {
       season_count?: number;
       /** Format: int64 */
       season_number?: number;
+      /** @description On an episode card: the season poster's ThumbHash */
+      season_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it
+       */
+      season_poster_url?: string;
+      /** @description On an episode card: the series backdrop's ThumbHash */
+      series_backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
+      /** @description On an episode card: the series poster's ThumbHash */
+      series_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_poster_url?: string;
       series_title?: string;
       /** @description Airing state of a series */
       show_status?: string;
@@ -24857,8 +24899,29 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      /** @description On an episode card: the season poster's ThumbHash */
+      season_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it
+       */
+      season_poster_url?: string;
+      /** @description On an episode card: the series backdrop's ThumbHash */
+      series_backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
+      /** @description On an episode card: the series poster's ThumbHash */
+      series_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_poster_url?: string;
       series_title?: string;
       /** @description Airing state of a series */
       show_status?: string;
@@ -25247,6 +25310,8 @@ export interface components {
       allowed: boolean;
       /** @enum {string} */
       delivery: "server" | "direct";
+      /** @description Episode cards may carry series_poster_url, series_backdrop_url and season_poster_url with their thumbhashes, sized by the poster and backdrop slots, on Home and library sections (including Continue Watching and Next Up), catalog browse and search, Watch Tonight, and episode detail (getCatalogItem). Seasons store no backdrop, so there is no season backdrop */
+      episode_parent_artwork: boolean;
       /** @description Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown */
       episode_still_provenance: boolean;
       /** @description Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc */
@@ -25259,7 +25324,7 @@ export interface components {
       /** @description Season-list boolean query parameter; false omits poster URLs and thumbhashes */
       season_list_artwork_param: string;
       sizes: string[];
-      /** @description Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is */
+      /** @description Per-slot width query parameters, keyed by slot: poster (poster_url, series_poster_url, season_poster_url), backdrop (backdrop_url, backdrop_urls, series_backdrop_url), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is */
       slot_width_params: {
         [key: string]: string;
       };
@@ -33795,8 +33860,29 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      /** @description On an episode card: the season poster's ThumbHash */
+      season_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it
+       */
+      season_poster_url?: string;
+      /** @description On an episode card: the series backdrop's ThumbHash */
+      series_backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
+      /** @description On an episode card: the series poster's ThumbHash */
+      series_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_poster_url?: string;
       series_title?: string;
       /** @description Airing state of a series */
       show_status?: string;
@@ -33985,8 +34071,29 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      /** @description On an episode card: the season poster's ThumbHash */
+      season_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the season poster, at poster_url's size. Presigned, short-lived; absent when the season has none or the surface does not load it
+       */
+      season_poster_url?: string;
+      /** @description On an episode card: the series backdrop's ThumbHash */
+      series_backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
+      /** @description On an episode card: the series poster's ThumbHash */
+      series_poster_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it
+       */
+      series_poster_url?: string;
       series_title?: string;
       /** @description Airing state of a series */
       show_status?: string;

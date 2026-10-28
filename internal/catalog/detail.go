@@ -250,6 +250,15 @@ type ItemDetail struct {
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
 
+	// An episode's series poster and backdrop and its season poster, sized
+	// like its own poster and backdrop. apiv2 emits them; /api/v1 is frozen.
+	SeriesPosterURL         string `json:"-"`
+	SeriesPosterThumbhash   string `json:"-"`
+	SeriesBackdropURL       string `json:"-"`
+	SeriesBackdropThumbhash string `json:"-"`
+	SeasonPosterURL         string `json:"-"`
+	SeasonPosterThumbhash   string `json:"-"`
+
 	// Banner, thumb, clear art and disc art, and every backdrop in display
 	// order with the primary first, for movies and series. Kept out of this
 	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
@@ -1874,6 +1883,10 @@ type seriesDetailContext struct {
 	crewCredits []CrewCredit
 	versionPref versionDefaults
 	backdropURL string
+	posterURL   string
+	// seasonPosters caches each season's signed poster, so a batch of one
+	// season's episodes loads and signs it once.
+	seasonPosters map[string]seasonPoster
 	// The viewer's audio and subtitle preferences depend only on the series
 	// and the library a file lives in, so a batch resolves them once per
 	// series (and library) instead of once per episode.
@@ -1904,6 +1917,8 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 		crewCredits:      crewCredits,
 		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
 		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop))),
+		posterURL:        s.PresignImageURL(ctx, series.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+		seasonPosters:    map[string]seasonPoster{},
 		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
 		subtitleDefaults: map[int]subtitleDefaults{},
 		trickplay:        s.trickplay,
@@ -3383,6 +3398,39 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 	return detail, nil
 }
 
+// seasonPoster is a season's signed poster and its ThumbHash.
+type seasonPoster struct {
+	url       string
+	thumbhash string
+}
+
+// episodeSeasonPoster returns the poster of an episode's season, loading and
+// signing each season once per series context. A missing season has none.
+func (s *DetailService) episodeSeasonPoster(ctx context.Context, seriesCtx *seriesDetailContext, seasonID string, filter AccessFilter) seasonPoster {
+	if seasonID == "" || s.seasonRepo == nil {
+		return seasonPoster{}
+	}
+	if poster, ok := seriesCtx.seasonPosters[seasonID]; ok {
+		return poster
+	}
+	var poster seasonPoster
+	season, err := s.seasonRepo.GetByID(ctx, seasonID)
+	if err == nil {
+		poster = seasonPoster{
+			url:       s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster))),
+			thumbhash: season.PosterThumbhash,
+		}
+	} else if !errors.Is(err, ErrSeasonNotFound) {
+		// Decoration only: a failed read leaves the season poster absent
+		// rather than failing the detail.
+		slog.WarnContext(ctx, "loading episode season poster", "component", "catalog", "season_id", seasonID, "error", err)
+	}
+	if seriesCtx.seasonPosters != nil {
+		seriesCtx.seasonPosters[seasonID] = poster
+	}
+	return poster
+}
+
 func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.Episode, seriesCtx *seriesDetailContext, filter AccessFilter) (*ItemDetail, error) {
 	localizationFilter := filter
 	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
@@ -3431,6 +3479,10 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 
 	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	detail.BackdropURL = seriesCtx.backdropURL
+	detail.SeriesPosterURL, detail.SeriesPosterThumbhash = seriesCtx.posterURL, series.PosterThumbhash
+	detail.SeriesBackdropURL, detail.SeriesBackdropThumbhash = seriesCtx.backdropURL, series.BackdropThumbhash
+	seasonArt := s.episodeSeasonPoster(ctx, seriesCtx, episode.SeasonID, filter)
+	detail.SeasonPosterURL, detail.SeasonPosterThumbhash = seasonArt.url, seasonArt.thumbhash
 
 	files := seriesCtx.filesByEpisode[episode.ContentID]
 	if seriesCtx.filesByEpisode == nil {

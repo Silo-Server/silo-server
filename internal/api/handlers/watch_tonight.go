@@ -490,6 +490,7 @@ func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayM
 		item.Genres = []string{}
 	}
 	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+	item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

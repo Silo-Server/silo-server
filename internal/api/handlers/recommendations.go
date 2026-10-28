@@ -596,6 +596,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 		}
 		urls := artwork[mi.ContentID]
 		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+		item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 		if enrichment.overlays != nil {
 			item.OverlaySummary = enrichment.overlays[mi.ContentID]
 		}

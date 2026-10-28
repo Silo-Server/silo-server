@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 // The TV spec's home request: medium cards, a 4K hero backdrop and logo. Each
@@ -191,5 +192,44 @@ func TestWatchTonightCastPhotosResolveOnProfileLadder(t *testing.T) {
 	h.resolveCastPhotos(t.Context(), plugin, imagesize.Width(200))
 	if resolver.variant != imagesize.PluginVariantLarge {
 		t.Errorf("plugin hint at 200px = %q, want %q", resolver.variant, imagesize.PluginVariantLarge)
+	}
+}
+
+// An episode card's series and season artwork signs in the card's own batch at
+// the size its poster and backdrop slots would give the same files, on
+// featured surfaces and listings alike.
+func TestEpisodeParentArtworkSignsAtTheCardsSlotSizes(t *testing.T) {
+	resolver := &countingSectionImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	parent := &models.EpisodeParentArtwork{
+		SeriesPosterPath:   "tmdb/series/2/poster/original.r1.webp",
+		SeriesBackdropPath: "tmdb/series/2/backdrop/original.r1.webp",
+		SeasonPosterPath:   "tmdb/series/2/seasons/1/poster/original.r1.webp",
+	}
+	episode := &models.MediaItem{ContentID: "episode", Type: "episode", BackdropPath: "tmdb/series/2/seasons/1/episodes/3/still/original.r2.webp", ParentArtwork: parent}
+	// Titles whose own slots hold the same files give the sizes to match.
+	series := &models.MediaItem{ContentID: "series", Type: "series", PosterPath: parent.SeriesPosterPath, BackdropPath: parent.SeriesBackdropPath}
+	season := &models.MediaItem{ContentID: "season", Type: "season", PosterPath: parent.SeasonPosterPath}
+
+	cards := []featuredArtworkCard[string]{
+		{key: "episode", item: episode, sectionType: sections.SectionContinueWatching},
+		{key: "series", item: series, sectionType: sections.SectionContinueWatching},
+		{key: "season", item: season, sectionType: sections.SectionContinueWatching},
+	}
+	featured := resolveFeaturedArtwork(t.Context(), detailSvc, cards, tvHomeArtwork)
+	if resolver.batchCalls != 1 {
+		t.Fatalf("featured batches = %d, want 1", resolver.batchCalls)
+	}
+	listing := (&ItemsHandler{detailSvc: detailSvc}).itemListCardImageURLs(t.Context(), []*models.MediaItem{episode, series, season},
+		map[string]episodeBrowseMetadata{"episode": {ParentArtwork: parent}}, tvHomeArtwork)
+
+	for name, got := range map[string][2]episodeParentImageURLs{
+		"featured": {featured["episode"].parents, {featured["series"].posterURL, featured["series"].backdropURL, featured["season"].posterURL}},
+		"listing":  {listing["episode"].parents, {listing["series"].posterURL, listing["series"].backdropURL, listing["season"].posterURL}},
+	} {
+		if got[0] != got[1] || got[0].seriesBackdropURL == "" {
+			t.Errorf("%s parent artwork = %+v, want %+v", name, got[0], got[1])
+		}
 	}
 }
