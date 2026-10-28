@@ -17,9 +17,15 @@ import {
   type DiscoverRowBody,
 } from "@/api/v2/adminRequests";
 import { HOME_PAGE } from "@/lib/homeRows/pages";
-import type { HomeRowsConflict, HomeRowsListAdapter } from "@/lib/homeRows/types";
+import { stableJson } from "@/lib/homeRows/stableJson";
+import {
+  RowChangedError,
+  type HomeRowsConflict,
+  type HomeRowsListAdapter,
+} from "@/lib/homeRows/types";
 import {
   layoutBodies,
+  rowBody,
   rowErrors,
   toHomeRow,
   withRow,
@@ -44,9 +50,12 @@ export interface DiscoverRowsAdapter extends HomeRowsListAdapter {
   discoverRows: DiscoverRow[];
   /**
    * Saves a new or changed row over the newest layout and resolves with its
-   * id. Rejects on a 412 (isRequestEditorConflict) or with RowRefusedError.
+   * id. `base` is the stored row an edit started from: when the newest layout
+   * holds anything else under its id, the save rejects with RowChangedError
+   * rather than write over another admin's change. Rejects on a 412
+   * (isRequestEditorConflict) or with RowRefusedError too.
    */
-  saveRow(row: DiscoverRowBody): Promise<string | undefined>;
+  saveRow(row: DiscoverRowBody, base?: DiscoverRowBody | null): Promise<string | undefined>;
   removeRow(id: string): Promise<void>;
   /** Drops the stored layout so the default rows apply; resolves false when it didn't. */
   restoreDefaults(): Promise<boolean>;
@@ -160,8 +169,14 @@ export function useDiscoverRows(): DiscoverRowsAdapter {
       ),
     removeRow: (id) =>
       listWrite((current) => current.filter((row) => row.id !== id), "Could not delete this row"),
-    saveRow: (row) =>
+    saveRow: (row, base) =>
       run(async (latest) => {
+        if (base) {
+          const stored = latest.rows.find((entry) => entry.id === base.id);
+          if (!stored || stableJson(rowBody(stored)) !== stableJson(base)) {
+            throw new RowChangedError();
+          }
+        }
         const before = new Set(latest.rows.map((entry) => entry.id));
         const rows = withRow(layoutBodies(latest), row);
         try {

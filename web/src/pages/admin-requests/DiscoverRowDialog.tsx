@@ -23,6 +23,7 @@ import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collection
 import { useDiscoverRowPreview } from "@/hooks/queries/admin/requestDiscover";
 import { RowRefusedError, type DiscoverRowsAdapter } from "@/hooks/queries/admin/useDiscoverRows";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { RowChangedError } from "@/lib/homeRows/types";
 import { useCollectionTemplates } from "@/lib/collectionTemplates";
 import {
   cleanMDBListLink,
@@ -380,6 +381,15 @@ export function DiscoverRowDialog({
   const narrow = useMediaQuery("(max-width: 1023px)");
   const [step, setStep] = useState<"pick" | "form">(editing ? "form" : "pick");
   const [row, setRow] = useState<DiscoverRowBody | null>(editRow ? rowBody(editRow) : null);
+  // The stored row an edit started from; a save refuses when another admin
+  // changed it since. Reload rows moves it to the row as it is now.
+  const [base, setBase] = useState<DiscoverRowBody | null>(editRow ? rowBody(editRow) : null);
+  const [rebase, setRebase] = useState(false);
+  if (rebase && editRow) {
+    setRebase(false);
+    const stored = adapter.discoverRows.find((entry) => entry.id === editRow.id);
+    setBase(stored ? rowBody(stored) : null);
+  }
   const [titleTyped, setTitleTyped] = useState(editing);
   // Counts picks, so each one starts its source control afresh.
   const [picks, setPicks] = useState(0);
@@ -428,13 +438,13 @@ export function DiscoverRowDialog({
     setBusy(true);
     setProblems([]);
     try {
-      const id = await adapter.saveRow({ ...row, title: savedTitle(row) });
+      const id = await adapter.saveRow({ ...row, title: savedTitle(row) }, base);
       if (!mounted.current) return;
       onSaved(editing ? undefined : id);
       onClose();
     } catch (error) {
       if (!mounted.current) return;
-      if (isRequestEditorConflict(error)) setConflict(true);
+      if (isRequestEditorConflict(error) || error instanceof RowChangedError) setConflict(true);
       else if (error instanceof RowRefusedError) setProblems(error.problems);
       else
         toast.error(
@@ -449,7 +459,10 @@ export function DiscoverRowDialog({
     setBusy(true);
     try {
       await adapter.reload();
-      if (mounted.current) setConflict(false);
+      if (mounted.current) {
+        setConflict(false);
+        setRebase(true);
+      }
     } finally {
       if (mounted.current) setBusy(false);
     }

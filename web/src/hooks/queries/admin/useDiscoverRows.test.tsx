@@ -13,6 +13,7 @@ vi.mock("@/api/v2/adminRequests", async () => ({
   putAdminDiscoverLayoutV2: (...args: unknown[]) => api.put(...args),
 }));
 
+import { RowChangedError } from "@/lib/homeRows/types";
 import { RowRefusedError, useDiscoverRows } from "./useDiscoverRows";
 
 const layout: DiscoverLayout = {
@@ -102,6 +103,17 @@ describe("useDiscoverRows", () => {
 
     expect(id).toBe("r_new");
     expect(api.put.mock.calls[0]![0]).toHaveLength(3);
+  });
+
+  it("refuses to save an edit over a row another admin changed since it opened", async () => {
+    const { result } = mount();
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const opened = { ...layout.rows[1]!, title: "Genres (old)" };
+
+    await expect(
+      result.current.saveRow({ ...opened, title: "Browse" }, opened),
+    ).rejects.toBeInstanceOf(RowChangedError);
+    expect(api.put).not.toHaveBeenCalled();
   });
 
   it("words the server's refusal of the saved row, and only that row", async () => {
