@@ -308,9 +308,11 @@ SQL
     stage_psql -d template1 -v name="$db" <<<'ALTER DATABASE :"name" RENAME TO silo'
     log "renamed database $db to silo"
     # init-postgres-db connects to postgres, so put back the empty maintenance
-    # database initdb makes when Silo's data was in it.
+    # database initdb makes when Silo's data was in it. From template0:
+    # PostgreSQL refuses to copy template1 while its recorded collation version
+    # differs from the C library's, which it does until init-postgres-db runs.
     if [[ "$db" == postgres ]]; then
-      stage_psql -d template1 <<<'CREATE DATABASE postgres'
+      stage_psql -d template1 <<<'CREATE DATABASE postgres TEMPLATE template0'
     fi
   elif [[ -z "$(db_exists silo)" ]]; then
     fail "the cluster has no silo database; set POSTGRES_DB in .env to the database the earlier stack used"
