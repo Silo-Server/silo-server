@@ -76,7 +76,8 @@ fi
 
 earlier_install=false
 for name in "${silo_dirs[@]}"; do
-  [[ -d "$root/$name" ]] && earlier_install=true
+  # A link counts even when it leads nowhere in here; it is refused below.
+  [[ -e "$root/$name" || -L "$root/$name" ]] && earlier_install=true
 done
 # The stack mounted SILO_DATA_ROOT/postgres at /var/lib/postgresql, where the
 # pgvector/pgvector image keeps its cluster in <major>/docker (in data before
@@ -88,15 +89,18 @@ done
 
 if [[ -d "$config" ]]; then
   # Staging an interrupted run left behind is never promoted.
-  rm -rf "$pg_stage"
+  rm -rf "$pg_stage" "$done_marker.new"
   for name in "${silo_dirs[@]}"; do rm -rf "$config/silo/.$name.migrating"; done
   # Interrupted while moving results into place: set aside what was moved and
-  # start over, since the earlier stack may have changed since.
+  # start over, since the earlier stack may have changed since. With the done
+  # marker written, everything is in place and only the pending record is left.
   if [[ -e "$pending_marker" ]]; then
-    [[ ! -e "$pgdata" ]] || set_aside "$pgdata"
-    for name in "${silo_dirs[@]}"; do
-      [[ ! -e "$config/silo/$name" ]] || set_aside "$config/silo/$name"
-    done
+    if [[ ! -s "$done_marker" ]]; then
+      [[ ! -e "$pgdata" ]] || set_aside "$pgdata"
+      for name in "${silo_dirs[@]}"; do
+        [[ ! -e "$config/silo/$name" ]] || set_aside "$config/silo/$name"
+      done
+    fi
     rm -f "$pending_marker"
   fi
 fi
@@ -147,6 +151,22 @@ fi
 if [[ "$(url_host "${SILO_MEILISEARCH_URL:-}")" == meilisearch ]]; then
   fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
 fi
+# Without a URL here, the one stored from the admin UI applies, which named
+# the earlier stack's service. Silo trims and lowercases the provider.
+env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+if [[ "$env_provider" == meilisearch && -z "${SILO_MEILISEARCH_URL:-}" ]] && ! truthy "${ENABLE_MEILISEARCH:-false}"; then
+  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+fi
+
+# The earlier stack's Silo container reached these through bind mounts, which
+# follow a link on the host; in here a link leads nowhere.
+for name in "${silo_dirs[@]}"; do
+  if [[ -L "$root/$name" ]]; then
+    fail "$host_root/$name is a symbolic link, which this step cannot follow. Replace it with the directory it points to and start again; the earlier Compose file still starts meanwhile"
+  elif [[ -e "$root/$name" && ! -d "$root/$name" ]]; then
+    fail "$host_root/$name is not a directory. Move it aside and start again"
+  fi
+done
 
 source_cluster=""
 if [[ -n "${DATABASE_URL:-}" ]]; then
@@ -190,6 +210,8 @@ trap cleanup EXIT
 
 install -d -m 0755 "$config" "$config/silo"
 fingerprint=none
+# Free space the copied database's first start needs, from the check below.
+reserve_kb=0
 if [[ -n "$source_cluster" ]]; then
   install -d -o postgres -g postgres -m 0750 "$config/postgres"
   need_kb="$(du -sk "$source_cluster" | cut -f1)"
@@ -271,7 +293,8 @@ WHERE EXISTS (SELECT FROM unnest(i.indcollation::oid[]) AS k(coll)
 SQL
 )"
   free_kb="$(df -Pk "$config/postgres" | awk 'NR == 2 { print $4 }')"
-  if (( 2 * largest_kb + 1024 * 1024 >= free_kb )); then
+  reserve_kb=$(( 2 * largest_kb + 1024 * 1024 ))
+  if (( reserve_kb >= free_kb )); then
     fail "after the copy, $(host "$config") has $((free_kb / 1024)) MiB free, and rebuilding its largest text index ($((largest_kb / 1024)) MiB) on the first start needs about $(( (2 * largest_kb + 1024 * 1024) / 1024 )) MiB. Free space there and start again; the earlier Compose file still starts meanwhile"
   fi
 
@@ -310,9 +333,17 @@ for name in "${silo_dirs[@]}"; do
   # Hard links take no space. Silo replaces files rather than rewriting them,
   # so the earlier stack keeps its own copies of files Silo changes from here
   # on; ownership is shared, but the root-run earlier image ignores it. A
-  # directory on another file system is copied instead.
+  # directory on another file system is copied instead, if it fits beside the
+  # room the database's first start needs.
   if ! cp -al "$src" "$stage" 2>/dev/null; then
     rm -rf "$stage"
+    need_kb="$(du -sk "$src" | cut -f1)"
+    free_kb="$(df -Pk "$config/silo" | awk 'NR == 2 { print $4 }')"
+    if (( need_kb + reserve_kb >= free_kb )); then
+      kept=""
+      (( reserve_kb == 0 )) || kept=", and the database's first start needs $((reserve_kb / 1024)) MiB of that"
+      fail "$(host "$src") cannot be linked into $(host "$config") (it is on another file system), and copying it needs $((need_kb / 1024)) MiB. $(host "$config") has $((free_kb / 1024)) MiB free$kept. Free space there, or move its contents onto the file system of $host_root, and start again; the earlier Compose file still starts meanwhile"
+    fi
     cp -a "$src" "$stage" || fail "could not copy $(host "$src") to $(host "$config/silo/$name")"
   fi
 done
@@ -325,7 +356,12 @@ fi
 
 # --- Into place. -------------------------------------------------------------
 
+# cp does not flush, and PostgreSQL never syncs a cleanly stopped cluster it
+# starts on. Everything staged, and the pending record, reach the disk before
+# anything moves, and every move before the done marker; otherwise a power
+# loss could keep the renames and lose the files.
 printf '%s\n' "$fingerprint" > "$pending_marker"
+sync -f "$config"
 for stage in "${staged_dirs[@]}"; do
   name="${stage##*/.}"
   name="${name%.migrating}"
@@ -335,10 +371,17 @@ for stage in "${staged_dirs[@]}"; do
 done
 staged_dirs=()
 if [[ -n "$source_cluster" ]]; then
+  # A data directory without PG_VERSION is an initdb that never finished.
+  [[ ! -e "$pgdata" ]] || set_aside "$pgdata"
   mv -T "$pg_stage" "$pgdata"
   log "copied the PostgreSQL cluster to $(host "$pgdata")"
 fi
-printf '%s\n' "$fingerprint" > "$done_marker"
+sync -f "$config"
+# Whole or absent: a run that finds it with the pending record only removes
+# the record.
+printf '%s\n' "$fingerprint" > "$done_marker.new"
+mv -T "$done_marker.new" "$done_marker"
+sync -f "$config"
 rm -f "$pending_marker"
 trap - EXIT
 [[ -z "$work" ]] || rm -rf "$work"
@@ -348,4 +391,11 @@ for name in postgres redis meilisearch "${silo_dirs[@]}"; do
   [[ -e "$root/$name" ]] && left+=("$name")
 done
 log "the earlier stack's directories in $host_root (${left[*]}) still hold its data, and the earlier Compose file still starts on them. Delete them once this install works"
+aside=()
+for dir in "$config"/postgres/.*.before-* "$config"/silo/.*.before-*; do
+  [[ -e "$dir" ]] && aside+=("$(host "$dir")")
+done
+if (( ${#aside[@]} > 0 )); then
+  log "unfinished earlier attempts were set aside as ${aside[*]}. Delete them once this install works"
+fi
 log "Silo now runs as uid ${PUID:-911} instead of root, so that account needs read access to the media"
