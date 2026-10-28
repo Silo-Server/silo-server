@@ -291,8 +291,9 @@ How it stays safe to repeat and to roll back:
   an unfinished `initdb` left is set aside the same way. A failure removes
   everything staged, and the closing log lists every copy set aside. While the
   pending record exists, `init-postgres` refuses to start, whatever the
-  environment: Silo writing to a half-moved cluster that the next run sets
-  aside would leave those writes behind.
+  environment and even with an external database: Silo writing to a
+  half-moved cluster or Silo directory that the next run sets aside would
+  leave those writes behind.
 - `cp` does not flush, and PostgreSQL never syncs a cleanly stopped cluster it
   starts on, so the script syncs the file system after staging and writing the
   pending record, after the moves, and after the done marker. Otherwise a power
