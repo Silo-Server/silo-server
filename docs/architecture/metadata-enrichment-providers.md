@@ -48,7 +48,8 @@ continues with the other providers. From an enrichment-only provider, the
 provider-wide statuses above (`RESOURCE_EXHAUSTED`, `UNAVAILABLE`,
 `FAILED_PRECONDITION`, `UNAUTHENTICATED`, `PERMISSION_DENIED`) are logged at
 debug level instead, from `GetMetadata` and, for a `lookup_images` provider,
-from a refresh's `GetImages`. A small daily quota runs out routinely, so the
+from a refresh's `GetImages` by lookup key. An image error behind the
+provider's own ID still warns. A small daily quota runs out routinely, so the
 plugin should log when it stops answering, and the host does not log once per
 item.
 
