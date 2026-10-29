@@ -208,7 +208,8 @@ func (s *Store) streamInput(ctx context.Context, t *Track, local string) *playba
 
 // Window returns the packets of ref's track that show in [from, to) on the
 // playback timeline: from the kept track when there is one, else read
-// through the source's index. It never reads the whole track.
+// through the source's index. A window open to the end is most of the
+// track, so it is read whole and kept first.
 func (s *Store) Window(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, from, to time.Duration) (*playback.SubtitlePacketInput, error) {
 	if !servable(ref.Codec) {
 		return nil, errNotServable
@@ -217,20 +218,32 @@ func (s *Store) Window(ctx context.Context, path string, ref playback.EmbeddedSu
 	if err != nil {
 		return nil, err
 	}
+	v := versionOf(path, info)
 	t, err := s.repo.Track(ctx, ref.MediaFileID, ref.StreamIndex)
-	if err != nil {
+	switch {
+	case err != nil:
 		slog.WarnContext(ctx, "kept subtitle track lookup failed", "component", "keptsub", "file_id", ref.MediaFileID, "error", err)
-	} else if t.matches(versionOf(path, info), ref) {
+	case t.matches(v, ref):
 		in, err := s.keptWindow(ctx, t, from, to)
-		if err == nil {
-			return in, nil
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if err == nil || ctx.Err() != nil {
+			return in, err
 		}
 		slog.WarnContext(ctx, "subtitle window from the kept track failed; reading the source", "component", "keptsub",
 			"file_id", t.MediaFileID, "stream_index", t.StreamIndex, "error", err)
+	case to == embeddedsub.WholeTo:
+		// A window open to the end reads most of the track: read it whole,
+		// keep it, and cut the window from that.
+		t, err := s.ensure(ctx, path, ref, false)
+		if err != nil {
+			return nil, err
+		}
+		return s.keptWindow(ctx, t, from, to)
 	}
+	return s.sourceWindow(ctx, path, ref, v, from, to)
+}
+
+// sourceWindow reads a window through the source's index.
+func (s *Store) sourceWindow(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, v sourceVersion, from, to time.Duration) (*playback.SubtitlePacketInput, error) {
 	number, err := trackNumber(ref)
 	if err != nil {
 		return nil, err
@@ -239,7 +252,7 @@ func (s *Store) Window(ctx context.Context, path string, ref playback.EmbeddedSu
 	if err != nil {
 		return nil, err
 	}
-	start, err := s.startTime(ctx, path, versionOf(path, info))
+	start, err := s.startTime(ctx, path, v)
 	if err != nil {
 		return nil, err
 	}
@@ -295,10 +308,6 @@ func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSu
 	if !servable(ref.Codec) {
 		return nil, errNotServable
 	}
-	number, err := trackNumber(ref)
-	if err != nil {
-		return nil, err
-	}
 	info, err := fspath.Stat(path)
 	if err != nil {
 		return nil, err
@@ -310,6 +319,11 @@ func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSu
 	}
 	if t.matches(v, ref) {
 		return t, nil
+	}
+	// A demux keeps a track the index can't address; reading needs the ID.
+	number, err := trackNumber(ref)
+	if err != nil {
+		return nil, err
 	}
 	key := flightKey{fileID: ref.MediaFileID, stream: ref.StreamIndex, version: v, background: background}
 	wait := s.foregroundWait

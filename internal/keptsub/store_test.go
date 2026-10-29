@@ -232,6 +232,15 @@ func TestWindows(t *testing.T) {
 	if puts, _ := repo.counts(); puts != 1 {
 		t.Fatalf("windows kept %d tracks", puts-1)
 	}
+	// A window open to the end reads the track whole and keeps it.
+	english := *playback.EmbeddedSubtitleRefFor(file, 0)
+	open, err := s.Window(t.Context(), path, english, 2500*time.Millisecond, embeddedsub.WholeTo)
+	if err != nil || len(open.Packets) != 2 {
+		t.Fatalf("open window: %+v, %v", open, err)
+	}
+	if kept, _ := repo.Track(t.Context(), file.ID, 1); kept == nil {
+		t.Fatal("an open window didn't keep the track")
+	}
 }
 
 // A file without cues is demuxed once; the copy that demux kept serves
@@ -280,6 +289,22 @@ func TestDemuxedCopyServesFilesWithoutCues(t *testing.T) {
 	window, err := s.Window(t.Context(), path, ref, 2500*time.Millisecond, 5*time.Second)
 	if err != nil || len(window.Packets) != 1 {
 		t.Fatalf("window from the kept copy: %+v, %v", window, err)
+	}
+	// A track the scanner recorded no ID for is kept by its demux too.
+	noID := ref
+	noID.ContainerTrackID = ""
+	demuxCopy.Path = filepath.Join(t.TempDir(), "kept.part-2")
+	if err := playback.StreamExtractSubtitle(t.Context(), playback.StreamExtractOpts{
+		InputPath: path, SourceCodec: "subrip", FFmpegPath: ffmpeg, Writer: &strings.Builder{},
+		KeepPath: demuxCopy.Path, KeepFormat: demuxCopy.Format, KeepOffset: demuxCopy.StartTime,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.KeepDemuxed(t.Context(), path, noID, demuxCopy, info.Size(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WholeTrack(t.Context(), path, noID); err != nil {
+		t.Fatalf("kept track without an ID: %v", err)
 	}
 	// A copy made while the source changed is never kept.
 	if err := s.KeepDemuxed(t.Context(), path, ref, demuxCopy, info.Size()+1, info.ModTime()); !errors.Is(err, errSourceChanged) {
