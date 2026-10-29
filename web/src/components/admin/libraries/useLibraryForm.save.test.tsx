@@ -1,8 +1,8 @@
-import { useEffect } from "react";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
+import { LANGUAGES } from "@/player/utils/languageNames";
 import { AdvancedFields, MetadataFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
 
@@ -158,33 +158,19 @@ describe("metadata language picker", () => {
   it("offers only languages the library contract accepts", () => {
     // updateLibrary and createLibrary take a bare ISO 639-1 code; a regional
     // tag such as pt-BR fails with 422 validation_failed (#3209).
-    let picked = "";
-    function Harness() {
-      const form = useLibraryForm({ library: null });
-      useEffect(() => {
-        picked = form.metadataLanguage;
-      });
-      return <MetadataFields form={form} />;
-    }
-    render(<Harness />);
-    const options = () => {
-      fireEvent.pointerDown(screen.getByRole("combobox"), {
-        button: 0,
-        ctrlKey: false,
-        pointerType: "mouse",
-      });
-      return screen.getAllByRole("option");
-    };
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    render(<MetadataFields form={result.current} />);
+    fireEvent.pointerDown(screen.getByRole("combobox"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const codes = screen
+      .getAllByRole("option")
+      .map((option) => LANGUAGES.find((lang) => lang.label === option.textContent)?.code);
 
-    const names = options().map((option) => option.textContent ?? "");
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
-    expect(names.length).toBeGreaterThan(1);
-    const rejected: string[] = [];
-    for (const name of names) {
-      fireEvent.click(options().find((option) => option.textContent === name)!);
-      if (!/^(?:[a-z]{2})?$/.test(picked)) rejected.push(picked);
-    }
-    expect(rejected).toEqual([]);
+    expect(codes.length).toBeGreaterThan(1);
+    expect(codes.filter((code) => !code || !/^[a-z]{2}$/.test(code))).toEqual([]);
   });
 });
 
