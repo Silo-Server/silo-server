@@ -59,9 +59,13 @@
     flex: 0 1 auto;
     min-height: 0;
     overflow-y: auto;
-    scrollbar-gutter: stable;
+    scrollbar-width: none; /* Firefox: hide vertical scrollbar */
     margin-top: auto;
     overflow-wrap: anywhere;
+  }
+
+  .detail-hero-information::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Edge: hide vertical scrollbar */
   }
 
   .detail-hero-information h1:not(.sr-only) {
@@ -77,6 +81,11 @@
     margin-bottom: 4px;
     max-height: 65%;
     overflow-y: auto;
+    scrollbar-width: none; /* Firefox: hide vertical scrollbar */
+  }
+
+  .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Edge: hide vertical scrollbar */
   }
 
   @media (min-width: 1024px) {
