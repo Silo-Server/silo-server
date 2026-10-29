@@ -11,6 +11,7 @@ import {
   Search,
   Settings,
   Shield,
+  Sparkles,
   UserCircle,
   UsersRound,
 } from "lucide-react";
@@ -283,12 +284,15 @@ export default function TopNav() {
   const iconButtonClass =
     "text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all active:scale-[0.98] focus-visible:ring-2 focus-visible:outline-none md:h-10 md:w-10";
 
+  // The only bar link with a glyph: it reuses the sparkle the sidebar gave
+  // "For You", which is the same Discover family in the old shell.
   const discoverLink = showRequestsNav ? (
     <ViewTransitionLink
       to="/requests"
-      className={linkClass(isActive("/requests"))}
+      className={`${linkClass(isActive("/requests"))} gap-1.5`}
       aria-current={isActive("/requests") ? "page" : undefined}
     >
+      <Sparkles className="h-4 w-4 shrink-0" />
       Discover
     </ViewTransitionLink>
   ) : null;
