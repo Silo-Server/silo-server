@@ -101,9 +101,15 @@ func bestJoint(curves []lagCurve, coarseRange int) jointPeak {
 	}
 	center := (lo + hi) / 2
 	half := max((hi-lo)/2, 1)
-	// A drift step that moves the farthest window by one pooled width.
+	// A drift step that moves the farthest window by one pooled width, with
+	// at most maxJointDriftSteps each way: past that span (about 6 hours
+	// of windows) the grid coarsens instead of the cost growing.
 	step := 2 * jointPoolSeconds / half
 	steps := int(math.Ceil(maxDrift / step))
+	if steps > maxJointDriftSteps {
+		steps = maxJointDriftSteps
+		step = maxDrift / float64(steps)
+	}
 	norm := 1 / math.Sqrt(float64(len(curves)))
 	total := make([]float64, 2*coarseRange+1)
 	var best jointPeak
@@ -176,7 +182,6 @@ func alignJoint(signals []*speechSignal, cues []subtitles.SubtitleCue, search *s
 		if len(curves) == 0 {
 			continue
 		}
-		// Ties go to the earlier, simpler ratio (1 first).
 		if peak := bestJoint(curves, search.coarseRange); peak.Score > best.Score {
 			best, bestMap, bestScale, bestCurves = peak, m, scale, curves
 		}
@@ -196,6 +201,10 @@ func alignJoint(signals []*speechSignal, cues []subtitles.SubtitleCue, search *s
 			lags = append(lags, lag)
 		}
 	}
+	// Every lag here lies within localSearchSeconds of the line, so a
+	// window of noise lands within inlierSeconds of it by chance far more
+	// often than in the window search: Inliers counts for less here, and
+	// Matched holds the joint search to its own, measured thresholds.
 	fit := fitLine(lags)
 	result := Alignment{Windows: len(bestCurves), Inliers: len(fit.Group), JointProminence: best.Prominence}
 	result.finish(fit, bestMap, bestScale)

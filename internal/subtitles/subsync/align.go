@@ -80,6 +80,8 @@ const (
 	// localSearchSeconds around the joint line is searched again, frame by
 	// frame, for each window's own lag.
 	localSearchSeconds = 1.0
+	// maxJointDriftSteps bounds the joint search's drift grid each way.
+	maxJointDriftSteps = 100
 	// maxDrift bounds the residual drift fitted on top of a framerate ratio,
 	// in seconds of offset per second of media. Releases cut from different
 	// masters can drift by a few hundredths of a percent without any

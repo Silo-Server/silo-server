@@ -11,6 +11,9 @@ package subsync
 // result offset ms, result scale, sha256, path, format, runtime), speech.tsv
 // (media file id, config hash, base64 speech-levels:v1 payload, as COPY
 // TO STDOUT writes it), and subs/ with each sidecar at its path.
+//
+// CI never builds this file; after changing the package, check it still
+// compiles with go vet -tags subsynceval ./internal/subtitles/subsync/.
 
 import (
 	"bufio"
