@@ -345,3 +345,32 @@ func (c *SubtitleCache) ExtractSourcedText(ctx context.Context, inputPath string
 }
 
 var errNoSourcedTrack = errors.New("embedded subtitle source can't read the track")
+
+// WarmEmbeddedTextTracks is WarmTextTracks for a file whose tracks ref
+// names: each rendition comes from a kept copy or a read through the
+// file's index when it can, and only the rest from one batch demux of the
+// source. Like WarmTextTracks it takes a warm slot without blocking.
+func (c *SubtitleCache) WarmEmbeddedTextTracks(inputPath string, tracks []TextSubtitleTrack, ref func(ordinal int) *EmbeddedSubtitleRef, batch TextSubtitleBatchFunc, ffmpegPath string) {
+	if c == nil || c.source == nil || ref == nil {
+		c.WarmTextTracks(inputPath, tracks, batch)
+		return
+	}
+	select {
+	case c.warmSem <- struct{}{}:
+	default:
+		slog.Debug("subtitle text warm skipped: all warm slots busy", "input", inputPath)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), subtitleCacheWarmTimeout)
+		defer cancel()
+		var demux []TextSubtitleTrack
+		for _, track := range tracks {
+			if _, ok, err := c.ExtractSourcedText(ctx, inputPath, ref(track.Ordinal), track.Ordinal, track.Format, ffmpegPath); !ok || err != nil {
+				demux = append(demux, track)
+			}
+		}
+		<-c.warmSem
+		c.WarmTextTracks(inputPath, demux, batch)
+	}()
+}

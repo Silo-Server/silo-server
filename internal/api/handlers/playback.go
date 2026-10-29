@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -170,6 +171,19 @@ type PlaybackChapterThumbnailQueuer interface {
 	QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64)
 }
 
+// SubtitleTrackFactsLoaderV3 loads, for one plan, what reading a file's
+// embedded subtitle tracks taught the server (keptsub.Store).
+type SubtitleTrackFactsLoaderV3 interface {
+	SubtitleTrackFacts(ctx context.Context, file *models.MediaFile) playback.SubtitleTrackFactsV3
+}
+
+// SubtitlePrefetcherV3 reads, when a playback starts, the embedded subtitle
+// tracks it will likely want (keptsub.Prefetcher).
+type SubtitlePrefetcherV3 interface {
+	SessionStarted(req keptsub.PrefetchRequest)
+	SessionEnded(sessionID string)
+}
+
 // PlaybackOriginalLanguageLookup fetches the original language for a content item.
 type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
@@ -265,8 +279,9 @@ type PlaybackHandler struct {
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map
-	SubtitleRepo           subtitles.Repository          // optional; enables downloaded subtitles in playback
-	SubtitleTrackFacts     playback.SubtitleTrackFactsV3 // optional; what reading embedded tracks taught the server, for native_embedded limitations
+	SubtitleRepo           subtitles.Repository       // optional; enables downloaded subtitles in playback
+	SubtitleTrackFacts     SubtitleTrackFactsLoaderV3 // optional; what reading embedded tracks taught the server, for native_embedded limitations
+	SubtitlePrefetch       SubtitlePrefetcherV3       // optional; reads the subtitle tracks a playback will likely want, at its start
 	RealtimeHub            *playback.RealtimeHub
 	CommandTracker         *playback.CommandTracker
 	CommandDispatcher      *playback.CommandDispatcher
