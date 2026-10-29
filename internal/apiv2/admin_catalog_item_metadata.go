@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -30,14 +31,14 @@ type AdminItemMetadataUpdate struct {
 	Genres           *[]string `json:"genres,omitempty" nullable:"true"`
 	Studios          *[]string `json:"studios,omitempty" nullable:"true"`
 	Networks         *[]string `json:"networks,omitempty" nullable:"true"`
-	Countries        *[]string `json:"countries,omitempty" nullable:"true"`
+	Countries        *[]string `json:"countries,omitempty" nullable:"true" doc:"Country codes, ISO 3166-1 alpha-2 by convention (US); stored as sent; null clears"`
 	ReleaseDate      *string   `json:"release_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	FirstAirDate     *string   `json:"first_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	LastAirDate      *string   `json:"last_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	AirTime          *string   `json:"air_time,omitempty" nullable:"true" doc:"Null clears the stored time"`
 	AirTimezone      *string   `json:"air_timezone,omitempty" nullable:"true" doc:"IANA time zone; null clears it"`
 	AirDate          *string   `json:"air_date,omitempty" nullable:"true" doc:"Season or episode air date; null clears it"`
-	Status           *string   `json:"status,omitempty" nullable:"true"`
+	Status           *string   `json:"status,omitempty" nullable:"true" enum:"pending,matched,unmatched" doc:"Match status; null leaves it unchanged"`
 	RatingIMDB       *float64  `json:"rating_imdb,omitempty" nullable:"true" doc:"Null clears it, along with any IMDb score a metadata plugin stored"`
 	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true" doc:"Null clears it, along with any TMDB score a metadata plugin stored"`
 	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored"`
@@ -90,6 +91,9 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	if reg.deps.AdminItemMetadata == nil {
 		return nil, unavailable("item metadata")
 	}
+	if problem := rejectMalformedMetadataDates(in.Body); problem != nil {
+		return nil, problem
+	}
 	detail, err := reg.deps.AdminItemMetadata.UpdateCatalogItemMetadata(ctx, in.ID, handlers.UpdateItemMetadataRequest(in.Body), clearedItemMetadataFields(in.RawBody))
 	if err != nil {
 		return nil, collectionProblem(err)
@@ -98,6 +102,44 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	// stored rating back.
 	detail.ViewerCurates = true
 	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail, reg.ratingSelection(ctx))}, nil
+}
+
+// The item metadata members that hold a calendar date.
+const (
+	memberReleaseDate  = "release_date"
+	memberFirstAirDate = "first_air_date"
+	memberLastAirDate  = "last_air_date"
+	memberAirDate      = "air_date"
+)
+
+// rejectMalformedMetadataDates refuses a date member that is not a
+// YYYY-MM-DD calendar date. The repositories write these members as text, so
+// PostgreSQL would otherwise fail the write (release_date and air_date, a
+// 500) or store the value as given (first_air_date and last_air_date). Null
+// decodes to nil and clears the date.
+func rejectMalformedMetadataDates(body AdminItemMetadataUpdate) *Problem {
+	var errs []ProblemError
+	for _, date := range []struct {
+		member string
+		value  *string
+	}{
+		{memberReleaseDate, body.ReleaseDate},
+		{memberFirstAirDate, body.FirstAirDate},
+		{memberLastAirDate, body.LastAirDate},
+		{memberAirDate, body.AirDate},
+	} {
+		if date.value == nil {
+			continue
+		}
+		// PostgreSQL's date type has no year 0.
+		if parsed, err := time.Parse(time.DateOnly, *date.value); err != nil || parsed.Year() < 1 {
+			errs = append(errs, ProblemError{Location: locationBody + "." + date.member, Code: codeInvalid, Detail: "expected a calendar date, YYYY-MM-DD"})
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(errs...)
 }
 
 // clearedItemMetadataFields lists the clearable members the body sets to

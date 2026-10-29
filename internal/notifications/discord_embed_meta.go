@@ -172,11 +172,16 @@ func overviewSnippet(text string) string {
 	if len(text) <= discordOverviewLimit {
 		return text
 	}
-	clipped := strings.TrimSuffix(truncateWithEllipsis(text, discordOverviewLimit), "…")
-	if at := strings.LastIndexByte(clipped, ' '); at > discordOverviewLimit/2 {
+	return clipAtWord(strings.TrimSuffix(truncateWithEllipsis(text, discordOverviewLimit), "…"))
+}
+
+// clipAtWord ends a clipped teaser on a word boundary, when one falls in its
+// second half, and appends the ellipsis.
+func clipAtWord(clipped string) string {
+	if at := strings.LastIndexByte(clipped, ' '); at > len(clipped)/2 {
 		clipped = clipped[:at]
 	}
-	return strings.TrimRight(clipped, " ,.;:") + "…"
+	return strings.TrimRight(clipped, " ,.;:…") + "…"
 }
 
 // titleWithYear appends the release year when known: "Dune (2021)".
@@ -187,13 +192,32 @@ func titleWithYear(title string, year int) string {
 	return title
 }
 
+// shortenTeaser clips an overview teaser to at most limit characters (code
+// points, as Discord counts them), on a word boundary like overviewSnippet.
+func shortenTeaser(teaser string, limit int) string {
+	runes := []rune(teaser)
+	if len(runes) <= limit {
+		return teaser
+	}
+	if limit <= 1 {
+		return ""
+	}
+	return clipAtWord(string(runes[:limit-1])) // leaves room for the ellipsis
+}
+
 // embedDescription joins the overview teaser and the provider link line.
 func embedDescription(overview string, ids providerIDs) string {
+	return joinDescription(overviewSnippet(overview), ids.linkLine())
+}
+
+// joinDescription renders an embed description from its teaser and provider
+// link line, either of which may be empty.
+func joinDescription(teaser, links string) string {
 	parts := make([]string, 0, 2)
-	if snippet := overviewSnippet(overview); snippet != "" {
-		parts = append(parts, snippet)
+	if teaser != "" {
+		parts = append(parts, teaser)
 	}
-	if links := ids.linkLine(); links != "" {
+	if links != "" {
 		parts = append(parts, links)
 	}
 	return strings.Join(parts, "\n\n")

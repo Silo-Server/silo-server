@@ -33,11 +33,8 @@ import {
   parseRecommendationEmbeddingLock,
   type RecFieldDef,
 } from "@/pages/admin-settings/recommendationsSettings";
-import {
-  RECOMMENDATION_PROVIDER_PRESETS,
-  matchRecommendationProviderPreset,
-  type RecommendationProviderPreset,
-} from "@/lib/recommendation-provider-presets";
+import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
+import { EmbeddingProviderField, ModelField } from "@/pages/admin-settings/AIProviders";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 
@@ -60,15 +57,13 @@ interface RecSettingFieldProps {
   onToggle: (key: string, checked: boolean) => void;
 }
 
-const EMBEDDING_SECTION_TITLE = "Embedding Configuration";
-const EMBEDDING_BASE_URL_KEY = "recommendations.embedding_base_url";
+const EMBEDDING_SECTION_TITLE = "Embedding Model";
+const EMBEDDING_PROVIDER_KEY = "recommendations.embedding_provider_id";
 const EMBEDDING_MODEL_KEY = "recommendations.embedding_model";
-const EMBEDDING_AUTH_TOKEN_KEY = "recommendations.embedding_auth_token";
 const EMBEDDING_CHECK_KEYS = [
   "recommendations.enabled",
-  EMBEDDING_BASE_URL_KEY,
+  EMBEDDING_PROVIDER_KEY,
   EMBEDDING_MODEL_KEY,
-  EMBEDDING_AUTH_TOKEN_KEY,
 ] as const;
 
 function RecSettingField({
@@ -450,6 +445,7 @@ export default function AdminRecommendations() {
   const triggerCowatch = useTriggerCowatch();
   const triggerRecommendations = useTriggerRecommendations();
   const resetEmbeddings = useResetEmbeddings();
+  const refreshProviders = useRefreshAIProviders();
 
   const [localValues, setLocalValues] = useState<RecLocalValues>({});
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
@@ -485,7 +481,8 @@ export default function AdminRecommendations() {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleCommit(key: string, value: string) {
+  /** Saves one setting and reports whether the server accepted it. */
+  async function handleCommit(key: string, value: string): Promise<boolean> {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
     try {
       const result = await updateSettings.mutateAsync({ [key]: value });
@@ -500,8 +497,10 @@ export default function AdminRecommendations() {
         return next;
       });
       setRestartRequired((current) => current || result.restart_required);
+      return true;
     } catch {
       // useUpdateServerSettings already reports failures.
+      return false;
     }
   }
 
@@ -516,31 +515,6 @@ export default function AdminRecommendations() {
         },
       },
     );
-  }
-
-  async function applyEmbeddingPreset(preset: RecommendationProviderPreset) {
-    try {
-      const result = await updateSettings.mutateAsync({
-        [EMBEDDING_BASE_URL_KEY]: preset.baseUrl,
-        [EMBEDDING_MODEL_KEY]: preset.model,
-      });
-      setLocalValues((prev) => ({
-        ...prev,
-        [EMBEDDING_BASE_URL_KEY]: result.values[EMBEDDING_BASE_URL_KEY] ?? preset.baseUrl,
-        [EMBEDDING_MODEL_KEY]: result.values[EMBEDDING_MODEL_KEY] ?? preset.model,
-      }));
-      setDirtyKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(EMBEDDING_BASE_URL_KEY);
-        next.delete(EMBEDDING_MODEL_KEY);
-        return next;
-      });
-
-      setRestartRequired((current) => current || result.restart_required);
-      setConnectionResult(null);
-    } catch {
-      // useUpdateServerSettings already reports failures.
-    }
   }
 
   async function handleResetEmbeddings() {
@@ -604,16 +578,16 @@ export default function AdminRecommendations() {
   const embeddingLock = parseRecommendationEmbeddingLock(
     serverSettings["recommendations.embedding_lock"],
   );
-  const selectedEmbeddingPreset = matchRecommendationProviderPreset(
-    localValues[EMBEDDING_BASE_URL_KEY] ?? serverSettings[EMBEDDING_BASE_URL_KEY],
-    localValues[EMBEDDING_MODEL_KEY] ?? serverSettings[EMBEDDING_MODEL_KEY],
-  );
+  const embeddingProviderID =
+    localValues[EMBEDDING_PROVIDER_KEY] ?? serverSettings[EMBEDDING_PROVIDER_KEY] ?? "";
+  const embeddingModel =
+    localValues[EMBEDDING_MODEL_KEY] ?? serverSettings[EMBEDDING_MODEL_KEY] ?? "";
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Recommendations"
-        subtitle="Configure the AI-powered recommendation engine. Requires pgvector and an OpenAI-compatible embedding endpoint."
+        subtitle="Configure the AI-powered recommendation engine. Requires pgvector and an embedding provider connected in AI Services."
       />
 
       {restartRequired && (
@@ -720,59 +694,58 @@ export default function AdminRecommendations() {
               {isOpen && (
                 <div className="border-border divide-border divide-y border-t px-5 pb-4">
                   {section.title === EMBEDDING_SECTION_TITLE && (
-                    <div className="space-y-3 py-3">
-                      <div className="space-y-0.5">
-                        <Label className="text-sm font-medium">Provider Presets</Label>
-                        <p className="text-muted-foreground text-xs">
-                          Choose a provider to fill the base URL and model.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {RECOMMENDATION_PROVIDER_PRESETS.map((preset) => {
-                          const selected = selectedEmbeddingPreset?.id === preset.id;
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => void applyEmbeddingPreset(preset)}
-                              disabled={updateSettings.isPending}
-                              className={`min-w-[8.5rem] rounded-md border px-3 py-2 text-left transition-colors ${
-                                selected
-                                  ? "border-foreground/20 bg-foreground/10 text-foreground"
-                                  : "border-border bg-background hover:bg-accent/30 text-foreground"
-                              }`}
-                            >
-                              <div className="text-sm font-medium">{preset.label}</div>
-                              {preset.tag && (
-                                <div className="text-muted-foreground mt-0.5 text-xs">
-                                  {preset.tag}
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {selectedEmbeddingPreset && (
-                        <p className="text-muted-foreground text-xs">
-                          {selectedEmbeddingPreset.description}
-                        </p>
-                      )}
+                    <div>
+                      <EmbeddingProviderField
+                        value={embeddingProviderID}
+                        disabled={updateSettings.isPending}
+                        onChange={(id) => {
+                          setConnectionResult(null);
+                          void handleCommit(EMBEDDING_PROVIDER_KEY, id).then((saved) => {
+                            // A refused choice must not stay on screen as if saved.
+                            if (!saved) {
+                              setLocalValues((prev) => ({
+                                ...prev,
+                                [EMBEDDING_PROVIDER_KEY]:
+                                  serverSettings[EMBEDDING_PROVIDER_KEY] ?? "",
+                              }));
+                              return;
+                            }
+                            // It changes which provider AI Services reports in use.
+                            void refreshProviders();
+                          });
+                        }}
+                      />
+                      <ModelField
+                        label="Model"
+                        providerID={embeddingProviderID}
+                        kind="embeddings"
+                        value={embeddingModel}
+                        placeholder="text-embedding-3-large, qwen3-embedding:0.6b"
+                        onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
+                        onCommit={() => {
+                          if (embeddingModel !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
+                            void handleCommit(EMBEDDING_MODEL_KEY, embeddingModel);
+                          }
+                        }}
+                      />
                     </div>
                   )}
-                  {section.fields.map((field) => (
-                    <RecSettingField
-                      key={field.key}
-                      field={field}
-                      serverValue={serverSettings[field.key] ?? ""}
-                      localValues={localValues}
-                      sensitiveConfigured={sensitiveConfigured}
-                      isPending={updateSettings.isPending}
-                      onLocalChange={handleLocalChange}
-                      onCommit={(key, value) => void handleCommit(key, value)}
-                      onToggle={handleToggle}
-                    />
-                  ))}
+                  {section.fields.map((field) =>
+                    // The embedding model renders above, with the provider's suggestions.
+                    field.key === EMBEDDING_MODEL_KEY ? null : (
+                      <RecSettingField
+                        key={field.key}
+                        field={field}
+                        serverValue={serverSettings[field.key] ?? ""}
+                        localValues={localValues}
+                        sensitiveConfigured={sensitiveConfigured}
+                        isPending={updateSettings.isPending}
+                        onLocalChange={handleLocalChange}
+                        onCommit={(key, value) => void handleCommit(key, value)}
+                        onToggle={handleToggle}
+                      />
+                    ),
+                  )}
                   {section.title === EMBEDDING_SECTION_TITLE ? (
                     // ConnectionCheckAction brings its own row padding.
                     <div>

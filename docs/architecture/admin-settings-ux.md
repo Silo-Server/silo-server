@@ -11,7 +11,7 @@ appears in it exactly once.
   Settings)
 - **Manage**: Libraries (Libraries, Collections, Home Sections, Subtitle
   Files, Settings), Autoscan (Activity, Sources, Settings), Requests (Queue,
-  Settings), Users (Users, Access Groups, Devices, History Import), Playback
+  Discover Page, Settings), Users (Users, Access Groups, Devices, History Import), Playback
   (History, Skip Markers, Nodes, Settings), Downloads (Prepared Files,
   Settings)
 - **Configure**: Server (General, Appearance, Storage, Search, Network

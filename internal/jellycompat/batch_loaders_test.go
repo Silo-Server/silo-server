@@ -149,6 +149,14 @@ func (r *countingEpisodeRepo) ListBySeriesIDs(context.Context, []string) (map[st
 	return nil, errors.New("ListBySeriesIDs not used in fallback test")
 }
 
+func (r *countingEpisodeRepo) ListIDsBySeriesIDs(context.Context, []string) (map[string][]string, error) {
+	return nil, nil
+}
+
+func (r *countingEpisodeRepo) ListIDsBySeasonIDs(context.Context, []string) (map[string][]string, error) {
+	return nil, nil
+}
+
 func (r *countingEpisodeRepo) ListAdjacentInSeries(context.Context, string, int, int) ([]*models.Episode, error) {
 	return nil, errors.New("ListAdjacentInSeries not used in fallback test")
 }

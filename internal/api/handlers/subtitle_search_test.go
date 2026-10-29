@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -97,6 +98,26 @@ func TestHandleUploadRejectsBadExtension(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestHandleUploadRejectsUnreadableContent(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
+	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
+	handler.FileAuthorizer = &MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{
+			file: &models.MediaFile{ID: 42, ContentID: "movie-1"},
+		},
+		ItemAccess: stubItemAccessChecker{},
+	}
+
+	req := newSubtitleUploadRequest(t, 42, "en", "notes.srt", []byte("Notes for the movie night.\n"))
+	rr := httptest.NewRecorder()
+	handler.HandleUpload(rr, req)
+
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), unreadableSubtitleMessage) {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
 

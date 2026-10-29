@@ -220,6 +220,31 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	}
 }
 
+// Jellyfin Web hands any source whose TranscodingSubProtocol is hls to
+// hls.js, even when it plays the static direct URL, so only a source played
+// through its TranscodingUrl may say hls (#2879).
+func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct {
+		name   string
+		source PlaybackMediaSource
+		want   string
+	}{
+		{"direct play with transcode fallback", PlaybackMediaSource{SupportsDirectPlay: true, SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
+		{"direct stream with transcode fallback", PlaybackMediaSource{SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
+		{"transcode only", PlaybackMediaSource{SupportsTranscoding: true}, "hls"},
+		{"nothing playable", PlaybackMediaSource{}, "http"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.source.ID = "source"
+			dto := h.mediaSourceDTO("item", "play", "token", tc.source)
+			if dto.TranscodingSubProtocol != tc.want {
+				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
+			}
+		})
+	}
+}
+
 func TestSubtitleTimingRequestTransformsOutput(t *testing.T) {
 	r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&AddVttTimeMap=true", nil)
 	route := chi.NewRouteContext()
@@ -533,7 +558,7 @@ func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
 	version := catalog.FileVersion{Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
 	for _, container := range []string{"hls", "mp4"} {
 		t.Run(container, func(t *testing.T) {
-			profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
+			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video"}}, TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
 			if got := profile.SupportsVideoCodecForDirectStream(version); got != (container == "hls") {
 				t.Fatalf("progressive support=%v for codec container=%s", got, container)
 			}

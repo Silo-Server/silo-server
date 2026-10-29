@@ -68,6 +68,16 @@ func TestPublicWarningSummarizesKnownDiagnostics(t *testing.T) {
 		warnJellyfinFavoritesUnavailable:                                      jellyfinFavoritesUnavailableSummary,
 		warnJellyfinFavoriteSeriesUnavailable:                                 jellyfinFavoriteSeriesUnavailableSummary,
 		"favorites import: add movie-1: pq: deadlock detected":                GenericRunWarning,
+
+		// Plex keeps the upstream error after the fixed text; only the
+		// section name and counts reach the monitor.
+		`failed to fetch watched episodes from section "TV": fetching Plex section items (section 2, type 4, offset 0): plex http 500`:                                             `Plex section "TV" couldn't be read, so its watched episodes weren't imported.`,
+		`failed to fetch in-progress movies from section "Films": fetching Plex section items (section 1, type 1, offset 0): plex http 500`:                                        `Plex section "Films" couldn't be read, so its partly watched movies weren't imported.`,
+		`watchlist fetch failed: fetching Plex watchlist (offset 0): plex http 401: {"Error":{"message":"Invalid token"}}`:                                                         "Your Plex watchlist couldn't be read, so it wasn't imported.",
+		"watchlist: could not resolve external ids for 3 of 10 items; those items will remain unmatched (first error: plex http 502)":                                              "Plex couldn't identify 3 watchlist titles, so they weren't added to the watchlist.",
+		"plex admin history: could not resolve external ids for 1 of 4 unique items; those items will remain unmatched, and the lookup stopped early after repeated server errors": "Plex couldn't identify 1 played title, so it stays unmatched.",
+		"plex sections: could not resolve external ids for 2 of 2 items; those items will remain unmatched":                                                                        GenericRunWarning,
+		"failed to fetch series metadata for 2 of 5 series; their episodes can only match on their own ids (first error: plex http 500)":                                           "Plex show details couldn't be read for 2 of 5 shows, so some of their episodes may be unmatched.",
 	}
 	for diagnostic, want := range cases {
 		if got := PublicWarning(diagnostic); got != want {

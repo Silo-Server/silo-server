@@ -50,7 +50,7 @@ func (s *directContentService) browseConfiguredUserState(ctx context.Context, se
 				result.Items = append(result.Items, item)
 			}
 			result.Total++
-			if !includeTotal && result.Total > filters.Offset+filters.Limit {
+			if !includeTotal && result.Total > pageFetchLimit(filters.Offset, filters.Limit) {
 				result.Total = 0
 				result.HasMore = true
 				return result, nil

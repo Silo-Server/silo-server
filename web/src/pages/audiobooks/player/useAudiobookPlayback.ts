@@ -9,6 +9,7 @@ import {
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
 } from "@/player/client-context-v3";
+import { mediaElementReleased } from "@/player/bandwidth-probe";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { replanV2 } from "@/player/lifecycle-v2";
 import { sendSessionProgress, stopSequencedSession } from "@/player/session-mutations";
@@ -419,7 +420,7 @@ export function useAudiobookPlayback({
             qualityPreference: QUALITY_ORIGINAL_V3,
             attemptedPlanKeys,
             attemptCount,
-            bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+            // Replans never send the speed-test reading; only a start does.
             clientCapabilities,
             clientPlaybackContext,
           }),
@@ -593,6 +594,7 @@ export function useAudiobookPlayback({
         if (canceled) return;
       }
 
+      const estimate = detectBandwidthEstimateKbpsV3();
       const decision = await startPlaybackV2(
         config,
         buildStartRequestV3({
@@ -608,7 +610,9 @@ export function useAudiobookPlayback({
           // "resume wherever the server last saw us".
           forceStartPosition: true,
           progressPersistence: "client",
-          bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
+          // The speed-test reading, labelled as one, as a video start sends it.
+          bandwidthEstimateKbps: estimate ?? null,
+          bandwidthEstimateSource: estimate === undefined ? undefined : "probe",
           clientCapabilities,
           clientPlaybackContext,
         }),
@@ -837,6 +841,8 @@ export function useAudiobookPlayback({
         audio.pause();
         reportRef.current(currentTimeRef.current);
       }
+      // A removed element's media events never reach the document.
+      if (audio) mediaElementReleased(audio);
     };
   }, []);
 

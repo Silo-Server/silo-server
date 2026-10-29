@@ -19,6 +19,14 @@ probes. `/Branding/Css` and `/Branding/Css.css` return 200 with an empty
 Jellyfin Web custom CSS: its own custom CSS styles Silo's web client, so it is
 not served here.
 
+Authenticated `GET /System/Configuration/encoding` returns
+`{"EnableFallbackFont":false,"EnableSubtitleExtraction":true}`. Jellyfin Web
+loads it before drawing ASS/SSA subtitles and draws nothing when the request
+fails; Silo serves no fallback fonts. The Kodi add-on reads
+`EnableSubtitleExtraction` before offering embedded text subtitles, which Silo
+serves as External. The key matches case-insensitively; any other key returns
+404.
+
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.
@@ -40,6 +48,10 @@ User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
 fields retain their values. An explicit historical `LastPlayedDate` remains the
 reported date without making a new edit disappear behind a history tombstone.
+A `LastPlayedDate` or `datePlayed` more than two minutes ahead of the server
+clock is stored and reported as the server's current time, the same bound
+native progress sync applies, so a client with a wrong clock cannot block
+later progress for the item.
 Positional updates require a playable item; marking a series or season played
 uses its child episodes. Parent reads and mutation responses derive `Played`,
 `PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
@@ -108,6 +120,11 @@ an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit
 `SubtitleStreamIndex` to request a fresh automatic subtitle selection. An echoed
 `-1` remains Off because it is indistinguishable from an intentional Off choice.
+As in Jellyfin, `AudioStreamIndex` and `SubtitleStreamIndex` in PlaybackInfo and
+session report bodies accept a number or a numeric string, and `null`, an empty
+string, or a blank string counts as omitting the field; Jellyfin Web sends an
+empty `SubtitleStreamIndex` when playback starts from a series page. An explicit
+`0` is stream 0.
 
 `PlaybackInfo` defaults follow the viewer's settings. `DefaultAudioStreamIndex`
 is the audio track Silo selects for the viewer (audio language preference,
@@ -146,6 +163,15 @@ in any listed language. Series match through their episode files. The
 `Filters2` language facets count the same files.
 ISO 639-2 codes such as `eng` match the stored canonical codes.
 `HasSubtitles=false` ignores `SubtitleLanguages`, as upstream does.
+
+An `/Items` browse whose only item type is `Episode`, with no series or season
+`ParentId` (such as `IncludeItemTypes=Episode&Recursive=true`), lists the
+visible episodes of every series, or of the library `ParentId` names, in series
+sort-title order, then season and episode number. `SortName` keeps that order,
+since a Jellyfin episode's sort name is its season and episode number. Episode
+listings here and on series and season parents apply the item-query predicates,
+`IsFavorite=true` included; studios, official ratings and genres are the
+series', and premiere dates are the episodes' air dates.
 
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
@@ -203,6 +229,13 @@ left out, including on `/Items?Ids=` without `Fields`. Item detail fills every
 list field. Roku (BrightScript) clients index some of these arrays without
 checking that they exist.
 
+The Resume lists honor `ParentId`: a library limits them to that library, and
+a series or season to its episodes. A series or season is answered from the
+progress of that series' episodes, not from the profile's recent progress, so
+an episode left long ago still resumes. As in Jellyfin, a movie or episode
+`ParentId` lists nothing. Moonfin for Roku resumes a series by asking for one
+resumable item under it.
+
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
 See [dropped-shows.md](architecture/dropped-shows.md). It orders series as
@@ -240,6 +273,8 @@ the primary first, and is empty when the item has no primary backdrop.
 | `GET /Items/{id}/Images/Art` | The clear art; 404 without one. |
 | `GET /Items/{id}/Images/Disc` | The disc art; 404 without one. |
 | `GET /Items/{id}/Images/Backdrop/{index}` | Index 0 (or no index) is the primary backdrop; index `i` is the item's `i`-th backdrop after it, 404 past the last. Other image types ignore the index. |
+| `GET /Items/{id}/Images` | Jellyfin's image list: one entry per type in `ImageTags` and one `Backdrop` entry per backdrop tag, with its `ImageIndex`. `Width` and `Height` are omitted because Silo does not record artwork dimensions. |
+| `HEAD /Items/{id}/Images/{type}[/{index}]` | `200` with no body when the GET would serve the image, without redirecting or proxying it; Roku checks for a logo this way. |
 
 An episode's `ParentThumbImageTag` still names its series' backdrop; the series'
 `Thumb` route serves its landscape thumb when it has one.
@@ -247,7 +282,9 @@ An episode's `ParentThumbImageTag` still names its series' backdrop; the series'
 | Routes | Behavior |
 |---|---|
 | `GET /Items/{id}/Ancestors` | Visible episode/season/series/library ancestry. When an item belongs to multiple libraries, chooses its first visible library parent. |
+| `GET /Library/MediaFolders` | The session's visible libraries as a `QueryResult` of `CollectionFolder` items, with the `Id` and `CollectionType` that `/UserViews` reports (`movies`, `tvshows`, …). The synthetic Collections view is not a media folder and is left out. Silo has no hidden media folders, so `isHidden=true` returns an empty list. Jellyfin SDK `getMediaFolders()` discovers libraries here. |
 | `GET /Items/Filters`, `/Items/Filters2` | Visible catalog genre facets; the legacy shape includes years and official ratings. For Movie, Series, Season, or Episode queries, `Filters2` also lists `AudioLanguages` and `SubtitleLanguages` as `{Name: "English (en)", Value: "en"}` pairs sorted by name. |
+| `GET /Items/Counts` | Jellyfin's `ItemCounts` for what the session can see: `MovieCount`, `SeriesCount`, `EpisodeCount`, and `BoxSetCount`, with `ItemCount` their sum (Jellyfin also counts seasons there). `isFavorite=true` counts the profile's favorites; box sets cannot be favorites, so they count zero. Silo serves no music, trailers, books or Live TV, so those counts are zero. A `userId` other than the session's answers 404. |
 | `GET /Items/{id}/Collections` | Jellyfin 12 "Included In": visible BoxSets that store the item, sorted by name and paged by `StartIndex`/`Limit`. An item the viewer cannot see returns 404 regardless of membership; visible episodes and any season return an empty result. Smart collections have no stored membership and are not listed. |
 | `GET /Studios` | Visible catalog studios with paging. |
 | `GET /Shows/Upcoming` | Scoped episodes dated from yesterday in UTC onward, with paging. |
@@ -411,12 +448,22 @@ back to a playback grant. Revoked owner credentials invalidate the grant.
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
 and MA), or `dtse` (DTS Express). HE-AACv2 is `mp4a.40.29` (RFC 6381), where
-Jellyfin writes `mp4a.40.2`. For Dolby Vision without a compatible base
-layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
+Jellyfin writes `mp4a.40.2`. Copied AV1 Main profile is `av01.0.LLM.DD`, always
+Main tier because the probe does not record the tier. Copied VP9 profiles 0 and
+2 are `vp09.PP.LL.DD`. FFprobe reports no VP9 level, so the level comes from the
+picture size alone, as FFmpeg writes it into the init segment's `vpcC` box;
+Jellyfin also counts the frame rate. These short forms imply BT.709,
+limited-range, non-monochrome video, so HDR, full-range, and monochrome AV1 or
+VP9 get no entry. When Silo cannot name every format a variant carries (an
+unknown level, another AV1 or VP9 profile or color, or copied audio with no
+entry), that variant has no `CODECS` or `SUPPLEMENTAL-CODECS`, where Jellyfin
+writes a partial list or a short form. For Dolby Vision without a compatible
+base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 `DOVI` in a `VideoRangeType` condition also gets Jellyfin 12's `dvh1`/`dav1`
-variant, listed before the `hvc1` fallback. MPEG-TS remuxes keep the single
-variant. Audio and subtitle streams carry `LocalizedLanguage`, and audio
-streams carry `LocalizedOriginal`, in English.
+variant, listed before the fallback variant, unless the copied audio has no
+entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
+carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
+English.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both
@@ -507,6 +554,15 @@ whose authority read preceded a concurrent logout may finish. Already issued sig
 node stream URLs retain their existing lifetime; logout does not withdraw them or
 cancel a transfer already authorized. Socket re-check timing is unchanged.
 
+`POST /Sessions/Logout` drops this node's cached copy of the compat session and
+deletes its stored row, returning `204` when the row is deleted or was already
+gone. When the delete fails it returns `500` with `Error: "ServerError"` and
+`Message: "Could not sign out"`. The stored row normally survives that failure,
+so the token keeps working until a later sign-out succeeds or the session
+expires; jellyfin-web clears its saved token whatever the status. The route
+authenticates first, so retrying after a delete that completed despite the error
+returns `401`.
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
@@ -594,10 +650,16 @@ connection's shared budget, as described in
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
-  against the same per-IP `login` counter. It reads at most 64 KiB of the
-  body: when decoding the JSON value needs more, it answers 413 with
-  `{"Error":"PayloadTooLarge",...}` before any credential check. Only the
-  first JSON value is decoded; data after it is ignored, not rejected.
+  against the same per-IP `login` counter. The account name also spends its
+  sign-in attempt budget, shared with native sign-in on every node
+  ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
+  locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
+  most 64 KiB of the body: when decoding the JSON value needs more, it answers
+  413 with `{"Error":"PayloadTooLarge",...}` before any credential check. Only
+  the first JSON value is decoded; data after it is ignored, not rejected. A
+  server too busy to check the password answers 503 `ServiceUnavailable`
+  with `Retry-After`, not a wrong password (see
+  [When the server is too busy to check a password](auth-api.md#when-the-server-is-too-busy-to-check-a-password)).
 - The Quick Connect routes spend the native device sign-in budgets, as the
   native device operations do: Initiate spends `device_start`, Connect and
   `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize
@@ -709,3 +771,47 @@ the complete HEVC recipe. Required audio conversion and tone mapping must be
 available on that same executor. Negotiation reads workers' stored capability
 reports; execution checks the selected worker again. Existing HEVC direct-play
 and remux routes are unchanged.
+
+## Encode limits
+
+As in Jellyfin, an H.264 encode targets the smallest `LessThanEqual` limits a
+profile sets on `VideoBitrate`, `Height` and `Width`, in its `Video` codec
+profiles for `h264` (those without a `Container` or `ApplyConditions`) and its
+HLS video transcoding profiles, instead of being refused for exceeding them:
+the video bitrate is capped and the frame is scaled to fit, keeping its aspect
+ratio. A stored device profile keeps `IsRequired: false`; a missing key reads
+back as `true`. A profile that lists transcoding profiles but no
+`DirectPlayProfiles` gets no direct play or direct stream, as in Jellyfin; Roku
+clients send one to ask for a remux after direct play fails.
+
+## Transcode reasons
+
+`TranscodingUrl` carries a `TranscodeReasons` query parameter with Jellyfin's
+reason names. A video copy reports `ContainerNotSupported`, plus
+`AudioChannelsNotSupported` or `AudioCodecNotSupported` when the audio is
+encoded. A video encode reports one video reason: `SubtitleCodecNotSupported`
+for a burn-in, else `VideoBitrateNotSupported`, `VideoResolutionNotSupported`
+or `VideoCodecNotSupported`. Clients read it from the URL: Moonfin for Roku
+shows a text subtitle itself over a copy and asks for a burn-in only over an
+encode. Without the parameter, it took every copy for an encode and restarted
+it with the subtitle burned in. The HLS routes ignore the parameter.
+
+## Roku MPEG-TS copies
+
+Roku players can play the audio of an fMP4 HLS copy silently, as JellyRock
+documents, and Roku clients list their MPEG-TS transcoding profile first. A
+video-copy HLS stream for a client whose user agent starts with `Roku/` and
+whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
+`remux-ts-v1` route, like the webOS Dolby Vision copies. The Dolby Vision strip
+keeps fMP4. Other clients are unchanged.
+
+## AAC encodes
+
+Compatibility audio encodes are AAC, which FFmpeg's encoder writes as AAC-LC;
+the negotiated output states that profile, so codec-profile rules on
+`AudioProfile` (Roku requires `!= Main`) evaluate against it. Roku clients
+(jellyfin-roku and Moonfin for Roku) leave AAC out of their video transcoding
+profiles although every Roku decodes stereo AAC (JellyRock fixed the same bug
+by always listing it first), so a transcoding profile without AAC still admits
+the stereo AAC encode when the profile declares AAC decode in a video
+direct-play or `VideoAudio` codec profile.

@@ -8,6 +8,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -284,32 +286,334 @@ func TestBuildPlaybackManifest_EncodedTranscodeUsesSyntheticVODManifest(t *testi
 	}
 }
 
-func TestGenerateFullManifestCompactsRepeatedAuthenticationQuery(t *testing.T) {
-	rawQuery := "st=" + strings.Repeat("recipe", 80) + "&token=" + strings.Repeat("access", 40)
-	session := &TranscodeSession{opts: TranscodeOpts{
-		TargetCodecVideo: "h264",
-		SegmentDuration:  1,
-		TotalDuration:    300,
-	}}
+// TestLongTitlePlaylistsCarryTheSignedQueryOnce renders each path that builds
+// or rewrites a v3 media playlist, for a client that negotiated
+// hls_variable_substitution_v1, and checks a four-hour title stays well under
+// the 4 MiB a Roku player accepts while every segment URI resolves to exactly
+// the URL the literal form names. The query is the size of a transcode's
+// signed stream token (about 1.7 KB). A growing EVENT playlist must use the
+// substituted form from its first fetch, even when the final duration is
+// unknown, so its form never changes while it grows.
+func TestLongTitlePlaylistsCarryTheSignedQueryOnce(t *testing.T) {
+	const (
+		fourHours = 4 * 60 * 60.0
+		maxBytes  = 1 << 20
+	)
+	rawQuery := "st=" + strings.Repeat("eyJzaWQiOi", 165)
+	encoded := TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: fourHours}
+	copyOpts := TranscodeOpts{TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2, TotalDuration: fourHours, KeyframePlaylist: true}
+	growing := copyOpts
+	growing.HLSVariableSubstitution = true
+	growing.TotalDuration = 0
+	ext := hlsSegmentExtension(copyOpts)
+	keyframeDurations := slices.Repeat([]float64{2.002}, 7200)
 
-	manifest := string(session.GenerateFullManifest("segment/", rawQuery))
-	if strings.Count(manifest, rawQuery) != 1 {
-		t.Fatalf("authentication query appears %d times, want exactly one definition", strings.Count(manifest, rawQuery))
+	tests := []struct {
+		name   string
+		render func(t *testing.T) []byte
+		want   []string
+	}{
+		{
+			name: "encoded transcode, synthetic VOD",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, &TranscodeSession{opts: encoded}, rawQuery)
+			},
+			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery, false),
+		},
+		{
+			// A quote cannot sit in a definition's quoted-string value.
+			name: "encoded transcode, query with a double quote",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, &TranscodeSession{opts: encoded}, rawQuery+`&x="`)
+			},
+			want: literalSegmentURIs(7200, "segment/", ".ts", "?"+rawQuery+"&x=%22", false),
+		},
+		{
+			name: "copy remux, complete keyframe playlist",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, &TranscodeSession{opts: copyOpts, copyPlan: &copySegmentPlan{durations: keyframeDurations}}, rawQuery)
+			},
+			want: literalSegmentURIs(7200, "segment/", ext, "?"+rawQuery, videoUsesFMP4(copyOpts)),
+		},
+		{
+			name: "copy remux, EVENT playlist first fetch, duration unknown",
+			render: func(t *testing.T) []byte {
+				return buildManifestForTest(t, realPlaylistSession(t, growing, ffmpegPlaylistFixture(3, ext, false)), rawQuery)
+			},
+			want: literalSegmentURIs(3, "segment/", ext, "?"+rawQuery, true),
+		},
+		{
+			name: "node playlist relayed by the API",
+			render: func(t *testing.T) []byte {
+				node := relayedNodePlaylist(t, ffmpegPlaylistFixture(7200, ext, true))
+				return AppendManifestQueryParamWithSubstitution(node, "st", strings.TrimPrefix(rawQuery, "st="))
+			},
+			want: literalSegmentURIs(7200, "segment/", ext, "?"+rawQuery, true),
+		},
 	}
-	for _, want := range []string{
-		"#EXT-X-VERSION:8",
-		"#EXT-X-DEFINE:NAME=\"silo_query\",VALUE=\"" + rawQuery + "\"",
-		"segment/seg_00000.ts?{$silo_query}",
-		"segment/seg_00299.ts?{$silo_query}",
-	} {
-		if !strings.Contains(manifest, want) {
-			t.Fatalf("manifest missing %q", want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := tt.render(t)
+			if len(manifest) >= maxBytes {
+				t.Fatalf("playlist is %d bytes, want under %d", len(manifest), maxBytes)
+			}
+			if !bytes.Contains(manifest, []byte("#EXT-X-DEFINE:")) {
+				t.Fatal("playlist carries no variable definition")
+			}
+			got := resolvePlaylistURIs(t, string(manifest))
+			if len(got) != len(tt.want) {
+				t.Fatalf("playlist resolves %d URIs, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("URI %d resolves to %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestLongTitleSubtitleRenditionPlaylistsCarryTheSignedQueryOnce covers the
+// subtitle media playlist of a session with an HLS subtitle rendition, for a
+// client that negotiated hls_variable_substitution_v1. The subtitle playlist
+// is derived from the video playlist (an encode's synthetic grid, a copy
+// remux's keyframe plan or FFmpeg's EVENT playlist, or a node playlist the API
+// relays), so it must keep that playlist's definition wherever it keeps a
+// reference, and every subtitle segment URI must resolve to the literal URL.
+// The multivariant playlist keeps the literal query: a multivariant playlist's
+// definitions would not reach the media playlists it names.
+func TestLongTitleSubtitleRenditionPlaylistsCarryTheSignedQueryOnce(t *testing.T) {
+	const (
+		fourHours = 4 * 60 * 60.0
+		maxBytes  = 1 << 20
+		segments  = 7200
+	)
+	token := strings.Repeat("eyJzaWQiOi", 165)
+	rawQuery := "st=" + token
+	rendition := func(opts TranscodeOpts) TranscodeOpts {
+		opts.SegmentDuration, opts.TotalDuration = 2, fourHours
+		opts.HLSVariableSubstitution = true
+		return opts
+	}
+	encoded := rendition(subtitleRenditionTestOpts(""))
+	copyOpts := rendition(copyRemuxRenditionOpts("", false))
+	ext := hlsSegmentExtension(copyOpts)
+	subtitles := func(t *testing.T, session *TranscodeSession, query string) []byte {
+		t.Helper()
+		if !session.HasSubtitleRendition() {
+			t.Fatal("session publishes no subtitle rendition")
 		}
+		return buildManifestForTest(t, session, joinQuery(SubtitleRenditionQueryParam+"="+subtitleRenditionSubtitles, query))
 	}
-	legacyBytes := 300 * len("segment/seg_00000.ts?"+rawQuery+"\n")
-	if len(manifest) >= legacyBytes/4 {
-		t.Fatalf("compact manifest size = %d, want less than one quarter of legacy %d", len(manifest), legacyBytes)
+	literal := func(n int) []string {
+		uris := make([]string, 0, n)
+		for i := range n {
+			uris = append(uris, fmt.Sprintf("segment/%s%05d%s?%s", subtitleSegmentPrefix, i, subtitleSegmentExt, rawQuery))
+		}
+		return uris
 	}
+
+	tests := []struct {
+		name    string
+		session *TranscodeSession
+		render  func(t *testing.T, session *TranscodeSession) []byte
+		want    []string
+	}{
+		{
+			name:    "encoded transcode, synthetic VOD",
+			session: &TranscodeSession{opts: encoded},
+			want:    literal(segments),
+		},
+		{
+			name:    "copy remux, complete keyframe playlist",
+			session: &TranscodeSession{opts: copyOpts, copyPlan: &copySegmentPlan{durations: slices.Repeat([]float64{2.002}, segments)}},
+			want:    literal(segments),
+		},
+		{
+			name:    "copy remux, EVENT playlist first fetch",
+			session: realPlaylistSession(t, copyOpts, ffmpegPlaylistFixture(3, ext, false)),
+			want:    literal(3),
+		},
+		{
+			name:    "node playlist relayed by the API",
+			session: realPlaylistSession(t, copyOpts, ffmpegPlaylistFixture(segments, ext, true)),
+			// The node strips "st", so it renders without a query and the
+			// API's relay appends the token.
+			render: func(t *testing.T, session *TranscodeSession) []byte {
+				return AppendManifestQueryParamWithSubstitution(subtitles(t, session, ""), "st", token)
+			},
+			want: literal(segments),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var manifest []byte
+			if tt.render != nil {
+				manifest = tt.render(t, tt.session)
+			} else {
+				manifest = subtitles(t, tt.session, rawQuery)
+			}
+			if len(manifest) >= maxBytes {
+				t.Fatalf("subtitle playlist is %d bytes, want under %d", len(manifest), maxBytes)
+			}
+			if !bytes.Contains(manifest, []byte("#EXT-X-DEFINE:")) {
+				t.Fatal("subtitle playlist carries no variable definition")
+			}
+			got := resolvePlaylistURIs(t, string(manifest))
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("subtitle playlist resolves %d URIs, want %d; first %q, want %q", len(got), len(tt.want), got[0], tt.want[0])
+			}
+
+			master := buildManifestForTest(t, tt.session, rawQuery)
+			if bytes.Contains(master, []byte("#EXT-X-DEFINE:")) || !bytes.Contains(master, []byte("master.m3u8?"+SubtitleRenditionQueryParam+"="+subtitleRenditionSubtitles+"&"+rawQuery+"\"")) {
+				t.Fatal("multivariant playlist must name its media playlists with the literal query")
+			}
+		})
+	}
+}
+
+func joinQuery(a, b string) string {
+	if b == "" {
+		return a
+	}
+	return a + "&" + b
+}
+
+// TestRewrittenPlaylistsStayLiteralWithoutSubstitutionFeature pins the
+// playlists the server rewrites for a client that did not negotiate
+// hls_variable_substitution_v1 (AetherEngine on Apple platforms parses them
+// itself and has no EXT-X-DEFINE support): however long the title, every URI
+// keeps the literal query, byte for byte.
+func TestRewrittenPlaylistsStayLiteralWithoutSubstitutionFeature(t *testing.T) {
+	token := strings.Repeat("eyJzaWQiOi", 165)
+	opts := TranscodeOpts{TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}
+	ext := hlsSegmentExtension(opts)
+	fixture := ffmpegPlaylistFixture(7200, ext, true)
+	literal := func(playlist, prefix, suffix string) string {
+		lines := strings.Split(playlist, "\n")
+		for i, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "#EXT-X-MAP:URI=\""):
+				lines[i] = `#EXT-X-MAP:URI="` + prefix + strings.TrimSuffix(strings.TrimPrefix(line, `#EXT-X-MAP:URI="`), `"`) + suffix + `"`
+			case line != "" && line[0] != '#':
+				lines[i] = prefix + line + suffix
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	event := buildManifestForTest(t, realPlaylistSession(t, opts, fixture), "st="+token)
+	if want := literal(string(stabilizeCopyHLSRemountTimeline([]byte(fixture), opts)), "segment/", "?st="+token); string(event) != want {
+		t.Fatal("copy EVENT playlist differs from the literal form")
+	}
+	relayed := AppendManifestQueryParam(relayedNodePlaylist(t, fixture), "st", token)
+	if want := literal(fixture, "segment/", "?st="+token); string(relayed) != want {
+		t.Fatal("relayed node playlist differs from the literal form")
+	}
+}
+
+// literalSegmentURIs lists a playlist's URIs as the literal form names them.
+func literalSegmentURIs(n int, prefix, ext, suffix string, init bool) []string {
+	uris := make([]string, 0, n+1)
+	if init {
+		uris = append(uris, prefix+"init.mp4"+suffix)
+	}
+	for i := range n {
+		uris = append(uris, fmt.Sprintf("%sseg_%05d%s%s", prefix, i, ext, suffix))
+	}
+	return uris
+}
+
+func buildManifestForTest(t *testing.T, session *TranscodeSession, rawQuery string) []byte {
+	t.Helper()
+	manifest, err := session.BuildPlaybackManifest("segment/", rawQuery)
+	if err != nil {
+		t.Fatalf("BuildPlaybackManifest: %v", err)
+	}
+	return manifest
+}
+
+func realPlaylistSession(t *testing.T, opts TranscodeOpts, playlist string) *TranscodeSession {
+	t.Helper()
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, playlist)
+	return &TranscodeSession{outputDir: dir, opts: opts}
+}
+
+// ffmpegPlaylistFixture is FFmpeg's fMP4 copy playlist after n segments.
+func ffmpegPlaylistFixture(n int, ext string, ended bool) string {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-MAP:URI=\"init.mp4\"\n")
+	for i := range n {
+		fmt.Fprintf(&b, "#EXTINF:2.002000,\nseg_%05d%s\n", i, ext)
+	}
+	if ended {
+		b.WriteString("#EXT-X-ENDLIST\n")
+	}
+	return b.String()
+}
+
+// relayedNodePlaylist is what a transcode node serves the API's relay for a
+// request without a query: FFmpeg's playlist under segment/.
+func relayedNodePlaylist(t *testing.T, playlist string) []byte {
+	t.Helper()
+	manifest, err := RewriteManifestPaths([]byte(playlist), "segment/", "")
+	if err != nil {
+		t.Fatalf("RewriteManifestPaths: %v", err)
+	}
+	return manifest
+}
+
+var (
+	playlistDefinePattern    = regexp.MustCompile(`^#EXT-X-DEFINE:NAME="([A-Za-z0-9_-]+)",VALUE="([^"]*)"$`)
+	playlistReferencePattern = regexp.MustCompile(`\{\$([A-Za-z0-9_-]+)\}`)
+	playlistMapURIPattern    = regexp.MustCompile(`URI="([^"]*)"`)
+)
+
+// resolvePlaylistURIs returns a media playlist's init and segment URIs after
+// HLS variable substitution, failing on a definition that precedes protocol
+// version 8, a duplicate definition, or an undefined reference.
+func resolvePlaylistURIs(t *testing.T, manifest string) []string {
+	t.Helper()
+	version := 1
+	vars := map[string]string{}
+	var uris []string
+	for line := range strings.SplitSeq(manifest, "\n") {
+		var uri string
+		switch {
+		case strings.HasPrefix(line, "#EXT-X-VERSION:"):
+			version, _ = strconv.Atoi(strings.TrimPrefix(line, "#EXT-X-VERSION:"))
+			continue
+		case strings.HasPrefix(line, "#EXT-X-DEFINE:"):
+			m := playlistDefinePattern.FindStringSubmatch(line)
+			if m == nil || version < 8 {
+				t.Fatalf("invalid definition %.80q at protocol version %d", line, version)
+			}
+			if _, dup := vars[m[1]]; dup {
+				t.Fatalf("variable %q defined twice", m[1])
+			}
+			vars[m[1]] = m[2]
+			continue
+		case strings.HasPrefix(line, "#EXT-X-MAP:"):
+			m := playlistMapURIPattern.FindStringSubmatch(line)
+			if m == nil {
+				t.Fatalf("map without URI: %q", line)
+			}
+			uri = m[1]
+		case line == "" || line[0] == '#':
+			continue
+		default:
+			uri = line
+		}
+		uris = append(uris, playlistReferencePattern.ReplaceAllStringFunc(uri, func(ref string) string {
+			value, ok := vars[ref[2:len(ref)-1]]
+			if !ok {
+				t.Fatalf("undefined variable reference %q", ref)
+			}
+			return value
+		}))
+	}
+	return uris
 }
 
 func TestBuildPlaybackManifest_LongEncodedTranscodeUsesRealManifest(t *testing.T) {
@@ -409,6 +713,67 @@ func TestBuildSourceAlignedPlaybackManifestAnchorsSeekedRealPlaylist(t *testing.
 	}
 }
 
+// The gap segments a source-aligned playlist prepends use the same query
+// form as the real segments, so a large seek does not bring back a
+// credential-sized query on every gap URI.
+func TestSourceAlignedGapsUseTheSubstitutedQuery(t *testing.T) {
+	tempDir := t.TempDir()
+	writeManifestFixture(t, tempDir, strings.Join([]string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:3",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MEDIA-SEQUENCE:1800",
+		"#EXTINF:2.000000,",
+		"seg_01800.ts",
+		"",
+	}, "\n"))
+	session := &TranscodeSession{
+		outputDir: tempDir,
+		opts: TranscodeOpts{
+			TargetCodecVideo:        "h264",
+			TargetCodecAudio:        "aac",
+			SegmentDuration:         2,
+			TotalDuration:           1_000_000,
+			SeekSeconds:             3600,
+			StartSegmentNumber:      1800,
+			HLSVariableSubstitution: true,
+		},
+	}
+	rawQuery := "source_timeline=1&st=" + strings.Repeat("eyJzaWQiOi", 100)
+	got, err := session.BuildSourceAlignedPlaybackManifest("segment/", rawQuery)
+	if err != nil {
+		t.Fatalf("BuildSourceAlignedPlaybackManifest: %v", err)
+	}
+	if count := strings.Count(string(got), rawQuery); count != 1 {
+		t.Fatalf("query appears %d times, want once in its definition:\n%s", count, got)
+	}
+	uris := resolvePlaylistURIs(t, string(got))
+	if len(uris) < 2 || uris[0] != "segment/source_timeline_gap.ts?"+rawQuery || uris[len(uris)-1] != "segment/seg_01800.ts?"+rawQuery {
+		t.Fatalf("resolved URIs = %q", uris)
+	}
+}
+
+// TestPlaybackManifestRefusesAnOversizedQuery covers both entry points the API
+// and the transcode node serve playlists through: a query that every URI would
+// repeat is refused past maxManifestQueryBytes instead of multiplied.
+func TestPlaybackManifestRefusesAnOversizedQuery(t *testing.T) {
+	session := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}}
+	for _, query := range []string{
+		"st=" + strings.Repeat("a", maxManifestQueryBytes),
+		// Under the bound as sent, over it once each quote is escaped.
+		"st=" + strings.Repeat(`"`, maxManifestQueryBytes/2),
+	} {
+		for name, build := range map[string]func(string, string) ([]byte, error){
+			"BuildPlaybackManifest":              session.BuildPlaybackManifest,
+			"BuildSourceAlignedPlaybackManifest": session.BuildSourceAlignedPlaybackManifest,
+		} {
+			if _, err := build("segment/", query); !errors.Is(err, ErrManifestQueryTooLong) {
+				t.Errorf("%s(%d-byte query) error = %v, want ErrManifestQueryTooLong", name, len(query), err)
+			}
+		}
+	}
+}
+
 func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
 	if !CanGenerateSyntheticManifest(100_000, 2) {
 		t.Fatal("historical 50,000-segment manifest should remain supported")
@@ -442,7 +807,7 @@ func TestHEVCTranscodeManifestAndProgressUseFMP4Segments(t *testing.T) {
 		t.Fatal(err)
 	}
 	progress := session.SegmentProgress(time.Now())
-	if progress.ProducedCount != 1 || progress.ProducedHead != 0 {
+	if progress.ProducedHead != 0 || progress.LastProducedAt.IsZero() {
 		t.Fatalf("HEVC segment progress = %#v, want one produced fMP4 segment", progress)
 	}
 }
@@ -711,8 +1076,8 @@ var segmentRecoveryDecisionCases = []struct {
 		wantWait: true, wantReason: "near_produced_head",
 		check: func(t *testing.T, d SegmentRecoveryDecision) {
 			waitsWithoutRestart(t, d)
-			if p := d.Progress; p.ProducedHead != 225 || p.ProducedCount != 2 || !p.HasManifest {
-				t.Fatalf("progress = %+v, want two ready files ending at225 with a manifest", p)
+			if p := d.Progress; p.ProducedHead != 225 || !p.HasManifest {
+				t.Fatalf("progress = %+v, want ready files ending at 225 with a manifest", p)
 			}
 		},
 	},
@@ -851,7 +1216,7 @@ func (w *recordingWriteCloser) Close() error {
 	return nil
 }
 
-func writeManifestRange(t *testing.T, dir string, first int, last int, ext string) {
+func writeManifestRange(t testing.TB, dir string, first int, last int, ext string) {
 	t.Helper()
 
 	lines := []string{
@@ -879,6 +1244,80 @@ func writeSegmentFile(t *testing.T, dir string, name string, data []byte, modTim
 	}
 	if err := os.Chtimes(filepath.Join(dir, name), modTime, modTime); err != nil {
 		t.Fatalf("chtimes segment %s: %v", name, err)
+	}
+}
+
+func TestSegmentProgressFindsNewestListedSegment(t *testing.T) {
+	// Each playlist lists segments 0-9. Segments in present are written in
+	// order, two seconds apart, as FFmpeg writes them; empty ones after them.
+	tests := []struct {
+		name     string
+		start    int
+		present  []int
+		empty    []int
+		wantHead int
+		wantLast int // the segment whose write time is reported, or -1 for none
+	}{
+		{name: "pruned prefix", present: []int{6, 7, 8, 9}, wantHead: 9, wantLast: 9},
+		{
+			name:    "missing and zero-byte tail, gap, unlisted newer file",
+			present: []int{0, 1, 2, 5, 6, 12}, empty: []int{7},
+			wantHead: 6, wantLast: 6,
+		},
+		{name: "playlist left behind a later start", start: 40, present: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, wantHead: 39, wantLast: 9},
+		{name: "nothing listed on disk", start: 3, wantHead: 2, wantLast: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeManifestRange(t, dir, 0, 9, ".ts")
+			written := time.Now().Add(-time.Hour).Truncate(time.Second)
+			writtenAt := map[int]time.Time{}
+			write := func(n int, data []byte) {
+				written = written.Add(2 * time.Second)
+				writeSegmentFile(t, dir, fmt.Sprintf("seg_%05d.ts", n), data, written)
+				writtenAt[n] = written
+			}
+			for _, n := range tt.present {
+				write(n, []byte("x"))
+			}
+			for _, n := range tt.empty {
+				write(n, nil)
+			}
+			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{
+				TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tt.start,
+			}}
+
+			got := session.SegmentProgress(time.Now())
+			if got.ProducedHead != tt.wantHead || !got.LastProducedAt.Equal(writtenAt[tt.wantLast]) || !got.HasManifest {
+				t.Fatalf("progress head %d, last produced %v, manifest %t; want head %d, last produced %v (segment %d), manifest true",
+					got.ProducedHead, got.LastProducedAt, got.HasManifest, tt.wantHead, writtenAt[tt.wantLast], tt.wantLast)
+			}
+		})
+	}
+}
+
+// BenchmarkSegmentProgress reads progress from a playlist whose segments are
+// all still on disk: 3,600 entries is a two-hour title at the default segment
+// length, and 50,000 is the playlist cap FFmpeg is started with.
+func BenchmarkSegmentProgress(b *testing.B) {
+	for _, entries := range []int{3_600, maxSyntheticManifestSegments} {
+		b.Run(strconv.Itoa(entries), func(b *testing.B) {
+			dir := b.TempDir()
+			writeManifestRange(b, dir, 0, entries-1, ".ts")
+			for n := range entries {
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("seg_%05d.ts", n)), []byte("x"), 0o644); err != nil {
+					b.Fatal(err)
+				}
+			}
+			session := &TranscodeSession{outputDir: dir, running: true, opts: TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 2}}
+			b.ReportAllocs()
+			for b.Loop() {
+				if progress := session.SegmentProgress(time.Now()); progress.ProducedHead != entries-1 {
+					b.Fatalf("ProducedHead = %d, want %d", progress.ProducedHead, entries-1)
+				}
+			}
+		})
 	}
 }
 

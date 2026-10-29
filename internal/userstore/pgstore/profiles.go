@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -176,7 +175,7 @@ func updateProfile(
 	var setClauses []string
 	var args []any
 	argIdx := 1
-	accessPolicyChanged := u.PIN != nil ||
+	accessPolicyChanged := u.PINHash != nil ||
 		u.IsChild != nil ||
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
@@ -197,17 +196,8 @@ func updateProfile(
 	if u.Avatar != nil {
 		addArg("avatar", *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			addArg("pin_hash", "")
-		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			addArg("pin_hash", string(hash))
-		}
+	if u.PINHash != nil {
+		addArg("pin_hash", *u.PINHash)
 		// The user_profiles_pin_revision trigger advances pin_revision in
 		// this same UPDATE whenever pin_hash changes, which invalidates every
 		// token minted for the old PIN, and only this profile's. It lives in
@@ -429,32 +419,6 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 
 	return tx.Commit(ctx)
-}
-
-func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string) (bool, error) {
-	var pinHash string
-	err := s.pool.QueryRow(ctx,
-		"SELECT pin_hash FROM user_profiles WHERE user_id = $1 AND id = $2",
-		s.userID, profileID,
-	).Scan(&pinHash)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }
 
 // deleteProfileSectionOverrides takes a profile's entries out of the account's

@@ -458,6 +458,12 @@ export const adminKeys = {
   requestRouteTitles: (mediaType: string, q: string) =>
     ["admin", "requestRouteTitles", mediaType, q] as const,
   requestIntegrationOptionsRoot: () => ["admin", "requestIntegrationOptions"] as const,
+  // The Discover layout sits outside requestsRoot: a request or settings write
+  // changes nothing it holds.
+  requestDiscoverLayout: () => ["admin", "requestDiscover", "layout"] as const,
+  requestDiscoverPreview: (row: unknown) => ["admin", "requestDiscover", "preview", row] as const,
+  requestWatchProviders: (mediaType: string, region: string) =>
+    ["admin", "requestDiscover", "watchProviders", mediaType, region] as const,
   requestIntegrationOptions: (integrationId: string) =>
     ["admin", "requestIntegrationOptions", integrationId] as const,
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,

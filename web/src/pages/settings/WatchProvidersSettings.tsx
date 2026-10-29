@@ -775,18 +775,6 @@ function WatchProviderCard({
                     updateConnection.mutate({ export_watched_enabled: checked })
                   }
                 />
-                {connection.capabilities.export_unwatched ? (
-                  <ToggleRow
-                    id={`watch-provider-${providerKey}-export-unwatched`}
-                    label="Send unwatched changes"
-                    description="When you mark something unwatched, remove matching history from this provider."
-                    checked={connection.export_unwatched_enabled}
-                    disabled={isBusy}
-                    onChange={(checked) =>
-                      updateConnection.mutate({ export_unwatched_enabled: checked })
-                    }
-                  />
-                ) : null}
                 {connection.capabilities.import_favorites ||
                 connection.capabilities.export_favorites ? (
                   <ToggleRow

@@ -26,6 +26,8 @@ export interface WatchRouteRequest {
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  /** The viewer chose fileId, so Auto must not swap in another version. */
+  versionPicked?: boolean;
   returnHref?: string;
   requestKey: string;
 }
@@ -41,6 +43,7 @@ export interface WatchPlaybackStartInput {
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
   prePlaySubtitleSelection?: PrePlaySubtitleSelection | null;
+  versionPicked?: boolean;
   returnHref?: string;
 }
 
@@ -62,6 +65,7 @@ function buildWatchRouteRequestKey(
   audioTrackIndex: number | undefined,
   prePlaySubtitleMode: "auto" | "off" | "explicit" | undefined,
   prePlaySubtitleSelection: PrePlaySubtitleSelection | null | undefined,
+  versionPicked: boolean,
 ): string {
   return JSON.stringify([
     contentId,
@@ -74,6 +78,7 @@ function buildWatchRouteRequestKey(
     audioTrackIndex ?? null,
     prePlaySubtitleMode ?? null,
     prePlaySubtitleSelection ?? null,
+    versionPicked,
   ]);
 }
 
@@ -88,6 +93,7 @@ export function createWatchRouteRequest({
   audioTrackIndex,
   prePlaySubtitleMode,
   prePlaySubtitleSelection,
+  versionPicked = false,
   returnHref,
 }: WatchPlaybackStartInput): WatchRouteRequest {
   return {
@@ -101,6 +107,7 @@ export function createWatchRouteRequest({
     audioTrackIndex,
     prePlaySubtitleMode,
     prePlaySubtitleSelection,
+    versionPicked,
     returnHref,
     requestKey: buildWatchRouteRequestKey(
       contentId,
@@ -113,6 +120,7 @@ export function createWatchRouteRequest({
       audioTrackIndex,
       prePlaySubtitleMode,
       prePlaySubtitleSelection,
+      versionPicked,
     ),
   };
 }
@@ -191,7 +199,6 @@ function buildInitialSubtitleTrackIndexes({
   subtitleMode,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
-  profileLanguage,
   showForcedSubtitles,
 }: {
   item: WatchDetail;
@@ -199,7 +206,6 @@ function buildInitialSubtitleTrackIndexes({
   subtitleMode: SubtitleMode;
   preferredSubtitleLanguage: string | null;
   preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null;
-  profileLanguage: string | null;
   showForcedSubtitles: boolean;
 }): {
   start: Record<number, number>;
@@ -245,7 +251,6 @@ function buildInitialSubtitleTrackIndexes({
       preferredLanguage: preferredSubtitleLanguage,
       preferredTrackSignature: preferredSubtitleTrackSignature,
       audioLanguage: resolveVersionAudioLanguage(version, selectedAudioTrackIndex),
-      profileLanguage,
       showForcedSubtitles,
     });
     if (selectedSubtitleTrackIndex === null) {
@@ -294,7 +299,6 @@ export function buildWatchPageProps({
     "auto") as SubtitleMode;
   const showForcedSubtitles =
     item.effective_show_forced_subtitles ?? currentProfile?.show_forced_subtitles ?? true;
-  const profileLanguage = currentProfile?.language || null;
 
   const subtitles: PlayerSubtitleInfo[] = item.subtitles.map((subtitle, index) => ({
     index,
@@ -356,7 +360,6 @@ export function buildWatchPageProps({
     subtitleMode,
     preferredSubtitleLanguage,
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
-    profileLanguage,
     showForcedSubtitles,
   });
 
@@ -404,6 +407,7 @@ export function buildWatchPageProps({
     title: item.title,
     year: item.year,
     fileId: request.fileId,
+    versionPicked: request.versionPicked,
     libraryId: request.libraryId,
     versions: item.versions,
     playbackVariants: item.playback_variants ?? [],
@@ -418,7 +422,6 @@ export function buildWatchPageProps({
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
     subtitleMode,
     showForcedSubtitles,
-    profileLanguage,
     intro,
     introSkipMode,
     credits,

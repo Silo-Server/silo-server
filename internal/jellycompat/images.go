@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha1"
@@ -10,6 +11,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -23,6 +25,9 @@ var compatImageProxyUserAgentSubstrings = []string{
 const compatImageRouteCacheControl = "private, no-store, no-cache, max-age=0, s-maxage=0, must-revalidate"
 const compatImageProxyTagSuffix = "-p"
 const compatImageProxyRoutePrefix = "__jellycompat_image_proxy__:"
+
+// compatImageSniffLen is the most http.DetectContentType reads.
+const compatImageSniffLen = 512
 
 type compatImageProxyRouteContextKey struct{}
 
@@ -195,6 +200,11 @@ func copyConditionalImageRequestHeaders(dst, src http.Header) {
 func proxyImage(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 
+	// A stored artwork URL can point at any host, so its bytes must never
+	// render as a document on this origin, as on the native artwork route.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+
 	if resp.StatusCode == http.StatusNotModified {
 		copyImageProxyHeaders(w.Header(), resp.Header)
 		setCompatImageRouteNoStore(w.Header())
@@ -208,10 +218,32 @@ func proxyImage(w http.ResponseWriter, resp *http.Response) {
 		return
 	}
 
+	body := bufio.NewReaderSize(resp.Body, compatImageSniffLen)
+	contentType, ok := proxiedImageContentType(resp.Header.Get("Content-Type"), body)
+	if !ok {
+		setCompatImageRouteNoStore(w.Header())
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
+	}
+
 	copyImageProxyHeaders(w.Header(), resp.Header)
+	w.Header().Set("Content-Type", contentType)
 	setCompatImageRouteNoStore(w.Header())
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, body)
+}
+
+// proxiedImageContentType returns the type a proxied body is served as: the
+// upstream's own when it names an image, else the sniffed type when the bytes
+// are an image, since some hosts label images application/octet-stream.
+// Anything else is not served.
+func proxiedImageContentType(declared string, body *bufio.Reader) (string, bool) {
+	if mediaType, _, err := mime.ParseMediaType(declared); err == nil && strings.HasPrefix(mediaType, "image/") {
+		return declared, true
+	}
+	head, _ := body.Peek(compatImageSniffLen)
+	sniffed := http.DetectContentType(head)
+	return sniffed, strings.HasPrefix(sniffed, "image/")
 }
 
 func copyImageProxyHeaders(dst, src http.Header) {

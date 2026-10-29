@@ -129,6 +129,17 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 	return h
 }
 
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the handler. Its signal reads then ask the store instead of the
+// Postgres tables.
+func (h *RecommendationsHandler) WithUserStoreOutsidePostgres(outside bool) *RecommendationsHandler {
+	if h != nil {
+		h.signals.WithUserStoreOutsidePostgres(outside)
+	}
+	return h
+}
+
 // --- Response types ---
 
 type scoredItemsResponse struct {
@@ -572,6 +583,8 @@ func (h *RecommendationsHandler) buildSectionItems(
 			RatingRTAudience:       mi.RatingRTAudience,
 			OriginalLanguage:       mi.OriginalLanguage,
 			Overview:               mi.Overview,
+			ReleaseDate:            mi.ReleaseDate,
+			LastAirDate:            mi.LastAirDate,
 			PosterThumbhash:        mi.PosterThumbhash,
 			BackdropThumbhash:      mi.BackdropThumbhash,
 			PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
@@ -585,6 +598,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 		}
 		urls := artwork[mi.ContentID]
 		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+		item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 		if enrichment.overlays != nil {
 			item.OverlaySummary = enrichment.overlays[mi.ContentID]
 		}

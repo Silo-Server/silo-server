@@ -20,6 +20,9 @@ const DELEGATED_PROPERTIES = [
   "playbackRate",
   "videoWidth",
   "videoHeight",
+  // Not a media element member: the buffering adapter reads it to tell a
+  // decoder restart's wait from a network stall.
+  "decoderRecovering",
 ] as const;
 
 const DELEGATED_METHODS = [

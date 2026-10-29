@@ -209,7 +209,7 @@ func overlayMissingPlexGuids(existing, metadata PlexGuids) PlexGuids {
 // failure so a systematic cause (auth, wrong URL) is visible in the run summary, and
 // aborted says the sweep stopped early rather than asking about every item.
 func plexUnresolvedIDsWarning(scope, noun string, unresolved, attempted int, firstErr error, aborted bool) string {
-	msg := fmt.Sprintf("%s: could not resolve external ids for %d of %d %s; those items will remain unmatched%s",
+	msg := fmt.Sprintf("%s"+warnPlexUnresolvedIDsMarker+"%d of %d %s; those items will remain unmatched%s",
 		scope, unresolved, attempted, noun, plexSweepAbortedSuffix(aborted))
 	if firstErr != nil {
 		msg += fmt.Sprintf(" (first error: %v)", firstErr)

@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildClientCapabilitiesV3 } from "../client-context-v3";
 import {
   detectHDRFromMatchMedia,
   prewarmCodecDetection,
@@ -252,6 +253,27 @@ describe("probeWebCapabilities", () => {
 
     await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
   });
+
+  // Firefox refuses H.264 High 10 while accepting High; the declared report
+  // must say so or the server copies a 10-bit stream the browser cannot decode.
+  it.each([
+    { name: "refuses", high10: false, bitDepths: [8] },
+    { name: "accepts", high10: true, bitDepths: [8, 10] },
+  ])(
+    "reports the H.264 bit depths a browser that $name High 10 decodes",
+    ({ high10, bitDepths }) => {
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+        mime === 'video/mp4; codecs="avc1.640028"' ||
+        (high10 && mime === 'video/mp4; codecs="avc1.6e0028"')
+          ? "probably"
+          : "",
+      );
+
+      expect(buildClientCapabilitiesV3(probeWebCapabilities()).video_decode).toEqual([
+        { codec: "h264", bit_depths: bitDepths, hardware: false },
+      ]);
+    },
+  );
 
   it("advertises native Dolby Vision Profile 8 from the dvh1 sample entry", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));

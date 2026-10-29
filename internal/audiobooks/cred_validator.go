@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -73,7 +74,7 @@ func (v *SiloCredValidator) Validate(
 	// CompatLogin refuses a temporary password: Audiobookshelf clients cannot
 	// run the password change it requires.
 	basePw, pin := auth.SplitPasswordPIN(password)
-	_, user, usedFallback, err := v.Auth.CompatLoginWithLocalFallback(ctx, authName, password, basePw, "abs-compat", "")
+	_, user, usedFallback, err := v.Auth.CompatLoginWithLocalFallback(ctx, authName, password, basePw, "abs-compat", "", "")
 	if err != nil {
 		// Propagate auth sentinel errors as-is so callers can distinguish
 		// "bad credentials" (ErrInvalidCredentials) from "service down".
@@ -113,12 +114,18 @@ func (v *SiloCredValidator) Validate(
 		}
 		// Counted before the PIN is checked, so concurrent guesses cannot
 		// overrun the limit, and while the profile is locked even the right
-		// PIN is refused.
+		// PIN is refused. The check waits for a hashing turn ahead of
+		// sign-ins.
 		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
 		if _, ok := v.PINAttempts.Reserve(ctx, attemptKey); !ok {
 			return abs.Principal{}, abs.ErrProfilePINLocked
 		}
-		valid, err := store.VerifyPIN(ctx, profile.ID, pin)
+		permit, err := passwordhash.AdmitAhead(ctx)
+		if err != nil {
+			return abs.Principal{}, err
+		}
+		valid, err := permit.Matches([]byte(profile.PINHash), []byte(pin))
+		permit.Release()
 		if err != nil {
 			return abs.Principal{}, fmt.Errorf("verify profile PIN: %w", err)
 		}

@@ -184,7 +184,7 @@ type WatchTonightCardsInput struct {
 type WatchTonightCastMember struct {
 	Name      string `json:"name" example:"Al Pacino"`
 	Character string `json:"character,omitempty" example:"Lt. Vincent Hanna"`
-	PhotoURL  string `json:"photo_url,omitempty" doc:"Presigned, short-lived"`
+	PhotoURL  string `json:"photo_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 }
 
 // WatchTonightCard is one swipe card: the shared card with its source and

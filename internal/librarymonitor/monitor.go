@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
@@ -59,7 +59,7 @@ type FolderLister interface {
 // *scantrigger.Resolver the monitor uses.
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
-	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
 }
 
@@ -670,7 +670,7 @@ func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) ou
 	rs.rewalk = false
 	m.mu.Unlock()
 
-	info, err := os.Stat(rs.path)
+	info, err := fspath.Stat(rs.path)
 	if err != nil || !info.IsDir() {
 		if everSeen {
 			return outcome{state: StateRootUnavailable}
@@ -765,7 +765,7 @@ func (m *Monitor) viewMounts(root string) (mountView, bool) {
 	if err != nil {
 		return mountView{}, false
 	}
-	physical, err := filepath.EvalSymlinks(root)
+	physical, err := fspath.EvalSymlinks(root)
 	if err != nil {
 		physical = root
 	}
@@ -791,7 +791,7 @@ func (m *Monitor) walkOutcome(ctx context.Context, path string, b Backend, err e
 	if errors.As(err, &limitErr) {
 		return outcome{state: StateLimitReached, backendName: BackendInotify, notes: notes, dirs: limitErr.Directories, limit: limitErr.Limit}
 	}
-	if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+	if info, statErr := fspath.Stat(path); statErr != nil || !info.IsDir() {
 		return outcome{state: StateRootUnavailable}
 	}
 	m.log.WarnContext(ctx, "librarymonitor: recording folder failed", "path", path, "err", err)
@@ -872,7 +872,7 @@ func (m *Monitor) forward(b Backend) {
 // which is what watching it needs.
 func anyReadable(dirs []string) bool {
 	for _, dir := range dirs {
-		if f, err := os.Open(dir); err == nil {
+		if f, err := fspath.Open(dir); err == nil {
 			_ = f.Close()
 			return true
 		}

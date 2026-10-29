@@ -1,9 +1,7 @@
 package subdl
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -51,25 +49,8 @@ func (p *Provider) downloadURL(id string) (string, error) {
 	if p.apiKey != "" {
 		target.RawQuery = url.Values{"api_key": {p.apiKey}}.Encode()
 	}
-	if !sameOrigin(target, base) || target.User.String() != base.User.String() {
+	if !subtitles.SameOrigin(target, base) || target.User.String() != base.User.String() {
 		return "", errInvalidID
 	}
 	return target.String(), nil
-}
-
-// sameOriginRedirects lets a provider request follow redirects only on the
-// scheme and host it started on, so a reply from SubDL cannot steer the
-// server to another host.
-func sameOriginRedirects(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return errors.New("subdl: stopped after 10 redirects")
-	}
-	if !sameOrigin(req.URL, via[0].URL) || req.URL.User != nil {
-		return fmt.Errorf("subdl: refused redirect off %s", via[0].URL.Host)
-	}
-	return nil
-}
-
-func sameOrigin(a, b *url.URL) bool {
-	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
 }

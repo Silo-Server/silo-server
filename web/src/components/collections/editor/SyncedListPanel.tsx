@@ -1,13 +1,10 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Info, Lock, Pencil } from "lucide-react";
-import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import { MDBListBrowser } from "@/components/CollectionTemplateGallery/MDBListBrowser";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUserCollectionTemplates } from "@/hooks/queries/userCollectionImports";
@@ -15,7 +12,6 @@ import { useCollectionTemplates } from "@/lib/collectionTemplates";
 import {
   ALL_MY_LIBRARIES_LABEL,
   CHANGE_LINK,
-  CHART_RULES_NOTE,
   CHART_SET_WHEN_MADE,
   LINK_CHANGES_AT_NEXT_SYNC,
   LIST_DECIDES,
@@ -49,6 +45,7 @@ import {
   linkPick,
   popularPicks,
   savedListMediaKind,
+  shownLink,
   TAB_OF_SOURCE,
   type ImportSource,
   type SyncedDraft,
@@ -56,21 +53,7 @@ import {
   type SyncedPick,
   type SyncedTab,
 } from "@/lib/collections/synced";
-import {
-  CHART_MEDIA_LABEL,
-  CHART_WINDOW_LABEL,
-  chartHasTimeWindow,
-  chartLockReason,
-  chartMediaTypes,
-  chartSummary,
-  defaultChart,
-  normalizeChart,
-  TMDB_CHARTS,
-  type TMDBChart,
-  type TMDBChartMediaType,
-  type TMDBChartPreset,
-  type TMDBChartTimeWindow,
-} from "@/lib/collections/tmdbSources";
+import { chartSummary } from "@/lib/collections/tmdbSources";
 import { isValidTMDBListURL } from "@/lib/tmdbList";
 
 import { SYNCED_SOURCE_LABEL } from "@/lib/collections/types";
@@ -79,6 +62,8 @@ import { FranchiseIdField } from "../fields/FranchiseIdField";
 import { LibrariesLine } from "../fields/LibrariesLine";
 import { OrderBlock } from "../fields/OrderBlock";
 import { ScheduleField } from "../fields/ScheduleField";
+import { SourceCard } from "../fields/SourceCard";
+import { TMDBChartField } from "../fields/TMDBChartField";
 import { TMDBListURLField } from "../TMDBListURLField";
 import { LockedSourceSummary } from "./LockedSourceSummary";
 import { SyncFailedCallout, SyncStatusBlock } from "./SyncStatusBlock";
@@ -113,136 +98,19 @@ function fittingLibraryIds(
   });
 }
 
-/** A row of mutually exclusive choices, as in Show: Movies / TV shows / Both. */
-function Segmented<Value extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: Value;
-  options: ReadonlyArray<{ value: Value; label: string; disabled?: boolean }>;
-  onChange: (value: Value) => void;
-}) {
-  const id = useId();
+/** Synced lists get their genre and franchise sets from Starter packs. */
+function StarterPacksNote() {
   return (
-    <div className="grid content-start gap-2">
-      <span id={id} className="text-[14px] font-semibold">
-        {label}
-      </span>
-      <RadioGroupPrimitive.Root
-        aria-labelledby={id}
-        value={value}
-        onValueChange={(next) => onChange(next as Value)}
-        orientation="horizontal"
-        className="bg-muted/50 inline-flex w-fit gap-1 rounded-xl p-1"
+    <>
+      Genre and franchise sets come from{" "}
+      <Link
+        to={`${SERVER_SCOPE.paths.list()}?dialog=starter-packs`}
+        className="text-foreground font-medium underline underline-offset-4"
       >
-        {options.map((option) => (
-          <RadioGroupPrimitive.Item
-            key={option.value}
-            value={option.value}
-            disabled={option.disabled}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 data-[state=checked]:bg-background data-[state=checked]:text-foreground h-9 rounded-lg px-3.5 text-[13.5px] font-medium outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {option.label}
-          </RadioGroupPrimitive.Item>
-        ))}
-      </RadioGroupPrimitive.Root>
-    </div>
-  );
-}
-
-/** The TMDB chart tab: chart cards, then Show and "Trending over" as TMDB allows them. */
-function ChartTab({
-  chart,
-  onChart,
-  isServer,
-}: {
-  chart: TMDBChart | null;
-  onChart: (chart: TMDBChart) => void;
-  isServer: boolean;
-}) {
-  const id = useId();
-  const allowed = chart ? chartMediaTypes(chart.preset) : [];
-  const lock = chart ? chartLockReason(chart.preset) : null;
-  const shows: TMDBChartMediaType[] =
-    chart?.preset === "trending" ? ["movie", "tv", "all"] : ["movie", "tv"];
-  return (
-    <div className="grid gap-4">
-      <div className="grid gap-2">
-        <span id={`${id}-chart`} className="text-[14px] font-semibold">
-          Chart
-        </span>
-        <RadioGroup
-          aria-labelledby={`${id}-chart`}
-          value={chart?.preset ?? ""}
-          onValueChange={(value) => {
-            const preset = value as TMDBChartPreset;
-            onChart(chart ? normalizeChart({ ...chart, preset }) : defaultChart(preset));
-          }}
-          className="grid-cols-2 gap-2.5 sm:grid-cols-4"
-        >
-          {TMDB_CHARTS.map((entry) => (
-            <RadioCardItem
-              key={entry.preset}
-              value={entry.preset}
-              label={entry.label}
-              hint={entry.hint}
-            />
-          ))}
-        </RadioGroup>
-      </div>
-      {chart ? (
-        <div className="grid gap-2">
-          <div className="flex flex-wrap gap-x-8 gap-y-3">
-            <Segmented
-              label="Show"
-              value={chart.mediaType}
-              options={shows.map((value) => ({
-                value,
-                label: CHART_MEDIA_LABEL[value],
-                disabled: !allowed.includes(value),
-              }))}
-              onChange={(mediaType) => onChart({ ...chart, mediaType })}
-            />
-            {chartHasTimeWindow(chart.preset) ? (
-              <Segmented<TMDBChartTimeWindow>
-                label="Trending over"
-                value={chart.timeWindow ?? "day"}
-                options={(["day", "week"] as const).map((value) => ({
-                  value,
-                  label: CHART_WINDOW_LABEL[value],
-                }))}
-                onChange={(timeWindow) => onChart({ ...chart, timeWindow })}
-              />
-            ) : null}
-          </div>
-          {lock ? (
-            <p className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
-              <Lock aria-hidden className="size-3.5" />
-              {lock}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      <p className="text-muted-foreground text-[13px]">
-        {CHART_RULES_NOTE}
-        {isServer ? (
-          <>
-            {" "}
-            Genre and franchise sets come from{" "}
-            <Link
-              to={`${SERVER_SCOPE.paths.list()}?dialog=starter-packs`}
-              className="text-foreground font-medium underline underline-offset-4"
-            >
-              Starter packs
-            </Link>
-            .
-          </>
-        ) : null}
-      </p>
-    </div>
+        Starter packs
+      </Link>
+      .
+    </>
   );
 }
 
@@ -342,8 +210,8 @@ function NewListContents({
             />
           </TabsContent>
           <TabsContent value="tmdb_chart" className="mt-3">
-            <ChartTab
-              isServer={isServer}
+            <TMDBChartField
+              note={isServer ? <StarterPacksNote /> : undefined}
               chart={list?.source === "tmdb_chart" ? list.chart : null}
               onChart={(chart) =>
                 follow(chartPick(chart, templates, scopeKind), {
@@ -485,39 +353,6 @@ const ONLY_KIND_REASON: Record<string, string> = {
   series: "This list only has TV shows.",
 };
 
-/** "mdblist.com/lists/u/top": a list link as the source card shows it. */
-function shownLink(link: string) {
-  return link
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/json$/, "");
-}
-
-/** What a saved list follows, as one line, with the button that changes it. */
-function SourceCard({
-  title,
-  detail,
-  action,
-  onChange,
-}: {
-  title: string;
-  detail: string;
-  action: string;
-  onChange: () => void;
-}) {
-  return (
-    <div className="bg-muted/40 flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
-      <div className="grid min-w-0 flex-1 gap-0.5">
-        <span className="text-[14px] font-semibold">{title}</span>
-        <span className="text-muted-foreground truncate text-[13px]">{detail}</span>
-      </div>
-      <Button type="button" size="sm" variant="outline" onClick={onChange}>
-        {action}
-      </Button>
-    </div>
-  );
-}
-
 /** A list followed by its link: the link, and Change link to paste another. */
 function LinkSource({
   source,
@@ -630,7 +465,11 @@ function TMDBSource({
         </TabsTrigger>
       </TabsList>
       <TabsContent value="tmdb_chart" className="mt-3">
-        <ChartTab isServer chart={list.chart ?? null} onChart={(chart) => onChange({ chart })} />
+        <TMDBChartField
+          note={<StarterPacksNote />}
+          chart={list.chart ?? null}
+          onChart={(chart) => onChange({ chart })}
+        />
       </TabsContent>
       <TabsContent value="tmdb_list" className="mt-3">
         <TMDBListURLField

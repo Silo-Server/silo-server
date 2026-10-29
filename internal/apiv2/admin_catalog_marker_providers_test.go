@@ -15,7 +15,7 @@ type fakeAdminMarkerProviders struct {
 }
 
 func (f *fakeAdminMarkerProviders) ListMarkerProviders(context.Context) ([]handlers.MarkerProviderConfigView, error) {
-	return []handlers.MarkerProviderConfigView{{Provider: "plugin:7:markers", PluginInstallationID: 7, FetchEnabled: true, ContributeMinConfidence: 0.8}}, nil
+	return []handlers.MarkerProviderConfigView{{Provider: "plugin:7:markers", PluginInstallationID: 7, FetchEnabled: true, FetchMinConfidence: 0.4, ContributeMinConfidence: 0.8}}, nil
 }
 func (f *fakeAdminMarkerProviders) UpdateMarkerProvider(_ context.Context, p string, b handlers.MarkerProviderUpdate) (handlers.MarkerProviderConfigView, error) {
 	f.calls++
@@ -38,17 +38,20 @@ func TestAdminMarkerProvidersTransport(t *testing.T) {
 	h := newTestHandler(t, deps)
 	path := Prefix + "/admin/markers/providers"
 	rec := do(t, h, "GET", path, "", bearer(adminToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"plugin_installation_id":"7"`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"plugin_installation_id":"7"`) || !strings.Contains(rec.Body.String(), `"fetch_min_confidence":0.4`) {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
-	rec = do(t, h, "PUT", path+"/plugin%3A7%3Amarkers", `{"fetch_enabled":false,"fetch_priority":0,"contribute_min_confidence":null}`, bearer(adminToken))
-	if rec.Code != 200 || f.provider != "plugin:7:markers" || f.update.FetchEnabled == nil || *f.update.FetchEnabled || f.update.FetchPriority == nil || *f.update.FetchPriority != 0 || f.update.ContributeMinConfidence != nil {
+	rec = do(t, h, "PUT", path+"/plugin%3A7%3Amarkers", `{"fetch_enabled":false,"fetch_priority":0,"fetch_min_confidence":0.5,"contribute_min_confidence":null}`, bearer(adminToken))
+	if rec.Code != 200 || f.provider != "plugin:7:markers" || f.update.FetchEnabled == nil || *f.update.FetchEnabled || f.update.FetchPriority == nil || *f.update.FetchPriority != 0 ||
+		f.update.FetchMinConfidence == nil || *f.update.FetchMinConfidence != 0.5 || f.update.ContributeMinConfidence != nil {
 		t.Fatalf("update: %d %s %+v", rec.Code, rec.Body, f)
 	}
 	before := f.calls
-	rec = do(t, h, "PUT", path+"/p", `{"contribute_min_confidence":1.1}`, bearer(adminToken))
-	if rec.Code != 422 || f.calls != before {
-		t.Fatalf("invalid: %d %s", rec.Code, rec.Body)
+	for _, body := range []string{`{"contribute_min_confidence":1.1}`, `{"fetch_min_confidence":-0.1}`} {
+		rec = do(t, h, "PUT", path+"/p", body, bearer(adminToken))
+		if rec.Code != 422 || f.calls != before {
+			t.Fatalf("invalid %s: %d %s", body, rec.Code, rec.Body)
+		}
 	}
 	for _, method := range []string{"PUT", "POST"} {
 		suffix := "/p"

@@ -78,7 +78,10 @@ func registerPersonalAPIKeys(reg *Registry) {
 		return out, nil
 	})
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, op(http.MethodGet, "/api-keys", "listPersonalAPIKeys"), func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
+	list := op(http.MethodGet, "/api-keys", "listPersonalAPIKeys")
+	// An API key cannot list keys: 403 (personalAPIKeyAccount).
+	list.Errors = append(list.Errors, http.StatusForbidden)
+	Register(reg, list, func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p

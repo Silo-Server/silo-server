@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -238,7 +239,7 @@ func (p *Provider) newLookup(ctx context.Context) *sidecarLookup {
 // sidecars, so that is unavailable, not "no NFO". Like the scanner, it
 // follows symlinks and counts only a regular file, never a directory.
 func mediaPresent(file string) error {
-	info, err := os.Stat(file)
+	info, err := fspath.Stat(file)
 	if err != nil {
 		return unavailable(file, err)
 	}
@@ -267,7 +268,7 @@ func anyMediaPresent(dir string, files []string) error {
 		}
 		if err == nil {
 			// A folder that can't be reached answers for every file in it.
-			if _, dirErr := os.Stat(dir); dirErr != nil {
+			if _, dirErr := fspath.Stat(dir); dirErr != nil {
 				return unavailable(dir, dirErr)
 			}
 		}
@@ -397,7 +398,7 @@ func (l *sidecarLookup) names(dir, name string) ([]string, error) {
 // but not list gives a nil listing, so the exact candidate names are still
 // tried.
 func (p *Provider) listDir(dir string) (*dirListing, error) {
-	info, err := os.Stat(dir)
+	info, err := fspath.Stat(dir)
 	if err != nil {
 		return nil, unavailable(dir, err)
 	}
@@ -409,7 +410,7 @@ func (p *Provider) listDir(dir string) (*dirListing, error) {
 		return listing, nil
 	}
 	listedAt := time.Now()
-	entries, err := os.ReadDir(dir)
+	entries, err := fspath.ReadDir(dir)
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		return nil, nil
@@ -440,7 +441,7 @@ func (p *Provider) listDir(dir string) (*dirListing, error) {
 // it confirms the opened file is the one it checked. A file that does not
 // parse is (nil, nil), so the caller falls through to the next candidate.
 func (l *sidecarLookup) load(path string) (*parsedNFO, error) {
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		if isAbsent(err) {
 			return nil, nil
@@ -492,7 +493,7 @@ func (l *sidecarLookup) load(path string) (*parsedNFO, error) {
 // open, whose earlier version is still read whole, and the next pass sees
 // the save.
 func readNFOFile(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	f, err := fspath.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if errors.Is(err, syscall.ELOOP) {
 		return nil, errNFOReplaced
 	}

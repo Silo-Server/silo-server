@@ -100,6 +100,13 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	req.Background = true
 	result, err := runner.Run(r.Context(), req)
 	if err != nil {
+		if r.Context().Err() == nil && trickplay.InputUnreadable(err) {
+			// This node's ffmpeg cannot open a file that passed the path
+			// check, as with a permission problem here: no fault of the
+			// file's content, so the API server does not count a failure.
+			writeTrickplayError(w, http.StatusUnprocessableEntity, trickplay.ExtractError{Reason: trickplay.InputUnreadableReason, Message: err.Error()})
+			return
+		}
 		cause := mediasample.Classify(err)
 		writeTrickplayError(w, http.StatusUnprocessableEntity, trickplay.ExtractError{Reason: string(cause), Permanent: cause.Permanent(), Message: err.Error()})
 		return

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -349,6 +352,76 @@ func TestItemsViewsPresentationControls(t *testing.T) {
 					t.Fatal("user data controls ignored")
 				}
 			})
+		}
+	}
+}
+
+// TestEpisodeOnlyBrowseSpansEverySeries pins that IncludeItemTypes=Episode with
+// no series or season parent pages the episode browse across every series,
+// scoped to the ParentId library, instead of the media_items browse, which holds
+// no episodes; and that /Items/Counts counts episodes the same way.
+func TestEpisodeOnlyBrowseSpansEverySeries(t *testing.T) {
+	codec := NewResourceIDCodec()
+	newHandler := func(repo *boundedEpisodeContractRepo) *ItemsHandler {
+		return &ItemsHandler{catalogUserState: true, content: &itemCountsContentService{totals: map[string]int{"movie": 3, "series": 2}}, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now), accessFilter: func(context.Context, int, string) catalog.AccessFilter {
+			return catalog.AccessFilter{AllowedLibraryIDs: []int{3}}
+		}}
+	}
+
+	repo := &boundedEpisodeContractRepo{}
+	library := codec.EncodeIntID(EncodedIDLibrary, 3)
+	// Jellyfin Web's Episodes tab sorts by SeriesSortName,SortName; an
+	// episode's SortName is its season and episode number, so the browse keeps
+	// its series order instead of sorting by episode title.
+	result := performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&ParentId="+library+"&SortBy=SeriesSortName,SortName&MinPremiereDate=2024-01-01&StartIndex=2&Limit=1")
+	if repo.seriesID != "" || repo.filters.LibraryID != 3 || repo.filters.Offset != 2 || repo.filters.Limit != 1 || repo.filters.Sort != "" || repo.filters.MinPremiereDate != "2024-01-01" || !repo.includeTotal {
+		t.Fatalf("episode browse scope = series %q filters %+v includeTotal %v", repo.seriesID, repo.filters, repo.includeTotal)
+	}
+	if result.TotalRecordCount != 6 {
+		t.Fatalf("episode page total = %d, want the episode browse's 6", result.TotalRecordCount)
+	}
+	if !slices.Equal(repo.access.AllowedLibraryIDs, []int{3}) {
+		t.Fatalf("episode browse access = %v, want it narrowed to the ParentId library", repo.access.AllowedLibraryIDs)
+	}
+	// Name, unlike SortName, sorts by episode title, as Jellyfin's NameComparer does.
+	repo = &boundedEpisodeContractRepo{}
+	performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&SortBy=Name")
+	if repo.filters.Sort != catalog.BrowseSortTitle {
+		t.Fatalf("SortBy=Name episode browse sort = %q, want %q", repo.filters.Sort, catalog.BrowseSortTitle)
+	}
+
+	// Episodes are access-checked through their series, which may also sit in
+	// a library the session can see, so a ParentId library the session cannot
+	// see never reaches the browse.
+	repo = &boundedEpisodeContractRepo{}
+	result = performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&ParentId="+codec.EncodeIntID(EncodedIDLibrary, 4))
+	if repo.filters.LibraryID != 0 || result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("forbidden library browse = filters %+v total %d", repo.filters, result.TotalRecordCount)
+	}
+
+	// Favorites are joined to media_items too, so an episode-only favorite
+	// browse takes the episode browse as well.
+	repo = &boundedEpisodeContractRepo{}
+	result = performItemsRequest(t, newHandler(repo), "/Items?IncludeItemTypes=Episode&Recursive=true&IsFavorite=true&Limit=1")
+	if repo.seriesID != "" || !repo.filters.IsFavorite || result.TotalRecordCount != 6 {
+		t.Fatalf("favorite episode browse = series %q filters %+v total %d", repo.seriesID, repo.filters, result.TotalRecordCount)
+	}
+
+	for _, favorite := range []bool{false, true} {
+		repo := &boundedEpisodeContractRepo{}
+		req := httptest.NewRequest(http.MethodGet, "/Items/Counts?IsFavorite="+strconv.FormatBool(favorite), nil)
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+		rec := httptest.NewRecorder()
+		newHandler(repo).HandleItemCounts(rec, req)
+		var counts itemCountsDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &counts); err != nil {
+			t.Fatalf("decode ItemCounts: %v; body=%s", err, rec.Body.String())
+		}
+		if repo.seriesID != "" || repo.filters.Limit != 0 || repo.filters.IsFavorite != favorite || !repo.includeTotal {
+			t.Fatalf("favorite=%v episode count query = series %q filters %+v", favorite, repo.seriesID, repo.filters)
+		}
+		if counts.EpisodeCount != 6 || counts.ItemCount != 3+2+6 {
+			t.Fatalf("favorite=%v ItemCounts = %+v, want 6 episodes of 11 items", favorite, counts)
 		}
 	}
 }

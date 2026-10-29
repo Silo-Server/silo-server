@@ -60,6 +60,7 @@ const (
 	metaCreateOnly      = "silo.create_only"
 	metaRetrySafety     = "silo.retry_safety"
 	metaDeprecation     = "silo.deprecation"
+	metaBlankBodyAbsent = "silo.blank_body_absent"
 	// metaIdentityOnly marks an operation whose output declares an ETag: its
 	// responses are served identity-encoded (IdentityEncoded), so a request
 	// that forbids identity is refused up front (encodingGuard).
@@ -216,6 +217,12 @@ type Operation struct {
 	// Deprecation retires the operation through the RFC 9745 / RFC 8594
 	// header flow (see Deprecation). Nil means not deprecated.
 	Deprecation *Deprecation
+	// BlankBodyIsAbsent, on an operation with an optional body, treats an
+	// empty or whitespace-only body as no body whatever its Content-Type. It
+	// is for an operation that gained an optional body after clients were
+	// already calling it bodiless, so those calls keep working; only a
+	// non-blank body must be application/json.
+	BlankBodyIsAbsent bool
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -288,6 +295,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaConditional] = op.Conditional
 	op.Metadata[metaCreateOnly] = op.CreateOnly
 	op.Metadata[metaRetrySafety] = string(op.RetrySafety)
+	op.Metadata[metaBlankBodyAbsent] = op.BlankBodyIsAbsent
 	if op.Deprecation != nil {
 		op.Metadata[metaDeprecation] = op.Deprecation
 	}

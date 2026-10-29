@@ -30,8 +30,8 @@ export function installationTier(installation: PluginInstallation): PluginTier {
 
 /**
  * The newer version an admin can install now. A version recorded before the
- * repository was removed or the community catalog was hidden can't be
- * applied, so it is not offered.
+ * repository was removed or disabled, or the community catalog was hidden,
+ * can't be applied, so it is not offered.
  */
 export function pendingUpdateVersion(installation: PluginInstallation): string | null {
   if (installationTier(installation) === "unverified" || installation.updates_paused) return null;

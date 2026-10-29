@@ -1,0 +1,139 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Create the PostgreSQL cluster on first start and refuse to open a data
+# directory written by another major version.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+# migrate-compose-stack moves an earlier install into place under this record
+# and removes it when done. What is in place while it exists may be half of an
+# interrupted move, which the next run sets aside and redoes, so anything Silo
+# wrote there now would be left behind. Silo's directories move with an
+# external database too, so this comes before the bundled PostgreSQL's check.
+if [[ -e /config/.compose-migration-pending ]]; then
+  cat >&2 <<'MSG'
+A move from the multi-container Compose stack into /config was interrupted
+(/config/.compose-migration-pending is present). Run `docker compose up -d`
+without --no-deps so the Compose file's postgres service can finish it.
+MSG
+  exit 1
+fi
+
+# With Silo's database elsewhere no cluster is created below, but the
+# migration still moves Silo's directories, so Silo waits for it the same way
+# under REQUIRE_COMPOSE_MIGRATION.
+if ! enabled postgres && truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
+  cat >&2 <<'MSG'
+The Compose file's postgres service has not yet checked SILO_DATA_ROOT for an
+earlier multi-container install to move here (/config/.compose-migration-checked
+is missing). Silo was likely started on its own, as `docker compose up -d
+--no-deps silo` does. Run `docker compose up -d` once without --no-deps; later
+updates can use --no-deps again.
+MSG
+  exit 1
+fi
+
+enabled postgres || exit 0
+export HOME=/config/postgres
+PGDATA=/config/postgres/data
+
+# /config/postgres belongs to the postgres account, so everything below it is
+# changed as that account: root following a symlink planted there would hand a
+# root-owned file to postgres. A data directory or version file that is itself
+# a link is not one this image wrote.
+if [[ -L "$PGDATA" || -L "$PGDATA/PG_VERSION" ]]; then
+  echo "$PGDATA or its PG_VERSION is a symbolic link; move the real data directory there" >&2
+  exit 1
+fi
+
+if [[ -e "$PGDATA/PG_VERSION" ]]; then
+  # Read as root, before any ownership changes: a cluster another image wrote
+  # can belong to another uid, and a refused one is left as it was. The read
+  # follows no link and never blocks, and only a version number is printed.
+  have="$(read_small "$PGDATA/PG_VERSION" | tr -d '\n')"
+  if [[ ! "$have" =~ ^[0-9]+$ ]]; then
+    echo "$PGDATA/PG_VERSION does not hold a PostgreSQL major version number" >&2
+    exit 1
+  fi
+  if [[ "$have" != "$PG_MAJOR" ]]; then
+    cat >&2 <<MSG
+/config/postgres/data was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR.
+Start the previous image, dump the silo database with pg_dump, move the old data
+directory aside, then start this image and restore the dump. The user manual's
+omnibus image page describes the steps.
+MSG
+    exit 1
+  fi
+  # Fail early, before changing anything, when another container's server
+  # holds the lock. svc-postgres takes it for good before touching the pid file.
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  if ! s6-setuidgid postgres bash -c 'exec 9<>"$1" && flock -n 9' _ "$PG_LOCK"; then
+    echo "another PostgreSQL server is using $PGDATA; is a second container using this /config?" >&2
+    exit 1
+  fi
+  own_tree postgres postgres "$PGDATA"
+  s6-setuidgid postgres chmod 0700 "$PGDATA"
+else
+  # docker-compose.yml runs migrate-compose-stack before Silo to move an
+  # install of the multi-container stack here, and sets this so that Silo
+  # started without it (up --no-deps) does not create an empty cluster first.
+  # That step leaves the marker whenever it finishes, whatever it found.
+  if truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
+    cat >&2 <<'MSG'
+/config/postgres/data holds no database, and the Compose file's postgres service
+has not yet checked SILO_DATA_ROOT for an earlier multi-container install to move
+here (/config/.compose-migration-checked is missing). Silo was likely started on
+its own, as `docker compose up -d --no-deps silo` does. Run `docker compose up -d`
+once without --no-deps so the postgres service can move an earlier install;
+later updates can use --no-deps again.
+MSG
+    exit 1
+  fi
+  log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
+  # The directory can already exist, empty: a bind mount, or a directory
+  # created ahead of the first start.
+  s6-setuidgid postgres mkdir -p "$PGDATA"
+  own_tree postgres postgres "$PGDATA"
+  s6-setuidgid postgres chmod 0700 "$PGDATA"
+  s6-setuidgid postgres initdb -D "$PGDATA" -U silo \
+    --encoding=UTF8 --locale=en_US.UTF-8 \
+    --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+fi
+
+# The image's settings live in conf.d. A data directory this image did not
+# create, such as one moved from another PostgreSQL container, lacks the line
+# that loads them.
+if ! s6-setuidgid postgres grep -q "^include_dir = 'conf.d'" "$PGDATA/postgresql.conf"; then
+  printf "\ninclude_dir = 'conf.d'\n" | append_as postgres "$PGDATA/postgresql.conf"
+fi
+
+s6-setuidgid postgres install -d -m 0755 "$PGDATA/conf.d"
+s6-setuidgid postgres install -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"
+
+# With ENABLE_NODE_ACCESS, listen on every interface and let the silo role in
+# from the network with its password; Silo itself stays on the socket.
+network_conf="$PGDATA/conf.d/01-node-access.conf"
+if [[ -e "$STATE_DIR/postgres.network" ]]; then
+  printf "# Written by the Silo omnibus image while ENABLE_NODE_ACCESS is on.\nlisten_addresses = '*'\n" |
+    write_as postgres "$network_conf"
+else
+  s6-setuidgid postgres rm -f "$network_conf"
+fi
+
+# pg_hba.conf belongs to the image too. A data directory from the official
+# PostgreSQL image trusts every local connection, which here would let any
+# account in the container sign in as the superuser.
+# Without the network rule even with node access on: init-postgres-db adds it
+# once the role has its current password, so a rotated-out password never
+# reaches a remote login.
+(umask 077 && write_as postgres "$PGDATA/pg_hba.conf") <<'HBA'
+# Written by the Silo omnibus image on every start; edits do not survive.
+local   all          all                 peer
+host    all          all   127.0.0.1/32  scram-sha-256
+host    all          all   ::1/128       scram-sha-256
+local   replication  all                 peer
+host    replication  all   127.0.0.1/32  scram-sha-256
+host    replication  all   ::1/128       scram-sha-256
+HBA
+s6-setuidgid postgres chmod 0600 "$PGDATA/pg_hba.conf"

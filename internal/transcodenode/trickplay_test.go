@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,6 +51,28 @@ func sheetsRequestJSON(t *testing.T, input string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// TestTrickplayExtractReportsUnreadableInput checks that a file this node's
+// ffmpeg cannot open answers input_unreadable, so the API server does not
+// count it against the file.
+func TestTrickplayExtractReportsUnreadableInput(t *testing.T) {
+	// ffmpeg stands in as a script that fails to open its input, so the
+	// test needs no ffmpeg on the host.
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\necho '/media/movie.mkv: Permission denied' >&2\nexit 1\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := newTrickplayTestServer(t, ffmpeg)
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, "/media/movie.mkv"))
+	var failure trickplay.ExtractError
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity || failure.Reason != trickplay.InputUnreadableReason || failure.Permanent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestTrickplayExtractRefuses(t *testing.T) {

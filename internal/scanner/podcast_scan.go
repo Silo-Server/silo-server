@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -42,7 +42,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entries, err := os.ReadDir(root)
+		entries, err := fspath.ReadDir(root)
 		if err != nil {
 			slog.WarnContext(ctx, "podcast scan: read root failed", "component", "scanner", "root", root, "error", err)
 			attempted++
@@ -127,7 +127,7 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 	// Lstat, like the full scan's directory listing: a full scan only treats
 	// real directories under the root as shows, so a subtree scan must not
 	// index a symlink or a loose file that the next full scan would retire.
-	info, err := os.Lstat(showPath)
+	info, err := fspath.Lstat(showPath)
 	if err != nil {
 		// Like the other subtree scans, a scope that cannot be inspected is
 		// left alone rather than reconciled; a vanished show is retired by the
@@ -426,7 +426,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
 					slog.ErrorContext(ctx, "podcast scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue

@@ -18,7 +18,7 @@ type SubtitleDownloadBody struct {
 	MediaFileID     ID      `json:"media_file_id"`
 	Provider        string  `json:"provider" minLength:"1" maxLength:"128"`
 	SubtitleID      ID      `json:"subtitle_id"`
-	Language        string  `json:"language" minLength:"1" maxLength:"64"`
+	Language        string  `json:"language" minLength:"1" maxLength:"64" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"Language of the chosen result exactly as searchSubtitles returned it (BCP 47)"`
 	ReleaseName     string  `json:"release_name" maxLength:"4096"`
 	Score           float64 `json:"score"`
 	HearingImpaired bool    `json:"hearing_impaired"`

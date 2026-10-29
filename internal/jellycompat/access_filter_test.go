@@ -3,7 +3,12 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"maps"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -74,6 +79,144 @@ func TestScopeAccessFilterFailsClosed(t *testing.T) {
 
 	if filter.AllowedLibraryIDs == nil || len(filter.AllowedLibraryIDs) != 0 {
 		t.Fatalf("AllowedLibraryIDs = %v, want empty non-nil allowlist (deny all)", filter.AllowedLibraryIDs)
+	}
+}
+
+// countingScopeResolver hands out a fresh scope() per call, or err.
+type countingScopeResolver struct {
+	mu    sync.Mutex
+	calls int
+	scope func() access.Scope
+	err   error
+}
+
+func (r *countingScopeResolver) Resolve(context.Context, access.ResolveInput) (access.Scope, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if r.err != nil {
+		return access.Scope{}, r.err
+	}
+	return r.scope(), nil
+}
+
+func (r *countingScopeResolver) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// TestRequestScopeResolvesOncePerRequest: within one authenticated compat
+// request the access filter and the playback bitrate cap share one scope
+// resolution, edits a caller makes to its filter never reach the next caller,
+// and anything outside that request's own viewer resolves as before.
+func TestRequestScopeResolvesOncePerRequest(t *testing.T) {
+	restricted := func() access.Scope {
+		return access.Scope{AllowedLibraryIDs: []int{2, 19}, DisabledLibraryIDs: []int{4}, HiddenLibraryIDs: []int{5}, MetadataLanguageOverrides: map[string]string{"no": "en"}}
+	}
+	session := &Session{StreamAppUserID: 7, ProfileID: "p1"}
+	newFilter := func(resolver ScopeResolver) AccessFilterResolver {
+		return compatAccessFilterResolver(NewScopeAccessFilter(resolver))
+	}
+
+	t.Run("one resolution per request", func(t *testing.T) {
+		resolver := &countingScopeResolver{scope: restricted}
+		filter, playbackScope := newFilter(resolver), rememberRequestScope(resolver)
+		handler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			for range 2 {
+				got := filter(r.Context(), 7, "p1")
+				if !slices.Equal(got.AllowedLibraryIDs, []int{2, 19}) || !slices.Equal(got.DisabledLibraryIDs, []int{4}) || !maps.Equal(got.MetadataLanguageOverrides, map[string]string{"no": "en"}) {
+					t.Errorf("filter = %+v, want the resolved scope unchanged", got)
+				}
+				got.AllowedLibraryIDs[0], got.DisabledLibraryIDs[0], got.MetadataLanguageOverrides["no"] = 99, 99, "fr"
+			}
+			scope, err := playbackScope.Resolve(r.Context(), compatScopeInput(7, "p1"))
+			if err != nil || !slices.Equal(scope.AllowedLibraryIDs, []int{2, 19}) || !slices.Equal(scope.HiddenLibraryIDs, []int{5}) {
+				t.Errorf("playback scope = %+v, %v", scope, err)
+			}
+		})
+		serveWithSessionContext(handler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), session)
+		if got := resolver.count(); got != 1 {
+			t.Fatalf("one request resolved %d times, want 1", got)
+		}
+		serveWithSessionContext(handler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), session)
+		if got := resolver.count(); got != 2 {
+			t.Fatalf("two requests resolved %d times, want 2: the scope must not outlive its request", got)
+		}
+	})
+
+	t.Run("another viewer resolves on its own", func(t *testing.T) {
+		resolver := &countingScopeResolver{scope: restricted}
+		filter, ctx := newFilter(resolver), withRequestScope(context.Background(), session)
+		for _, profileID := range []string{"p2", "p1", "p2", "p1"} {
+			filter(ctx, 7, profileID)
+		}
+		if got := resolver.count(); got != 3 {
+			t.Fatalf("resolved %d times, want 3: only the session's own profile is remembered", got)
+		}
+		if _, err := rememberRequestScope(resolver).Resolve(ctx, access.ResolveInput{UserID: 7, ProfileID: "p1", SkipPINVerification: true, ContentAccessOnly: true}); err != nil || resolver.count() != 4 {
+			t.Fatalf("a different resolve input reused the remembered scope (calls=%d, err=%v)", resolver.count(), err)
+		}
+	})
+
+	t.Run("a failure is not remembered", func(t *testing.T) {
+		resolver := &countingScopeResolver{scope: restricted, err: errors.New("database unavailable")}
+		filter, ctx := newFilter(resolver), withRequestScope(context.Background(), session)
+		if got := filter(ctx, 7, "p1"); got.AllowedLibraryIDs == nil || len(got.AllowedLibraryIDs) != 0 {
+			t.Fatalf("failed resolution AllowedLibraryIDs = %#v, want deny all", got.AllowedLibraryIDs)
+		}
+		resolver.err = nil
+		for range 2 {
+			if got := filter(ctx, 7, "p1"); !slices.Equal(got.AllowedLibraryIDs, []int{2, 19}) {
+				t.Fatalf("AllowedLibraryIDs after recovery = %#v, want [2 19]", got.AllowedLibraryIDs)
+			}
+		}
+		if got := resolver.count(); got != 2 {
+			t.Fatalf("resolved %d times, want 2: retry the failure once, then remember", got)
+		}
+	})
+
+	// A nil allowlist grants every library and an empty one grants none, so
+	// the remembered copy must keep which one it was.
+	for name, allowed := range map[string][]int{"unrestricted": nil, "deny all": {}} {
+		t.Run(name+" allowlist keeps its meaning", func(t *testing.T) {
+			resolver := &countingScopeResolver{scope: func() access.Scope { return access.Scope{AllowedLibraryIDs: slices.Clone(allowed)} }}
+			filter, ctx := newFilter(resolver), withRequestScope(context.Background(), session)
+			for range 2 {
+				if got := filter(ctx, 7, "p1").AllowedLibraryIDs; (got == nil) != (allowed == nil) || len(got) != 0 {
+					t.Fatalf("AllowedLibraryIDs = %#v, want %#v", got, allowed)
+				}
+			}
+		})
+	}
+}
+
+// TestCloneScopeCopiesReferenceFields: every top-level slice, map, and pointer
+// field of a remembered scope is copied, including ones added to access.Scope
+// later.
+func TestCloneScopeCopiesReferenceFields(t *testing.T) {
+	var scope access.Scope
+	in := reflect.ValueOf(&scope).Elem()
+	for i := range in.NumField() {
+		field := in.Field(i)
+		switch field.Kind() {
+		case reflect.Slice:
+			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		case reflect.Map:
+			field.Set(reflect.MakeMap(field.Type()))
+			field.SetMapIndex(reflect.Zero(field.Type().Key()), reflect.Zero(field.Type().Elem()))
+		case reflect.Pointer:
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+	}
+	out := reflect.ValueOf(cloneScope(scope))
+	for i := range in.NumField() {
+		switch in.Field(i).Kind() {
+		case reflect.Slice, reflect.Map, reflect.Pointer:
+			if out.Field(i).Pointer() == in.Field(i).Pointer() {
+				t.Errorf("cloneScope shares access.Scope.%s with its input", in.Type().Field(i).Name)
+			}
+		}
 	}
 }
 

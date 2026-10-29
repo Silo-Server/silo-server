@@ -36,10 +36,10 @@ const (
 func creditsProfile() matchProfile {
 	limits := creditsLimitsFor(false)
 	return matchProfile{
-		MinSeconds:             limits.minSeconds,
-		MaxSeconds:             limits.maxSeconds,
-		AdjustedMinSeconds:     limits.minSeconds,
-		AdjustedMaxSeconds:     limits.maxSeconds,
+		MinSeconds:             limits.MinSeconds,
+		MaxSeconds:             limits.MaxSeconds,
+		AdjustedMinSeconds:     limits.MinSeconds,
+		AdjustedMaxSeconds:     limits.MaxSeconds,
 		ShortSeconds:           creditsShortSeconds,
 		SeasonToleranceSeconds: creditsSeasonToleranceSeconds,
 		Algorithm:              CreditsAudioAlgorithm,

@@ -82,7 +82,15 @@ type DiscoverParams struct {
 	WithRuntimeGte   int
 	WithRuntimeLte   int
 	OriginalLanguage string
-	Limit            int
+	// WithKeywords, WithOriginCountry (ISO 3166-1 alpha-2) and
+	// WithWatchProviders match any of their values. WatchRegion (ISO 3166-1
+	// alpha-2) is where the watch providers stream; TMDB requires it with
+	// them.
+	WithKeywords       []int
+	WithOriginCountry  []string
+	WithWatchProviders []int
+	WatchRegion        string
+	Limit              int
 }
 
 // ExternalIDs holds cross-references used for matching collection entries.
@@ -129,9 +137,9 @@ type collectionResponsePart struct {
 // listResponse is the wire format of one /list/{id} page. Unlike the
 // discovery endpoints, a list pages its entries under "items".
 type listResponse struct {
-	Page       int              `json:"page"`
-	TotalPages int              `json:"total_pages"`
-	Items      []TrendingResult `json:"items"`
+	Page       int                        `json:"page"`
+	TotalPages int                        `json:"total_pages"`
+	Items      []mediaMultiSearchResponse `json:"items"`
 }
 
 type mediaMovieResponse struct {
@@ -175,6 +183,22 @@ type mediaMultiSearchResponse struct {
 	FirstAirDate string  `json:"first_air_date"`
 	Popularity   float64 `json:"popularity"`
 	VoteAverage  float64 `json:"vote_average"`
+}
+
+// asMovie and asTV read a mixed list or trending entry as the movie or show
+// it is.
+func (m mediaMultiSearchResponse) asMovie() mediaMovieResponse {
+	return mediaMovieResponse{
+		ID: m.ID, Title: m.Title, Overview: m.Overview, PosterPath: m.PosterPath, BackdropPath: m.BackdropPath,
+		ReleaseDate: m.ReleaseDate, Popularity: m.Popularity, VoteAverage: m.VoteAverage,
+	}
+}
+
+func (m mediaMultiSearchResponse) asTV() mediaTVResponse {
+	return mediaTVResponse{
+		ID: m.ID, Name: m.Name, Overview: m.Overview, PosterPath: m.PosterPath, BackdropPath: m.BackdropPath,
+		FirstAirDate: m.FirstAirDate, Popularity: m.Popularity, VoteAverage: m.VoteAverage,
+	}
 }
 
 type apiError struct {

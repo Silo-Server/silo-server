@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // narratorSuffixRE matches a trailing "read by X" / "(Read by X)" /
@@ -123,7 +125,7 @@ type parsedAudiobookFile struct {
 // allowedPaths is the inventory accepted by discovery, including ignore rules.
 // A nil inventory allows every audio file in the folder.
 func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
-	entries, err := os.ReadDir(folderPath)
+	entries, err := fspath.ReadDir(folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// The folder was renamed or deleted between the scan walk and
@@ -159,7 +161,7 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	book := &parsedAudiobook{}
 
 	if len(audioFiles) == 1 {
-		info, err := os.Stat(audioFiles[0])
+		info, err := fspath.Stat(audioFiles[0])
 		if err != nil {
 			return nil, fmt.Errorf("stat audiobook file %s: %w", audioFiles[0], err)
 		}
@@ -189,7 +191,7 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
 	for i, path := range audioFiles {
 		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		info, err := os.Stat(path)
+		info, err := fspath.Stat(path)
 		if err != nil {
 			return nil, fmt.Errorf("stat audiobook file %s: %w", path, err)
 		}
@@ -205,7 +207,7 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			Path: path,
 			Chapters: []ChapterInfo{{
 				Index:        i,
-				Title:        stem,
+				Title:        fspath.Display(stem),
 				StartSeconds: 0,
 				EndSeconds:   float64(probed.Duration),
 			}},
@@ -297,7 +299,7 @@ func deriveAudiobookTitleFromFilesystem(folderPath string, audioFiles []string) 
 		candidates = append(candidates, strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)))
 	}
 	for _, candidate := range candidates {
-		if cleaned := cleanAudiobookFilesystemTitle(candidate); cleaned != "" {
+		if cleaned := cleanAudiobookFilesystemTitle(fspath.Display(candidate)); cleaned != "" {
 			return cleaned
 		}
 	}
