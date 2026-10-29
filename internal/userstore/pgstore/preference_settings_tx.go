@@ -54,6 +54,20 @@ func (s *PostgresUserStore) WithPreferenceSettingsTransaction(
 	return nil
 }
 
+var _ userstore.AuditedProfileWriter = (*preferenceSettingsTx)(nil)
+
+// AuditTx is the PostgreSQL transaction WithPreferenceSettingsTransaction
+// runs the writer in.
+func (tx *preferenceSettingsTx) AuditTx() pgx.Tx {
+	pgTx, _ := tx.exec.(pgx.Tx)
+	return pgTx
+}
+
+// GetProfile reads a profile inside the writer's transaction.
+func (tx *preferenceSettingsTx) GetProfile(ctx context.Context, id string) (*userstore.Profile, error) {
+	return getProfile(ctx, tx.exec, tx.userID, id)
+}
+
 func (tx *preferenceSettingsTx) ListProfileIDs(ctx context.Context) ([]string, error) {
 	rows, err := tx.exec.Query(ctx,
 		"SELECT id FROM user_profiles WHERE user_id = $1 ORDER BY created_at, id", tx.userID)

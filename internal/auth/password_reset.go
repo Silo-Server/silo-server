@@ -60,34 +60,37 @@ func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs 
 		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
-	if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
+	if _, err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	if err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
+	if _, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	return withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	_, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	return err
 }
 
-func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	if _, err := tx.Exec(ctx, `
+func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
 		UPDATE abs_sessions SET revoked_at = NOW()
-		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs); err != nil {
-		return fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
+		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // deleteJellyfinSessionsInTransaction deletes the accounts' stored
 // Jellyfin-compatible sessions, so no replica can load one again once the
 // transaction commits. Persistent compatibility lookups check the stored row;
 // the OnUserSessionsRevoked hook also discards replicas' cached copies.
-func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs); err != nil {
-		return fmt.Errorf("deleting Jellyfin-compatible sessions: %w", err)
+func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("deleting Jellyfin-compatible sessions: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // NewLinkToken mints a raw bearer token for an emailed or copied account link
