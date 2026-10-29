@@ -307,7 +307,7 @@ export default function WatchPartyHub() {
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-12 px-6 py-12 sm:px-8">
       <header className="flex flex-col gap-3">
         <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-          Watch Party
+          Weflix Party
         </p>
         <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
           Watch together, wherever everyone is.
