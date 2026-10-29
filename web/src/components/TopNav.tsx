@@ -60,6 +60,13 @@ import type { ResolvedPrimaryMenuLink } from "@/components/primaryMenuLinks";
 const TABLET_QUERY = "(min-width: 48rem)";
 
 /**
+ * Menu destinations that sit after the divider, alongside Discover: the ones
+ * about what is coming up rather than what to browse. Identified by the key
+ * `menuItemKey` gives a builtin.
+ */
+const TRAILING_DESTINATIONS: ReadonlySet<string> = new Set(["builtin:calendar"]);
+
+/**
  * Whether the viewport is wide enough for the bar to hold the links and for the
  * account menu to open as a dropdown. Below it, both move into the phone
  * arrangement.
@@ -270,7 +277,7 @@ export default function TopNav() {
     <button
       type="button"
       aria-label={`${profile?.name ?? user?.username ?? "User"} account menu`}
-      className="hover:bg-accent/60 focus-visible:ring-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-transform active:scale-[0.98] focus-visible:ring-2 focus-visible:outline-none md:h-10 md:w-10"
+      className="hover:bg-accent/60 focus-visible:ring-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-transform focus-visible:ring-2 focus-visible:outline-none active:scale-[0.98] md:h-10 md:w-10"
     >
       <Avatar className="h-8 w-8 md:h-7 md:w-7">
         {profile?.avatar_url ? <AvatarImage src={profile.avatar_url} alt={profile.name} /> : null}
@@ -297,21 +304,36 @@ export default function TopNav() {
     </ViewTransitionLink>
   ) : null;
 
+  // The bar reads as two groups: what to browse, then what is coming up.
+  // Calendar is a primary-menu builtin, so it arrives in `links` and is moved
+  // here to sit with Discover after the divider.
+  const browseLinks = useMemo(
+    () => links.filter((link) => !TRAILING_DESTINATIONS.has(link.key)),
+    [links],
+  );
+  const trailingLinks = useMemo(
+    () => links.filter((link) => TRAILING_DESTINATIONS.has(link.key)),
+    [links],
+  );
+
+  const renderMenuLink = (link: ResolvedPrimaryMenuLink) => (
+    <ViewTransitionLink
+      key={link.key}
+      to={link.href}
+      className={linkClass(isActive(link.href))}
+      aria-current={isActive(link.href) ? "page" : undefined}
+    >
+      {link.label}
+    </ViewTransitionLink>
+  );
+
   const navLinks = (
     <>
-      {links.map((link) => (
-        <ViewTransitionLink
-          key={link.key}
-          to={link.href}
-          className={linkClass(isActive(link.href))}
-          aria-current={isActive(link.href) ? "page" : undefined}
-        >
-          {link.label}
-        </ViewTransitionLink>
-      ))}
-      {discoverLink ? (
+      {browseLinks.map(renderMenuLink)}
+      {trailingLinks.length > 0 || discoverLink ? (
         <>
           <span className="bg-border mx-1 h-5 w-px shrink-0" aria-hidden="true" />
+          {trailingLinks.map(renderMenuLink)}
           {discoverLink}
         </>
       ) : null}
@@ -337,7 +359,12 @@ export default function TopNav() {
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-0.5 md:ml-0 md:gap-1">
-          <button type="button" onClick={openSearch} aria-label="Search" className={iconButtonClass}>
+          <button
+            type="button"
+            onClick={openSearch}
+            aria-label="Search"
+            className={iconButtonClass}
+          >
             <Search className="h-5 w-5" />
           </button>
           <ViewTransitionLink
