@@ -305,7 +305,7 @@ export default function TopNav() {
   const discoverLink = showRequestsNav ? (
     <ViewTransitionLink
       to="/requests"
-      className={`${linkClass(isActive("/requests"))} gap-1.5`}
+      className={`${linkClass(isActive("/requests"))} gap-3`}
       aria-current={isActive("/requests") ? "page" : undefined}
     >
       <Sparkles className="h-4 w-4 shrink-0" />
@@ -327,11 +327,17 @@ export default function TopNav() {
 
   const renderMenuLink = (link: ResolvedPrimaryMenuLink) => {
     const icon = MENU_LINK_ICONS[link.key];
+    // Joined from an array rather than interpolated: the icon needs its own
+    // class, and a missing separator there silently produces one dead class
+    // ("…accent/70gap-3") instead of a gap.
+    const className = [linkClass(isActive(link.href)), icon ? "gap-3" : ""]
+      .filter(Boolean)
+      .join(" ");
     return (
       <ViewTransitionLink
         key={link.key}
         to={link.href}
-        className={`${linkClass(isActive(link.href))}${icon ? "gap-1.5" : ""}`}
+        className={className}
         aria-current={isActive(link.href) ? "page" : undefined}
       >
         {icon}
