@@ -28,6 +28,8 @@ type localImageServiceFake struct {
 	applyLocalErr  error
 	plainImages    []metadata.RemoteImage
 	previewCalls   int
+	uploads        []metadata.ApplyUploadedItemImageRequest
+	uploadErr      error
 }
 
 func (f *localImageServiceFake) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
@@ -70,6 +72,17 @@ func (f *localImageServiceFake) ApplyItemImage(context.Context, metadata.ApplyIt
 func (f *localImageServiceFake) ApplyLocalItemImage(_ context.Context, req metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	f.applyLocal = append(f.applyLocal, req)
 	return nil, f.applyLocalErr
+}
+
+func (f *localImageServiceFake) ApplyUploadedItemImage(_ context.Context, req metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
+	f.uploads = append(f.uploads, req)
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	return &metadata.ApplyUploadedItemImageResult{
+		ApplyItemImageResult: metadata.ApplyItemImageResult{StoredPath: "local/series/series/ab12cd34/poster/original.webp", Thumbhash: "th-upload"},
+		SourcePath:           "upload://sha256:ab12cd34",
+	}, nil
 }
 
 func newLocalImageHandlerForTest(svc *localImageServiceFake) *AdminImageHandler {

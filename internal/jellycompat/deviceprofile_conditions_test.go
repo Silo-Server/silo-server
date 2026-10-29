@@ -78,6 +78,21 @@ func TestHLSRemuxDV8HDR10BaseLayerMatchesExplicitDOVIAndHDR10Declaration(t *test
 	}
 }
 
+// A DV 8.1 file whose HDR10 base layer also carries HDR10+ keeps the remux it
+// had before the scanner detected HDR10+.
+func TestHLSRemuxDV8HDR10BaseLayerAcceptsHDR10PlusBase(t *testing.T) {
+	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
+	version.VideoTracks[0].HDR10Plus = true
+	version.VideoTracks[0].VideoRangeType = "DOVIWithHDR10Plus"
+	profile := hlsRemuxDV8HDR10BaseLayerTestProfile([]ProfileCondition{
+		{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|HDR10Plus|HLG|DOVI", IsRequired: true},
+		{Condition: "EqualsAny", Property: "VideoCodecTag", Value: "hvc1|dvh1", IsRequired: true},
+	})
+	if !profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)) {
+		t.Fatal("DV8.1 source with HDR10+ in its base layer lost the explicit DOVI+HDR10 HLS remux")
+	}
+}
+
 func TestDV8HDR10BaseLayerDoesNotWidenOriginalMKVDirectPlay(t *testing.T) {
 	version := hlsRemuxDV8HDR10BaseLayerTestVersion()
 	profile := DeviceProfile{
@@ -190,6 +205,108 @@ func hlsRemuxDV8HDR10BaseLayerTestProfile(conditions []ProfileCondition) DeviceP
 	}
 }
 
+func TestHDR10PlusSatisfiesHDR10RangeConditions(t *testing.T) {
+	const (
+		hdr10Display = "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|DOVI|DOVIWithHDR10|DOVIWithHDR10Plus|HDR10Plus"
+		sdrDisplay   = hdr10Display + "|HDR10"
+	)
+	supportedRanges := func(ranges string) CodecProfile {
+		return CodecProfile{Type: "Video", Codec: "hevc", Conditions: []ProfileCondition{{
+			Condition: "EqualsAny", Property: "VideoRangeType", Value: ranges, IsRequired: true,
+		}}}
+	}
+	tests := []struct {
+		name           string
+		rangeType      string
+		rangeProfile   CodecProfile
+		wantDirectPlay bool
+		wantHLSRemux   bool
+	}{
+		{
+			name: "HDR10+ meets a positive list naming HDR10", rangeType: "HDR10Plus",
+			rangeProfile: supportedRanges("SDR|HDR10|HLG"), wantDirectPlay: true, wantHLSRemux: true,
+		},
+		{
+			name: "HDR10+ fails a positive list without HDR10", rangeType: "HDR10Plus",
+			rangeProfile: supportedRanges("SDR|HLG"),
+		},
+		{
+			name: "HDR10+ exclusion blocks direct play but not the copy", rangeType: "HDR10Plus",
+			rangeProfile: unsupportedRangeProfile("hevc", hdr10Display), wantHLSRemux: true,
+		},
+		{
+			name: "HDR10 exclusion blocks the HDR10+ copy", rangeType: "HDR10Plus",
+			rangeProfile: unsupportedRangeProfile("hevc", sdrDisplay),
+		},
+		{
+			name: "HDR10 meets a positive list naming HDR10", rangeType: "HDR10",
+			rangeProfile: supportedRanges("SDR|HDR10|HLG"), wantDirectPlay: true, wantHLSRemux: true,
+		},
+		{
+			name: "HDR10 is not satisfied by HDR10Plus", rangeType: "HDR10",
+			rangeProfile: supportedRanges("SDR|HDR10Plus|HLG"),
+		},
+		{
+			name: "HDR10 passes an HDR10+ exclusion", rangeType: "HDR10",
+			rangeProfile: unsupportedRangeProfile("hevc", hdr10Display), wantDirectPlay: true, wantHLSRemux: true,
+		},
+		{
+			name: "HDR10 fails an HDR10 exclusion", rangeType: "HDR10",
+			rangeProfile: unsupportedRangeProfile("hevc", sdrDisplay),
+		},
+		{
+			name: "DV 8.1 with HDR10+ meets a positive list naming DOVIWithHDR10", rangeType: "DOVIWithHDR10Plus",
+			rangeProfile: supportedRanges("SDR|HDR10|DOVIWithHDR10"), wantDirectPlay: true, wantHLSRemux: true,
+		},
+		{
+			name: "DV 8.1 with HDR10+ fails a positive list without DOVIWithHDR10", rangeType: "DOVIWithHDR10Plus",
+			rangeProfile: supportedRanges("SDR|HDR10|HLG"),
+		},
+		{
+			name: "DV 7 with HDR10+ meets a positive list naming DOVIWithEL", rangeType: "DOVIWithELHDR10Plus",
+			rangeProfile: supportedRanges("SDR|HDR10|DOVIWithEL"), wantDirectPlay: true, wantHLSRemux: true,
+		},
+		// A profile from before the HDR10+ range types excludes HDR10 alone.
+		{
+			name: "HDR10+ stays excluded by an exclusion naming only HDR10", rangeType: "HDR10Plus",
+			rangeProfile: unsupportedRangeProfile("hevc", "DOVI|DOVIWithHDR10|HDR10"),
+		},
+		{
+			name: "DV 8.1 with HDR10+ stays excluded by an exclusion naming only DOVIWithHDR10", rangeType: "DOVIWithHDR10Plus",
+			rangeProfile: unsupportedRangeProfile("hevc", "DOVI|DOVIWithHDR10"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version := hdr10PlusRangeTestVersion(tt.rangeType)
+			profile := DeviceProfile{
+				DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "hevc", AudioCodec: "eac3"}},
+				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "eac3"}},
+				CodecProfiles:       []CodecProfile{tt.rangeProfile},
+			}
+			if got := profile.SupportsDirectPlay(version); got != tt.wantDirectPlay {
+				t.Fatalf("SupportsDirectPlay = %v, want %v", got, tt.wantDirectPlay)
+			}
+			if got := profile.SupportsHLSRemuxForAudioStream(version, defaultAudioStreamIndex(version)); got != tt.wantHLSRemux {
+				t.Fatalf("SupportsHLSRemuxForAudioStream = %v, want %v", got, tt.wantHLSRemux)
+			}
+		})
+	}
+}
+
+// hdr10PlusRangeTestVersion is a 4K HEVC MKV without Dolby Vision whose
+// primary video reports rangeType.
+func hdr10PlusRangeTestVersion(rangeType string) catalog.FileVersion {
+	return catalog.FileVersion{
+		FileID: 1, Container: "mkv", CodecVideo: "hevc", CodecAudio: "eac3", HDR: true,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, BitDepth: 10,
+			HDR10Plus: rangeType == "HDR10Plus", VideoRangeType: rangeType,
+		}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}},
+	}
+}
+
 func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
 	baseVersion := catalog.FileVersion{
@@ -240,6 +357,51 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 				VideoRangeType: "DOVIWithEL",
 			}, "2160p"),
 			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus")},
+			wantDirectPlay:     false,
+			wantDirectStream:   false,
+			wantTranscoding:    true,
+			wantTranscodeAudio: false,
+		},
+		{
+			name: "hdr10 plus is direct playable when the client lists hdr10",
+			version: withVideoTrack(baseVersion, models.VideoTrack{
+				Codec:          "hevc",
+				Profile:        "Main 10",
+				Level:          153,
+				Width:          3840,
+				Height:         2160,
+				BitDepth:       10,
+				HDR10Plus:      true,
+				VideoRangeType: "HDR10Plus",
+			}, "2160p"),
+			codecProfiles: []CodecProfile{{
+				Type:  "Video",
+				Codec: "hevc",
+				Conditions: []ProfileCondition{{
+					Condition:  "EqualsAny",
+					Property:   "VideoRangeType",
+					Value:      "SDR|HDR10|HLG",
+					IsRequired: true,
+				}},
+			}},
+			wantDirectPlay:     true,
+			wantDirectStream:   true,
+			wantTranscoding:    true,
+			wantTranscodeAudio: false,
+		},
+		{
+			name: "hdr10 plus exclusion blocks direct play",
+			version: withVideoTrack(baseVersion, models.VideoTrack{
+				Codec:          "hevc",
+				Profile:        "Main 10",
+				Level:          153,
+				Width:          3840,
+				Height:         2160,
+				BitDepth:       10,
+				HDR10Plus:      true,
+				VideoRangeType: "HDR10Plus",
+			}, "2160p"),
+			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
 			wantDirectPlay:     false,
 			wantDirectStream:   false,
 			wantTranscoding:    true,

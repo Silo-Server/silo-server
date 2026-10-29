@@ -4,6 +4,7 @@
 .env
 .env.*
 docs/
+!docs/design/schemas/
 node_modules
 web/node_modules
 web/dist

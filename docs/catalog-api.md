@@ -4,6 +4,13 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## Recommendation limits
+
+`GET /api/v2/recommendations/because-watched/{item_id}` accepts `limit` from
+1 to 50 (default 20). The v1 bridge route clamps positive limits above 50
+to 50 and keeps its existing default of 50 for missing or invalid values.
+The shared service caps the limit before the engine expands its candidate queries.
+
 ## Section browsing
 
 Catalog reads with `source=section` resolve the row on the acting profile's
@@ -24,6 +31,14 @@ the row may hold more. Some engines produce fewer items than the cap
 hides them, as the row does. Each page request rebuilds the list, so a row
 whose source moves (trending over a sliding window) can shift between pages. The
 frozen `/api/v1` catalog keeps answering row-backed sections with no items.
+
+A Home or library row is the first page of its section: clients show a few cards
+in the row and open the full list here. To download only the cards a row shows,
+`listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
+which caps every row's item limit for that request. Send it only when
+`getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
+the parameter. See the home section of
+[the native API contract](architecture/api-contract.md) for the details.
 
 ## People search
 
@@ -358,6 +373,13 @@ header they resolve the profile's preferences alone. Clients that set
 device overrides should send the header so the detail page matches what playback
 picks.
 
+`effective_audio_track_index` does not know the playing device's capabilities.
+A playback start that names no audio track can play another track in the same
+language when the plan for this one converts its audio and the plan for that
+one does not
+(see "Omission is a request" in `docs/architecture/playback-protocol-v3.md`).
+The plan's `selected_tracks` names the track that plays.
+
 ## Episode files
 
 Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
@@ -569,21 +591,33 @@ Each rule is `{field, op, value}`; an operator a field does not list returns `42
 and so does a value of the wrong shape: a span not like `30d` or reaching back before
 PostgreSQL's earliest date (4714 BC), a non-numeric bound,
 a decade that is not a year from 10 on (decade 0 would catch every title with no
-year), a `title` value that is empty or not a string, or a
+year), a `title` or `show_title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
 
 | Operators | Fields | Value |
 | --- | --- | --- |
-| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title`, `show_title` | string, compared ignoring case; `%` and `_` match literally |
 | `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
 | `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
 | `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
 
+In the `episode` scope, `title` compares the episode title and `show_title`
+compares its parent show's title. Other item types match neither positive nor
+negative `show_title` rules. Combine `show_title`, `watched`, and `title` rules
+to select watched episodes of a show while excluding particular episode titles.
+`GET /api/v2/catalog/search/capabilities` advertises `show_title_rules: true`
+when the server accepts the field. Clients should offer it only in episode
+rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
+
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
 matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
-show's newest episode, so movies never match them. An episode row never matches
+show's newest episode with a file in a library, so movies never match them. An
+episode the metadata provider lists but no library has a file for does not count,
+even after its air date. The `last_air_date` sort follows the same rule. A show's
+`last_air_date` response field still reports its newest aired episode, with or
+without a file, so it can be later than the date the rule and sort use. An episode row never matches
 `latest_episode_added`, and in the `episode` scope `last_air_date` is the
 episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
 still apply when an administrator hides that rating source, so a saved collection

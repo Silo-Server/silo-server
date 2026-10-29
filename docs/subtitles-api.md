@@ -76,11 +76,11 @@ protocol and needs no equivalent native capability route.
 
 ## OpenRouter transcription configuration
 
-In Admin Settings → AI Services, select the OpenRouter speech-to-text preset:
-base URL `https://openrouter.ai/api/v1`, model `openai/whisper-large-v3-turbo`, and an
-OpenRouter API key. A shared text endpoint and key can also be used, but the
-speech model must still be a transcription model. Test it before enabling
-"Create subtitles from audio".
+In Admin Settings → AI Services, connect an OpenRouter provider (base URL
+`https://openrouter.ai/api/v1` and an OpenRouter API key), then choose it for
+speech-to-text with model `openai/whisper-large-v3-turbo`. The same provider can
+also serve text, but the speech model must still be a transcription model. Test
+it before enabling "Create subtitles from audio".
 
 Silo sends multipart audio to `/audio/transcriptions` with `verbose_json` and
 both segment and word timestamp granularities. OpenRouter receives only the
@@ -167,8 +167,14 @@ are canonical instants. Object keys, uploader identity, and upstream failure
 diagnostics are not returned. Failures use the standard native Problem Details
 contract. A `subtitle_id` that is not in the shape the provider's search returns
 is refused with `422` `validation_failed` at `body.subtitle_id` before the
-provider is contacted. SubDL result files are fetched only from the SubDL
+provider is contacted. SubSource and OpenSubtitles API requests do not follow
+redirects to another host, so the SubSource API key and the OpenSubtitles login
+are sent only to the provider. SubDL result files are fetched only from the SubDL
 download host, and SubDL requests do not follow redirects to another host.
+OpenSubtitles result files are fetched only from public addresses, including
+every redirect; a file link on the server's own network fails the download like
+any other provider error (see
+[outbound address guard](architecture/outbound-address-guard.md#subtitle-downloads)).
 
 This operation is `non_retryable`. Each request contacts the provider before
 stored-content deduplication. Deduplication can reuse identical content but does
@@ -192,6 +198,16 @@ The file is limited to 5 MiB; the whole form is limited to 5 MiB plus 256 KiB fo
 framing and other fields. Supported filename extensions are SRT, VTT, ASS, SSA,
 and SUB. The filename determines format; the file part can use
 `application/octet-stream`.
+
+The file must hold at least one cue the format can carry: an SRT or WebVTT
+timing line with text, a displayed ASS/SSA `Dialogue` event, or a MicroDVD or
+SubViewer cue for SUB. A renamed document, binary data, or plain text is
+refused with `400` and the detail "This file doesn't contain readable
+subtitles. Upload an SRT, VTT, ASS, SSA or SUB subtitle file." before anything
+is stored. Legacy single-byte encodings and UTF-16 with a byte-order mark pass
+the check. UTF-16 files are stored converted to UTF-8, and the 5 MiB limit
+also applies to the converted file; other bytes are stored as uploaded. The v1
+bridge shares this check.
 
 Authentication and profile gates precede multipart parsing. The shared service
 checks file and parent-item access before storage and derives uploader identity
@@ -299,6 +315,16 @@ The response is `202` with `job` in the existing v2 job projection (string IDs)
 and `live_delivery_attached`. That boolean reports whether this request attached
 its live notifier to a newly created job. It does not acknowledge socket delivery.
 An existing active job is returned without attaching another viewer's stream.
+A `translate` request for the same file, source track, target language and model
+as a completed job whose track is still stored returns that completed job, with
+its `result_subtitle_id`, and does not call the provider again. The source track
+is matched by its content, not by `source_index`, which shifts when sidecars or
+stored subtitles change: a sidecar or stored subtitle by its bytes with any saved
+timing correction applied, an embedded track by its container stream and the media
+file's hash, size and modification time. Editing a sidecar, correcting its timing or
+replacing the media file starts a new translation. The returned job's
+`source_index` is the one the request sent. Deleting the track allows a fresh
+translation. Transcription requests always start a new job.
 Clients should poll the returned job or refresh the file's subtitle inventory.
 
 Creation is `non_retryable`: send once, with no automatic authentication replay
@@ -454,6 +480,19 @@ DELETE requires `If-Match`: missing validators return 428, stale validators or a
 A 204 confirms metadata removal only. Object cleanup is best effort using the accepted immutable-object deletion service. An uncertain database response never triggers cleanup or proves that metadata survived. This operation is non-retryable: there is no durable receipt, automatic replay, physical-erasure guarantee, or orphan reconciler. Inspect current metadata after uncertainty before deciding on another attempt; even absence is not proof of physical cleanup. Missing dependencies return 503 and unexpected errors are redacted.
 
 The bundled viewer subtitle search dialogs and track selector have no stored-subtitle deletion action. Administrator deletion and subtitle-preference removal are separate caller families. Native viewer-deletion inventories remain a coordination prerequisite; no new viewer deletion UI or Jellyfin behavior is introduced.
+
+## Text encoding
+
+Every text subtitle a client receives is UTF-8, as its `charset=utf-8` content
+type says: the playback subtitle routes, the Jellyfin subtitle stream, offline
+downloads, and the source of an AI translation. Sidecars and stored subtitles
+saved in a legacy code page (Windows-1251 Russian, Windows-1250 Polish,
+UTF-16, and so on) are decoded on delivery, with the code page chosen from the
+subtitle's language and, among a language's common code pages, from the bytes
+(`subtitles.DecodeText`). UTF-8 is delivered unchanged. Text the server cannot
+place safely, such as Chinese tagged without a script or region, or untagged
+text that is not Latin, is delivered as stored. The administrator attachment
+returns the stored bytes unchanged.
 
 ## Subtitle sync
 

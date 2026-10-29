@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -63,7 +64,7 @@ type SubtitleInventoryItemV3 struct {
 	CombinedIndex int    `json:"combined_index"`
 	Source        string `json:"source"`
 	Codec         string `json:"codec,omitempty"`
-	Language      string `json:"language,omitempty"`
+	Language      string `json:"language,omitempty" doc:"Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value"`
 	Label         string `json:"label,omitempty"`
 	Forced        bool   `json:"forced"`
 	// Default marks the track the source container flags as its default
@@ -73,10 +74,10 @@ type SubtitleInventoryItemV3 struct {
 	Delivery        string `json:"delivery"`
 	// URL is the session-scoped sidecar URL, present only on
 	// SubtitleDeliverySidecarV3 tracks and only once a session exists.
-	URL string `json:"url,omitempty"`
+	URL string `json:"url,omitempty" format:"uri-reference"`
 	// FontBundleURL is the attachment bundle needed to render an embedded
 	// ASS/SSA track with its authored typesetting.
-	FontBundleURL string `json:"font_bundle_url,omitempty"`
+	FontBundleURL string `json:"font_bundle_url,omitempty" format:"uri-reference"`
 	// SyncKey names the track to the subtitle sync operations. Present on
 	// external and downloaded tracks whose timing can be corrected (SRT,
 	// WebVTT, ASS, SSA); stable across sessions and inventory reordering.
@@ -120,7 +121,7 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	items := make([]SubtitleInventoryItemV3, 0, len(file.ExternalSubtitles)+len(file.SubtitleTracks)+len(additional))
 	for _, sub := range file.ExternalSubtitles {
 		item := subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceExternalV3, sub.Format,
-			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
+			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, fspath.Display(filepath.Base(sub.Path)), sub.Language),
 			sub.Forced, sub.Default, sub.HearingImpaired)
 		if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
 			item.SyncKey = subtitles.ExternalSyncKey(sub.Path)

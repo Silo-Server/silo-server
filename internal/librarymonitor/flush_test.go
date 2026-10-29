@@ -326,3 +326,45 @@ func TestFlushResolvesABurstWithoutListingLibrariesPerPath(t *testing.T) {
 		t.Fatalf("built %d resolvers, want one per flush", built)
 	}
 }
+
+// Tdarr replaces a file by renaming the original to <name>.partial.old,
+// writing the new file, and deleting the renamed original a second later.
+// The deleted temp name is neither media nor a sidecar, so it starts no scan
+// of its own: a scan of a path that is gone fails to read it and raises a
+// partial-scan warning. Only the episode's directory is scanned.
+func TestFlushScansNothingForAVanishedTempFile(t *testing.T) {
+	root := t.TempDir()
+	lib := library(1, root)
+	lib.Type = "tv"
+	season := filepath.Join(root, "Show", "Season 08")
+	mkdirs(t, root, filepath.Join("Show", "Season 08"))
+	writeFile(t, filepath.Join(season, "Show S08E01.mkv"), "new")
+	queue := newFakeQueue()
+	m, err := New(Config{
+		NodeID:      "node-test",
+		Folders:     &fakeFolders{},
+		NewResolver: func(f scantrigger.FolderRepository) Resolver { return scantrigger.NewResolver(f) },
+		Queue:       queue,
+		Logger:      quietLogger(),
+		QuietWindow: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.desired[lib.ID] = lib
+	m.listed = []*models.MediaFolder{lib}
+	b := newFakeBackend("inotify")
+	for _, ev := range []Event{
+		{Kind: EventRename, OldDir: season, OldName: "Show S08E01.mkv", Dir: season, Name: "Show S08E01.mkv.partial.old"},
+		{Kind: EventCloseWrite, Dir: season, Name: "Show S08E01.mkv"},
+		{Kind: EventDelete, Dir: season, Name: "Show S08E01.mkv.partial.old"},
+	} {
+		m.handleEvent(backendEvent{backend: b, ev: ev}, t0)
+	}
+
+	m.flush(context.Background(), t0.Add(5*time.Second))
+	want := []string{"1 subtree " + season + " realtime_monitor"}
+	if got := takeBatch(t, queue); !reflect.DeepEqual(got, want) {
+		t.Fatalf("enqueued %v, want %v", got, want)
+	}
+}

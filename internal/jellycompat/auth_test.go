@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -53,6 +54,38 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 				t.Fatal("expected authenticated session in context")
 			}
 		})
+	}
+}
+
+// With the default settings, a play session keeps authorizing PlaySessionId-only
+// HLS requests for 24h, so a paused or long play survives past six hours (#2899).
+func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := fixedNow()
+	clock := func() time.Time { return now }
+	deps := withDefaults(Dependencies{Config: cfg, Now: clock})
+	sessions := NewSessionStore(30*24*time.Hour, clock)
+	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
+	deps.PlaybackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
+	mw := PlaybackSessionAuth(sessions, deps.PlaybackStore, nil)
+
+	for _, tc := range []struct {
+		elapsed  time.Duration
+		wantCode int
+	}{
+		{24*time.Hour - time.Minute, http.StatusOK},
+		{24 * time.Hour, http.StatusUnauthorized},
+	} {
+		now = fixedNow().Add(tc.elapsed)
+		req := requestWithCompatRouteItem(httptest.NewRequest("GET", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", nil), "itm")
+		rec := httptest.NewRecorder()
+		mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })).ServeHTTP(rec, req)
+		if rec.Code != tc.wantCode {
+			t.Errorf("after %s: status = %d, want %d", tc.elapsed, rec.Code, tc.wantCode)
+		}
 	}
 }
 

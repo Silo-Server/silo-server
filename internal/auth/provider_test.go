@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -64,8 +65,9 @@ func (d loginDirectory) GetByEmail(_ context.Context, email string) (*models.Use
 
 // A password sign-in compares one bcrypt hash whatever the outcome, so an
 // unknown name or an account without local password sign-in is rejected in
-// the same time as a wrong password. Not parallel: it swaps the package's
-// comparePasswordHash.
+// the same time as a wrong password, and when the server is too busy to
+// compare, every name gets the same busy answer. Not parallel: it swaps the
+// package's comparePasswordHash.
 func TestCheckLocalPasswordComparesOneHash(t *testing.T) {
 	const password = "correct horse battery"
 	local := passwordUser(t, password)
@@ -80,10 +82,10 @@ func TestCheckLocalPasswordComparesOneHash(t *testing.T) {
 	}
 
 	var compared [][]byte
-	t.Cleanup(func() { comparePasswordHash = bcrypt.CompareHashAndPassword })
-	comparePasswordHash = func(hash, plain []byte) error {
+	t.Cleanup(func() { comparePasswordHash = passwordhash.Compare })
+	comparePasswordHash = func(ctx context.Context, hash, plain []byte) error {
 		compared = append(compared, hash)
-		return bcrypt.CompareHashAndPassword(hash, plain)
+		return passwordhash.Compare(ctx, hash, plain)
 	}
 
 	tests := []struct {
@@ -110,6 +112,16 @@ func TestCheckLocalPasswordComparesOneHash(t *testing.T) {
 			}
 			if len(compared) != 1 || !bytes.Equal(compared[0], tt.wantHash) {
 				t.Fatalf("compared hashes %q, want exactly %q", compared, tt.wantHash)
+			}
+		})
+	}
+
+	comparePasswordHash = func(context.Context, []byte, []byte) error { return passwordhash.ErrBusy }
+	for _, tt := range tests {
+		t.Run(tt.name+" while busy", func(t *testing.T) {
+			user, err := checkLocalPassword(t.Context(), users, Credentials{Username: tt.username, Password: tt.password})
+			if user != nil || !errors.Is(err, passwordhash.ErrBusy) {
+				t.Fatalf("checkLocalPassword() = %v, %v; want passwordhash.ErrBusy", user, err)
 			}
 		})
 	}

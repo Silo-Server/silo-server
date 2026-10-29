@@ -19,6 +19,7 @@ import {
 import { formatDate, formatDateTime } from "@/lib/datetime";
 import {
   configPanelId,
+  installationTier,
   licenseLabel,
   pluginResourceLinks,
   safeExternalURL,
@@ -303,9 +304,14 @@ export function PluginDetailRail({
   installation?: PluginInstallation;
   catalogEntry?: PluginCatalogEntry;
 }) {
-  const sourceKind = installation?.source_kind ?? catalogEntry?.source_kind ?? "external";
-  const repositoryName = installation?.repository_name || catalogEntry?.repository_name;
-  const repoURL = installation?.repo_url || catalogEntry?.repo_url;
+  const tier = installation
+    ? installationTier(installation)
+    : (catalogEntry?.source_kind ?? "external");
+  // An installation only borrows details from a catalog entry with the same
+  // plugin ID when it came from a catalog; an Unverified one has its own.
+  const catalogFallback = tier === "unverified" ? undefined : catalogEntry;
+  const repositoryName = installation?.repository_name || catalogFallback?.repository_name;
+  const repoURL = installation?.repo_url || catalogFallback?.repo_url;
   const links = pluginResourceLinks(presentation, repoURL);
   const publisher = presentation?.publisher_name?.trim();
   const publisherURL = safeExternalURL(presentation?.publisher_url);
@@ -361,8 +367,8 @@ export function PluginDetailRail({
               )}
             </Fact>
           ) : null}
-          <Fact label="Source">{sourceLabel(sourceKind)}</Fact>
-          {repositoryName && repositoryName !== sourceLabel(sourceKind) ? (
+          <Fact label="Source">{sourceLabel(tier)}</Fact>
+          {repositoryName && repositoryName !== sourceLabel(tier) ? (
             <Fact label="Repository">{repositoryName}</Fact>
           ) : null}
           <Fact label="License">{licenseLabel(presentation?.license_spdx)}</Fact>

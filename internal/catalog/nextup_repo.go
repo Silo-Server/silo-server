@@ -340,6 +340,62 @@ func nextUpReleaseScope(q NextUpQuery, argIdx int) (string, []interface{}) {
 	}
 }
 
+// nextUpAnchorsCTE places each series' anchor for the successor lookup.
+// Specials carry no airing position and season 0 sorts first, so a special
+// anchor would only ever lead to the next special. When the anchor is a
+// special and the series has regular seasons, it moves to the profile's most
+// recent completed regular episode, or, when the profile has watched only
+// specials, to just before the first regular season. A series of specials
+// alone keeps stepping through them. updated_at stays the completion that
+// picked the series, so ordering and CompletedAt don't change; anchored_at is
+// the completion the anchor now stands on, -infinity before any regular one.
+const nextUpAnchorsCTE = `,
+		anchors AS (
+			SELECT
+				ce.series_id,
+				ce.updated_at,
+				COALESCE(regular.season_number, ce.season_number) AS season_number,
+				COALESCE(regular.episode_number, ce.episode_number) AS episode_number,
+				regular.season_number IS NOT NULL AS moved,
+				CASE
+					WHEN regular.season_number IS NULL THEN ce.updated_at
+					ELSE COALESCE(regular.completed_at, '-infinity'::timestamptz)
+				END AS anchored_at
+			FROM completed_episodes ce
+			LEFT JOIN LATERAL (
+				SELECT
+					COALESCE(done.season_number, 0) AS season_number,
+					COALESCE(done.episode_number, 2147483647) AS episode_number,
+					done.updated_at AS completed_at
+				FROM episodes e_reg
+				LEFT JOIN LATERAL (
+					SELECT e_d.season_number, e_d.episode_number, uwp_d.updated_at
+					FROM episodes e_d
+					JOIN user_watch_progress uwp_d
+					  ON uwp_d.media_item_id = e_d.content_id
+					 AND uwp_d.user_id = $1
+					 AND uwp_d.profile_id = $2
+					 AND uwp_d.completed = TRUE
+					WHERE e_d.series_id = ce.series_id
+					  AND e_d.season_number > 0
+					  AND NOT EXISTS (
+						  SELECT 1
+						  FROM user_history_hidden_items hhi
+						  WHERE hhi.user_id = uwp_d.user_id
+						    AND hhi.profile_id = uwp_d.profile_id
+						    AND hhi.media_item_id = uwp_d.media_item_id
+						    AND uwp_d.updated_at <= hhi.hidden_before
+					  )
+					ORDER BY uwp_d.updated_at DESC, e_d.season_number DESC, e_d.episode_number DESC
+					LIMIT 1
+				) done ON true
+				WHERE ce.season_number = 0
+				  AND e_reg.series_id = ce.series_id
+				  AND e_reg.season_number > 0
+				LIMIT 1
+			) regular ON true
+		)`
+
 func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (string, []interface{}) {
 	args := []interface{}{q.UserID, q.ProfileID, limit}
 	argIdx := 4
@@ -397,27 +453,30 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 
 	// When resumable items are disabled, suppress next-up only if the series has
 	// newer in-progress activity than the most recent completed episode. Older
-	// partial watches should not block the user's current progression.
+	// partial watches should not block the user's current progression. Once the
+	// anchor has moved off a special, a regular episode is measured against the
+	// regular completion the anchor moved to instead (any time, before the
+	// first one).
 	inProgressExclusion := ""
 	if !q.EnableResumable {
 		inProgressExclusion = `
 		,
 		eligible_series AS (
-			SELECT ce.*
-			FROM completed_episodes ce
+			SELECT a.*
+			FROM anchors a
 			WHERE NOT EXISTS (
 				SELECT 1 FROM user_watch_progress uwp_ip
 				JOIN episodes e_ip ON e_ip.content_id = uwp_ip.media_item_id
 				WHERE uwp_ip.user_id = $1
 				  AND uwp_ip.profile_id = $2
 				  AND uwp_ip.position_seconds > 0
-				  AND e_ip.series_id = ce.series_id
-				  AND uwp_ip.updated_at > ce.updated_at
+				  AND e_ip.series_id = a.series_id
+				  AND uwp_ip.updated_at > CASE WHEN a.moved AND e_ip.season_number > 0 THEN a.anchored_at ELSE a.updated_at END
 			)
 		)`
 	}
 
-	sourceTable := "completed_episodes"
+	sourceTable := "anchors"
 	if !q.EnableResumable {
 		sourceTable = "eligible_series"
 	}
@@ -573,8 +632,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 
 	if q.SeriesID != "" {
 		query := fmt.Sprintf(`
-		WITH %s
-		%s
+		WITH %s%s%s
 		SELECT
 			next_ep.content_id,
 			next_ep.series_id,
@@ -603,7 +661,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral)
+		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral)
 		return query, args
 	}
 
@@ -639,8 +697,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		LIMIT $3`, activityExpr, sourceTable, releaseLateral)
 
 	query := fmt.Sprintf(`
-		WITH %s
-		%s
+		WITH %s%s%s
 		,
 		frontier AS (
 			SELECT w.updated_at, w.media_item_id, w.seen, w.n
@@ -664,7 +721,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		LEFT JOIN (
 			%s
 		) r ON true
-		ORDER BY r.completed_at DESC NULLS LAST`, completedEpisodesCTE, inProgressExclusion, resultQuery)
+		ORDER BY r.completed_at DESC NULLS LAST`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, resultQuery)
 
 	return query, args
 }

@@ -185,6 +185,15 @@ Listings use lexical keys and a cursor equal to the last returned key. Local
 pagination skips completed subtrees and stops after a page plus one object;
 each visited directory's entries are read and sorted in memory.
 
+`Matches` lets the image cache skip rewriting an immutable object whose bytes
+are already stored. It is only an optimization, so on S3 a `HeadObject` 403
+reports no match instead of an error and the object is rewritten. A HEAD
+response has no body, so the 403 cannot say whether the key is missing (AWS S3
+answers 403 for a missing key when the credential lacks `s3:ListBucket`) or the
+credential is denied. The `PutObject` that follows reports a real denial with
+the backend's error code. Other reads (`Stat`, `ObjectExists`, delivery
+verification) still return a 403 as an error.
+
 Keys are relative, non-empty, and at most 1024 bytes. Empty segments, dot
 segments, backslashes, and control characters are rejected. Local storage
 refuses symlinks and non-regular files below its root. MIME types come from key
@@ -204,6 +213,18 @@ and the key prefix keep their case. Releases before the identity row
 lowercased the whole endpoint, so startup accepts a recorded S3 identity whose
 endpoint equals the configured one lowercased, with the bucket and key prefix
 matching exactly, and rewrites the row in the exact form.
+A local root is resolved through symlinks in its parent directories, so the
+same directory can resolve to another path after a link is added, such as the
+omnibus image's `/var/lib/silo` link to `/config/silo`. When the recorded root
+and the configured one resolve to the same path (`SameLocalRoot`), the
+store keeps reporting the recorded identity and the row is left as it is:
+trickplay manifests, delivery scopes, and sweep checkpoints are keyed by it,
+and an image that reaches the directory by the recorded path must still open
+it. The reconcile task and storage transitions compare a local identity they
+derive from settings the same way, so naming the active directory by its other
+path is not a move. The root's own name is never followed: a store refuses a
+root that is itself a link, so a recorded root replaced by a link to another
+directory is a different location and still needs the managed transition.
 The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
 any write that would resolve to a different identity with

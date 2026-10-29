@@ -19,7 +19,7 @@ type ConnectInfo struct {
 	// PendingRestart reports that an administrator has changed the enabled
 	// setting to something the running process has not adopted yet.
 	PendingRestart bool   `json:"pending_restart"`
-	PublicURL      string `json:"public_url"`
+	PublicURL      string `json:"public_url" doc:"Public URL Jellyfin clients are told to use, as configured; not validated as a URI"`
 	ServerName     string `json:"server_name"`
 }
 

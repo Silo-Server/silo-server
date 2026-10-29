@@ -402,9 +402,11 @@ Caching and refresh:
 - The metadata image-cache processor caches the file under
   `local/{contentType}/{contentID}/{hash8}/{imageType}/...` (`hash8` = content
   hash; the discriminator sits before the imageType segment because variant
-  clamping reads the parent directory). A replaced image rotates the key; the
-  stale hashed prefix is deleted after a successful re-cache, and item
-  deletion trims local paths to the content prefix.
+  clamping reads the parent directory). A replaced image rotates the key. The
+  catalog update that points at the new copy displaces the old one to the
+  artwork revision GC, which deletes it only once nothing references it: an
+  admin pick of the same bytes shares the key. Item deletion trims local
+  paths to the content prefix.
 - The process that discovered the sidecar copies it
   (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
   processes run refreshes and the image cache, and a refresh can only discover
@@ -460,7 +462,12 @@ Caching and refresh:
   the best remote candidate by the `applyBestImages` rules, for seasons and
   episodes the first remote poster or still that the local one displaced while
   provider results merged, or, when the refresh kept a local source it could
-  not see, the remote one it chose. The slot's source stays the local file, so the
+  not see, the remote one it chose. When the refresh offers no remote image for
+  an item slot, which is always so for a local re-apply because it asks no
+  remote provider, the remote image the slot was serving stays as the stand-in,
+  as a cached copy would, so a copy that keeps failing never leaves the slot
+  blank; clear art stored as the logo is the exception and never stands in. The
+  slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update, and a refresh
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO
@@ -614,6 +621,20 @@ lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
 choices. The server answering the admin API reads the file, so it needs the
 library mounted, like a server that copies local artwork; on a server without
 the mount discovery finds nothing and local choices are not offered.
+
+An admin can also upload a poster, backdrop or logo for a movie or series, or
+a season's poster (`POST .../images/upload`). Silo does not write into library
+folders, which are usually mounted read-only, so the upload is stored only in
+artwork storage: under the same `local/...` keys as cached sidecar art, with
+the image's digest as the key discriminator. It is published with the images
+lock, and its source is `upload://sha256:<hex>`, one of the non-provider
+schemes image caching, artwork reconcile and the ladder backfill never try to
+download. A storage reconcile that resets cached artwork in bulk still checks
+each upload's object and clears the row only when the object is gone. The list offers the upload as a local choice only while the item
+shows it; applying another image replaces it, and revision GC reclaims it
+after the grace period like any displaced revision. Its only record is the
+item's artwork columns, so there is no upload table to keep in step with
+content ID moves or GC references.
 
 The reads open each library root as an `os.Root`, which needs read (list)
 permission on the root directory, not only search permission. The scanner lists

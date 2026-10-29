@@ -32,11 +32,38 @@ type SectionViewer struct {
 	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
 	// frozen v1 card shape, so v1 must not pay for the aggregation.
 	IncludeCardAvailability bool
+	// ItemLimitCap lowers every row's item limit to at most this many items
+	// on the aggregate section reads (HomeSections, LibrarySections). Zero
+	// leaves each row at its own limit; only the native v2 API sets it, at
+	// most MaxSectionItemLimitCap.
+	ItemLimitCap int
 }
 
 // Artwork is the viewer's artwork preference.
 func (v SectionViewer) Artwork() imagesize.Request {
 	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
+}
+
+// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 aggregate
+// section reads accept, advertised by getHomeCapabilities.
+const MaxSectionItemLimitCap = 100
+
+// capSectionItemLimits returns resolved with each row's effective item limit
+// lowered to at most limit, so the fetch, the hide-watched widening, and the
+// diversity pass all work from the capped size. A row already at or under
+// limit keeps its configured value, and a non-positive limit returns resolved
+// as is. resolved may be shared, so a capped copy is returned.
+func capSectionItemLimits(resolved []sections.ResolvedSection, limit int) []sections.ResolvedSection {
+	if limit <= 0 {
+		return resolved
+	}
+	out := slices.Clone(resolved)
+	for i := range out {
+		if effectiveHomeItemLimit(out[i].ItemLimit) > limit {
+			out[i].ItemLimit = limit
+		}
+	}
+	return out
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
@@ -157,7 +184,8 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 	return resp
 }
 
-// LibrarySections answers every section of the library with its items.
+// LibrarySections answers every section of the library with its items, each
+// row capped at viewer.ItemLimitCap items when it is set.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionsView{}, err
@@ -166,6 +194,7 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	resolved = capSectionItemLimits(resolved, viewer.ItemLimitCap)
 	userID := viewer.Access.UserID
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
@@ -301,7 +330,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if err != nil {
 		return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	adminCollections = h.withViewerPosters(ctx, adminCollections, AccessFilterFromContext(ctx, ""))
+	access := AccessFilterFromContext(ctx, "")
+	adminCollections = catalog.CollectionsShownToViewer(adminCollections, h.viewerCollectionCounts(ctx, adminCollections, access))
+	adminCollections = h.withViewerPosters(ctx, adminCollections, access)
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
 		Collections: h.libraryCollectionResponsesOf(ctx, adminCollections),

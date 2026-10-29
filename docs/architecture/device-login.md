@@ -90,6 +90,14 @@ people who can approve decide. A device approved from a session opened through a
 external sign-in provider inherits that session's provider chain
 ([external-sign-in.md](external-sign-in.md#provider-re-check)).
 
+The first approval holds. Approving a request another account (or, for
+approve-handoff, another profile) already approved is refused with 409 (v2
+`conflict`, v1 `approval_conflict`), and so is another account's deny: anyone
+holding the code could otherwise cancel a sign-in someone else approved. Deny
+from the approving account, from any of its profiles, withdraws its approval
+before the device collects it. An approval whose approving account or profile
+was deleted can no longer be collected, and any account may deny it.
+
 Approval locks the account and checks that the submitting login session is
 still active before updating the device request. Collection and credential
 revocation also lock the account before the device request. A request that
@@ -107,6 +115,9 @@ phone's verified profile. Collecting it gives the TV a temporary login session
 of that one profile. The poll answer is unchanged: `tokens` (access and
 refresh), `profile_id`, `profile_token`, `temporary: true` and
 `session_expires_at`. The Apple and Android TV apps require the refresh token.
+The web approval page (`/activate`) never approves a handoff: it shows the
+request as playback sent from a Silo app, offers only deny, and follows a
+pending one until the app decides it.
 
 The session row (`auth_sessions`) records what the session is, and every node
 enforces it from the row rather than from the tokens, so a token issued before

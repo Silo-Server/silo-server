@@ -2,7 +2,9 @@
 
 History imports persist a versioned dispatch intent in `history_import_runs`
 before reporting acceptance. Administrative intent references source and mapping revisions,
-the external user locator, and the original Silo account/profile target. Admin tokens
+the external user locator, the original Silo account/profile target, and an optional
+lookback cutoff (`played_since`, Jellyfin only) fixed at admission; only a full
+import updates the mapping's `last_imported_at`. Admin tokens
 remain in the source's encrypted storage. Personal intent retains the original target,
 optional predefined-source revision, and a run-scoped encrypted credential envelope.
 Tokens are decrypted only for the exact running claim generation. A queued run does

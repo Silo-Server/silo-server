@@ -20,6 +20,10 @@ func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodep
 	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
 }
 
+func (n fixedNodes) TranscodeNodeWith(eligible func(*nodepool.Node) bool) bool {
+	return plannerForNodes(n...).TranscodeNodeWith(eligible)
+}
+
 var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1","trickplay_extract_v2"]}`)
 
 // fakeNode answers /trickplay/extract with status and body, counting calls.

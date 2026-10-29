@@ -46,12 +46,12 @@ func (e *Engine) validateQueryEmbeddingLock(ctx context.Context, vector []float3
 	if lock == nil {
 		return nil
 	}
-	return validateQueryEmbeddingLock(lock, e.cfg.EmbeddingBaseURL, e.cfg.EmbeddingModel, len(vector))
+	return validateQueryEmbeddingLock(lock, e.cfg.EmbeddingModel, len(vector))
 }
 
-func validateQueryEmbeddingLock(lock *EmbeddingLock, baseURL, model string, sourceDimensions int) error {
+func validateQueryEmbeddingLock(lock *EmbeddingLock, model string, sourceDimensions int) error {
 	if lock == nil {
 		return nil
 	}
-	return lock.Validate(baseURL, model, sourceDimensions)
+	return lock.Validate(model, sourceDimensions)
 }

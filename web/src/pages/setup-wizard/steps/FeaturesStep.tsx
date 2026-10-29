@@ -1,17 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ConnectionCheckAction,
   useConnectionCheck,
 } from "@/components/admin/ConnectionCheckAction";
 import { MobilePushPrivacyDisclosure } from "@/components/notifications/MobilePushPrivacyDisclosure";
-import { Button } from "@/components/ui/button";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-import {
-  RECOMMENDATION_PROVIDER_OPTIONS,
-  matchRecommendationProviderPreset,
-  type RecommendationProviderPreset,
-} from "@/lib/recommendation-provider-presets";
+import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
+import { EmbeddingProviderField, ModelField } from "@/pages/admin-settings/AIProviders";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
@@ -20,7 +16,14 @@ import { useStepSubmit, useStepSummary } from "../useStep";
 const APPLE_PUSH_KEY = "notifications.apple_push_delivery_enabled";
 const ANDROID_PUSH_KEY = "notifications.android_push_delivery_enabled";
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
+const SHARE_MARKERS_KEY = "markers.share_by_default";
+
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  SHARE_MARKERS_KEY,
+];
 
 const DOWNLOAD_KEYS = [
   "download.enabled",
@@ -29,12 +32,9 @@ const DOWNLOAD_KEYS = [
   "download.max_concurrent_per_user",
 ];
 
-const RECS_KEYS = [
-  "recommendations.enabled",
-  "recommendations.embedding_base_url",
-  "recommendations.embedding_model",
-  "recommendations.embedding_auth_token",
-];
+const EMBEDDING_PROVIDER_KEY = "recommendations.embedding_provider_id";
+const EMBEDDING_MODEL_KEY = "recommendations.embedding_model";
+const RECS_KEYS = ["recommendations.enabled", EMBEDDING_PROVIDER_KEY, EMBEDDING_MODEL_KEY];
 
 const KEYS = [APPLE_PUSH_KEY, ANDROID_PUSH_KEY, ...MARKER_KEYS, ...DOWNLOAD_KEYS, ...RECS_KEYS];
 
@@ -43,7 +43,17 @@ export function FeaturesStep() {
   const { handleSubmit, busy } = useStepSubmit("features", form, "Failed to save");
   const recsCheck = useConnectionCheck("recommendations_embedding", form, RECS_KEYS);
   const [showDisclosure, setShowDisclosure] = useState(false);
-  const [presetId, setPresetId] = useState<string | null>(null);
+  const sharePrefilled = useRef(false);
+
+  // A new server shares markers by default only once this choice is saved,
+  // so stage the switch's on default while nothing is stored. Continuing
+  // saves it; leaving the step unsaved keeps sharing off.
+  const { loaded, getPersistedValue, setValue } = form;
+  useEffect(() => {
+    if (sharePrefilled.current || !loaded) return;
+    sharePrefilled.current = true;
+    if (getPersistedValue(SHARE_MARKERS_KEY) === "") setValue(SHARE_MARKERS_KEY, "true");
+  }, [loaded, getPersistedValue, setValue]);
 
   // Both push keys are written together; either still on means push is on.
   // The snapshot carries the server default (on) for a fresh install, so the
@@ -56,17 +66,10 @@ export function FeaturesStep() {
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const localMarkersEnabled = markerMode === "local" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  // Unset reads as on, the default the effect above stages.
+  const shareMarkers = form.getValue(SHARE_MARKERS_KEY) !== "false";
 
-  const baseUrl = form.getValue("recommendations.embedding_base_url");
-  const model = form.getValue("recommendations.embedding_model");
-  const activePreset =
-    RECOMMENDATION_PROVIDER_OPTIONS.find((p) => p.id === presetId) ??
-    matchRecommendationProviderPreset(baseUrl, model) ??
-    null;
-  const tokenConfigured = form.sensitiveConfigured.includes("recommendations.embedding_auth_token");
-  const showToken =
-    activePreset?.needsToken ??
-    (form.getValue("recommendations.embedding_auth_token") !== "" || tokenConfigured);
+  const embeddingProviderID = form.getValue(EMBEDDING_PROVIDER_KEY);
 
   const enabledFeatures = [
     onlineMarkersEnabled || localMarkersEnabled ? "Skip markers" : null,
@@ -93,14 +96,6 @@ export function FeaturesStep() {
     if (onlineMarkersEnabled) nextMode = enabled ? "both" : "online";
     form.setValue("markers.mode", nextMode);
     if (enabled || !onlineMarkersEnabled) form.setValue("markers.lazy_playback", String(enabled));
-  }
-
-  function applyPreset(preset: RecommendationProviderPreset) {
-    setPresetId(preset.id);
-    if (preset.id !== "custom") {
-      form.setValue("recommendations.embedding_base_url", preset.baseUrl);
-      form.setValue("recommendations.embedding_model", preset.model);
-    }
   }
 
   if (form.isPending) return <StepSkeleton rows={4} />;
@@ -134,9 +129,9 @@ export function FeaturesStep() {
     >
       <StepSection>
         <SettingField
-          label="Skip markers from TheIntroDB"
+          label="Skip markers from TheIntroDB and Silo"
           type="toggle"
-          description="TheIntroDB is installed by default to find intros, credits, recaps, and other segments you can skip. Online markers are preferred over local detection."
+          description="TheIntroDB and Silo's marker service find intros, credits, recaps, and other segments you can skip. TheIntroDB is installed by default. Online markers are preferred over local detection."
           value={onlineMarkersEnabled ? "true" : "false"}
           onChange={(value) => setOnlineMarkers(value === "true")}
         />
@@ -166,6 +161,13 @@ export function FeaturesStep() {
           description="Detect missing intros and credits using this server's CPU. Saved online markers take priority. Applies to libraries with marker detection enabled."
           value={localMarkersEnabled ? "true" : "false"}
           onChange={(value) => setLocalMarkers(value === "true")}
+        />
+        <SettingField
+          label="Share markers with Silo"
+          type="toggle"
+          description={MARKER_SHARING_DISCLOSURE}
+          value={shareMarkers ? "true" : "false"}
+          onChange={(value) => form.setValue(SHARE_MARKERS_KEY, value)}
         />
         <SettingField
           label="Mobile push notifications"
@@ -229,53 +231,18 @@ export function FeaturesStep() {
 
       {recsEnabled ? (
         <StepSection title="Recommendation provider">
-          <div className="py-3">
-            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Provider">
-              {RECOMMENDATION_PROVIDER_OPTIONS.map((preset) => {
-                const selected = activePreset?.id === preset.id;
-                return (
-                  <Button
-                    key={preset.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    variant={selected ? "default" : "secondary"}
-                    size="sm"
-                    onClick={() => applyPreset(preset)}
-                  >
-                    {preset.label}
-                    {preset.tag ? (
-                      <span className="ml-1.5 text-[10px] opacity-70">{preset.tag}</span>
-                    ) : null}
-                  </Button>
-                );
-              })}
-            </div>
-            {activePreset ? (
-              <p className="text-muted-foreground mt-2 text-xs">{activePreset.description}</p>
-            ) : null}
-          </div>
-          <SettingField
-            label="Base URL"
-            hint="https://generativelanguage.googleapis.com"
-            value={baseUrl}
-            onChange={(v) => form.setValue("recommendations.embedding_base_url", v)}
+          <EmbeddingProviderField
+            value={embeddingProviderID}
+            onChange={(id) => form.setValue(EMBEDDING_PROVIDER_KEY, id)}
           />
-          <SettingField
+          <ModelField
             label="Model"
-            hint="gemini-embedding-001"
-            value={model}
-            onChange={(v) => form.setValue("recommendations.embedding_model", v)}
+            providerID={embeddingProviderID}
+            kind="embeddings"
+            value={form.getValue(EMBEDDING_MODEL_KEY)}
+            onChange={(v) => form.setValue(EMBEDDING_MODEL_KEY, v)}
+            placeholder="gemini-embedding-001"
           />
-          {showToken ? (
-            <SettingField
-              label="API key"
-              type="password"
-              value={form.getValue("recommendations.embedding_auth_token")}
-              onChange={(v) => form.setValue("recommendations.embedding_auth_token", v)}
-              sensitiveConfigured={tokenConfigured}
-            />
-          ) : null}
           <ConnectionCheckAction
             onClick={recsCheck.run}
             result={recsCheck.result}

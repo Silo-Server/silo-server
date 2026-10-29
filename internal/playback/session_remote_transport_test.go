@@ -61,6 +61,7 @@ func backdatePlaybackTestSession(manager *SessionManager, sessionID string, age 
 	session := manager.sessions[sessionID]
 	session.LastActivityAt = time.Now().Add(-age)
 	session.UpdatedAt = session.LastActivityAt
+	session.PlanCommittedAt = session.LastActivityAt
 }
 
 // startAbandonedRemoteSession returns a remote-transport session whose client

@@ -45,7 +45,7 @@ type NotificationItem struct {
 	SeasonNumber    *int                    `json:"season_number,omitempty"`
 	EpisodeNumber   *int                    `json:"episode_number,omitempty"`
 	PosterPath      string                  `json:"poster_path,omitempty"`
-	PosterURL       string                  `json:"poster_url,omitempty"`
+	PosterURL       string                  `json:"poster_url,omitempty" format:"uri-reference"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	ReasonFlags     NotificationReasonFlags `json:"reason_flags"`
 	CreatedAt       Instant                 `json:"created_at"`
@@ -194,7 +194,7 @@ type NotificationPushDisplay struct {
 	Body       string `json:"body,omitempty"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	Category   string `json:"category"`
-	URL        string `json:"url"`
+	URL        string `json:"url" format:"uri-reference"`
 }
 type NotificationPushDisplayInput struct {
 	// Delivery IDs are ULIDs minted by the notification store (text, not UUID).

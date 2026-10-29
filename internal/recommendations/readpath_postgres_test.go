@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -223,9 +224,12 @@ func TestGetTasteClusterMetaOmitsOnlyEmbeddingsPostgres(t *testing.T) {
 	}
 }
 
-// The watched set walks the user store by keyset across pages: every row
-// at least half watched counts, episodes for their series.
-func TestWatchedItemIDSetAcrossPagesPostgres(t *testing.T) {
+// The watched set is the same read with one query, as on the Postgres user
+// store, or walked from the store by keyset across pages, as on a store
+// outside Postgres: every title completed or at least half watched, episodes
+// for their series, and every book read at least half way, leaving out rows
+// hidden from the history since their last progress and other profiles' rows.
+func TestWatchedItemIDSetQueryMatchesStoreWalkPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()
 	prefix := "twatched-keyset-" + uuid.NewString()[:8] + "-"
@@ -252,24 +256,93 @@ func TestWatchedItemIDSetAcrossPagesPostgres(t *testing.T) {
 		FROM generate_series(0, $4 - 1) AS i`, userID, profile, prefix+"item-", rows); err != nil {
 		t.Fatal(err)
 	}
-	seedCompletion(t, pool, userID, profile, episode, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC))
-
-	got, err := NewSignalReader(NewRepo(pool), pgstore.NewPostgresProvider(pool)).WatchedItemIDSet(ctx, userID, profile)
-	if err != nil {
+	at := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	seedCompletion(t, pool, userID, profile, episode, at)
+	progress := func(profile, itemID string, position, duration float64, updatedAt time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
+			VALUES ((SELECT user_id FROM user_profiles WHERE id = $1), $1, $2, $3, $4, $5)`, profile, itemID, position, duration, updatedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hide := func(itemID string, hiddenBefore time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO user_history_hidden_items(user_id, profile_id, media_item_id, hidden_before) VALUES ($1, $2, $3, $4)`, userID, profile, itemID, hiddenBefore); err != nil {
+			t.Fatal(err)
+		}
+	}
+	progress(profile, prefix+"half", 50, 100, at)
+	progress(profile, prefix+"under-half", 49.99, 100, at)
+	progress(profile, prefix+"no-duration", 50, 0, at)
+	seedCompletion(t, pool, userID, profile, prefix+"hidden", at)
+	hide(prefix+"hidden", at.Add(time.Hour))
+	seedCompletion(t, pool, userID, profile, prefix+"rewatched", at.Add(2*time.Hour))
+	hide(prefix+"rewatched", at.Add(time.Hour))
+	sibling := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES ($1, $2, 'sibling')`, sibling, userID); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]struct{}{series: {}}
+	seedCompletion(t, pool, userID, sibling, prefix+"sibling", at)
+	// The sibling hiding a title the profile watched leaves it in the profile's set.
+	if _, err := pool.Exec(ctx, `INSERT INTO user_history_hidden_items(user_id, profile_id, media_item_id, hidden_before) VALUES ($1, $2, $3, $4)`, userID, sibling, prefix+"item-00000", at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	otherUser, otherProfile := newTasteTestAccount(t, pool, prefix+"other")
+	seedCompletion(t, pool, otherUser, otherProfile, prefix+"other-account", at)
+
+	var folderID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type, name) VALUES ('ebooks', $1) RETURNING id`, prefix+"books").Scan(&folderID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	book := func(itemID string, read float64) {
+		t.Helper()
+		seedRecoMediaItem(t, pool, itemID, "ebook", "matched")
+		if _, err := pool.Exec(ctx, `
+			WITH file AS (INSERT INTO media_files(media_folder_id, file_path, content_id) VALUES ($1, $2, $3) RETURNING id)
+			INSERT INTO ebook_reader_progress(user_id, profile_id, content_id, file_id, location, progress, updated_at)
+			SELECT $4, $5, $3, id, 'loc', $6, $7 FROM file`, folderID, "/"+itemID+".epub", itemID, userID, profile, read, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	book(prefix+"book-half", 0.5)
+	book(prefix+"book-under-half", 0.49)
+	book(prefix+"book-hidden", 0.95)
+	hide(prefix+"book-hidden", at.Add(time.Hour))
+
+	want := map[string]struct{}{series: {}, prefix + "half": {}, prefix + "rewatched": {}, prefix + "book-half": {}}
 	for i := range rows {
 		if i%3 != 2 {
 			want[fmt.Sprintf("%sitem-%05d", prefix, i)] = struct{}{}
 		}
 	}
-	if len(got) != len(want) {
-		t.Fatalf("watched set has %d items, want %d", len(got), len(want))
-	}
-	for id := range want {
-		if _, ok := got[id]; !ok {
-			t.Fatalf("watched set misses %s", id)
+	store := pgstore.NewPostgresProvider(pool)
+	for name, reader := range map[string]*SignalReader{
+		"query": NewSignalReader(NewRepo(pool), store),
+		"walk":  NewSignalReader(NewRepo(pool), store).WithUserStoreOutsidePostgres(true),
+	} {
+		got, err := reader.WatchedItemIDSet(ctx, userID, profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !maps.Equal(got, want) {
+			t.Fatalf("%s: watched set has %d items, want %d; extra %v, missing %v", name, len(got), len(want), setDifference(got, want), setDifference(want, got))
 		}
 	}
+}
+
+// setDifference lists the keys of a missing from b, sorted.
+func setDifference(a, b map[string]struct{}) []string {
+	var out []string
+	for id := range a {
+		if _, ok := b[id]; !ok {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

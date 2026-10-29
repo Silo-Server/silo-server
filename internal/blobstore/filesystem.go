@@ -19,7 +19,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type Filesystem struct{ root string }
+type Filesystem struct {
+	root string
+	// identity, when set, is the recorded identity of a root that resolves to
+	// this directory by another path (see SameLocalRoot).
+	identity string
+}
 
 func NewFilesystem(root string) (*Filesystem, error) {
 	abs, err := resolveRoot(root)
@@ -538,8 +543,55 @@ func (f *Filesystem) Probe(ctx context.Context) error {
 }
 
 // Identity is the absolute root, so two mounts of different directories never
-// share a catalog by accident.
-func (f *Filesystem) Identity() string { return BackendLocal + "|" + f.root }
+// share a catalog by accident. A store opened on a directory the catalog
+// recorded under another path keeps the recorded identity instead.
+func (f *Filesystem) Identity() string {
+	if f.identity != "" {
+		return f.identity
+	}
+	return BackendLocal + "|" + f.root
+}
+
+// SameLocalRoot reports whether two local identities name the same root once
+// each is resolved the way a store resolves its own root (LocalIdentity):
+// symlinks in the parent directories are followed, the root's own name is
+// not. The paths can differ when a link was added to, or removed from, a
+// parent after the identity was recorded: an image that keeps its state under
+// a linked directory resolves a root the regular image recorded at another
+// path. A recorded root that is itself a link is not followed, because a
+// store refuses a linked root (ensureRoot), so it never matches the directory
+// the link points to.
+func SameLocalRoot(a, b string) bool {
+	rootA, okA := strings.CutPrefix(a, BackendLocal+"|")
+	rootB, okB := strings.CutPrefix(b, BackendLocal+"|")
+	if !okA || !okB || rootA == "" || rootB == "" {
+		return false
+	}
+	if rootA == rootB {
+		return true
+	}
+	resolvedA, errA := LocalIdentity(rootA)
+	resolvedB, errB := LocalIdentity(rootB)
+	return errA == nil && errB == nil && resolvedA == resolvedB
+}
+
+// Location names where a store's objects are. For a local store it is the
+// directory the store opened, through any wrappers; that can differ from an
+// identity recorded under another path, whose links may since point elsewhere.
+// Any other store's location is its identity.
+func Location(store Store) string {
+	for store != nil {
+		switch s := store.(type) {
+		case *Filesystem:
+			return BackendLocal + "|" + s.root
+		case interface{ unwrapStore() Store }:
+			store = s.unwrapStore()
+		default:
+			return store.Identity()
+		}
+	}
+	return ""
+}
 
 var _ Store = (*Filesystem)(nil)
 

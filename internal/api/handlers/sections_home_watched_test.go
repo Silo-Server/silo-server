@@ -189,6 +189,40 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 	}
 }
 
+func TestCapSectionItemLimits(t *testing.T) {
+	resolved := []sections.ResolvedSection{
+		{ID: "large", ItemLimit: 100},
+		{ID: "small", ItemLimit: 12},
+		{ID: "unset", ItemLimit: 0},
+	}
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  []int
+	}{
+		{"cap lowers larger rows", 20, []int{20, 12, 0}},
+		{"cap below the default lowers an unset row", 10, []int{10, 10, 10}},
+		{"cap above every row is a no-op", 100, []int{100, 12, 0}},
+		{"no cap is a no-op", 0, []int{100, 12, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := capSectionItemLimits(resolved, tc.limit)
+			for i, want := range tc.want {
+				if got[i].ItemLimit != want {
+					t.Errorf("section %q limit = %d, want %d", got[i].ID, got[i].ItemLimit, want)
+				}
+			}
+			if resolved[0].ItemLimit != 100 || resolved[2].ItemLimit != 0 {
+				t.Errorf("input mutated: %+v", resolved)
+			}
+		})
+	}
+	// The hide-watched widening works from the capped limit.
+	if got := homeSectionsForFetch(capSectionItemLimits(resolved, 20), true)[0].ItemLimit; got != homeWatchedCandidateLimit(20) {
+		t.Errorf("widened fetch limit = %d, want %d", got, homeWatchedCandidateLimit(20))
+	}
+}
+
 func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	input := []sections.SectionWithItems{
 		{

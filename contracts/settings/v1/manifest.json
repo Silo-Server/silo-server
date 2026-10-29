@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 23,
+  "revision": 25,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -157,6 +157,42 @@
     }
   },
   "definitions": [
+    {
+      "key": "playback.buffering_quality_mode",
+      "introduced_in": 23,
+      "persistence": "remote",
+      "allowed_scopes": [
+        "profile",
+        "profile_device"
+      ],
+      "resolution_order": [
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": "never",
+            "label": "Never"
+          },
+          {
+            "value": "ask",
+            "label": "Ask first"
+          },
+          {
+            "value": "always",
+            "label": "Automatically"
+          }
+        ]
+      },
+      "default_value": "always",
+      "category": "playback",
+      "label": "Lower quality when buffering",
+      "description": "What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked.",
+      "recommended_control": "select"
+    },
     {
       "key": "player.video_skip_back_seconds",
       "introduced_in": 9,
@@ -595,6 +631,36 @@
       "description": "What Silo does when an intro starts: leave it alone, offer a Skip Intro button, or skip it and offer an undo.",
       "recommended_control": "select",
       "notes": "The replacement for playback.auto_skip_intro, which could only say \"prompt\" or \"count down then skip\" and had no way to turn the prompt off. The default is \"ask\", which is exactly what auto_skip_intro=false did, so an untouched profile behaves identically across the cutover. The schema has no segmented control, so this is a select; clients that have a segmented control should use it. See docs/design/2026-08-16-intro-skip-mode.md."
+    },
+    {
+      "key": "playback.show_marker_confidence",
+      "introduced_in": 24,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "category": "playback",
+      "label": "Show marker confidence",
+      "description": "Show how confident the source is above the Skip Intro button. Each source rates on its own scale, so the percentage is only comparable within one source; turn the source line on to see which one it is.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.show_marker_source",
+      "introduced_in": 24,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "category": "playback",
+      "label": "Show marker source",
+      "description": "Show where the skip came from above the Skip Intro button: Silo's own detection, a person, or the provider that supplied the marker.",
+      "recommended_control": "switch"
     },
     {
       "key": "playback.auto_skip_credits",
@@ -1159,7 +1225,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15. Revision 23 adds the availability overlay id (complete seasons on a series poster, episodes in the library on a season poster) under the same rule."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15. Revision 25 adds the availability overlay id (complete seasons on a series poster, episodes in the library on a season poster) under the same rule."
     },
     {
       "key": "ui.card_overlays_enabled",
@@ -1349,9 +1415,9 @@
       "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Media cards",
-      "description": "Poster size and caption detail used by media cards.",
+      "description": "Poster size used by media cards.",
       "recommended_control": "panel",
-      "notes": "Semantic presets roam between like devices without forcing identical pixel dimensions across platforms. A profile fallback can opt into one presentation everywhere; family and exact-device values remain more specific."
+      "notes": "Semantic presets roam between like devices without forcing identical pixel dimensions across platforms. A profile fallback can opt into one presentation everywhere; family and exact-device values remain more specific. Revision 24 retires the caption choice: people hid titles and could no longer tell what a card was, so every card shows its title and details. caption stays required and keeps all three members so older clients can still write it, current clients send title_metadata and ignore the stored member, a migration rewrote stored values to title_metadata, and clients no longer offer it."
     },
     {
       "key": "ui.sidebar_pins",

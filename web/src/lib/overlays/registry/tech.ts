@@ -55,7 +55,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     id: "resolution_hdr",
     category: "tech",
     label: "Resolution + HDR (combined)",
-    description: 'Single badge combining resolution and dynamic range (e.g. "4K DV", "1080p HDR")',
+    description:
+      'Single badge combining resolution and dynamic range (e.g. "4K DV", "4K HDR10+", "1080p HDR")',
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconCapable: true,

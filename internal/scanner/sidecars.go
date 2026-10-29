@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // localMetadataSidecarExtensions are the files the builtin NFO provider reads
@@ -49,7 +51,7 @@ func (l SidecarListing) merge(other SidecarListing) {
 func ReadSidecarListing(dirs []string) SidecarListing {
 	listing := make(SidecarListing, len(dirs))
 	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+		entries, err := fspath.ReadDir(dir)
 		if err != nil {
 			continue
 		}

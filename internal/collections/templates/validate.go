@@ -101,6 +101,14 @@ func (r *Registry) validateBundleLocked(b Bundle) error {
 	return nil
 }
 
+// ValidateTMDBSpec checks a TMDB chart spec by the rules templates follow,
+// for other surfaces that read the same charts (request discover rows).
+func ValidateTMDBSpec(spec TMDBSpec) error { return validateTMDB(spec) }
+
+// ValidateTMDBDiscoverSpec checks a TMDB discover spec by the rules
+// templates follow, for other surfaces that build the same queries.
+func ValidateTMDBDiscoverSpec(spec TMDBDiscoverSpec) error { return validateTMDBDiscover(spec) }
+
 func validateTMDB(spec TMDBSpec) error {
 	switch spec.Preset {
 	case "trending":

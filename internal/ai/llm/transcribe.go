@@ -122,9 +122,8 @@ func hostMatchesAny(baseURL string, hosts []string) bool {
 	return false
 }
 
-// Transcribe performs one audio transcription against the ASR endpoint
-// (falling back to the chat endpoint's base URL/key when no ASR override is
-// configured), using the OpenAI-compatible /v1/audio/transcriptions API with
+// Transcribe performs one audio transcription against the ASR endpoint, using
+// the OpenAI-compatible /v1/audio/transcriptions API with
 // response_format=verbose_json for segment timestamps.
 func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transcription, error) {
 	cfg := c.Config()
@@ -142,7 +141,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := endpointURL(cfg.asrBaseURL(), "audio/transcriptions")
+	url := endpointURL(cfg.ASRBaseURL, "audio/transcriptions")
 
 	var result *Transcription
 	doErr := c.doWithRetry(ctx, c.asrHTTP, "transcription API",
@@ -169,7 +168,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			if req.Language != "" {
 				fields = append(fields, [2]string{"language", req.Language})
 			}
-			if !hostMatchesAny(cfg.asrBaseURL(), strictHostedASRHosts) {
+			if !hostMatchesAny(cfg.ASRBaseURL, strictHostedASRHosts) {
 				fields = append(fields, [2]string{"vad_filter", "true"})
 			}
 			for _, f := range fields {
@@ -186,7 +185,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 				return nil, fmt.Errorf("create request: %w", err)
 			}
 			httpReq.Header.Set("Content-Type", w.FormDataContentType())
-			if key := cfg.asrAPIKey(); key != "" {
+			if key := cfg.ASRAPIKey; key != "" {
 				httpReq.Header.Set("Authorization", "Bearer "+key)
 			}
 			return httpReq, nil
@@ -273,7 +272,7 @@ func decorateTranscribeError(err error) error {
 	if !likelyUnsupported {
 		return err
 	}
-	return fmt.Errorf("%w — the configured endpoint likely does not support audio transcription; "+
-		"set a Whisper-compatible Transcription base URL (and model) under Admin Settings → AI Services "+
-		"(e.g. a self-hosted faster-whisper/speaches server, api.groq.com/openai with whisper-large-v3-turbo, or api.openai.com with whisper-1)", err)
+	return fmt.Errorf("%w — the selected provider likely does not support audio transcription; "+
+		"choose a Whisper-compatible speech-to-text provider and model under Admin Settings → AI Services "+
+		"(e.g. a self-hosted faster-whisper/speaches server, Groq with whisper-large-v3-turbo, or OpenAI with whisper-1)", err)
 }

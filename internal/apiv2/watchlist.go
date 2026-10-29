@@ -58,6 +58,9 @@ func registerWatchlist(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}", "getWatchlistEntry", "watchlist",
 		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getWatchlistEntry)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}/membership", "getWatchlistMembership", "watchlist",
+		"Answer whether the item is on the acting profile's watchlist as is_member, 200 either way; 404 only when the viewer may not see the item.")),
+		reg.getWatchlistMembership)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
 		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addToWatchlist)
@@ -116,6 +119,21 @@ func (reg *Registry) getWatchlistEntry(ctx context.Context, in *WatchlistItemInp
 		return nil, p
 	}
 	return &WatchlistEntryOutput{Body: WatchlistEntry{ItemID: ID(entry.MediaItemID), AddedAt: added}}, nil
+}
+
+func (reg *Registry) getWatchlistMembership(ctx context.Context, in *WatchlistItemInput) (*PersonalListMembershipOutput, error) {
+	if reg.deps.PersonalLists == nil {
+		return nil, unavailable("watchlist")
+	}
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
+	if p != nil {
+		return nil, p
+	}
+	entry, found, err := reg.deps.PersonalLists.GetWatchlistEntry(ctx, viewer, string(in.ItemID))
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return personalListMembership(in.ItemID, found, entry.AddedAt)
 }
 
 func (reg *Registry) addToWatchlist(ctx context.Context, in *WatchlistItemInput) (*struct{}, error) {

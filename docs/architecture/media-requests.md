@@ -5,7 +5,11 @@ A user asks for a movie or series the server does not have, an admin approves it
 to a downstream service such as Sonarr or Radarr, and the request completes when
 the media is in the library. The code lives in `internal/requests`; the reconcile
 pass is the `reconcile_requests` task in `internal/taskmanager/tasks`, and the
-download refresh pass is `refresh_request_downloads` beside it.
+download refresh pass is `refresh_request_downloads` beside it. The Discover
+page people request from follows an admin-defined layout; see
+[Request Discover rows](request-discover-rows.md), whose list rows the
+`refresh_request_discover_lists` task keeps (under snapshot leases, not the
+reconcile locks).
 
 ## State
 

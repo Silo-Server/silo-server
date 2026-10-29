@@ -48,9 +48,9 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			($3, 'movie', 'Undated', '{}', 0, 0, NULL, NULL, NULL)`,
 		id("empire"), id("wolf"), id("undated"), recent)
 	batchEquivExec(t, pool, `
-		INSERT INTO media_items (content_id, type, title, genres, latest_episode_added_at, last_air_date_at) VALUES
-			($1, 'series', 'Fresh Show', '{}', NOW() - INTERVAL '2 days', CURRENT_DATE - 2),
-			($2, 'series', 'Stale Show', '{}', NOW() - INTERVAL '400 days', CURRENT_DATE - 400)`,
+		INSERT INTO media_items (content_id, type, title, genres, latest_episode_added_at, last_air_date_at, latest_available_episode_air_date_at) VALUES
+			($1, 'series', 'Fresh Show', '{}', NOW() - INTERVAL '2 days', CURRENT_DATE - 2, CURRENT_DATE - 2),
+			($2, 'series', 'Stale Show', '{}', NOW() - INTERVAL '400 days', CURRENT_DATE - 1, CURRENT_DATE - 400)`,
 		id("fresh"), id("stale"))
 	for _, movie := range []string{"empire", "wolf", "undated"} {
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id(movie), movies)
@@ -92,6 +92,8 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		{"released not in the last", "movie", QueryRule{Field: "release_date", Op: "not_in_last", Value: "30d"}, []string{"empire"}},
 		{"episode added in the last", "series", QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"}, []string{"fresh"}},
 		{"episode added not in the last", "series", QueryRule{Field: "latest_episode_added", Op: "not_in_last", Value: "7d"}, []string{"stale"}},
+		// Stale Show's newest episode aired yesterday but has no file; the
+		// rule counts its newest episode with one.
 		{"aired not in the last", "series", QueryRule{Field: "last_air_date", Op: "not_in_last", Value: "1m"}, []string{"stale"}},
 		{"show watched in the last", "series", QueryRule{Field: "last_watched", Op: "in_last", Value: "7d"}, []string{"fresh"}},
 		{"show not watched in the last", "series", QueryRule{Field: "last_watched", Op: "not_in_last", Value: "7d"}, []string{"stale"}},
@@ -99,6 +101,15 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		// The episode fast path leaves title to the generic executor, whose
 		// placeholders follow the episode relation's library arguments.
 		{"episode title", "episode", QueryRule{Field: "title", Op: "is", Value: "pilot"}, []string{"fresh-e1", "stale-e1"}},
+		{"show title contains", "episode", QueryRule{Field: "show_title", Op: "contains", Value: "FRESH"}, []string{"fresh-e1"}},
+		{"show title is", "episode", QueryRule{Field: "show_title", Op: "is", Value: " fresh show "}, []string{"fresh-e1"}},
+		{"show title is not", "episode", QueryRule{Field: "show_title", Op: "is_not", Value: "Fresh Show"}, []string{"stale-e1"}},
+		{"show title not contains", "episode", QueryRule{Field: "show_title", Op: "not_contains", Value: "fresh"}, []string{"stale-e1"}},
+		{"show title prefix", "episode", QueryRule{Field: "show_title", Op: "begins_with", Value: "fresh"}, []string{"fresh-e1"}},
+		{"show title suffix", "episode", QueryRule{Field: "show_title", Op: "ends_with", Value: "show"}, []string{"fresh-e1", "stale-e1"}},
+		{"show title wildcard is literal", "episode", QueryRule{Field: "show_title", Op: "contains", Value: "%"}, []string{}},
+		{"movies have no show title", "movie", QueryRule{Field: "show_title", Op: "is_not", Value: "Fresh Show"}, []string{}},
+		{"shows have no parent show title", "series", QueryRule{Field: "show_title", Op: "contains", Value: "Show"}, []string{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,5 +138,77 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 				t.Fatalf("got %v (total %d), want %v", got, total, want)
 			}
 		})
+	}
+
+	t.Run("show title combines with watched and episode-title exclusions", func(t *testing.T) {
+		batchEquivExec(t, pool, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'other')`, profile+"-other", userID)
+		for i, title := range []string{"Finale", "Return", "Unseen", "In progress"} {
+			episodeID := id(fmt.Sprintf("fresh-e%d", i+2))
+			batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1, $2, $2 || '-s1', 1, $3, $4)`, episodeID, id("fresh"), i+2, title)
+			batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1, $2)`, episodeID, shows)
+			watcher := profile
+			if i == 1 {
+				watcher += "-other"
+			}
+			if i != 2 { // Unseen has no watch history for any profile.
+				batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW(), $5)`, episodeID+"-history", userID, watcher, episodeID, i != 3)
+			}
+		}
+		for _, tc := range []struct {
+			name    string
+			watched bool
+			want    []string
+		}{
+			{"watched", true, []string{id("fresh-e1")}},
+			{"unwatched", false, []string{id("fresh-e3"), id("fresh-e4"), id("fresh-e5")}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				items, total, err := executor.Preview(ctx, QueryDefinition{
+					MediaScope: "episode",
+					LibraryIDs: []int{shows},
+					Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{
+						{Field: "show_title", Op: "contains", Value: "fresh"},
+						{Field: "watched", Op: "is", Value: tc.watched},
+						{Field: "title", Op: "is_not", Value: "Finale"},
+					}}},
+				}.Normalize(), viewer, 50)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := contentIDs(items)
+				slices.Sort(got)
+				if !slices.Equal(got, tc.want) || total != len(tc.want) {
+					t.Fatalf("episodes excluding Finale = %v (total %d), want %v", got, total, tc.want)
+				}
+			})
+		}
+	})
+
+	// The last air date sort reads the same value as the rule, in catalog
+	// queries and in library browse. A show that premiered recently but has
+	// no aired episode with a file sorts last in both.
+	batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, genres, first_air_date) VALUES ($1, 'series', 'Unlinked Show', '{}', $2)`,
+		id("unlinked"), recent)
+	batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id("unlinked"), shows)
+	want := []string{id("fresh"), id("stale"), id("unlinked")}
+	items, _, err := executor.Preview(ctx, QueryDefinition{
+		MediaScope: "series",
+		LibraryIDs: []int{shows},
+		Sort:       QuerySort{Field: "last_air_date", Order: "desc"},
+	}.Normalize(), viewer, 50)
+	if err != nil {
+		t.Fatalf("Preview sorted by last air date: %v", err)
+	}
+	if got := contentIDs(items); !slices.Equal(got, want) {
+		t.Fatalf("query order by last air date = %v, want %v", got, want)
+	}
+	browsed, err := NewBrowseRepository(pool).Browse(ctx, BrowseFilters{
+		Type: "series", LibraryID: shows, Sort: "last_air_date", Order: "desc", Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("Browse sorted by last air date: %v", err)
+	}
+	if got := contentIDs(browsed.Items); !slices.Equal(got, want) {
+		t.Fatalf("browse order by last air date = %v, want %v", got, want)
 	}
 }

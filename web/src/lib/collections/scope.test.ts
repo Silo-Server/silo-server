@@ -426,6 +426,7 @@ describe("invalidate", () => {
     await SERVER_SCOPE.invalidate(client);
     expect(spy.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
       ["libraryCollections"],
+      ["collections", "server"],
       ["catalog"],
       ["admin", "collections"],
       ["admin", "collectionGroups"],

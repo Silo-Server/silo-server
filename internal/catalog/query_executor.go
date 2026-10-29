@@ -77,6 +77,9 @@ func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access A
 }
 
 func (e *QueryExecutor) buildCountQuery(def QueryDefinition, access AccessFilter) (string, []any, error) {
+	if countSQL, countArgs, ok, err := e.episodeCatalogCountQuery(def, access); ok || err != nil {
+		return countSQL, countArgs, err
+	}
 	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
 	if err != nil {
 		return "", nil, err
@@ -100,7 +103,7 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, fmt.Errorf("query executor requires a database pool")
 	}
 
-	if !e.GroupByWork && e.SourceWhere == "" && e.SourceJoin == "" && len(e.SourceOrder) == 0 {
+	if e.usesEpisodeCatalogQueries() {
 		if items, total, hasMore, ok, err := e.tryEpisodeCatalogUserStatePreviewPage(
 			ctx,
 			def,
@@ -414,6 +417,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
+	} else if baseRelation == mediaItemsBaseRelation {
+		// No library named or denied: a media item must still belong to one.
+		// Other relations (episodes, the search cursor's pre-filtered union)
+		// carry their own membership.
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
 	}
 	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")

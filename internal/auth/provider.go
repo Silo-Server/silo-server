@@ -7,6 +7,7 @@ import (
 	netmail "net/mail"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -135,17 +136,25 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 // the password against the account's local password. Every rejection costs
 // one bcrypt comparison: a name with no account, or an account without local
 // password sign-in, is checked against placeholderPasswordHash, so the
-// response time does not tell a stranger which names have accounts.
+// response time does not tell a stranger which names have accounts. When the
+// server is too busy to compare, every name gets the same
+// passwordhash.ErrBusy, for the same reason.
 func checkLocalPassword(ctx context.Context, users LoginDirectory, creds Credentials) (*models.User, error) {
 	user, err := LookupLogin(ctx, users, creds.Username)
 	if err != nil && !IsNotFound(err) {
 		return nil, fmt.Errorf("looking up user: %w", err)
 	}
 	if err != nil || !user.LocalPasswordLoginEnabled {
-		_ = comparePasswordHash(placeholderPasswordHash(), []byte(creds.Password))
+		if err := comparePasswordHash(ctx, placeholderPasswordHash(), []byte(creds.Password)); errors.Is(err, passwordhash.ErrBusy) {
+			return nil, err
+		}
 		return nil, ErrInvalidCredentials
 	}
-	if !CheckPassword(user, creds.Password) {
+	ok, err := CheckPassword(ctx, user, creds.Password)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrInvalidCredentials
 	}
 	return user, nil

@@ -241,7 +241,7 @@ type AccountIdentityLinkStartInput struct {
 
 // AccountIdentityLinkStart is where the browser goes next.
 type AccountIdentityLinkStart struct {
-	AuthorizeURL string `json:"authorize_url" doc:"Provider sign-in URL; navigate the same browser there" example:"https://id.example.test/authorize?client_id=silo&state=..."`
+	AuthorizeURL string `json:"authorize_url" doc:"Provider sign-in URL as the sign-in plugin returned it; navigate the same browser there; not validated as a URI" example:"https://id.example.test/authorize?client_id=silo&state=..."`
 }
 
 // AccountIdentityLinkStartOutput carries the flow's browser-binding cookie.
@@ -267,7 +267,7 @@ type AccountIdentityLinkTicketOutput struct {
 
 // ProviderLogout is the provider sign-out a web client may visit.
 type ProviderLogout struct {
-	EndSessionURL string `json:"end_session_url" doc:"Provider end-session URL to navigate to after logout; empty when there is none" example:"https://id.example.test/logout?id_token_hint=eyJhbGciOi..."`
+	EndSessionURL string `json:"end_session_url" format:"uri-reference" doc:"Provider end-session URL to navigate to after logout; empty when there is none" example:"https://id.example.test/logout?id_token_hint=eyJhbGciOi..."`
 }
 
 // ProviderLogoutOutput is the getProviderLogout response.

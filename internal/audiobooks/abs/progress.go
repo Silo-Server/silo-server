@@ -422,7 +422,7 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.stopNativePlaybackSession(r.Context(), sid)
+	h.stopNativePlaybackSession(r.Context(), &sess)
 
 	h.publish(a.UserID, "user_session_closed", map[string]any{
 		"id":            sid,

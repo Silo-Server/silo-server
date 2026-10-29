@@ -18,7 +18,10 @@ import (
 type recordingRepo struct {
 	mu        sync.Mutex
 	inserts   int
-	quotaUsed int // returned by CountTranscribeJobsByUserSince
+	quotaUsed int  // returned by CountTranscribeJobsByUserSince
+	reusable  *Job // completed job GetReusableJobByIdempotencyKey returns for its key
+	active    *Job // in-flight job GetActiveJobByIdempotencyKey returns for its key
+	raceWin   *Job // when set, InsertJob loses the unique-index race to this job
 	completed []int
 	failures  []recordedFailure
 	progress  []recordedProgress
@@ -44,12 +47,31 @@ func (r *recordingRepo) InsertJob(_ context.Context, job *Job, quota *JobQuota) 
 	if quota != nil && r.quotaUsed >= quota.Limit {
 		return &QuotaExceededError{Limit: quota.Limit, Used: r.quotaUsed, Period: quota.Period}
 	}
+	if r.raceWin != nil {
+		r.active = r.raceWin
+		return errors.New("duplicate key value violates unique constraint")
+	}
 	r.inserts++
 	job.ID = int64(r.inserts)
 	return nil
 }
 func (r *recordingRepo) GetJob(context.Context, int64) (*Job, error) { return nil, nil }
-func (r *recordingRepo) GetActiveJobByIdempotencyKey(context.Context, string) (*Job, error) {
+func (r *recordingRepo) GetActiveJobByIdempotencyKey(_ context.Context, key string) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active != nil && r.active.IdempotencyKey == key {
+		job := *r.active
+		return &job, nil
+	}
+	return nil, nil
+}
+func (r *recordingRepo) GetReusableJobByIdempotencyKey(_ context.Context, key string) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reusable != nil && r.reusable.IdempotencyKey == key {
+		job := *r.reusable
+		return &job, nil
+	}
 	return nil, nil
 }
 func (r *recordingRepo) ListJobsByMediaFile(context.Context, int) ([]Job, error) { return nil, nil }
@@ -106,6 +128,7 @@ func newQuotaTestService(t *testing.T, used, limit int) (*Service, *recordingRep
 	t.Cleanup(cancel)
 	cfg := Config{
 		Configured:            true,
+		SpeechConfigured:      true,
 		TranscribeEnabled:     true,
 		ASRModel:              "whisper-1",
 		TranscribeQuotaJobs:   limit,

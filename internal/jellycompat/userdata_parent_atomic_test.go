@@ -36,6 +36,9 @@ func (parentAtomicOnlyStore) MarkWatchedBatch(context.Context, string, []usersto
 func (parentAtomicOnlyStore) RemoveHistoryItems(context.Context, string, []string, time.Time) error {
 	return errors.New("separate removal forbidden")
 }
+func (parentAtomicOnlyStore) ClearWatchedState(context.Context, string, []string, time.Time) error {
+	return errors.New("separate clear forbidden")
+}
 
 func TestParentUserDataCombinedFavoriteUsesOneTransaction(t *testing.T) {
 	for _, empty := range []bool{false, true} {
@@ -60,19 +63,16 @@ func TestParentUserDataCombinedFavoriteUsesOneTransaction(t *testing.T) {
 				if err != nil || favorite != (index == 0) {
 					t.Fatalf("favorite=%v error=%v", favorite, err)
 				}
+				// The played mark records a play per episode; the
+				// unplayed mark keeps them.
 				history, err := store.ListHistory(t.Context(), session.ProfileID, 10, 0)
 				expected := 0
-				if index == 0 && !empty {
+				if !empty {
 					expected = 2
 				}
 				if err != nil || len(history) != expected {
 					t.Fatalf("history count=%d want=%d error=%v", len(history), expected, err)
 				}
-
-			}
-			history, err := store.ListHistory(t.Context(), session.ProfileID, 10, 0)
-			if err != nil || len(history) != 0 {
-				t.Fatalf("history=%v error=%v", history, err)
 			}
 		})
 	}

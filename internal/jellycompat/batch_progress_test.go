@@ -66,6 +66,10 @@ func (m *mockUserDataService) ListProgressFiltered(context.Context, *Session, st
 	panic("unused")
 }
 
+func (m *mockUserDataService) ListResumableProgress(context.Context, *Session, []string) ([]upstreamProgress, error) {
+	return nil, nil
+}
+
 func (m *mockUserDataService) FilterResumeProgress(_ context.Context, _ *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	return entries, nil
 }
@@ -100,7 +104,7 @@ func (s *stubContentService) GetItemDetail(_ context.Context, _ *Session, conten
 	return &d, nil
 }
 
-func (s *stubContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+func (s *stubContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	out := make(map[string]*upstreamItemDetail, len(contentIDs))
 	for _, id := range contentIDs {
 		detail, err := s.GetItemDetail(ctx, session, id, libraryID)

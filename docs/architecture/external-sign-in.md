@@ -172,7 +172,12 @@ plugin.
 A local password sign-in rechecks the account, password hash and local sign-in
 policy while holding the account row lock in the transaction that creates its
 login session. Linking or revoking the account cannot leave an in-flight local
-sign-in with a new session after its credentials were retired.
+sign-in with a new session after its credentials were retired. A directory
+(credentials plugin) sign-in opens its session the way a completion code's
+redemption does (see Completion codes): account resolution commits first, then
+the session's transaction locks the account, rechecks that it is enabled, and
+locks the enabled installation and the linked identity. A disable or unlink
+that commits in between refuses the sign-in instead of missing its session.
 
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one
@@ -184,6 +189,14 @@ sign-in refused by the sign-in policy (`local_login_disabled`,
 `not_permitted`, `email_in_use`, `identity_linked_elsewhere`, an expired
 directory password) answers 401 `InvalidUsernameOrPassword` with the reason
 as its message; a provider that cannot answer is 503 `ServiceUnavailable`.
+
+Every password Silo sends to the directory, from sign-in on any listener or
+from linking, first spends the sign-in attempt budget of the name it was sent
+with ([Sign-in attempts per name](../auth-api.md#sign-in-attempts-per-name)).
+Guessing at a directory name therefore stops at that budget however many
+addresses the guesses come from. A directory whose lockout threshold is below
+the budget, or that accepts several names for one entry, can still lock the
+entry.
 
 Audiobookshelf compatibility (beta) signs in local accounts only: its sessions
 refresh without the provider re-check below, so directory users are not

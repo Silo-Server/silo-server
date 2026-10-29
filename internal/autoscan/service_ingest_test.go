@@ -88,6 +88,10 @@ func (r *failOnceResolver) ResolveVanishedPath(ctx context.Context, path, trigge
 	return (fakeResolver{}).ResolveVanishedPath(ctx, path, trigger)
 }
 
+func (r *failOnceResolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return r.ResolveVanishedPath(ctx, path, trigger)
+}
+
 func TestRetryPendingWebhookDeliveriesRecoversTransientFailure(t *testing.T) {
 	store := webhookTestStore()
 	queue := &recordingQueuer{}

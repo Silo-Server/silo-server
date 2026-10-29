@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,10 +73,16 @@ func (c Candidate) hasVideo() bool { return strings.TrimSpace(c.CodecVideo) != "
 
 func (c Candidate) hasAudio() bool { return strings.TrimSpace(c.CodecAudio) != "" }
 
+// metadataTailDetails are the unusable tail details
+// tailUnusableBeforeSampling decides from probe metadata. Earlier builds
+// stored them; this one decides them on every analysis and never stores
+// them.
+var metadataTailDetails = []string{tailDetailNoVideo, tailDetailUnsupportedCodec}
+
 // metadataTailDetail reports whether an unusable tail's detail came from
 // tailUnusableBeforeSampling rather than from decoding the tail.
 func metadataTailDetail(detail string) bool {
-	return detail == tailDetailNoVideo || detail == tailDetailUnsupportedCodec
+	return slices.Contains(metadataTailDetails, detail)
 }
 
 // tailUnusableBeforeSampling returns why the candidate's tail cannot be

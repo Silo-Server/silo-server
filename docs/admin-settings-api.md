@@ -13,6 +13,20 @@ no-store responses:
   `managed_by_env` names. Values are never returned. Both fields are arrays,
   including when empty.
 
+`managed_by_env` lists the keys the server's environment sets on every start:
+`redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
+(`SILO_TRUSTED_PROXIES`), `catalog.search.provider` (`SILO_SEARCH_PROVIDER`),
+`catalog.search.meilisearch.url` (`SILO_MEILISEARCH_URL`), and
+`catalog.search.meilisearch.api_key` (`SILO_MEILISEARCH_API_KEY`). The
+environment variables are read by the server answering the request, so the list
+can differ between API servers that were started differently. A write of one of
+these keys is refused with the detail `<key> is managed by an environment
+variable`; `redis.db` has one exception, described below. The values of
+`SILO_TRUSTED_PROXIES` and the search variables are also stored at startup, so
+stored settings show the trusted proxies, the search provider and the
+Meilisearch URL in effect; the API key is stored encrypted and, like every
+secret, only appears in `configured`. `REDIS_URL` is never stored.
+
 Stored and effective settings are string dictionaries keyed by the server
 settings registry. An empty dictionary is `{}`. Inspection copies stored values
 before redaction so a cached settings map remains intact. Missing settings storage
@@ -42,9 +56,77 @@ remain clears under each provider's existing fallback rules. Connection checks d
 not persist draft values. Credentialed Meilisearch checks follow redirects only
 within the same scheme, exact host and effective port; any other redirect fails the check with a
 message asking for the final address. Checks without a key retain the HTTP
-client's ordinary redirect behavior.
+client's ordinary redirect behavior. Because Meilisearch answers `/health`
+without a key, the check then lists one index, which needs the `indexes.get`
+action, and searches a nonexistent index under the configured index name,
+which needs the `search` action and an index scope covering Silo's indexes.
+A key Meilisearch refuses for either request, or a missing one on a secured
+instance, fails with a message asking for another key. The check does not
+prove the key can write documents.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
+
+## AI providers
+
+An administrator connects each AI provider once, and each AI job selects a
+provider from that list: `ai.text_provider_id` for text translation (used while
+`ai.auth_mode` is `api_key`), `ai.speech_provider_id` for speech-to-text, and
+`recommendations.embedding_provider_id` for recommendation embeddings (applied
+at restart, like every `recommendations.*` setting). The model settings
+(`ai.chat_model`, `ai.asr_model`, `recommendations.embedding_model`) are
+unchanged, except that `recommendations.embedding_model` no longer has a
+default. A binding must
+name a stored provider that serves the job's capability; settings writes that
+break this rule return `400`. The ChatGPT plan is not a stored provider; it is
+selected with `ai.auth_mode: chatgpt` and serves text only.
+
+The registry is the encrypted, internal setting `ai.providers`. Generic settings
+reads, writes, secret-status lists, revision validators, and connection-check
+drafts exclude it; the operations below are its only administrative boundary.
+`ai.base_url`, `ai.api_key`, `ai.asr_base_url`, `ai.asr_api_key`,
+`subtitle_ai.base_url`, `subtitle_ai.api_key`,
+`recommendations.embedding_base_url`, `recommendations.embedding_auth_token`,
+`recommendations.openai_model`, `recommendations.openai_api_key`, and
+`recommendations.embedding_provider` are retired: the server no longer reads
+them and rejects writes to them. On first start, a server moves the
+endpoints those keys held into providers and binds each job to the provider that
+serves the endpoint and key it used, then leaves the old rows in place.
+Transcription no longer falls back to the text endpoint. A stored endpoint
+whose URL carries credentials (`https://user:password@host`) or a query is not
+converted, because provider addresses are shown to administrators and the AI
+clients never handled a query; that job stays unconfigured and startup logs a
+warning naming the legacy setting. HTTP Basic authentication through the URL
+is not supported; such a proxy needs to accept the provider's API key.
+
+The following operations require an acting administrator:
+
+- `GET /api/v2/admin/ai/providers` lists providers without keys (`has_api_key`
+  reports a saved key) and the provider `types` that can be connected, with each
+  type's default address, fixed capabilities, and whether it needs a key. A
+  custom type has no fixed capabilities; the administrator declares them.
+  `used_by` lists the jobs sending requests to a provider; the text binding is
+  idle while the ChatGPT plan serves text.
+- `POST /api/v2/admin/ai/providers` connects a provider and returns `201`.
+- `PATCH /api/v2/admin/ai/providers/{id}` edits a provider. Every job using it
+  switches at once. The type is fixed. An omitted `api_key` keeps the stored
+  key and an empty one clears it. A `base_url` on another host needs `api_key`
+  in the same request, so a stored key never follows a provider elsewhere
+  unasked. Removing a capability a job uses returns `409`. Moving the
+  embedding provider to another address marks a restart as required; the
+  embedding lock follows the model, so the move needs no reset.
+- `DELETE /api/v2/admin/ai/providers/{id}` discards a provider and its key. A
+  provider a job uses returns `409`; an idle text binding to it is cleared.
+- `POST /api/v2/admin/ai/providers/check` lists a draft provider's models
+  without saving it. With `id` and no `api_key`, the stored key is sent only to
+  the stored address's scheme, host, and port. A provider that does not list
+  models answers `success: true` with no models. Failures return
+  `success: false` with a message that excludes provider text and credentials.
+- `GET /api/v2/admin/ai/providers/{id}/models` lists a stored provider's models.
+  Each model's `kind` (`chat`, `embeddings`, `speech`) comes from the provider
+  where it reports one (Gemini) and from the model name otherwise; clients use
+  it for suggestions and still accept any typed model name.
+
+Model listing never follows redirects, because the request carries the key.
 
 ## AI reasoning and ChatGPT accounts
 
@@ -53,7 +135,7 @@ provider error bodies and credentials. Invalid kinds/configuration return `422`.
 uses the model's default. Explicit values come from the model's capability
 response. The server validates known model families against their supported
 levels; an unknown custom model is validated by the provider connection check.
-Text requests read the persisted authentication mode, endpoint, API key, model,
+Text requests read the persisted authentication mode, text provider, model,
 effort, and active registration together at request start.
 
 The following operations require an acting administrator:
@@ -141,8 +223,8 @@ account operations are the only administrative credential boundary. See
 [AI provider authentication](architecture/ai-provider-authentication.md) for
 identity, refresh, and inference invariants.
 
-ChatGPT plan credentials authorize text translation. Speech-to-text continues to
-use the configured Whisper-compatible URL and API key. These operations belong
+ChatGPT plan credentials authorize text translation. Speech-to-text uses the
+provider `ai.speech_provider_id` selects. These operations belong
 to the web administrator UI; Apple, Android, and Jellyfin clients continue to
 consume the existing translated subtitle and metadata contracts and require no
 account or settings changes.
@@ -263,6 +345,19 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
 - The connection is made before the settings transaction. If another write
   changes the stored Redis settings in the meantime, the write is refused the
   same way and can be sent again.
+
+### Lower-version transcoding
+
+`playback.prefer_lower_version_transcode` is a boolean setting, default
+`true`. It applies when `allow_4k_transcode` is `true` and a 4K title has a
+lower-resolution version. A quality at or below that version's resolution
+class, such as Auto under a bandwidth estimate, is transcoded from the lower
+version. Qualities above it, such as **4K Medium**, still transcode the 4K
+version. When `false`, every lower quality transcodes the 4K version. With
+`allow_4k_transcode` set to `false`, the lower version serves lower qualities
+whatever this setting says. Changes apply to new playback decisions. The
+Playback settings page shows this policy as **Prefer 1080p
+versions** while 4K transcoding is allowed.
 
 ### HEVC encoding
 

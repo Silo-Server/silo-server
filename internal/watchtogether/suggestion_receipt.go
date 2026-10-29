@@ -20,7 +20,8 @@ var ErrSuggestionIdentityConflict = errors.New("suggestion identity was already 
 
 // CreateSuggestionOnce atomically binds a v2 caller-selected identity to its
 // original request. A retained receipt prevents resurrection after deletion.
-// Legacy CreateSuggestion intentionally keeps its original insert behavior.
+// Legacy CreateSuggestion keeps its receipt-free insert; both share the room
+// row lock and the maxRoomSuggestions cap.
 func (r *SuggestionRepository) CreateSuggestionOnce(ctx context.Context, suggestion Suggestion) (*Suggestion, bool, error) {
 	if r == nil || r.pool == nil {
 		return nil, false, fmt.Errorf("suggestion repository unavailable")
@@ -67,6 +68,11 @@ func (r *SuggestionRepository) CreateSuggestionOnce(ctx context.Context, suggest
 	const columns = `id,room_id,suggester_user_id,suggester_profile_id,content_id,content_type,title,subtitle,poster_url,note,vote_count,created_at`
 	var result *Suggestion
 	if inserted {
+		// Refusal rolls the receipt back, so the identity stays usable after
+		// a suggestion is removed. A replay never counts against the cap.
+		if err = ensureSuggestionCapacity(ctx, tx, suggestion.RoomID); err != nil {
+			return nil, false, err
+		}
 		result, err = scanSuggestion(tx.QueryRow(ctx, `INSERT INTO watch_together_suggestions (`+columns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11) ON CONFLICT(id) DO NOTHING RETURNING `+columns, suggestion.ID, suggestion.RoomID, suggestion.SuggesterUserID, suggestion.SuggesterProfileID, suggestion.ContentID, suggestion.ContentType, suggestion.Title, suggestion.Subtitle, suggestion.PosterURL, suggestion.Note, suggestion.CreatedAt.UTC()))
 	} else {
 		result, err = scanSuggestion(tx.QueryRow(ctx, `SELECT `+columns+` FROM watch_together_suggestions WHERE id=$1 FOR UPDATE`, suggestion.ID))

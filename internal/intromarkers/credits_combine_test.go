@@ -119,7 +119,7 @@ func TestCombineCreditsValidatedCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := creditsLimitsFor(tc.movie)
-			if got := limits.windowStart(tc.candidate.DurationSeconds); math.Abs(got-tc.window) > 0.001 {
+			if got := limits.WindowStart(tc.candidate.DurationSeconds); math.Abs(got-tc.window) > 0.001 {
 				t.Fatalf("window starts at %.3f, fixture has %.3f", got, tc.window)
 			}
 			got, ok := combineCredits(tc.candidate, tc.evidence, limits)

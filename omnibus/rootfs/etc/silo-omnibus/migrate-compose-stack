@@ -1,0 +1,462 @@
+#!/usr/bin/env bash
+# Copy an install of the multi-container Compose stack, which ran PostgreSQL,
+# Redis, and Meilisearch in containers of their own, into the omnibus layout
+# under SILO_DATA_ROOT/config. docker-compose.yml runs this as its postgres
+# service before Silo starts, with SILO_DATA_ROOT mounted at /silo-data.
+#
+# The PostgreSQL cluster is copied and Silo's plugins, artwork, and compat
+# directories are hard-linked, so the earlier Compose file still starts on the
+# old directories. Everything is prepared under staging names and moved into
+# place at the end under a pending record, so an interrupted run starts over.
+# Redis and Meilisearch data stay behind: Redis holds nothing a single server
+# cannot rebuild, and Silo rebuilds the search index.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+PATH="/command:$PATH"
+
+root=/silo-data
+host_root="${SILO_DATA_ROOT:-/opt/silo}"
+config="$root/config"
+pgdata="$config/postgres/data"
+pg_stage="$config/postgres/.data.migrating"
+# Both in /config, which only root writes, like the image's other markers.
+# done: written last; the source cluster's identifier and latest checkpoint,
+# or "none" when Silo's database is elsewhere. pending: present while staged
+# results move into place. checked: this step finished, whatever it found;
+# under REQUIRE_COMPOSE_MIGRATION, init-postgres creates no cluster without it,
+# since one would come up empty beside an earlier install this step has yet
+# to move.
+done_marker="$config/.compose-cluster-copied"
+pending_marker="$config/.compose-migration-pending"
+checked_marker="$config/.compose-migration-checked"
+silo_dirs=(plugins artwork compat)
+
+fail() {
+  printf '[omnibus] error: %s\n' "$*" >&2
+  exit 1
+}
+
+# mark_checked: record that this step ran. /config stays root's, as
+# init-config lays it out.
+mark_checked() {
+  install -d -o root -g root -m 0755 "$config"
+  : > "$checked_marker"
+}
+
+# host PATH: PATH under /silo-data as the host names it.
+host() { printf '%s' "$host_root${1#"$root"}"; }
+
+# url_host URL: the host part of a database or Redis URL.
+url_host() {
+  local rest="${1#*://}"
+  rest="${rest#*@}"
+  rest="${rest%%[/?]*}"
+  if [[ "$rest" == \[* ]]; then
+    rest="${rest#[}"
+    printf '%s' "${rest%%]*}"
+  else
+    printf '%s' "${rest%%:*}"
+  fi
+}
+
+# control_fingerprint DIR: what changes whenever a server writes the cluster,
+# including a clean start and stop: its identifier and latest checkpoint.
+# Fails, rather than print nothing, when the cluster cannot be read, so an
+# unreadable cluster never matches. LC_ALL=C keeps the labels untranslated.
+control_fingerprint() {
+  local out
+  out="$(LC_ALL=C s6-setuidgid postgres pg_controldata -D "$1" 2>&1)" ||
+    fail "pg_controldata cannot read $(host "$1"): ${out##*$'\n'}"
+  out="$(sed -nE 's/^(Database system identifier|Latest checkpoint location):[[:space:]]*//p' <<<"$out" | paste -sd ' ')"
+  [[ "$out" == *' '* ]] || fail "pg_controldata shows no system identifier and checkpoint for $(host "$1")"
+  printf '%s' "$out"
+}
+
+# set_aside PATH: move a result an earlier attempt left at PATH out of the way.
+set_aside() {
+  local dest
+  dest="${1%/*}/.${1##*/}.before-$(date -u +%Y%m%dT%H%M%SZ)"
+  mv -T "$1" "$dest"
+  log "set aside $(host "$1") from an unfinished earlier attempt as $(host "$dest")"
+}
+
+[[ -d "$root" ]] || fail "mount SILO_DATA_ROOT at $root"
+
+# The earlier file read SILO_IMAGE; this one reads SILO_OMNIBUS_IMAGE and
+# would otherwise follow aio past a pinned build.
+if [[ -n "${SILO_IMAGE:-}" && "$SILO_IMAGE" != *:latest && "$SILO_IMAGE" != *:aio && -z "${SILO_OMNIBUS_IMAGE:-}" ]]; then
+  fail "SILO_IMAGE in .env pins $SILO_IMAGE, which this Compose file does not use. Set SILO_OMNIBUS_IMAGE to the omnibus image of that build (its tag with -aio added), or remove SILO_IMAGE to follow aio"
+fi
+
+# --- What is there. ----------------------------------------------------------
+
+earlier_install=false
+for name in "${silo_dirs[@]}"; do
+  # A link counts even when it leads nowhere in here; it is refused below.
+  [[ -e "$root/$name" || -L "$root/$name" ]] && earlier_install=true
+done
+# The stack mounted SILO_DATA_ROOT/postgres at /var/lib/postgresql, where the
+# pgvector/pgvector image keeps its cluster in <major>/docker (in data before
+# PostgreSQL 18). PG_VERSION is in a directory the old postgres account wrote.
+clusters=()
+for dir in "$root"/postgres/*/docker "$root"/postgres/data; do
+  [[ -e "$dir/PG_VERSION" && ! -L "$dir/PG_VERSION" ]] && clusters+=("$dir")
+done
+
+if [[ -d "$config" ]]; then
+  # Staging an interrupted run left behind is never promoted.
+  rm -rf "$pg_stage" "$done_marker.new"
+  for name in "${silo_dirs[@]}"; do rm -rf "$config/silo/.$name.migrating"; done
+  # Interrupted while moving results into place: set aside what was moved and
+  # start over, since the earlier stack may have changed since. With the done
+  # marker written, everything is in place and only the pending record is left.
+  if [[ -e "$pending_marker" ]]; then
+    if [[ ! -s "$done_marker" ]]; then
+      [[ ! -e "$pgdata" ]] || set_aside "$pgdata"
+      for name in "${silo_dirs[@]}"; do
+        [[ ! -e "$config/silo/$name" ]] || set_aside "$config/silo/$name"
+      done
+    fi
+    rm -f "$pending_marker"
+  fi
+fi
+
+# Migrated before: refuse if the earlier stack has run on the original since,
+# since starting on the copy would drop what it wrote.
+if [[ -s "$done_marker" ]]; then
+  recorded="$(<"$done_marker")"
+  if [[ "$recorded" != none && -n "${clusters[0]:-}" ]]; then
+    now=""
+    [[ -e "${clusters[0]}/postmaster.pid" ]] || now="$(control_fingerprint "${clusters[0]}")" || exit 1
+    if [[ -e "${clusters[0]}/postmaster.pid" || "$now" != "$recorded" ]]; then
+      fail "the earlier stack has used $(host "${clusters[0]}") since it was copied to $(host "$pgdata"). To copy it again, move $(host "$config") aside; to keep the copy, delete $(host "${clusters[0]}")"
+    fi
+  fi
+  mark_checked
+  exit 0
+fi
+# An omnibus install of its own. Beside an earlier install this step has not
+# moved, its cluster was created first, most likely by Silo started on its
+# own: copying over it would drop what it holds, and going on without the
+# earlier install would leave that data behind unannounced.
+if [[ -e "$pgdata/PG_VERSION" ]]; then
+  if (( ${#clusters[@]} > 0 )) || [[ "$earlier_install" == true ]]; then
+    found=()
+    for name in postgres "${silo_dirs[@]}"; do
+      [[ -e "$root/$name" || -L "$root/$name" ]] && found+=("$name")
+    done
+    fail "an omnibus database was created in $(host "$pgdata") before the earlier install in $host_root (${found[*]}) was moved, likely by starting Silo before this step (docker compose up --no-deps). If $(host "$pgdata") holds nothing you need, move it aside and start again. To keep it, delete the earlier stack's directories in $host_root"
+  fi
+  mark_checked
+  exit 0
+fi
+
+if (( ${#clusters[@]} == 0 )) && [[ "$earlier_install" == false ]]; then
+  # Nothing of the earlier stack here. An .env written for it means its data
+  # is in named volumes or at paths this file does not mount, and starting
+  # would make an empty server beside it.
+  if [[ -z "${DATABASE_URL:-}" ]] && ! truthy "${ENABLE_NODE_ACCESS:-false}" &&
+    [[ -n "${POSTGRES_PASSWORD_SET:-}" || -n "${SILO_IMAGE:-}" ]]; then
+    fail ".env sets POSTGRES_PASSWORD or SILO_IMAGE, which only the earlier stack used, but $host_root has none of its data. If its data is in named volumes or other paths, move it to $host_root (postgres, plugins, artwork, compat) and start again. If this is a new install, remove those two settings from .env"
+  fi
+  mark_checked
+  exit 0
+fi
+
+# --- An earlier install is here. ---------------------------------------------
+
+# The earlier file set these for Silo itself, hiding any in .env; this one
+# passes .env through, and the services they named are gone.
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  case "$(url_host "$DATABASE_URL")" in
+    postgres | localhost | 127.0.0.1 | ::1)
+      fail "DATABASE_URL in .env points at the earlier stack's PostgreSQL; remove it to use the bundled one" ;;
+  esac
+fi
+if [[ -n "${REDIS_URL:-}" ]]; then
+  case "$(url_host "$REDIS_URL")" in
+    redis | localhost | 127.0.0.1 | ::1)
+      fail "REDIS_URL in .env points at the earlier stack's Redis; remove it, and set ENABLE_REDIS=true if this server needs Redis" ;;
+  esac
+fi
+# Silo applies these on every start, over the stored settings, and the image
+# keeps a URL set here even with its own Meilisearch on.
+if [[ "$(url_host "${SILO_MEILISEARCH_URL:-}")" == meilisearch ]]; then
+  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+fi
+# Without a URL here, the one stored from the admin UI applies, which named
+# the earlier stack's service. Silo trims and lowercases the provider.
+env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+if [[ "$env_provider" == meilisearch && -z "${SILO_MEILISEARCH_URL:-}" ]] && ! truthy "${ENABLE_MEILISEARCH:-false}"; then
+  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+fi
+
+# The earlier stack's Silo container reached these through bind mounts, which
+# follow a link on the host; in here a link leads nowhere.
+for name in "${silo_dirs[@]}"; do
+  if [[ -L "$root/$name" ]]; then
+    fail "$host_root/$name is a symbolic link, which this step cannot follow. Replace it with the directory it points to and start again; the earlier Compose file still starts meanwhile"
+  elif [[ -e "$root/$name" && ! -d "$root/$name" ]]; then
+    fail "$host_root/$name is not a directory. Move it aside and start again"
+  fi
+done
+
+source_cluster=""
+if [[ -n "${DATABASE_URL:-}" ]]; then
+  # Silo's database is elsewhere; only its directories move. The earlier file
+  # set DATABASE_URL for Silo itself, so one in .env never reached it: beside
+  # the earlier stack's cluster, that cluster is the database Silo used.
+  if (( ${#clusters[@]} > 0 )); then
+    fail "DATABASE_URL in .env names another database, but the earlier stack ran Silo on the cluster in $(host "${clusters[0]}"): its Compose file set DATABASE_URL itself. Remove DATABASE_URL from .env to move that cluster here, or move $(host "${clusters[0]}") aside to keep using the other database"
+  fi
+elif (( ${#clusters[@]} > 1 )); then
+  fail "found more than one PostgreSQL cluster under $host_root/postgres; move aside every one but the cluster Silo used"
+elif (( ${#clusters[@]} == 0 )); then
+  fail "found an earlier install's files under $host_root but no PostgreSQL cluster in $host_root/postgres. If its database lives elsewhere, set DATABASE_URL in .env to reach it, or copy its data directory to $host_root/config/postgres/data"
+else
+  source_cluster="${clusters[0]}"
+  have="$(read_small "$source_cluster/PG_VERSION" | tr -d '\n')"
+  [[ "$have" =~ ^[0-9]+$ ]] || fail "$(host "$source_cluster")/PG_VERSION does not hold a PostgreSQL major version number"
+  if [[ "$have" != "$PG_MAJOR" ]]; then
+    fail "$(host "$source_cluster") was written by PostgreSQL $have but this image ships PostgreSQL $PG_MAJOR; move it with pg_dump and pg_restore instead"
+  fi
+  # A copy is only consistent if no server has the cluster open. A clean stop
+  # removes the pid file; a container killed mid-shutdown leaves it behind.
+  if [[ -e "$source_cluster/postmaster.pid" ]]; then
+    fail "PostgreSQL in $(host "$source_cluster") is still running or did not shut down cleanly. Stop the earlier postgres container; if none is running, delete $(host "$source_cluster")/postmaster.pid and start again"
+  fi
+  # A copy would share these with the original.
+  if [[ -L "$source_cluster/pg_wal" ]] || [[ -n "$(ls -A "$source_cluster/pg_tblspc" 2>/dev/null)" ]]; then
+    fail "$(host "$source_cluster") keeps its WAL or a tablespace outside the data directory; move it with pg_dump and pg_restore instead"
+  fi
+fi
+
+# --- Stage. ------------------------------------------------------------------
+
+staged_dirs=()
+work=""
+cleanup() {
+  if [[ -n "$work" ]]; then
+    s6-setuidgid postgres pg_ctl -D "$pg_stage" -s -m immediate stop >/dev/null 2>&1 || true
+    [[ ! -s "$work/server.log" ]] || cat "$work/server.log" >&2
+    rm -rf "$work"
+  fi
+  rm -rf "$pg_stage" "${staged_dirs[@]}"
+}
+trap cleanup EXIT
+
+install -d -m 0755 "$config" "$config/silo"
+fingerprint=none
+# Free space the copied database's first start needs, from the check below.
+reserve_kb=0
+if [[ -n "$source_cluster" ]]; then
+  install -d -o postgres -g postgres -m 0750 "$config/postgres"
+  need_kb="$(du -sk "$source_cluster" | cut -f1)"
+  free_kb="$(df -Pk "$config/postgres" | awk 'NR == 2 { print $4 }')"
+  if (( need_kb + 2 * 1024 * 1024 >= free_kb )); then
+    fail "copying $(host "$source_cluster") needs $((need_kb / 1024)) MiB plus room to rebuild its indexes, and $(host "$config") has $((free_kb / 1024)) MiB free. Free space there, or move the cluster with pg_dump and pg_restore; the earlier Compose file still starts on it meanwhile"
+  fi
+  log "copying the PostgreSQL cluster in $(host "$source_cluster") ($((need_kb / 1024)) MiB)"
+  fingerprint="$(control_fingerprint "$source_cluster")"
+  cp -a "$source_cluster" "$pg_stage"
+
+  # Root's, so postgres can reach the socket directory and write the log in
+  # it, but not replace the log root appends to.
+  work="$(mktemp -d)"
+  chmod 0755 "$work"
+  sock="$work/socket"
+  pglog="$work/server.log"
+  install -d -o postgres -g postgres -m 0700 "$sock"
+  install -o postgres -g postgres -m 0600 /dev/null "$pglog"
+
+  # The pgvector image created POSTGRES_USER and POSTGRES_DB and trusted every
+  # local connection. Silo here connects as the silo role to the silo database
+  # with peer authentication. Make the copy match, on a server that only this
+  # script can reach. The copy came from another container, so anything in it
+  # can be a link: remove before writing, and write as postgres.
+  rm -f "$pg_stage/pg_hba.conf"
+  printf 'local all all trust\n' | write_as postgres "$pg_stage/pg_hba.conf"
+  s6-setuidgid postgres pg_ctl -D "$pg_stage" -s -w -t 600 -l "$pglog" \
+    -o "-c listen_addresses='' -c unix_socket_directories='$sock' -c shared_buffers=128MB -c archive_mode=off" start
+
+  role=""
+  for candidate in "${POSTGRES_USER:-silo}" silo postgres; do
+    if s6-setuidgid postgres psql -h "$sock" -U "$candidate" -d template1 -XAtqc 'SELECT 1' >/dev/null 2>&1; then
+      role="$candidate"
+      break
+    fi
+  done
+  [[ -n "$role" ]] || fail "could not find the cluster's superuser; set POSTGRES_USER in .env to the user the earlier stack created"
+  # Into the server log, which a failure prints: under this image's C library
+  # every connection warns about the cluster's collation version until
+  # init-postgres-db rebuilds its indexes.
+  stage_psql() {
+    s6-setuidgid postgres psql -h "$sock" -U "$role" -XAtq -v ON_ERROR_STOP=1 "$@" 2>>"$pglog"
+  }
+  db_exists() { stage_psql -d template1 -v name="$1" <<<"SELECT 1 FROM pg_database WHERE datname = :'name'"; }
+
+  stage_psql -d template1 <<'SQL'
+DO $$BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'silo') THEN
+    CREATE ROLE silo SUPERUSER LOGIN;
+  ELSIF NOT (SELECT rolsuper AND rolcanlogin FROM pg_roles WHERE rolname = 'silo') THEN
+    ALTER ROLE silo SUPERUSER LOGIN;
+  END IF;
+END$$;
+SQL
+  db="${POSTGRES_DB:-silo}"
+  if [[ "$db" != silo ]]; then
+    [[ -z "$(db_exists silo)" ]] || fail "the cluster has both a silo database and POSTGRES_DB=$db; drop the one Silo did not use"
+    [[ -n "$(db_exists "$db")" ]] || fail "the cluster has no $db database; set POSTGRES_DB in .env to the database the earlier stack used"
+    stage_psql -d template1 -v name="$db" <<<'ALTER DATABASE :"name" RENAME TO silo'
+    log "renamed database $db to silo"
+    # init-postgres-db connects to postgres, so put back the empty maintenance
+    # database initdb makes when Silo's data was in it. From template0:
+    # PostgreSQL refuses to copy template1 while its recorded collation version
+    # differs from the C library's, which it does until init-postgres-db runs.
+    if [[ "$db" == postgres ]]; then
+      stage_psql -d template1 <<<'CREATE DATABASE postgres TEMPLATE template0'
+    fi
+  elif [[ -z "$(db_exists silo)" ]]; then
+    fail "the cluster has no silo database; set POSTGRES_DB in .env to the database the earlier stack used"
+  fi
+
+  # The first start rebuilds every collation-dependent index (the selection
+  # init-postgres-db makes). One at a time: room for the largest beside it,
+  # and as much again for its WAL, plus a margin.
+  largest_kb="$(stage_psql -d silo <<'SQL'
+SELECT coalesce(max(pg_relation_size(i.indexrelid)), 0) / 1024
+FROM pg_index i
+JOIN pg_class ic ON ic.oid = i.indexrelid
+JOIN pg_am am ON am.oid = ic.relam
+WHERE EXISTS (SELECT FROM unnest(i.indcollation::oid[]) AS k(coll)
+              JOIN pg_collation c ON c.oid = k.coll
+              WHERE c.collprovider IN ('d', 'c')
+                AND NOT (c.collnamespace = 'pg_catalog'::regnamespace AND c.collname IN ('C', 'POSIX')))
+   OR ((i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AND am.amname NOT IN ('hnsw', 'ivfflat'))
+SQL
+)"
+  free_kb="$(df -Pk "$config/postgres" | awk 'NR == 2 { print $4 }')"
+  reserve_kb=$(( 2 * largest_kb + 1024 * 1024 ))
+  if (( reserve_kb >= free_kb )); then
+    fail "after the copy, $(host "$config") has $((free_kb / 1024)) MiB free, and rebuilding its largest text index ($((largest_kb / 1024)) MiB) on the first start needs about $(( (2 * largest_kb + 1024 * 1024) / 1024 )) MiB. Free space there and start again; the earlier Compose file still starts meanwhile"
+  fi
+
+  # Proxy and transcode nodes reached the earlier stack's PostgreSQL and Redis
+  # on published ports; the bundled ones are closed to them unless node access
+  # is on, and nodes then sign in as silo.
+  if ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
+    nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled")"
+    if (( nodes > 0 )); then
+      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Layer docker-compose.node-access.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
+    fi
+  fi
+
+  # Meilisearch chosen in the admin UI pointed at the earlier stack's service,
+  # which is gone. With the bundled Meilisearch on, init-config hands Silo its
+  # address; otherwise search goes back to PostgreSQL.
+  provider="$(stage_psql -d silo -c "SELECT value FROM server_settings WHERE key = 'catalog.search.provider'")"
+  meili_url="$(stage_psql -d silo -c "SELECT value FROM server_settings WHERE key = 'catalog.search.meilisearch.url'")"
+  if [[ "${provider,,}" == meilisearch && "$(url_host "$meili_url")" == meilisearch ]] && ! truthy "${ENABLE_MEILISEARCH:-false}"; then
+    stage_psql -d silo -c "UPDATE server_settings SET value = 'postgres' WHERE key = 'catalog.search.provider'"
+    log "search used the earlier stack's Meilisearch and now uses PostgreSQL. Set ENABLE_MEILISEARCH=true in .env to use the bundled Meilisearch; Silo builds a new index"
+    provider=postgres
+  fi
+  # Meilisearch search keeps its paging sessions in Redis, which the earlier
+  # stack always ran. One chosen in the admin UI stays chosen, but this file
+  # starts Redis only when asked. A provider in .env overrides the stored one,
+  # and init-config starts Redis for SILO_SEARCH_PROVIDER=meilisearch itself.
+  if [[ -z "$env_provider" && "${provider,,}" == meilisearch && -z "${REDIS_URL:-}" ]] && ! truthy "${ENABLE_REDIS:-false}" &&
+    ! truthy "${ENABLE_MEILISEARCH:-false}" && ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
+    fail "search uses a Meilisearch chosen in the admin UI, whose paging sessions need the Redis the earlier stack always ran. Set ENABLE_REDIS=true in .env and start again; the earlier Compose file still starts meanwhile"
+  fi
+
+  s6-setuidgid postgres pg_ctl -D "$pg_stage" -s -w -m fast stop
+  # init-postgres writes the full file on every start; until then, no trust.
+  rm -f "$pg_stage/pg_hba.conf"
+  printf 'local all all peer\n' | write_as postgres "$pg_stage/pg_hba.conf"
+fi
+
+# Silo's directories, in the same generation as the database.
+for name in "${silo_dirs[@]}"; do
+  src="$root/$name"
+  [[ -d "$src" ]] || continue
+  stage="$config/silo/.$name.migrating"
+  staged_dirs+=("$stage")
+  # Hard links take no space. Silo replaces files rather than rewriting them,
+  # so the earlier stack keeps its own copies of files Silo changes from here
+  # on; ownership is shared, but the root-run earlier image ignores it. A
+  # directory on another file system is copied instead, if it fits beside the
+  # room the database's first start needs.
+  if ! cp -al "$src" "$stage" 2>/dev/null; then
+    rm -rf "$stage"
+    need_kb="$(du -sk "$src" | cut -f1)"
+    free_kb="$(df -Pk "$config/silo" | awk 'NR == 2 { print $4 }')"
+    if (( need_kb + reserve_kb >= free_kb )); then
+      kept=""
+      (( reserve_kb == 0 )) || kept=", and the database's first start needs $((reserve_kb / 1024)) MiB of that"
+      fail "$(host "$src") cannot be linked into $(host "$config") (it is on another file system), and copying it needs $((need_kb / 1024)) MiB. $(host "$config") has $((free_kb / 1024)) MiB free$kept. Free space there, or move its contents onto the file system of $host_root, and start again; the earlier Compose file still starts meanwhile"
+    fi
+    cp -a "$src" "$stage" || fail "could not copy $(host "$src") to $(host "$config/silo/$name")"
+  fi
+done
+
+# The earlier stack must not have run while this copied.
+if [[ -n "$source_cluster" ]]; then
+  now=""
+  [[ -e "$source_cluster/postmaster.pid" ]] || now="$(control_fingerprint "$source_cluster")" || exit 1
+  if [[ -e "$source_cluster/postmaster.pid" || "$now" != "$fingerprint" ]]; then
+    fail "the earlier stack started on $(host "$source_cluster") during the copy; stop it and start again"
+  fi
+fi
+
+# --- Into place. -------------------------------------------------------------
+
+# cp does not flush, and PostgreSQL never syncs a cleanly stopped cluster it
+# starts on. Everything staged, and the pending record, reach the disk before
+# anything moves, and every move before the done marker; otherwise a power
+# loss could keep the renames and lose the files.
+printf '%s\n' "$fingerprint" > "$pending_marker"
+sync -f "$config"
+for stage in "${staged_dirs[@]}"; do
+  name="${stage##*/.}"
+  name="${name%.migrating}"
+  # An empty one is what init-config makes when Silo started before this
+  # step and init-postgres turned it away; nothing to keep.
+  [[ ! -e "$config/silo/$name" ]] || rmdir "$config/silo/$name" 2>/dev/null || set_aside "$config/silo/$name"
+  mv -T "$stage" "$config/silo/$name"
+  log "linked $(host "$root/$name") into $(host "$config/silo/$name")"
+done
+staged_dirs=()
+if [[ -n "$source_cluster" ]]; then
+  # A data directory without PG_VERSION is an initdb that never finished.
+  [[ ! -e "$pgdata" ]] || set_aside "$pgdata"
+  mv -T "$pg_stage" "$pgdata"
+  log "copied the PostgreSQL cluster to $(host "$pgdata")"
+fi
+sync -f "$config"
+# Whole or absent: a run that finds it with the pending record only removes
+# the record.
+printf '%s\n' "$fingerprint" > "$done_marker.new"
+mv -T "$done_marker.new" "$done_marker"
+sync -f "$config"
+rm -f "$pending_marker"
+# Last: init-postgres may create a cluster once this exists.
+mark_checked
+trap - EXIT
+[[ -z "$work" ]] || rm -rf "$work"
+
+left=()
+for name in postgres redis meilisearch "${silo_dirs[@]}"; do
+  [[ -e "$root/$name" ]] && left+=("$name")
+done
+log "the earlier stack's directories in $host_root (${left[*]}) still hold its data, and the earlier Compose file still starts on them. Delete them once this install works"
+aside=()
+for dir in "$config"/postgres/.*.before-* "$config"/silo/.*.before-*; do
+  [[ -e "$dir" ]] && aside+=("$(host "$dir")")
+done
+if (( ${#aside[@]} > 0 )); then
+  log "unfinished earlier attempts were set aside as ${aside[*]}. Delete them once this install works"
+fi
+log "Silo now runs as uid ${PUID:-911} instead of root, so that account needs read access to the media"

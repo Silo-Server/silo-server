@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -174,6 +175,20 @@ func (s *PopulationService) Populate(ctx context.Context, file *models.MediaFile
 	return s.populate(ctx, file, false, true)
 }
 
+// ShowsStoredMarkers reports whether a player is shown a file's stored markers
+// and nothing else: online lookups are off, or their results are stored on
+// the file. In on_demand mode a player is shown provider answers each replica
+// caches in its own memory and drops, so no replica can tell later which
+// provider marker a player was shown.
+func (s *PopulationService) ShowsStoredMarkers(ctx context.Context) (bool, error) {
+	enabled, err := s.enabled(ctx)
+	if err != nil || !enabled {
+		return err == nil, err
+	}
+	storage, err := s.OnlineStorage(ctx)
+	return err == nil && storage == OnlineStorageStored, err
+}
+
 // Refresh bypasses successful cached results for an explicit refresh.
 // Active leases, provider cooldowns and failed-request backoff still apply.
 func (s *PopulationService) Refresh(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
@@ -253,6 +268,8 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		EpisodeNumbering:   ids.EpisodeNumbering,
 		EpisodeTitle:       ids.EpisodeTitle,
 		Duration:           time.Duration(file.Duration) * time.Second,
+		FileHash:           file.FileHash,
+		FileSize:           file.FileSize,
 	}
 	cached := make(map[string]Result)
 	if storage == OnlineStorageStored {
@@ -386,7 +403,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		if checkErr != nil {
 			return file, false, errors.Join(append(failures, checkErr)...)
 		}
-		effective := ApplyResult(file, s.selectResults(results))
+		effective := ApplyResult(file, s.selectResults(file, results))
 		effective.MarkerThumbnailBaseSegments = models.EffectiveMarkerSegments(file)
 		if s.opts.Notify != nil {
 			s.opts.Notify(saveCtx, effective)
@@ -394,7 +411,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		return effective, true, errors.Join(failures...)
 	}
 	var wrote bool
-	merged := s.selectResults(results)
+	merged := s.selectResults(file, results)
 	if checkErr != nil {
 		err = checkErr
 	} else if s.opts.Write == nil {
@@ -461,7 +478,10 @@ func (s *PopulationService) recordFetchFailure(ctx context.Context, provider Pro
 
 // Selection settings can change while a request is in flight. Apply current
 // priorities to the fetched/cached responses without invalidating those caches.
-func (s *PopulationService) selectResults(results []providerResult) Result {
+// Credits that cannot belong to file are dropped before providers compete, so
+// one provider's misplaced credits never hide another's; the intro check waits
+// for the merged intro, in ApplyResult and the repository write.
+func (s *PopulationService) selectResults(file *models.MediaFile, results []providerResult) Result {
 	entries := make(map[string]fetchEntry)
 	for _, entry := range s.opts.Registry.fetchEntries() {
 		entries[entry.provider.ID()] = entry
@@ -470,10 +490,22 @@ func (s *PopulationService) selectResults(results []providerResult) Result {
 	for _, result := range results {
 		if entry, ok := entries[result.entry.provider.ID()]; ok {
 			result.entry = entry
+			result.result.Markers = withoutMisplacedCredits(file, result.result.Markers)
 			current = append(current, result)
 		}
 	}
 	return mergeProviderResults(current)
+}
+
+func withoutMisplacedCredits(file *models.MediaFile, found []Marker) []Marker {
+	limits := CreditsLimitsForFile(file)
+	duration := 0.0
+	if file != nil {
+		duration = float64(file.Duration)
+	}
+	return slices.DeleteFunc(slices.Clone(found), func(m Marker) bool {
+		return m.Kind == MarkerKindCredits && !m.Absent && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
+	})
 }
 
 func (s *PopulationService) claimFile(ctx context.Context, file *models.MediaFile, wait bool) (FetchClaim, bool, error) {

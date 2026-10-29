@@ -321,4 +321,5 @@ PUT /api/v1/admin/users/{id}
 PUT /api/v1/diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}
 PUT /api/v1/profile/sections/
 PUT /api/v2/*
+QUERY /api/v2/*
 TRACE /api/v2/*

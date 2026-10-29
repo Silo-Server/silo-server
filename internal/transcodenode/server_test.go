@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1081,6 +1082,21 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores requested MPEG-TS packaging would publish fMP4 under a
+// plan that promises MPEG-TS.
+func TestValidateCopyVideoMPEGTSAttestation(t *testing.T) {
+	request := TranscodeStartRequest{CopyVideoMPEGTS: true}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{CopyVideoMPEGTS: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrCopyVideoMPEGTSAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrCopyVideoMPEGTSAttestationMismatch)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("fMP4 request rejected a legacy node response: %v", err)
+	}
+}
+
 // Requests the node cannot execute as written are refused with 400 before
 // anything runs.
 func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
@@ -1088,6 +1104,7 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 		name         string
 		prepare      bool
 		catalogPaths bool
+		artifactDir  string // relative to the transcode root; empty keeps the default
 		body         any
 	}{
 		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
@@ -1098,6 +1115,27 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
 			TargetCodecVideo: "copy",
 		}},
+		{name: "start with session id outside the transcode root", body: TranscodeStartRequest{
+			SessionID: "../sibling", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the transcode root", body: TranscodeStartRequest{
+			SessionID: ".", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store", body: TranscodeStartRequest{
+			SessionID: downloadprepare.ArtifactDirectoryName, InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store in another case", body: TranscodeStartRequest{
+			SessionID: "Download-Artifacts", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming a configured prepared-download store", artifactDir: "prepared/store",
+			body: TranscodeStartRequest{
+				SessionID: "prepared", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+			}},
 		{name: "start with unapproved input path", catalogPaths: true,
 			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
 		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
@@ -1113,6 +1151,9 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			server := newTestServer(t)
 			if test.catalogPaths {
 				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			if test.artifactDir != "" {
+				server.artifactRoot = filepath.Join(server.transcodeDir, test.artifactDir)
 			}
 			post := postStartRequest
 			if test.prepare {
@@ -1151,6 +1192,18 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return response.CopyFMP4RecipeVersion },
 			want:    playback.CopyFMP4RecipeVersion,
+		},
+		{
+			// Without the echo the API refuses the node rather than publish
+			// fMP4 under a plan that promises MPEG-TS.
+			name: "copy MPEG-TS",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-ts", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, CopyVideoMPEGTS: true, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return strconv.FormatBool(response.CopyVideoMPEGTS) },
+			want:    "true",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -2501,6 +2554,137 @@ func TestForceReloadTeardownKeepsRecipeMovedToAnotherNode(t *testing.T) {
 	}
 }
 
+// Regression for #2265: a stop kills the job, and a segment request for the
+// same transport that was already in flight reaches the node right after. The
+// node must answer it 410 rather than rebuild the job from the request's
+// stream token, which would encode for nobody until the idle reaper. A node
+// that lost the job some other way (a restart) must still rebuild it.
+func TestHandleStop_LateSegmentDoesNotRebuildStoppedTranscode(t *testing.T) {
+	const sessionID = "sess-late-segment"
+	const transportID = sessionID + "-plan1234-abcd1234"
+
+	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newNode := func() *Server {
+		s := newTestServer(t)
+		s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+		s.watcher.Config().Playback.FFmpegPath = ffmpegPath
+		return s
+	}
+	token := signCard(t, *nativeTransportCard(sessionID, transportID))
+	segmentRequest := func() *http.Request {
+		const name = "seg_00005.ts"
+		r := httptest.NewRequest(http.MethodGet, "/transcode/"+transportID+"/segment/"+name, nil)
+		r.Header.Set("X-Silo-Stream-Token", token)
+		return withNodeRouteParams(r, map[string]string{"session_id": transportID, "name": name})
+	}
+	registered := func(s *Server) *playback.TranscodeSession {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.sessions[transportID]
+	}
+
+	s := newNode()
+	running, err := s.reconstructFromToken(requestWithToken(transportID, token), transportID, 5)
+	if err != nil || running == nil {
+		t.Fatalf("set up running job: session = %v, err = %v", running, err)
+	}
+
+	stop := withNodeRouteParams(httptest.NewRequest(http.MethodDelete, "/transcode/"+transportID, nil), map[string]string{"session_id": transportID})
+	stopRec := httptest.NewRecorder()
+	s.handleStop(stopRec, stop)
+	if stopRec.Code != http.StatusNoContent {
+		t.Fatalf("stop status = %d, want %d", stopRec.Code, http.StatusNoContent)
+	}
+
+	late := httptest.NewRecorder()
+	s.handleSegment(late, segmentRequest())
+	if late.Code != http.StatusGone {
+		t.Fatalf("late segment status = %d, want %d (body %q)", late.Code, http.StatusGone, late.Body.String())
+	}
+	if got := registered(s); got != nil {
+		_ = got.CloseProcess()
+		t.Fatal("late segment rebuilt the stopped transcode")
+	}
+
+	// A request that found no job while the stop held the lifecycle lock reaches
+	// spawnReconstruct past the early check; the fence must hold there too.
+	if got, err := s.spawnReconstruct(segmentRequest(), transportID, 5, *nativeTransportCard(sessionID, transportID)); got != nil || !errors.Is(err, errTranscodeStopped) {
+		if got != nil {
+			_ = got.CloseProcess()
+		}
+		t.Fatalf("spawnReconstruct after stop = (%v, %v), want (nil, errTranscodeStopped)", got, err)
+	}
+
+	// A replacement process has no record of the stop and still recovers the
+	// client's session from its token.
+	restarted := newNode()
+	rebuilt, err := restarted.reconstructFromToken(segmentRequest(), transportID, 5)
+	if err != nil || rebuilt == nil {
+		t.Fatalf("restarted node did not rebuild the session: session = %v, err = %v", rebuilt, err)
+	}
+
+	// A release moves the transport to another node under the same id. A
+	// replica whose copy still names this node must still be able to rebuild it.
+	release := withNodeRouteParams(httptest.NewRequest(http.MethodDelete, "/transcode/"+transportID+"?fence=0", nil), map[string]string{"session_id": transportID})
+	releaseRec := httptest.NewRecorder()
+	restarted.handleStop(releaseRec, release)
+	if releaseRec.Code != http.StatusNoContent {
+		t.Fatalf("release status = %d, want %d", releaseRec.Code, http.StatusNoContent)
+	}
+	rebuilt, err = restarted.reconstructFromToken(segmentRequest(), transportID, 5)
+	if err != nil || rebuilt == nil {
+		t.Fatalf("released transport was not rebuilt: session = %v, err = %v", rebuilt, err)
+	}
+	_ = rebuilt.CloseProcess()
+}
+
+// A fresh start under a stopped transport id is the API choosing that
+// transport again (a Jellyfin software retry reuses the id right after
+// stopping it), so it lifts the stop fence: a later idle reap must leave the
+// job recoverable from its token.
+func TestHandleStart_LiftsStopFence(t *testing.T) {
+	const sessionID = "sess-restarted-after-stop"
+	s := newTestServer(t)
+	s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.watcher.Config().Playback.FFmpegPath = ffmpegPath
+
+	stop := withNodeRouteParams(httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil), map[string]string{"session_id": sessionID})
+	s.handleStop(httptest.NewRecorder(), stop)
+	if !s.transcodeStopped(sessionID) {
+		t.Fatal("stop did not fence the transport")
+	}
+
+	body, err := json.Marshal(TranscodeStartRequest{
+		SessionID: sessionID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.handleStart(rec, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("start status = %d, want 202 (body %s)", rec.Code, rec.Body.String())
+	}
+	s.mu.RLock()
+	session := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if session == nil {
+		t.Fatal("start did not register the session")
+	}
+	_ = session.CloseProcess()
+	if s.transcodeStopped(sessionID) {
+		t.Fatal("start left the stop fence in place; an idle-reaped job could not be rebuilt")
+	}
+}
+
 // The idle reaper must close only jobs whose last access predates the TTL;
 // registration counts as an access, so a just-started job (including one still
 // waiting on its manifest in the RequireReady flow) is spared. Zero-value
@@ -2581,6 +2765,26 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 	}
 	if _, ok := s.lastAccess["ghost-1"]; ok {
 		t.Fatal("touch recorded access for an unregistered session")
+	}
+}
+
+func TestSpawnReconstructRejectsSessionIDOutsideTranscodeRoot(t *testing.T) {
+	server := newTestServer(t)
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+logPath+"\nexit 1\n")
+
+	const sessionID = ".."
+	card := *nativeTransportCard(sessionID, sessionID)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if session != nil {
+		_ = session.Close()
+		t.Fatal("reconstruct registered a session outside the transcode root")
+	}
+	if err != nil {
+		t.Fatalf("spawnReconstruct err = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("ffmpeg ran for a rejected session id (stat err %v)", statErr)
 	}
 }
 
@@ -3090,4 +3294,42 @@ func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
 		t.Fatal("late request reached durable authority lookup")
 	}
 
+}
+
+// Stops and remux registrations sweep the fence maps under mu; the sweep runs
+// at most once per interval so a day of fences is not rescanned on every stop,
+// while lookups keep ignoring entries that expired in between.
+func TestPruneStopFencesRunsAtMostOncePerInterval(t *testing.T) {
+	s := newTestServer(t)
+	s.stoppedTranscodes = make(map[string]time.Time)
+	start := time.Now()
+
+	s.mu.Lock()
+	s.stoppedTranscodes["expired-first"] = start.Add(-time.Second)
+	s.pruneStopFencesLocked(start)
+	_, kept := s.stoppedTranscodes["expired-first"]
+	s.mu.Unlock()
+	if kept {
+		t.Fatal("first sweep left an expired fence")
+	}
+
+	s.mu.Lock()
+	s.stoppedTranscodes["expired-second"] = start.Add(-time.Second)
+	s.pruneStopFencesLocked(start.Add(stopFencePruneInterval / 2))
+	_, kept = s.stoppedTranscodes["expired-second"]
+	s.mu.Unlock()
+	if !kept {
+		t.Fatal("sweep ran again inside the prune interval")
+	}
+	if s.transcodeStopped("expired-second") {
+		t.Fatal("an expired fence still refused reconstruction before the next sweep")
+	}
+
+	s.mu.Lock()
+	s.pruneStopFencesLocked(start.Add(stopFencePruneInterval))
+	_, kept = s.stoppedTranscodes["expired-second"]
+	s.mu.Unlock()
+	if kept {
+		t.Fatal("sweep after the interval left an expired fence")
+	}
 }

@@ -33,6 +33,9 @@ func TestOwnCandidatesJudgesEachKindOnItsOwn(t *testing.T) {
 		// A marker written before per-segment provenance carries only the
 		// shared markers_source.
 		{FileID: 5, CreditsStart: floatPtr(1300), CreditsEnd: floatPtr(1400), MarkersSource: strPtr(online)},
+		// A provider's answer that the file has no intro holds the intro
+		// like a provider intro would.
+		{FileID: 6, IntroMarkersSource: strPtr(models.MarkerSourcePlugin), IntroMarkersConfidence: floatPtr(0.9)},
 	}
 	ids := func(candidates []Candidate) []int {
 		out := make([]int, 0, len(candidates))
@@ -44,7 +47,7 @@ func TestOwnCandidatesJudgesEachKindOnItsOwn(t *testing.T) {
 	if got, want := ids(ownCandidates(candidates, kindIntro)), []int{1, 3, 4, 5}; !slices.Equal(got, want) {
 		t.Fatalf("intro candidates = %v, want %v", got, want)
 	}
-	if got, want := ids(ownCandidates(candidates, kindCredits)), []int{1, 2, 3}; !slices.Equal(got, want) {
+	if got, want := ids(ownCandidates(candidates, kindCredits)), []int{1, 2, 3, 6}; !slices.Equal(got, want) {
 		t.Fatalf("credits candidates = %v, want %v", got, want)
 	}
 }
