@@ -148,9 +148,16 @@ func (c *extrasClassifier) classify(path string) (extraCandidate, bool) {
 	}
 
 	// Preserve the documented series behavior: an episode-tokened file under
-	// a show's Extras/ is an episode (S00 a special), not an extra.
+	// a show's Extras/ is an episode (S00 a special), not an extra. A file
+	// marked only by its suffix stays an episode only when its name labels the
+	// episode (S01E05, 1x05); a bare number such as the 03 in "Season 03
+	// Recap-trailer.mp4" beside the season folders is not an episode code.
 	if !librarykind.IsMovie(c.folderType) && c.keepsEpisodeToken(candidate) {
-		if hints := naming.ParseFilename(path, c.folderType); hints != nil &&
+		if candidate.SupplementalDir == "" {
+			if _, _, _, ok := naming.ExplicitEpisodeCoordinates(path); ok {
+				return extraCandidate{}, false
+			}
+		} else if hints := naming.ParseFilename(path, c.folderType); hints != nil &&
 			hints.Type == "series" && hints.EpisodeNum > 0 {
 			return extraCandidate{}, false
 		}

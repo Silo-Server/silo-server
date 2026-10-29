@@ -100,6 +100,16 @@ func TestClassifyExtraPathSeriesLibrary(t *testing.T) {
 	if !ok || candidate.Kind != models.ExtraKindTrailer {
 		t.Fatalf("show trailer dir should classify, got ok=%v kind=%q", ok, candidate.Kind)
 	}
+	// A suffix-marked file beside the season folders is a show extra even
+	// when its title carries a bare number; a labeled episode code keeps it an
+	// episode.
+	candidate, ok = classifier.classify("/tv/Show/Season 03 Recap-trailer.mp4")
+	if !ok || candidate.Kind != models.ExtraKindTrailer {
+		t.Fatalf("suffix trailer beside season folders should classify, got ok=%v kind=%q", ok, candidate.Kind)
+	}
+	if _, ok := classifier.classify("/tv/Show/Season 01/Show S01E02-clip.mkv"); ok {
+		t.Fatal("suffix-marked file with an SxxExx code must remain an episode")
+	}
 	// A scope folder named "other" holding show folders stays primary.
 	if _, ok := classifier.classify("/tv/other/Flat Show/pilot.mkv"); ok {
 		t.Fatal("show under a scope-level other/ must remain primary")
