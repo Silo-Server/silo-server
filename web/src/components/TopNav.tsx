@@ -7,7 +7,6 @@ import {
   Clock,
   FolderOpen,
   Heart,
-  List,
   LogOut,
   Search,
   Settings,
@@ -18,6 +17,7 @@ import {
 
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { SiloBrand } from "@/components/SiloBrand";
+import { WatchlistIcon } from "@/components/icons/WatchlistIcon";
 import { OPEN_GLOBAL_SEARCH_EVENT } from "@/components/GlobalSearch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -348,7 +348,7 @@ export default function TopNav() {
             aria-label="Watchlist"
             className={iconButtonClass}
           >
-            <List className="h-5 w-5" />
+            <WatchlistIcon className="h-5 w-5" />
           </ViewTransitionLink>
 
           {tabletUp ? (
