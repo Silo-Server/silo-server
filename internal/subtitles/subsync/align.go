@@ -189,23 +189,24 @@ type windowLag struct {
 // choosing a lag, which finds subtitles whose windows are each too weak to
 // stand out (dialog under a laugh track or a score).
 func Align(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) (Alignment, error) {
-	signals, cues, search, err := prepare(windows, cues)
+	signals, maps, search, err := prepare(windows, cues)
 	if err != nil {
 		return Alignment{}, err
 	}
-	best := alignWindows(signals, cues, search)
+	best := alignWindows(signals, maps, search)
 	if best.Matched() {
 		return best, nil
 	}
-	if joint, ok := alignJoint(signals, cues, search); ok && joint.Matched() {
+	if joint, ok := alignJoint(signals, maps, search); ok && joint.Matched() {
 		return joint, nil
 	}
 	return best, nil
 }
 
-// prepare turns windows into speech signals and drops the cues none of
-// them can reach, with a searcher sized for the longest window.
-func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) ([]*speechSignal, []subtitles.SubtitleCue, *searcher, error) {
+// prepare turns windows into speech signals and the cues they can reach
+// into one cue map per ratio of scaleCandidates, which both searches share,
+// with a searcher sized for the longest window.
+func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) ([]*speechSignal, []cueMap, *searcher, error) {
 	if len(cues) == 0 {
 		return nil, nil, nil, ErrNoCues
 	}
@@ -224,17 +225,21 @@ func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) (
 	if len(cues) == 0 {
 		return nil, nil, nil, ErrNoCues
 	}
-	return signals, cues, newSearcher(longest), nil
+	maps := make([]cueMap, len(scaleCandidates))
+	for i, scale := range scaleCandidates {
+		maps[i] = newCueMap(cues, scale)
+	}
+	return signals, maps, newSearcher(longest), nil
 }
 
 // alignWindows fits a line through the windows' own best lags.
-func alignWindows(signals []*speechSignal, cues []subtitles.SubtitleCue, search *searcher) Alignment {
+func alignWindows(signals []*speechSignal, maps []cueMap, search *searcher) Alignment {
 	var best Alignment
 	var bestFit lineFit
 	var bestMap cueMap
 	var bestScale float64
-	for _, scale := range scaleCandidates {
-		cues := newCueMap(cues, scale)
+	for i, scale := range scaleCandidates {
+		cues := maps[i]
 		var lags []windowLag
 		for _, s := range signals {
 			if lag, ok := search.bestLag(s, cues); ok {

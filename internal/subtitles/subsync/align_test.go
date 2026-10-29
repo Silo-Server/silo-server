@@ -225,11 +225,11 @@ func TestAlignFindsDialogUnderALaughTrack(t *testing.T) {
 
 // alignWindowsOnly is Align without the joint search.
 func alignWindowsOnly(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) Alignment {
-	signals, cues, search, err := prepare(windows, cues)
+	signals, maps, search, err := prepare(windows, cues)
 	if err != nil {
 		return Alignment{}
 	}
-	return alignWindows(signals, cues, search)
+	return alignWindows(signals, maps, search)
 }
 
 func TestAlignInputs(t *testing.T) {
