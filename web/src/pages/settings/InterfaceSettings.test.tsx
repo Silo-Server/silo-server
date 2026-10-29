@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import {
   defaultWebPrimaryMenu,
   type PrimaryMenuDocument,
@@ -15,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   useUserLibraries: vi.fn(),
   useSetSettingValue: vi.fn(),
   useClearSettingValue: vi.fn(),
+  useAdminServerSettings: vi.fn(),
+  useUpdateServerSetting: vi.fn(),
 }));
 
 vi.mock("@/hooks/useUICustomization", () => ({
@@ -34,6 +37,12 @@ vi.mock("@/hooks/queries/libraries", () => ({
 vi.mock("@/hooks/queries/settingValues", () => ({
   useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
   useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
+}));
+
+// The menu editor writes the administrator default now, not a profile setting.
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminServerSettings: (...args: unknown[]) => mocks.useAdminServerSettings(...args),
+  useUpdateServerSetting: (...args: unknown[]) => mocks.useUpdateServerSetting(...args),
 }));
 
 // Shortcuts, badges, and the preview have their own tests; here it only
@@ -74,17 +83,35 @@ function customization(overrides: Record<string, unknown> = {}) {
 describe("InterfaceSettings", () => {
   let clearMutateAsync: ReturnType<typeof vi.fn>;
   let setMutateAsync: ReturnType<typeof vi.fn>;
+  let updateDefaultAsync: ReturnType<typeof vi.fn>;
+
+  /** The admin settings map carrying a shared menu, as the server stores it. */
+  function adminSettingsWithMenu(menu: PrimaryMenuDocument | null) {
+    return {
+      data: { [adminDefaultServerKey(SETTING_KEYS.NAV_PRIMARY_MENU)]: JSON.stringify(menu) },
+    };
+  }
 
   beforeEach(() => {
     mocks.useUICustomization.mockReset();
+    mocks.useAdminServerSettings.mockReset();
+    mocks.useUpdateServerSetting.mockReset();
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
     setMutateAsync = vi.fn().mockResolvedValue(undefined);
+    updateDefaultAsync = vi.fn().mockResolvedValue(undefined);
     mocks.useUICustomization.mockReturnValue(customization());
     mocks.useUserLibraries.mockReturnValue({ data: [] });
     mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutateAsync: setMutateAsync });
     mocks.useClearSettingValue.mockReturnValue({
       isPending: false,
       mutateAsync: clearMutateAsync,
+    });
+    // No shared menu by default; a test that needs one sets its own.
+    mocks.useAdminServerSettings.mockReturnValue(adminSettingsWithMenu(null));
+    mocks.useUpdateServerSetting.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: updateDefaultAsync,
     });
   });
 
@@ -126,30 +153,42 @@ describe("InterfaceSettings", () => {
     );
   });
 
-  it("keeps a saved edit on screen until the refetch replaces the menu", async () => {
-    let effectiveMenu = MOVIES_MENU;
-    mocks.useUICustomization.mockImplementation(() =>
-      customization({ primaryMenu: effectiveMenu }),
+  it("writes the menu as the default for every profile", async () => {
+    mocks.useAdminServerSettings.mockReturnValue(adminSettingsWithMenu(MOVIES_MENU));
+
+    render(<InterfaceSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
+
+    await waitFor(() =>
+      expect(updateDefaultAsync).toHaveBeenCalledWith({
+        key: adminDefaultServerKey(SETTING_KEYS.NAV_PRIMARY_MENU),
+        value: JSON.stringify({ items: [HOME, CALENDAR] }),
+      }),
     );
+  });
+
+  it("keeps a saved edit on screen until the refetch replaces the shared menu", async () => {
+    let sharedMenu: PrimaryMenuDocument = MOVIES_MENU;
+    mocks.useAdminServerSettings.mockImplementation(() => adminSettingsWithMenu(sharedMenu));
 
     const view = render(<InterfaceSettings />);
     fireEvent.click(screen.getByRole("button", { name: "Move Calendar up" }));
-    await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(updateDefaultAsync).toHaveBeenCalledTimes(1));
 
-    // The save resolved but the effective menu has not refetched yet.
+    // The save resolved but the settings have not refetched yet.
     view.rerender(<InterfaceSettings />);
     let labels = screen.getAllByRole("listitem").map((item) => item.textContent);
     expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
 
-    effectiveMenu = { items: [HOME, CALENDAR, MOVIES] };
+    sharedMenu = { items: [HOME, CALENDAR, MOVIES] };
     view.rerender(<InterfaceSettings />);
     labels = screen.getAllByRole("listitem").map((item) => item.textContent);
     expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
   });
 
   it("puts the menu back when a save fails", async () => {
-    mocks.useUICustomization.mockReturnValue(customization({ primaryMenu: MOVIES_MENU }));
-    setMutateAsync.mockRejectedValueOnce(new Error("nope"));
+    mocks.useAdminServerSettings.mockReturnValue(adminSettingsWithMenu(MOVIES_MENU));
+    updateDefaultAsync.mockRejectedValueOnce(new Error("nope"));
 
     render(<InterfaceSettings />);
     fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
@@ -157,25 +196,18 @@ describe("InterfaceSettings", () => {
     expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
   });
 
-  it("can reset a just-saved menu before its effective refetch arrives", async () => {
-    mocks.useUICustomization.mockReturnValue(
-      customization({ primaryMenu: MOVIES_MENU, primaryMenuSource: "profile" }),
-    );
+  it("resets the shared menu for everyone", async () => {
+    mocks.useAdminServerSettings.mockReturnValue(adminSettingsWithMenu(MOVIES_MENU));
 
     render(<InterfaceSettings />);
-    expect(screen.queryByRole("button", { name: "Reset menu" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
-    await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(screen.getByRole("button", { name: "Reset menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset menu for everyone" }));
 
     await waitFor(() =>
-      expect(clearMutateAsync).toHaveBeenCalledWith({
-        key: SETTING_KEYS.NAV_PRIMARY_MENU,
-        identity: { scope: "profile_client" },
+      expect(updateDefaultAsync).toHaveBeenCalledWith({
+        key: adminDefaultServerKey(SETTING_KEYS.NAV_PRIMARY_MENU),
+        value: "null",
       }),
     );
-    expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
   });
 
   it("keeps editors closed when effective customization could not be loaded", () => {

@@ -20,11 +20,14 @@ import {
   defaultWebPrimaryMenu,
   menuItemKey,
   moveMenuItem,
+  parsePrimaryMenu,
   cardPresentationValue,
   type CardPresentation,
   type PosterSize,
   type PrimaryMenuItem,
 } from "@/lib/uiCustomization";
+import { adminDefaultServerKey, storedAdminDefault } from "@/lib/settingsAdminDefaults";
+import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
 
 import { useAppTheme } from "@/themes/appThemeContext";
 import { THEME_IDS, THEME_LABELS } from "@/themes/theme";
@@ -36,6 +39,9 @@ import { ResetButton } from "./ResetButton";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 const DEVICE_SCOPE = { scope: "profile_device" } as const;
+
+/** The server setting holding the administrator's menu for every profile, as JSON text. */
+const ADMIN_MENU_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.NAV_PRIMARY_MENU);
 
 /** How long the preview keeps the hover-only shortcut buttons showing after a pick. */
 const SHORTCUT_REVEAL_MS = 2500;
@@ -257,17 +263,35 @@ function PosterSettings() {
   );
 }
 
-/** The ordered links in the web menu, stored for the web client family. Saves on every edit. */
+/**
+ * The menu every profile gets.
+ *
+ * This edits the administrator default (`defaults.nav.primary_menu`), not the
+ * signed-in profile's own menu. A profile's stored menu wins over the default,
+ * so writing the default is what makes one menu reach everybody — including a
+ * new account, whose profile starts with no menu of its own. The page is
+ * admin-only for the same reason.
+ *
+ * Saves on every edit.
+ */
 function MenuSettings() {
   const { data: libraries = [] } = useUserLibraries();
   const customization = useUICustomization();
-  const setValue = useSetSettingValue();
+  const adminSettings = useAdminServerSettings();
+  const updateDefault = useUpdateServerSetting(adminSettings.data);
   const clearValue = useClearSettingValue();
   const blocker = useCustomizationBlocker();
-  const baselineMenu = useMemo(
-    () => customization.primaryMenu ?? defaultWebPrimaryMenu(),
-    [customization.primaryMenu],
+  const sharedMenu = useMemo(
+    () =>
+      parsePrimaryMenu(
+        storedAdminDefault(
+          SETTING_KEYS.NAV_PRIMARY_MENU,
+          adminSettings.data?.[ADMIN_MENU_DEFAULT_KEY],
+        ),
+      ),
+    [adminSettings.data],
   );
+  const baselineMenu = sharedMenu ?? defaultWebPrimaryMenu();
   const baselineKey = useMemo(() => JSON.stringify(baselineMenu.items), [baselineMenu.items]);
   // The menu as last saved from here, shown until the effective menu it was
   // saved over is replaced by the refetch (or while the save is in flight), so
@@ -275,14 +299,15 @@ function MenuSettings() {
   const [saved, setSaved] = useState<{ items: PrimaryMenuItem[]; overBaselineKey: string } | null>(
     null,
   );
-  const busy = setValue.isPending || clearValue.isPending;
-  const showSaved = saved !== null && (setValue.isPending || saved.overBaselineKey === baselineKey);
+  const busy = updateDefault.isPending || clearValue.isPending;
+  const showSaved =
+    saved !== null && (updateDefault.isPending || saved.overBaselineKey === baselineKey);
   // Once the refetch has replaced the menu it was saved over, the effective
   // menu is the truth again; drop the copy so it can never resurface.
   if (saved !== null && !showSaved) setSaved(null);
   const menuItems = showSaved ? saved.items : baselineMenu.items;
   const deviceOverride = customization.primaryMenuSource === "profile_device";
-  const clientOverride = customization.primaryMenuSource === "profile_client" || saved !== null;
+  const sharedMenuSet = sharedMenu !== null || saved !== null;
   const locked = busy || deviceOverride;
   const atLimit = menuItems.length >= 64;
 
@@ -310,26 +335,39 @@ function MenuSettings() {
     return [...unique.values()];
   }, [customization.shortcuts.items, libraries, menuItems]);
 
+  // Writes the administrator default, so every profile without a menu of its
+  // own — including a new account's — follows what is set here.
   async function saveMenu(next: PrimaryMenuItem[]) {
     setSaved({ items: next, overBaselineKey: baselineKey });
     try {
-      await setValue.mutateAsync({
-        key: SETTING_KEYS.NAV_PRIMARY_MENU,
-        value: { items: next },
-        identity: CLIENT_SCOPE,
+      await updateDefault.mutateAsync({
+        key: ADMIN_MENU_DEFAULT_KEY,
+        value: JSON.stringify({ items: next }),
       });
+      toast.success("Saved the menu for every profile");
     } catch (error) {
       setSaved(null);
-      toast.error(errorMessage(error, "Couldn't save your menu"));
+      toast.error(errorMessage(error, "Couldn't save the menu"));
     }
   }
 
-  async function clear(identity: typeof CLIENT_SCOPE | typeof DEVICE_SCOPE) {
+  /** Drops the default, so every profile goes back to the built-in links. */
+  async function resetSharedMenu() {
+    setSaved(null);
     try {
-      await clearValue.mutateAsync({ key: SETTING_KEYS.NAV_PRIMARY_MENU, identity });
-      setSaved(null);
+      await updateDefault.mutateAsync({ key: ADMIN_MENU_DEFAULT_KEY, value: "null" });
+      toast.success("Reset the menu for every profile");
     } catch (error) {
-      toast.error(errorMessage(error, "Couldn't reset your menu"));
+      toast.error(errorMessage(error, "Couldn't reset the menu"));
+    }
+  }
+
+  /** Clears this browser's own menu row, which is what shadows the default here. */
+  async function clearDeviceOverride() {
+    try {
+      await clearValue.mutateAsync({ key: SETTING_KEYS.NAV_PRIMARY_MENU, identity: DEVICE_SCOPE });
+    } catch (error) {
+      toast.error(errorMessage(error, "Couldn't clear this browser's menu"));
     }
   }
 
@@ -339,13 +377,13 @@ function MenuSettings() {
   return (
     <SettingsGroup
       title="Menu"
-      description="The links along the top of Silo in your web browsers. Search and your profile are always there."
+      description="The links along the top of Silo, for every profile. Search and your profile are always there."
       actions={
-        clientOverride ? (
+        sharedMenuSet ? (
           <ResetButton
-            label="Reset menu"
+            label="Reset menu for everyone"
             disabled={locked}
-            onClick={() => void clear(CLIENT_SCOPE)}
+            onClick={resetSharedMenu}
           />
         ) : null
       }
@@ -355,7 +393,7 @@ function MenuSettings() {
           <OverrideNotice
             action="Match my other browsers"
             disabled={busy}
-            onAction={() => void clear(DEVICE_SCOPE)}
+            onAction={() => void clearDeviceOverride()}
           >
             This browser has its own menu, so changes here won't show in it.
           </OverrideNotice>
