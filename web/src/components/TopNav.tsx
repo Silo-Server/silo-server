@@ -60,6 +60,15 @@ import type { ResolvedPrimaryMenuLink } from "@/components/primaryMenuLinks";
 const TABLET_QUERY = "(min-width: 48rem)";
 
 /**
+ * Glyphs for menu destinations that carry one in this bar, keyed by the key
+ * `menuItemKey` gives a builtin. Only the trailing group is drawn with icons,
+ * so the browse links stay plain text; Discover carries its own.
+ */
+const MENU_LINK_ICONS: Record<string, ReactNode> = {
+  "builtin:calendar": <CalendarDays className="h-4 w-4 shrink-0" />,
+};
+
+/**
  * Menu destinations that sit after the divider, alongside Discover: the ones
  * about what is coming up rather than what to browse. Identified by the key
  * `menuItemKey` gives a builtin.
@@ -316,16 +325,20 @@ export default function TopNav() {
     [links],
   );
 
-  const renderMenuLink = (link: ResolvedPrimaryMenuLink) => (
-    <ViewTransitionLink
-      key={link.key}
-      to={link.href}
-      className={linkClass(isActive(link.href))}
-      aria-current={isActive(link.href) ? "page" : undefined}
-    >
-      {link.label}
-    </ViewTransitionLink>
-  );
+  const renderMenuLink = (link: ResolvedPrimaryMenuLink) => {
+    const icon = MENU_LINK_ICONS[link.key];
+    return (
+      <ViewTransitionLink
+        key={link.key}
+        to={link.href}
+        className={`${linkClass(isActive(link.href))}${icon ? "gap-1.5" : ""}`}
+        aria-current={isActive(link.href) ? "page" : undefined}
+      >
+        {icon}
+        {link.label}
+      </ViewTransitionLink>
+    );
+  };
 
   const navLinks = (
     <>
