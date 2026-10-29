@@ -14,9 +14,10 @@ A library opts in through `trickplay_enabled` on the v2 library resources
 (`createLibrary`, `updateLibrary`); `trickplay_supported` reports whether the
 server can generate them (an assets store is configured), and
 `GET /api/v2/libraries/capabilities` reports `trickplay: true`. The frozen
-v1 library bodies neither read nor write it. Turning it on or off runs a
-reconcile pass right away on the server that handled the change; turning it
-off deletes the library's previews.
+v1 library bodies neither read nor write it. Turning it on or off, or changing
+the library's type or whether it is enabled, runs a reconcile pass right away
+on the server that handled the change; turning it off, disabling the library,
+or changing it to a non-video type deletes the library's previews.
 
 ## The row
 
@@ -76,8 +77,8 @@ so a large library drains without waiting for the next scheduled task:
 1. Reclaims expired leases, as above.
 2. Adds the probed video files (with a duration and a video stream) of
    opted-in libraries that have no row.
-3. Deletes the rows of libraries that opted out; their sheets are queued for
-   deletion.
+3. Deletes the rows of libraries that opted out, are disabled, or no longer
+   have a video type; their sheets are queued for deletion.
 4. Requeues finished rows whose sheets no longer fit: made by an older
    algorithm, with other settings (`published_recipe`), in another store, or
    from a different file. An `unusable` row is requeued when its file
@@ -128,7 +129,8 @@ and runs each file at idle CPU and I/O priority:
   signal: no chain without its RPU can show that base.
 - Hardware decode follows `playback.hw_accel` and `playback.hw_device`
   (QSV, VAAPI, VideoToolbox, and NVENC's CUDA decoder), with a software
-  attempt after a hardware failure. A GPU that cannot decode the codec fails
+  attempt after a hardware failure, except when the hardware attempt on this
+  server found no video stream (`no_stream`). A GPU that cannot decode the codec fails
   its attempt as `unsupported`, logged at debug rather than as the
   accelerator's first failure. Attempt timeouts grow with the samples: two minutes plus half a
   second a sample on hardware, two seconds a sample in software.
@@ -197,7 +199,9 @@ the lease, and the uploads; a node only decodes and tiles
 (`POST /trickplay/extract`, see
 [worker protocol](worker-http-protocol.md)).
 
-- A node is eligible while it is enabled, healthy, and advertises the
+- A node is eligible while it is enabled, healthy, its stored capability
+  report is current (the hash its last health check named matches it, once a
+  check has run), and that report advertises the
   `trickplay_extract_v2` transport feature, so nodes that would ignore the
   tone-map source signal (`trickplay_extract_v1` alone) are never sent
   work. Nodes keep advertising v1 for older API servers. The API server reserves capacity through the node planner shared
@@ -210,7 +214,7 @@ the lease, and the uploads; a node only decodes and tiles
   (such as a file its user may not read) answers `input_unreadable`, which
   does not count against the file: it moves on like `node_unavailable`.
   `unsupported` (the node's ffmpeg lacks a filter, decoder, or device the run
-  needs) also moves on, and counts against the file, as when this server's
+  needs) also moves on and, in `transcode_nodes_only` mode, counts against the file, as when this server's
   own ffmpeg lacks it, unless another node that may have it was busy or at
   its job cap. Another
   transient sampling failure also tries another node, followed by local
@@ -295,8 +299,9 @@ Sheets are deleted per revision through `blob_gc_queue` (see
 - Publishing queues the revision it displaces; finishing without publishing,
   and reclaiming an expired lease, queue the revision the work had started
   uploading. Both happen in the transaction that changes the row.
-- A trigger queues the revisions of every deleted row, whether its library
-  opted out or its media file was deleted (the cascade).
+- A trigger queues the revisions of every deleted row, whether reconcile
+  removed it (step 3 of [Reconcile](#reconcile)) or its media file was deleted
+  (the cascade).
 - Displaced and abandoned revisions wait at least 48 hours. Before serving
   a manifest, the reader protects its exact published revision until the
   latest expiry of all signed sheets. Publication and deletion carry that

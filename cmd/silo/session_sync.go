@@ -43,6 +43,8 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		ClientBuild:             s.ClientBuild,
 		ClientChannel:           s.ClientChannel,
 		ClientUserAgent:         s.ClientUserAgent,
+		DeviceID:                s.DeviceID,
+		DevicePlatform:          s.DevicePlatform,
 		AudioTrackIndex:         s.AudioTrackIndex,
 		TranscodeAudio:          s.TranscodeAudio,
 		StreamBitrateKbps:       s.StreamBitrateKbps,

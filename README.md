@@ -85,16 +85,16 @@ Existing library data is preserved when upgrading.
 
 ## Quick start
 
-Requires Docker Compose 2.24 or newer. The default stack runs Silo, PostgreSQL
-with pgvector, and Redis.
+Requires Docker Compose 2.24 or newer. The default Compose file runs the
+omnibus image: Silo with a bundled PostgreSQL (with pgvector) and Redis, plus
+Meilisearch when you turn it on.
 
 ```sh
 git clone https://github.com/Silo-Server/silo-server.git
 cd silo-server
 cp .env.example .env
 chmod 600 .env
-printf '\nPOSTGRES_PASSWORD=%s\nSECRET_KEY=%s\n' \
-  "$(openssl rand -hex 24)" "$(openssl rand -base64 48)" >> .env
+key="$(openssl rand -base64 48)" && printf '\nSECRET_KEY=%s\n' "$key" >> .env
 ```
 
 Set `MEDIA_ROOT` in `.env` to the absolute path of your media, then:
@@ -104,6 +104,18 @@ docker compose up -d
 ```
 
 Open <http://localhost:8090> and complete onboarding.
+
+An install from before the omnibus image moves to it on the first
+`docker compose up -d` with this Compose file. Its earlier data directories stay
+in place until you delete them. Remove any `docker-compose.override.yml`
+entries for the old `postgres`, `redis`, or `meilisearch` services first. The
+earlier stack ran Silo as root; the omnibus image runs it as `PUID` (default
+1000), so set `PUID` and `PGID` in `.env` to an account that can read
+`MEDIA_ROOT`. If its
+`.env` sets `SILO_SEARCH_PROVIDER`,
+`SILO_MEILISEARCH_URL`, or `SILO_MEILISEARCH_API_KEY` for the separate
+Meilisearch service, remove them and set `ENABLE_MEILISEARCH=true` to use the
+bundled one.
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,

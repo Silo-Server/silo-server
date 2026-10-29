@@ -88,54 +88,57 @@ type Dependencies struct {
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
 
-	DirectDownloads                  *DirectDownloadHandlers
-	DirectDownloadLinks              DirectDownloadLinkService
-	ViewerSubtitleDelete             ViewerSubtitleDeleteService
-	OrderedApplePush                 OrderedApplePushService
-	ApplePushRetirement              ApplePushRetirementService
-	NotificationEmailVerification    NotificationEmailVerificationService
-	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
-	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService
-	WatchTogetherSocket              WatchTogetherSocketService
-	WatchTogetherCreate              WatchTogetherCreateService
-	AdminAutoscanEvents              AdminAutoscanEventsService
-	AdminAutoscanScans               AdminAutoscanScansService
-	WatchTogetherSuggestionPromote   WatchTogetherSuggestionPromoteService
-	WatchTogetherSuggestionCreate    WatchTogetherSuggestionCreateService
-	AdminAutoscanConnectionDeletes   AdminAutoscanConnectionDeleteService
-	AdminAutoscanConnectionUpdate    AdminAutoscanConnectionUpdateService
-	AdminAutoscanConnectionCreation  AdminAutoscanConnectionCreationService
-	AdminAutoscanRewrites            AdminAutoscanRewritesService
-	AdminAutoscanAvailableSources    AdminAutoscanAvailableSourcesService
-	AdminAuditLogs                   AdminAuditLogsService
-	ExternalSignIn                   ExternalSignInService
-	AdminOperationalLogs             AdminOperationalLogsService
-	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
-	OrderedAndroidPush               OrderedAndroidPushService
-	AndroidPushRetirement            AndroidPushRetirementService
-	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
-	WatchTogetherClose               WatchTogetherCloseService
-	WatchTogetherRoomRead            WatchTogetherRoomReadService
-	WatchTogetherPolicy              WatchTogetherPolicyService
-	WatchTogetherJoin                WatchTogetherJoinService
-	WatchTogetherSelection           WatchTogetherSelectionService
-	WatchTogetherSourceFallback      WatchTogetherSourceFallbackService
-	WatchTogetherStage               WatchTogetherStageService
-	WatchTogetherStart               WatchTogetherStartService
-	WatchTogetherStop                WatchTogetherStopService
-	WatchTogetherSelectionMode       WatchTogetherSelectionModeService
-	WatchTogetherMemberState         WatchTogetherMemberStateService
-	WatchTogetherPicker              WatchTogetherPickerService
-	WatchTogetherCapability          WatchTogetherCapabilityService
-	WatchTogetherSuggestions         WatchTogetherSuggestionService
-	AdminDashboardStats              AdminDashboardStatsService
-	AdminHardwareAcceleration        AdminHardwareAccelerationService
-	AdminDashboardLayout             AdminDashboardLayoutService
-	AdminDashboardLayoutResets       AdminDashboardLayoutResetService
-	AdminDashboardLayoutSaves        AdminDashboardLayoutSaveService
-	ScanControls                     ScanControlService
-	AuthProviderIconPublic           AuthProviderIconPublic
-	AdminPlaybackSessions            AdminPlaybackSessionService
+	DirectDownloads                 *DirectDownloadHandlers
+	DirectDownloadLinks             DirectDownloadLinkService
+	ViewerSubtitleDelete            ViewerSubtitleDeleteService
+	OrderedApplePush                OrderedApplePushService
+	ApplePushRetirement             ApplePushRetirementService
+	NotificationEmailVerification   NotificationEmailVerificationService
+	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
+	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
+	WatchTogetherSocket             WatchTogetherSocketService
+	WatchTogetherCreate             WatchTogetherCreateService
+	AdminAutoscanEvents             AdminAutoscanEventsService
+	AdminAutoscanScans              AdminAutoscanScansService
+	WatchTogetherSuggestionPromote  WatchTogetherSuggestionPromoteService
+	WatchTogetherSuggestionCreate   WatchTogetherSuggestionCreateService
+	AdminAutoscanConnectionDeletes  AdminAutoscanConnectionDeleteService
+	AdminAutoscanConnectionUpdate   AdminAutoscanConnectionUpdateService
+	AdminAutoscanConnectionCreation AdminAutoscanConnectionCreationService
+	AdminAutoscanRewrites           AdminAutoscanRewritesService
+	AdminAutoscanAvailableSources   AdminAutoscanAvailableSourcesService
+	AdminAuditLogs                  AdminAuditLogsService
+	ExternalSignIn                  ExternalSignInService
+	AdminOperationalLogs            AdminOperationalLogsService
+	AdminJellyfinCompatSettings     AdminJellyfinCompatSettingsService
+	OrderedAndroidPush              OrderedAndroidPushService
+	AndroidPushRetirement           AndroidPushRetirementService
+	WatchTogetherSuggestionDelete   WatchTogetherSuggestionDeleteService
+	WatchTogetherClose              WatchTogetherCloseService
+	WatchTogetherRoomRead           WatchTogetherRoomReadService
+	WatchTogetherPolicy             WatchTogetherPolicyService
+	WatchTogetherJoin               WatchTogetherJoinService
+	WatchTogetherSelection          WatchTogetherSelectionService
+	WatchTogetherSourceFallback     WatchTogetherSourceFallbackService
+	WatchTogetherStage              WatchTogetherStageService
+	WatchTogetherStart              WatchTogetherStartService
+	WatchTogetherStop               WatchTogetherStopService
+	WatchTogetherSelectionMode      WatchTogetherSelectionModeService
+	WatchTogetherMemberState        WatchTogetherMemberStateService
+	WatchTogetherPicker             WatchTogetherPickerService
+	WatchTogetherCapability         WatchTogetherCapabilityService
+	WatchTogetherSuggestions        WatchTogetherSuggestionService
+	AdminDashboardStats             AdminDashboardStatsService
+	AdminHardwareAcceleration       AdminHardwareAccelerationService
+	AdminDashboardLayout            AdminDashboardLayoutService
+	AdminDashboardLayoutResets      AdminDashboardLayoutResetService
+	AdminDashboardLayoutSaves       AdminDashboardLayoutSaveService
+	ScanControls                    ScanControlService
+	AuthProviderIconPublic          AuthProviderIconPublic
+	AdminPlaybackSessions           AdminPlaybackSessionService
+	// PlaybackLifecycleEvents reports that this server announces session.*
+	// lifecycle events on the admin sessions channel.
+	PlaybackLifecycleEvents          bool
 	AdminDownloadPreparations        AdminDownloadPreparationService
 	AdminDownloadPreparationControls AdminDownloadPreparationControlService
 	AdminDownloadStorage             AdminDownloadStorageService
@@ -169,6 +172,7 @@ type Dependencies struct {
 	ServerConnections             ServerConnections
 	NotificationDestinationCreate NotificationDestinationCreateService
 	AdminUnmatchedFiles           AdminUnmatchedFilesService
+	AdminCatalogItems             AdminCatalogItemsService
 	AdminCatalogImages            AdminCatalogImagesService
 	AdminCatalogMatch             AdminCatalogMatchService
 	AdminCatalogSplit             AdminCatalogSplitService
@@ -237,6 +241,7 @@ type Dependencies struct {
 	AdminCatalogSearch            AdminCatalogSearchService
 	AdminSettingsChecks           AdminSettingsCheckService
 	ChatGPT                       ChatGPTService
+	AdminAIProviders              AdminAIProviderService
 	AdminSettingsInspection       AdminSettingsInspectionService
 	AdminResourceSampler          AdminResourceSampler
 	AdminTaskJobs                 AdminTaskJobsService
@@ -1084,8 +1089,8 @@ type RecommendationService interface {
 // handlers.RequestService) the profile-facing request operations use.
 type MediaRequestService interface {
 	Search(ctx context.Context, viewer mediarequests.Viewer, query string, mediaType mediarequests.MediaType, page int) (*mediarequests.MediaPage, error)
-	Discover(ctx context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error)
-	DiscoverAll(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error)
+	DiscoverRows(ctx context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error)
+	DiscoverRow(ctx context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error)
 	GetDetail(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error)
 	CreateRequest(ctx context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error)
 	ListMine(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)

@@ -1,0 +1,5 @@
+#!/bin/sh
+# As the meilisearch account: s6-notifyoncheck runs this as root with HOME set
+# to /config/meilisearch, and -q (which must come first) keeps curl from
+# reading a .curlrc there.
+s6-setuidgid meilisearch curl -q -fsS "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}/health" 2>/dev/null | grep -q available

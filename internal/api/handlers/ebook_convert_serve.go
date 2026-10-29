@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -132,7 +133,7 @@ func (h *EbookReaderHandler) serveKindleHead(w http.ResponseWriter, r *http.Requ
 // validator can never disagree with the cache) with a revalidate policy that
 // keeps clients/proxies from serving a stale representation.
 func setConvertedEpubHeaders(w http.ResponseWriter, file *models.MediaFile, key ebookconvert.SourceKey) {
-	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
+	name := fspath.Display(strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath))) + ".epub"
 	w.Header().Set("Content-Type", "application/epub+zip")
 	w.Header().Set("Content-Disposition", inlineContentDisposition(name))
 	w.Header().Set("X-Content-Type-Options", "nosniff")

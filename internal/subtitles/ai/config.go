@@ -13,9 +13,11 @@ import (
 type Config struct {
 	// TextConfigSource reads live text settings and connection state before enqueue.
 	TextConfigSource func(context.Context) (llm.Config, error)
-	// Configured reports that the shared AI endpoint has a base URL; without
-	// one, no feature is available regardless of toggles.
+	// Configured reports that a text provider is chosen; without one,
+	// translation is unavailable regardless of toggles.
 	Configured bool
+	// SpeechConfigured reports that a speech-to-text provider is chosen.
+	SpeechConfigured bool
 	// TranslateEnabled gates on-demand subtitle translation.
 	TranslateEnabled bool
 	// TranscribeEnabled gates Whisper ASR generation (transcribe /
@@ -42,5 +44,5 @@ func (c Config) TranslateReady() bool {
 
 // TranscribeReady reports whether ASR subtitle generation can currently run.
 func (c Config) TranscribeReady() bool {
-	return c.Configured && c.TranscribeEnabled && c.ASRModel != ""
+	return c.SpeechConfigured && c.TranscribeEnabled && c.ASRModel != ""
 }

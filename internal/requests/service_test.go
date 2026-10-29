@@ -2361,7 +2361,7 @@ func (f *fakeTMDBClient) SearchMedia(_ context.Context, mediaType, _ string, _ i
 	return f.page, nil
 }
 
-func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.MediaPage, error) {
+func (f *fakeTMDBClient) ChartPage(context.Context, tmdb.ChartParams, int) (*tmdb.MediaPage, error) {
 	return f.page, nil
 }
 

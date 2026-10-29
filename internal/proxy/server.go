@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -804,7 +805,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(claims.MediaPath)
+	f, err := fspath.Open(claims.MediaPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -816,7 +817,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := filepath.Base(claims.MediaPath)
+	filename := fspath.Display(filepath.Base(claims.MediaPath))
 	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
 		w.Header().Set("Content-Disposition", disposition)
 	}
@@ -1190,7 +1191,8 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 
 	resp, err := transcodeproxy.DoNode(s.httpClient, req, claims.TranscodeNode, "stream")
 	if err != nil {
-		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
+		// The forwarded query can carry the player's account token.
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", logredact.SanitizeURLError(err), "url", logredact.SanitizeURL(targetURL), "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}

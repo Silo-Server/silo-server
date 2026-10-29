@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -255,6 +256,49 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 	}
 	if len(dtos) != 1 || dtos[0].Name != "Movie One" {
 		t.Fatalf("completed names = %v, want [Movie One]", dtoNames(dtos))
+	}
+}
+
+// TestLoadProgressPage_HugeLimitDoesNotPreallocate pins that a client-supplied
+// Limit far beyond the profile's progress rows sizes nothing by Limit. Both
+// scan loops used Limit as the result slice's capacity, so
+// /Items?IsPlayed=true&Limit=100000000 asked for about 120 GB and crashed the
+// server. Limit=math.MaxInt, which parseItemsQuery accepts, makes the unfixed
+// make() panic at once, so the test catches a revert without measuring memory.
+// The page must still hold every row.
+func TestLoadProgressPage_HugeLimitDoesNotPreallocate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query itemsQuery
+	}{
+		{name: "raw-offset fast path", query: itemsQuery{limit: math.MaxInt}},
+		{name: "general loop", query: itemsQuery{limit: math.MaxInt, enableTotalRecordCount: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := map[string]*models.MediaItem{
+				"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+				"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
+			}
+			userData := &resumeFilteringUserData{entries: []upstreamProgress{
+				{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+				{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+			}}
+			h := resumeTestHandler(userData, items)
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("loadProgressPage sized an allocation by Limit: %v", r)
+				}
+			}()
+			dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", tc.query, nil, nil)
+			if err != nil {
+				t.Fatalf("loadProgressPage: %v", err)
+			}
+			if got := dtoNames(dtos); len(got) != 2 || got[0] != "Movie One" || got[1] != "Movie Two" {
+				t.Fatalf("names = %v, want [Movie One Movie Two]", got)
+			}
+		})
 	}
 }
 

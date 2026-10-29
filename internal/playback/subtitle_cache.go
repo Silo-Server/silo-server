@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
@@ -581,7 +582,7 @@ func (c *SubtitleCache) cachedFormatEntryPath(inputPath string, trackIndex int, 
 	if dir == "" {
 		return "", time.Time{}, false
 	}
-	src, err := os.Stat(inputPath)
+	src, err := fspath.Stat(inputPath)
 	if err != nil {
 		return "", time.Time{}, false
 	}
@@ -665,7 +666,7 @@ func (c *SubtitleCache) reserveFill(inputPath string, trackIndex int, format str
 	if dir == "" {
 		return nil, nil
 	}
-	src, err := os.Stat(inputPath)
+	src, err := fspath.Stat(inputPath)
 	if err != nil {
 		return nil, nil
 	}
@@ -859,7 +860,7 @@ func (f *SubtitleCacheFill) Commit() error {
 		f.Discard()
 		return errors.New("subtitle cache fill had write errors; discarded")
 	}
-	if src, err := os.Stat(f.inputPath); err != nil ||
+	if src, err := fspath.Stat(f.inputPath); err != nil ||
 		!src.ModTime().Equal(f.srcMtime) || src.Size() != f.srcSize {
 		f.fail(errSubtitleSourceChanged)
 		return errSubtitleSourceChanged

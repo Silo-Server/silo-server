@@ -16,6 +16,8 @@ COPY web/ .
 # The v2 contract fixtures are imported by web tests, which `tsrs -b` type-checks
 # as part of the build; they live outside web/ so copy them explicitly.
 COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
+# Web tests also import the shared design schema vectors under docs/.
+COPY docs/design/schemas/ /app/docs/design/schemas/
 RUN pnpm run build
 
 # Allow CI to inject prebuilt frontend assets via a named `frontend_dist`
@@ -55,7 +57,11 @@ RUN --network=none go build \
     -o /silo ./cmd/silo/
 
 # Stage 3: Runtime
-FROM debian:trixie-slim
+# CI rebuilds this stage without the layer cache (no-cache-filters: runtime in
+# trusted-linux-build.yml) so every image picks up Debian security updates; the
+# upgrade covers packages already in the base image between Debian's refreshes
+# of the trixie-slim tag.
+FROM debian:trixie-slim AS runtime
 ARG TARGETARCH
 ARG INTEL_GMMLIB_VERSION=22.10.0
 ARG INTEL_IGC_VERSION=2.34.4
@@ -63,6 +69,7 @@ ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \

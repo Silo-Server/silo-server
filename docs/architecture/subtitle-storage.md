@@ -54,8 +54,7 @@ physical erasure guarantee or durable operation replay from these methods.
 All subtitle writers must use the immutable object implementation before relying
 on these publication guarantees. The revision trigger invalidates guards for
 older writers, but cannot make an older binary's object moves or shared-key
-cleanup safe. This storage foundation alone does not enable API v2 mutations or
-activate playback for existing accounts.
+cleanup safe.
 
 AI job cancellation attempts the guarded terminal job-state transition before
 canceling a local worker context. A database error is returned even when local
@@ -94,5 +93,4 @@ already-streamed transient cues limit how quickly work stops. The database
 publication fence does not depend on prompt provider cancellation and does not
 undo provider compute or previously committed output. All AI workers must use
 this fenced publication path before relying on these guarantees; an older
-worker can still bypass it. This change does not activate playback or port the
-AI creation/cancellation wire operations.
+worker can still bypass it.

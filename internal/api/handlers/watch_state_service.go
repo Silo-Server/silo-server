@@ -106,7 +106,7 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 // recordRewatch lets marking a watched movie or episode that has a resume
 // position record another play; it never applies to a season or series.
 func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalog.AccessFilter) (WatchedStateView, error) {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
+	targetType, seriesID, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
@@ -145,7 +145,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	}
 
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, seriesID, "watched", userStateEventState{
 		Played: boolPtr(played),
 	})
 
@@ -188,7 +188,7 @@ func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, prof
 		return nil
 	}
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "progress", userStateEventState{})
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, target.seriesID(), "progress", userStateEventState{})
 	return nil
 }
 

@@ -63,6 +63,8 @@ type RecipeCard struct {
 	ClientBuild      string `json:"client_build,omitempty"`
 	ClientChannel    string `json:"client_channel,omitempty"`
 	ClientUserAgent  string `json:"client_user_agent,omitempty"`
+	DeviceID         string `json:"device_id,omitempty"`
+	DevicePlatform   string `json:"device_platform,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
 	// Header-authenticated recovery. A session that negotiated
@@ -137,6 +139,11 @@ type RecipeCard struct {
 	TotalDuration              float64                `json:"total_duration"`
 	FastStart                  bool                   `json:"fast_start,omitempty"`
 	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
+
+	// HLSVariableSubstitution mirrors TranscodeOpts.HLSVariableSubstitution so
+	// a reconstructed session, and the API relaying a node's playlist, keep
+	// the playlist form the client negotiated.
+	HLSVariableSubstitution bool `json:"hls_variable_substitution,omitempty"`
 }
 
 const playMethodCopyFMP4V1 PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
@@ -271,6 +278,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TotalDuration:              opts.TotalDuration,
 		FastStart:                  opts.FastStart,
 		ThrottleSeconds:            opts.ThrottleSeconds,
+		HLSVariableSubstitution:    opts.HLSVariableSubstitution,
 	}
 }
 
@@ -377,6 +385,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
 		ThrottleSeconds:            c.ThrottleSeconds,
+		HLSVariableSubstitution:    c.HLSVariableSubstitution,
 		NodeType:                   "integrated",
 		ExecutionMode:              "integrated",
 		FFmpegLogSink:              logSink,
@@ -486,6 +495,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		CopyAudioCodec:             c.CopyAudioCodec,
 		TargetAudioChannels:        targetAudioChannels,
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
+		HLSVariableSubstitution:    c.HLSVariableSubstitution,
 	}
 }
 
@@ -579,6 +589,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TotalDuration:                 c.TotalDuration,
 		FastStart:                     c.FastStart,
 		ThrottleSeconds:               c.ThrottleSeconds,
+		HLSVariableSubstitution:       c.HLSVariableSubstitution,
 	}
 	if c.OriginalStartedAtUnixNano != 0 {
 		card.OriginalStartedAt = time.Unix(0, c.OriginalStartedAtUnixNano).UTC()

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
@@ -43,9 +44,12 @@ func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
 	}))
 	defer server.Close()
 	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-		"ai.base_url":   server.URL,
-		"ai.chat_model": "test-model",
-		"ai.api_key":    "private-test-key",
+		config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+			ID: "text", Type: config.AIProviderCustom, Name: "Text", BaseURL: server.URL, APIKey: "private-test-key",
+			Capabilities: []config.AICapability{config.AICapabilityChat},
+		}),
+		config.AITextProviderSettingKey: "text",
+		"ai.chat_model":                 "test-model",
 	}}}
 	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
 	const want = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
@@ -59,10 +63,10 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 		status int
 		want   string
 	}{
-		{http.StatusUnauthorized, "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."},
+		{http.StatusUnauthorized, "Speech-to-text authentication failed. Replace the provider's API key in AI Services."},
 		{http.StatusForbidden, "Speech-to-text access was denied. Check your API key permissions and allowed providers."},
 		{http.StatusPaymentRequired, "Speech-to-text provider requires payment. Check your provider balance and spending limit."},
-		{http.StatusNotFound, "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."},
+		{http.StatusNotFound, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."},
 		{http.StatusBadRequest, "Connection check failed. Verify the submitted settings and provider availability."},
 	} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
@@ -76,9 +80,12 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 			}))
 			defer server.Close()
 			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				"ai.asr_base_url": server.URL,
-				"ai.asr_model":    "test-model",
-				"ai.asr_api_key":  "private-test-key",
+				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+					ID: "speech", Type: config.AIProviderCustom, Name: "Speech", BaseURL: server.URL, APIKey: "private-test-key",
+					Capabilities: []config.AICapability{config.AICapabilitySpeech},
+				}),
+				config.AISpeechProviderSettingKey: "speech",
+				"ai.asr_model":                    "test-model",
 			}}}
 			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_transcription", nil, nil)
 			if err != nil || result.Success || result.Message != tc.want {

@@ -579,6 +579,39 @@ func TestHandleStartPlaybackV3DoesNotWaitForSessionSync(t *testing.T) {
 	close(syncer.release)
 }
 
+// preparedAtSessionManager records when the start path committed the session
+// state its prepared transport produced.
+type preparedAtSessionManager struct {
+	*playback.SessionManager
+	preparedAt time.Time
+}
+
+func (m *preparedAtSessionManager) UpdateStreamState(sessionID string, state playback.SessionStreamState) error {
+	err := m.SessionManager.UpdateStreamState(sessionID, state)
+	m.preparedAt = time.Now()
+	return err
+}
+
+// The startup grace must run from when the client gets its plan, not from
+// admission: transport preparation can take long enough that a grace started
+// at admission expires before the client's startup timeout (issue #3202).
+func TestHandleStartPlaybackV3StartsStartupGraceAfterTransportPreparation(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	manager := &preparedAtSessionManager{SessionManager: playback.NewSessionManager(0, 0)}
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	response := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
+	session, err := manager.GetSession(response.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.preparedAt.IsZero() || session.PlanCommittedAt.Before(manager.preparedAt) {
+		t.Fatalf("PlanCommittedAt = %v, before the transport was prepared at %v", session.PlanCommittedAt, manager.preparedAt)
+	}
+}
+
 func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	scrobbler := &orderedBlockingPlaybackScrobblerV3{
@@ -602,7 +635,7 @@ func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T
 	}
 	stopped := make(chan struct{})
 	go func() {
-		handler.finalizeSessionStop(context.Background(), session, false, "", true)
+		handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 		close(stopped)
 	}()
 	select {

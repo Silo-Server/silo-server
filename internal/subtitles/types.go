@@ -28,6 +28,16 @@ type SearchRequest struct {
 	MediaInfo *MediaMatchInfo
 }
 
+// DownloadTarget is the episode a subtitle download is for, so a season-pack
+// archive yields that episode's entry. Episode 0 means a movie or a file not
+// linked to an episode. EndEpisode is the last episode a multi-episode file
+// covers; 0 means the file covers Episode alone.
+type DownloadTarget struct {
+	Season     int
+	Episode    int
+	EndEpisode int
+}
+
 // MediaMatchInfo holds metadata about the media file for scoring subtitle matches.
 type MediaMatchInfo struct {
 	ReleaseGroup string

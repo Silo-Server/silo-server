@@ -800,6 +800,13 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 	if err != nil {
 		return nil, err
 	}
+	// A target naming the directory the active store opened is the active
+	// store, which may carry the identity recorded under another path. Compare
+	// with that directory, not the recorded path: a link on it may since point
+	// somewhere else.
+	if blobstore.SameLocalRoot(target.Identity(), blobstore.Location(s.source)) {
+		target = s.source
+	}
 	targetPrivate := s.openPrivate(staged.Values)
 	publicChanged := target.Identity() != s.source.Identity()
 	privateChanged := storeIdentity(s.private) != storeIdentity(targetPrivate)
@@ -1134,8 +1141,8 @@ func storageNamespacesOverlap(sourceIdentity, targetIdentity string) bool {
 		return false
 	}
 	if strings.HasPrefix(sourceIdentity, blobstore.BackendLocal+"|") && strings.HasPrefix(targetIdentity, blobstore.BackendLocal+"|") {
-		sourceRoot := filepath.Clean(strings.TrimPrefix(sourceIdentity, blobstore.BackendLocal+"|"))
-		targetRoot := filepath.Clean(strings.TrimPrefix(targetIdentity, blobstore.BackendLocal+"|"))
+		sourceRoot := resolvedLocalRoot(sourceIdentity)
+		targetRoot := resolvedLocalRoot(targetIdentity)
 		return pathContains(sourceRoot, targetRoot) || pathContains(targetRoot, sourceRoot)
 	}
 	if strings.HasPrefix(sourceIdentity, blobstore.BackendS3+"|") && strings.HasPrefix(targetIdentity, blobstore.BackendS3+"|") {
@@ -1149,6 +1156,18 @@ func storageNamespacesOverlap(sourceIdentity, targetIdentity string) bool {
 		return keyPrefixContains(sourcePrefix, targetPrefix) || keyPrefixContains(targetPrefix, sourcePrefix)
 	}
 	return false
+}
+
+// resolvedLocalRoot is the root a local identity names with symlinks in its
+// parent directories resolved, the same rule blobstore.SameLocalRoot uses. A
+// store can keep the identity recorded under another path to its directory,
+// so containment compares where the roots are, not how they are written.
+func resolvedLocalRoot(identity string) string {
+	root := strings.TrimPrefix(identity, blobstore.BackendLocal+"|")
+	if resolved, err := blobstore.LocalIdentity(root); err == nil {
+		return strings.TrimPrefix(resolved, blobstore.BackendLocal+"|")
+	}
+	return filepath.Clean(root)
 }
 
 func pathContains(parent, child string) bool {
@@ -1198,7 +1217,7 @@ func namespacesOverlapObserved(ctx context.Context, source, target blobstore.Sto
 	if source == nil || target == nil {
 		return false, nil
 	}
-	if storageNamespacesOverlap(source.Identity(), target.Identity()) {
+	if storageNamespacesOverlap(blobstore.Location(source), blobstore.Location(target)) {
 		return true, nil
 	}
 	for _, probe := range namespaceProbes(source.Identity(), target.Identity()) {
@@ -2355,6 +2374,12 @@ func (s *Service) targetIdentities(values map[string]string) (assets, private st
 		assets, err = blobstore.LocalIdentity(values[settingArtworkLocalPath])
 		if err != nil {
 			return "", "", err
+		}
+		// The active store may carry the identity recorded under another path
+		// to the directory it opened; that directory is still the active
+		// location.
+		if s.source != nil && blobstore.SameLocalRoot(assets, blobstore.Location(s.source)) {
+			assets = s.source.Identity()
 		}
 	} else {
 		store, openErr := s.openPublic(values)

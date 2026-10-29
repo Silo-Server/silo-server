@@ -629,13 +629,20 @@ func registerCatalogItems(reg *Registry) {
 	registerCatalogLetters(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
-		"Page the catalog, a section, a collection, a personal list, or a person's credits, filtered and sorted.")),
+	// Browsing, audiobook groups and the query form answer 501
+	// capability_unsupported when the selected user store or the search
+	// index cannot serve the query (catalogProblem).
+	browse := viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
+		"Page the catalog, a section, a collection, a personal list, or a person's credits, filtered and sorted."))
+	browse.Errors = append(browse.Errors, http.StatusNotImplemented)
+	Register(reg, browse,
 		func(ctx context.Context, in *CatalogBrowseInput) (*CatalogBrowseOutput, error) {
 			return reg.listCatalogItems(ctx, cursors, in)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/audiobook-groups", opListAudiobookGroups, "catalog",
-		"Page the authors, narrators, or series of an audiobook library with aggregate stats and cover stacks.")),
+	groups := viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/audiobook-groups", opListAudiobookGroups, "catalog",
+		"Page the authors, narrators, or series of an audiobook library with aggregate stats and cover stacks."))
+	groups.Errors = append(groups.Errors, http.StatusNotImplemented)
+	Register(reg, groups,
 		func(ctx context.Context, in *AudiobookGroupsInput) (*AudiobookGroupCollectionOutput, error) {
 			return reg.listAudiobookGroups(ctx, cursors, in)
 		})
@@ -648,6 +655,7 @@ func registerCatalogItems(reg *Registry) {
 	query.DefaultStatus = http.StatusOK
 	queryOperation := viewerOperation(query)
 	queryOperation.RetrySafety = RetrySafetyNaturalIdempotent
+	queryOperation.Errors = append(queryOperation.Errors, http.StatusNotImplemented)
 	Register(reg, queryOperation, func(ctx context.Context, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
 		return reg.queryCatalogItems(ctx, cursors, in)
 	})
@@ -1408,6 +1416,9 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: calendarDatePtr(d.ReleaseDate), LastAirDate: calendarDatePtr(d.LastAirDate),
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
+		SeriesPosterURL: d.SeriesPosterURL, SeriesPosterThumbhash: d.SeriesPosterThumbhash,
+		SeriesBackdropURL: d.SeriesBackdropURL, SeriesBackdropThumbhash: d.SeriesBackdropThumbhash,
+		SeasonPosterURL: d.SeasonPosterURL, SeasonPosterThumbhash: d.SeasonPosterThumbhash,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
 	}

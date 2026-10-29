@@ -167,7 +167,11 @@ func TestDescribeEmbeddingLockConflict(t *testing.T) {
 	}{
 		{"matching", lock, lock.BaseURL, "model-a", 768, ""},
 		{"matching, dimensions unknown", lock, lock.BaseURL, "model-a", 0, ""},
-		{"other base URL", lock, "http://other", "model-a", 768, "different provider base URL"},
+		{"other base URL", lock, "http://other", "model-a", 768, ""},
+		{"vendor-prefixed model", lock, "http://other", "google/model-a", 768, ""},
+		{"another vendor's model of the same name", EmbeddingLock{Model: "team-a/m", SourceDimensions: 768, StorageDimensions: CanonicalEmbeddingDimensions},
+			"http://other", "team-b/m", 768, `model "team-a/m", not "team-b/m"`},
+		{"no provider chosen", lock, "", "", 0, `No embedding provider is chosen. Choose a provider that serves "model-a"`},
 		{"other model", lock, lock.BaseURL, "model-b", 768, `model "model-a", not "model-b"`},
 		{"other dimensions", lock, lock.BaseURL, "model-a", 1024, "768-dimension vectors, but the model now returns 1024"},
 		{"unstorable lock", EmbeddingLock{BaseURL: "http://ollama", Model: "qwen3-embedding:latest", SourceDimensions: 4096}, "http://ollama", "qwen3-embedding:latest", 0, "records 4096-dimension vectors; Silo stores 1 to 3072"},

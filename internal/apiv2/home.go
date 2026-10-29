@@ -104,7 +104,8 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -117,6 +118,7 @@ type HomeCapabilitiesOutput struct {
 
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
+	SectionItemLimitQuery
 	ArtworkQuery
 }
 
@@ -430,8 +432,9 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		return &HomeCapabilitiesOutput{Body: HomeCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
 	}
 	return &HomeCapabilitiesOutput{Body: HomeCapabilities{
-		Capability:      Capability{State: StateAvailable},
-		IncludeItemsMax: handlers.MaxHomeLayoutIncludedSections,
+		Capability:          Capability{State: StateAvailable},
+		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
+		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
 	}}, nil
 }
 
@@ -465,7 +468,7 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSections(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

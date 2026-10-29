@@ -155,6 +155,11 @@ type Claims struct {
 	TargetAudioChannels    int     `json:"tac,omitempty"`
 	TargetAudioBitrateKbps int     `json:"tabr,omitempty"`
 
+	// HLSVariableSubstitution records the client's hls_variable_substitution_v1
+	// delivery feature, so the relay and a reconstruct keep the playlist form
+	// the client negotiated. Absent in older tokens: the literal form.
+	HLSVariableSubstitution bool `json:"hvs,omitempty"`
+
 	// Recipe staleness hint, bumped on each re-mint after a recipe mutation
 	// (audio/quality/seek switch). An optional client-side hint only.
 	Version int `json:"ver,omitempty"`

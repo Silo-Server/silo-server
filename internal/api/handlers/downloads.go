@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -745,7 +746,8 @@ func (h *DownloadHandler) proxyCanServe(ctx context.Context, cacheKey, probeURL 
 	resp, err := client.Do(req)
 	reachable := false
 	if err != nil {
-		slog.DebugContext(ctx, "download proxy preflight failed; serving locally", "component", "api", "error", err)
+		// The probe URL carries the signed download token in its path.
+		slog.DebugContext(ctx, "download proxy preflight failed; serving locally", "component", "api", "error", logredact.SanitizeURLError(err))
 	} else {
 		_ = resp.Body.Close()
 		reachable = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices

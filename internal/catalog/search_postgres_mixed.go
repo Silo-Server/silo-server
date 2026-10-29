@@ -33,7 +33,7 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 	args := []any{contentIDs}
 	argIdx := 2
 	mediaConditions := []string{"hydrated_mi.content_id = ANY($1)"}
-	appendLibraryAccessConditions("hydrated_mi.content_id", filter, &mediaConditions, &args, &argIdx)
+	appendListedLibraryAccessConditions("hydrated_mi.content_id", filter, &mediaConditions, &args, &argIdx)
 	applyAccessFilter("hydrated_mi", AccessFilter{
 		MaturityLimits:     filter.MaturityLimits,
 		ExcludedMediaTypes: filter.ExcludedMediaTypes,
@@ -152,7 +152,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			argIdx++
 		}
 		var libraryConditions []string
-		appendLibraryAccessConditions("mi.content_id", filter, &libraryConditions, &args, &argIdx)
+		appendListedLibraryAccessConditions("mi.content_id", filter, &libraryConditions, &args, &argIdx)
 		if len(libraryConditions) > 0 {
 			// Keep membership checks on the indexed title/alias identities. A
 			// hoisted semi-join can hash an entire allowed library for a rare hit.

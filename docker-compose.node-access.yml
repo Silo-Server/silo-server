@@ -1,0 +1,22 @@
+# Layer on docker-compose.yml on the main server so proxy and transcode nodes
+# on other hosts can use its bundled PostgreSQL and Redis:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.node-access.yml
+#
+# Nodes sign in to PostgreSQL as silo with POSTGRES_PASSWORD and to Redis with
+# REDIS_PASSWORD. Publish both ports only on an address of a network you trust;
+# neither connection is encrypted. docker-compose.node.yml runs a node.
+services:
+  # Tells the migration from the multi-container stack that nodes will reach
+  # this server, so it accepts a server with registered nodes.
+  postgres:
+    environment:
+      ENABLE_NODE_ACCESS: "true"
+  silo:
+    environment:
+      ENABLE_NODE_ACCESS: "true"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env — generate one with openssl rand -hex 24}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env — generate one with openssl rand -hex 24}
+    ports:
+      - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env to this host's address on the network the nodes use}:${POSTGRES_PORT:-5432}:5432"
+      - "${NODE_ACCESS_HOST}:${REDIS_PORT:-6379}:6379"

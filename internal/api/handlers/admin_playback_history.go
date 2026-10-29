@@ -21,6 +21,13 @@ type AdminPlaybackHistoryFilter struct {
 	// EndedAfter keeps attempts that ended at or after the instant; nil
 	// keeps every attempt.
 	EndedAfter *time.Time
+	// EndedBefore keeps attempts that ended strictly before the instant, so
+	// adjacent windows sharing a bound never list an attempt twice; nil keeps
+	// every attempt.
+	EndedBefore *time.Time `json:",omitempty"`
+	// SessionID limits the page to one session's row. Internal: a lifecycle
+	// event reads the row its end recorded.
+	SessionID string `json:",omitempty"`
 }
 
 // AdminPlaybackHistoryPageKey is the keyset position of the last row a page
@@ -32,8 +39,7 @@ type AdminPlaybackHistoryPageKey struct {
 }
 
 // AdminPlaybackHistoryRow is one finalized playback attempt as an
-// administrator sees it. client_ip is stored on the row but is not part of
-// this projection, matching v1.
+// administrator sees it.
 type AdminPlaybackHistoryRow struct {
 	SessionID       string
 	UserID          int
@@ -52,8 +58,25 @@ type AdminPlaybackHistoryRow struct {
 	Completed       bool
 	// PlayedSeconds is the measured watch time (see playback.WatchTime); nil
 	// when the play has no measurement, which includes every row written
-	// before it was recorded.
-	PlayedSeconds *float64
+	// before it was recorded. StartPositionSeconds, PausedSeconds and the
+	// measured window come from the same measurement and are nil with it.
+	PlayedSeconds        *float64
+	Measured             bool
+	StartPositionSeconds *float64
+	PausedSeconds        *float64
+	MeasuredSince        *time.Time
+	MeasuredUntil        *time.Time
+	// ClientIP is the stored client address; nil when none was recorded.
+	ClientIP *string
+	// The play's device, client, stream decisions and end reason; nil when
+	// unknown, which includes every row written before they were recorded.
+	DeviceID, DevicePlatform     *string
+	ClientName, ClientVersion    *string
+	VideoDecision, AudioDecision *string
+	EndReason                    *string
+	// LifecycleSeq is the sequence number of the end the row records; nil
+	// on rows recorded before lifecycle numbers existed.
+	LifecycleSeq *int64
 	// SeriesTitle, SeasonNumber and EpisodeNumber describe an episode's
 	// place in its series; empty and nil for anything else.
 	SeriesTitle   string
@@ -99,6 +122,12 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 	if filter.EndedAfter != nil {
 		add("h.ended_at >= ", *filter.EndedAfter)
 	}
+	if filter.EndedBefore != nil {
+		add("h.ended_at < ", *filter.EndedBefore)
+	}
+	if filter.SessionID != "" {
+		add("h.session_id = ", filter.SessionID)
+	}
 	if after != nil {
 		args = append(args, after.EndedAt, after.SessionID)
 		conditions = append(conditions, fmt.Sprintf("(h.ended_at, h.session_id) < ($%d, $%d)", len(args)-1, len(args)))
@@ -122,6 +151,20 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.duration_seconds,
 			h.completed,
 			CASE WHEN h.measured THEN h.played_seconds END,
+			h.measured,
+			CASE WHEN h.measured THEN h.start_position_seconds END,
+			CASE WHEN h.measured THEN h.paused_seconds END,
+			CASE WHEN h.measured THEN h.measured_since END,
+			CASE WHEN h.measured THEN h.measured_until END,
+			host(h.client_ip),
+			h.device_id,
+			h.device_platform,
+			h.client_name,
+			h.client_version,
+			h.video_decision,
+			h.audio_decision,
+			h.end_reason,
+			h.lifecycle_seq,
 			COALESCE(sm.title, ''),
 			ep.season_number,
 			ep.episode_number
@@ -151,7 +194,10 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 			&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
 			&row.StartedAt, &row.EndedAt, &row.WatchedSeconds, &row.DurationSeconds, &row.Completed,
-			&row.PlayedSeconds,
+			&row.PlayedSeconds, &row.Measured, &row.StartPositionSeconds, &row.PausedSeconds,
+			&row.MeasuredSince, &row.MeasuredUntil, &row.ClientIP,
+			&row.DeviceID, &row.DevicePlatform, &row.ClientName, &row.ClientVersion,
+			&row.VideoDecision, &row.AudioDecision, &row.EndReason, &row.LifecycleSeq,
 			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
 		); err != nil {
 			rows.Close()
@@ -172,4 +218,14 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		return AdminPlaybackHistoryPage{}, err
 	}
 	return out, nil
+}
+
+// ReadAdminPlaybackHistoryEntry reads one session's admin history row as the
+// history list projects it; nil when the session has none.
+func (h *AdminHandler) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessionID string) (*AdminPlaybackHistoryRow, error) {
+	page, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
+	if err != nil || len(page.Items) == 0 {
+		return nil, err
+	}
+	return &page.Items[0], nil
 }
