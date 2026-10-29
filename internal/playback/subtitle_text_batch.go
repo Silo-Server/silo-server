@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // TextSubtitleTrack names one cached text rendition of an embedded subtitle
@@ -80,7 +80,7 @@ func ExtractTextSubtitlesToFiles(ctx context.Context, inputPath string, outputs 
 	if ffmpegPath == "" {
 		ffmpegPath = defaultFFmpegBinary
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd := fspath.CommandContext(ctx, ffmpegPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -260,7 +260,7 @@ func (c *SubtitleCache) waitForTextFill(ctx context.Context, inputPath string, t
 	if c.dir() == "" {
 		return false
 	}
-	src, err := os.Stat(inputPath)
+	src, err := fspath.Stat(inputPath)
 	if err != nil {
 		return false
 	}

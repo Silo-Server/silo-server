@@ -19,3 +19,19 @@ func TestLoadDatabaseURLNeedsNoSecretKey(t *testing.T) {
 		t.Fatal("LoadDatabaseURL accepted a missing DATABASE_URL")
 	}
 }
+
+func TestAudiobookshelfCompatWithBootstrapListen(t *testing.T) {
+	cases := []struct {
+		name, listen, bootstrap, want string
+	}{
+		{"ABS_PORT moves an enabled listener", ":13378", ":13379", ":13379"},
+		{"a disabled listener stays disabled", "", ":13379", ""},
+		{"no bootstrap address keeps the listener", ":13378", "", ":13378"},
+	}
+	for _, tc := range cases {
+		got := AudiobookshelfCompatConfig{Listen: tc.listen}.WithBootstrapListen(tc.bootstrap)
+		if got.Listen != tc.want {
+			t.Errorf("%s: Listen = %q, want %q", tc.name, got.Listen, tc.want)
+		}
+	}
+}

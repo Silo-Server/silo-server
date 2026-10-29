@@ -59,7 +59,14 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks
 					return ErrIncompleteIndex
 				}
 			}
-			if id, _, _, err := readElementHeader(r, next); next >= segEnd || err != nil || id != idCluster {
+			if next >= segEnd {
+				break
+			}
+			id, _, _, err := readElementHeader(r, next)
+			if err != nil && !isShortRead(err) {
+				return fmt.Errorf("keyframes: read element at %d: %w", next, err)
+			}
+			if err != nil || id != idCluster {
 				break
 			}
 			at = next

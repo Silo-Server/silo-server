@@ -49,7 +49,8 @@ const artifactSelect = `
 	       COALESCE(last_error, ''),
 	       retry_after,
 	       recorded_by,
-	       updated_at
+	       updated_at,
+	       markers_invalidated_at
 	FROM media_intro_fingerprints`
 
 func scanArtifact(row pgx.Row) (Artifact, error) {
@@ -75,6 +76,7 @@ func scanArtifact(row pgx.Row) (Artifact, error) {
 		&a.RetryAfter,
 		&a.RecordedBy,
 		&a.UpdatedAt,
+		&a.MarkersInvalidatedAt,
 	)
 	return a, err
 }
@@ -162,9 +164,10 @@ const artifactInsert = `
 	    failure_count,
 	    last_error,
 	    retry_after,
-	    recorded_by
+	    recorded_by,
+	    markers_invalidated_at
 	) VALUES (
-	    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13, $14, $15, $16, NULLIF($17, ''), $18, $19
+	    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13, $14, $15, $16, NULLIF($17, ''), $18, $19, $20
 	)`
 
 // artifactUpsert replaces any row for the key, but never another kind's.
@@ -185,6 +188,7 @@ const artifactUpsert = artifactInsert + `
 	    last_error = EXCLUDED.last_error,
 	    retry_after = EXCLUDED.retry_after,
 	    recorded_by = EXCLUDED.recorded_by,
+	    markers_invalidated_at = EXCLUDED.markers_invalidated_at,
 	    updated_at = NOW()
 	WHERE media_intro_fingerprints.kind = EXCLUDED.kind`
 
@@ -230,6 +234,7 @@ func execArtifactWrite(ctx context.Context, q querier, query string, a Artifact)
 		a.LastError,
 		a.RetryAfter,
 		a.RecordedBy,
+		a.MarkersInvalidatedAt,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing %s artifact for file %d: %w", a.Kind, a.MediaFileID, err)

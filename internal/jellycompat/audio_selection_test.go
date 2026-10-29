@@ -29,6 +29,19 @@ type testCompatSessionManager struct {
 	startCalls          int
 	beginTransportCalls []string
 	endTransportCalls   []string
+	// detached records FinishDetached snapshots with their end reason.
+	detached []compatDetachedEnd
+	// startErr fails StartSession.
+	startErr error
+}
+
+type compatDetachedEnd struct {
+	session playback.Session
+	reason  string
+}
+
+func (m *testCompatSessionManager) FinishDetached(ctx context.Context, s playback.Session) {
+	m.detached = append(m.detached, compatDetachedEnd{session: s, reason: playback.EndReasonFromContext(ctx)})
 }
 
 type compatAudioTrackCall struct {
@@ -59,6 +72,9 @@ func (s *failAfterMutationPlaybackStore) Update(id string, fn func(*PlaybackSess
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
 	m.startCalls++
+	if m.startErr != nil {
+		return nil, m.startErr
+	}
 	session := &playback.Session{
 		ID:             "upstream-started",
 		UserID:         userID,
@@ -162,7 +178,7 @@ func (m *testCompatSessionManager) SetTranscodeNodeURL(sessionID, url string) er
 }
 
 // SetTranscodeStreamDetails records the execution facts supplied by the compatibility handler.
-func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error {
+func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode, targetResolution string, targetBitrateKbps int) error {
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		return playback.ErrSessionNotFound
@@ -172,7 +188,51 @@ func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVi
 	session.TranscodeAudio = transcodeAudio
 	session.TranscodeHWAccel = hwAccel
 	session.ToneMapMode = toneMapMode
+	session.TargetResolution = targetResolution
+	session.TargetBitrateKbps = targetBitrateKbps
 	return nil
+}
+
+// TestRecordTranscodeStreamDetailsTargets checks that the session reports the
+// resolution and bitrate the encoder runs with, and none when video is copied,
+// replacing whatever an earlier recipe left on the session.
+func TestRecordTranscodeStreamDetailsTargets(t *testing.T) {
+	tests := []struct {
+		name           string
+		videoCodec     string
+		audioCodec     string
+		wantResolution string
+		wantBitrate    int
+	}{
+		{name: "video encode", videoCodec: "h264", audioCodec: "aac", wantResolution: "720p", wantBitrate: 3608},
+		{name: "video and audio copy", videoCodec: "copy", audioCodec: "copy"},
+		{name: "video copy with audio encode", videoCodec: "copy", audioCodec: "aac"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			mgr.RegisterReconstructed(&playback.Session{
+				ID: "upstream-1", TargetResolution: "1080p", TargetBitrateKbps: 8000,
+			})
+			h := &PlaybackHandler{sessionMgr: mgr}
+			opts := playback.TranscodeOpts{
+				TargetCodecVideo: tt.videoCodec, TargetCodecAudio: tt.audioCodec,
+				TargetResolution: "720p", TargetBitrateKbps: 3608,
+			}
+			h.recordTranscodeStreamDetails(t.Context(), "upstream-1", opts)
+
+			session, err := mgr.GetSession("upstream-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.TargetResolution != tt.wantResolution || session.TargetBitrateKbps != tt.wantBitrate {
+				t.Fatalf("targets = %q/%d, want %q/%d", session.TargetResolution, session.TargetBitrateKbps, tt.wantResolution, tt.wantBitrate)
+			}
+			if session.TargetVideoCodec != tt.videoCodec || session.TargetAudioCodec != tt.audioCodec || session.TranscodeAudio != (tt.audioCodec == "aac") {
+				t.Fatalf("codec decisions lost: %+v", session)
+			}
+		})
+	}
 }
 
 type testCompatFileResolver struct {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -858,121 +860,99 @@ func (f *fakeAISettingsCheckClient) Transcribe(
 	return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
 }
 
-func TestHandleCheckSettingsConnectionAIChatDoesNotSendStoredKeyToDraftEndpoint(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
+// testAIProviders encodes an ai.providers registry for a settings fixture.
+func testAIProviders(t *testing.T, providers ...config.AIProvider) string {
+	t.Helper()
+	return config.AIProviderRegistry{Version: 1, Providers: providers}.Encode()
+}
+
+// A check draft selects a provider by id, so a stored key reaches only the
+// address saved with it. A draft cannot substitute its own registry.
+func TestHandleCheckSettingsConnectionAIUsesOnlyStoredProviders(t *testing.T) {
+	originalAI, originalEmbeddings := newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient
 	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
+		newAdminAISettingsCheckClient, newAdminEmbeddingsSettingsCheckClient = originalAI, originalEmbeddings
 	})
-
-	var captured llm.Config
-	var chatCalled bool
+	var capturedAI llm.Config
+	var capturedEmbeddings embeddings.ClientConfig
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{
-			chat: func(_ context.Context, _ []llm.Message, jsonObject bool) (string, error) {
-				chatCalled = true
-				if !jsonObject {
-					t.Fatal("chat connection check did not request a JSON response")
-				}
-				return `{"status":"ok"}`, nil
-			},
-		}
+		capturedAI = cfg
+		return &fakeAISettingsCheckClient{transcribe: func(context.Context, llm.TranscribeRequest) (*llm.Transcription, error) {
+			return &llm.Transcription{Segments: []llm.TranscriptionSegment{{Start: 0, End: 1, Text: "Subtitle test."}}}, nil
+		}}
 	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":   "https://persisted.example.test",
-				"ai.chat_model": "persisted-model",
-				"ai.api_key":    "persisted-secret",
-			},
-		},
+	newAdminEmbeddingsSettingsCheckClient = func(cfg embeddings.ClientConfig) embeddingsSettingsCheckClient {
+		capturedEmbeddings = cfg
+		return &fakeEmbeddingsSettingsCheckClient{embed: func(context.Context, []string) ([][]float32, error) {
+			return [][]float32{make([]float32, 8)}, nil
+		}}
 	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_chat",
-		map[string]any{
-			"values": map[string]string{
-				"ai.base_url":   "https://draft.example.test",
-				"ai.chat_model": "draft-model",
-				"ai.api_key":    "",
-			},
-			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	both := []config.AICapability{config.AICapabilityChat, config.AICapabilityEmbeddings, config.AICapabilitySpeech}
+	stored := map[string]string{
+		config.AIProvidersSettingKey: testAIProviders(t,
+			config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://saved.example.test", APIKey: "saved-secret", Capabilities: both},
+			config.AIProvider{ID: "other", Type: config.AIProviderCustom, Name: "Other", BaseURL: "https://other.example.test", APIKey: "other-secret", Capabilities: both},
+		),
+		config.AITextProviderSettingKey:    "saved",
+		config.AISpeechProviderSettingKey:  "saved",
+		config.EmbeddingProviderSettingKey: "saved",
+		"ai.chat_model":                    "chat-model",
+		"ai.asr_model":                     "whisper-model",
+		"recommendations.embedding_model":  "embed-model",
+		// Rows older builds wrote are no longer read.
+		"recommendations.embedding_base_url":   "https://legacy.example.test",
+		"recommendations.embedding_auth_token": "legacy-secret",
 	}
-
-	var response connectionCheckResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if !response.Success || !chatCalled {
-		t.Fatalf("response = %+v, chatCalled = %v", response, chatCalled)
-	}
-	if captured.BaseURL != "https://draft.example.test" || captured.ChatModel != "draft-model" {
-		t.Fatalf("captured config = %+v, want draft endpoint and model", captured)
-	}
-	if captured.APIKey != "" {
-		t.Fatalf("captured API key = %q, want no stored secret for a changed endpoint", captured.APIKey)
+	forged := testAIProviders(t, config.AIProvider{ID: "saved", Type: config.AIProviderCustom, Name: "Saved", BaseURL: "https://attacker.example.test", Capabilities: both})
+	for _, tc := range []struct {
+		name, kind, wantURL, wantKey string
+		values                       map[string]string
+	}{
+		{name: "text uses the bound provider", kind: "ai_chat", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "text draft switches provider", kind: "ai_chat", values: map[string]string{config.AITextProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "text draft registry ignored", kind: "ai_chat", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "speech uses the bound provider", kind: "ai_transcription", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "speech draft switches provider", kind: "ai_transcription", values: map[string]string{config.AISpeechProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "speech draft registry ignored", kind: "ai_transcription", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings use the bound provider", kind: "recommendations_embedding", wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft switches provider", kind: "recommendations_embedding", values: map[string]string{config.EmbeddingProviderSettingKey: "other"}, wantURL: "https://other.example.test", wantKey: "other-secret"},
+		{name: "embeddings draft registry ignored", kind: "recommendations_embedding", values: map[string]string{config.AIProvidersSettingKey: forged}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+		{name: "embeddings draft legacy endpoint ignored", kind: "recommendations_embedding", values: map[string]string{"recommendations.embedding_base_url": "https://attacker.example.test"}, wantURL: "https://saved.example.test", wantKey: "saved-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capturedAI, capturedEmbeddings = llm.Config{}, embeddings.ClientConfig{}
+			handler := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: maps.Clone(stored)}}
+			dirty := make([]string, 0, len(tc.values))
+			for key := range tc.values {
+				dirty = append(dirty, key)
+			}
+			rec := performSettingsCheckRequest(t, handler, "/admin/settings/check/"+tc.kind, map[string]any{"values": tc.values, "dirty_keys": dirty})
+			var response connectionCheckResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || !response.Success {
+				t.Fatalf("response = %+v, %v", response, err)
+			}
+			gotURL, gotKey := capturedAI.BaseURL, capturedAI.APIKey
+			switch tc.kind {
+			case "ai_transcription":
+				gotURL, gotKey = capturedAI.ASRBaseURL, capturedAI.ASRAPIKey
+			case "recommendations_embedding":
+				gotURL, gotKey = capturedEmbeddings.BaseURL, capturedEmbeddings.APIKey
+			}
+			if gotURL != tc.wantURL || gotKey != tc.wantKey {
+				t.Fatalf("checked %q with %q, want %q with %q", gotURL, gotKey, tc.wantURL, tc.wantKey)
+			}
+		})
 	}
 }
 
-func TestHandleCheckSettingsConnectionAIChatReusesStoredKeyForSameEndpoint(t *testing.T) {
+func TestHandleCheckSettingsConnectionAITranscriptionProbe(t *testing.T) {
 	originalFactory := newAdminAISettingsCheckClient
 	t.Cleanup(func() {
 		newAdminAISettingsCheckClient = originalFactory
 	})
 
-	var captured llm.Config
-	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{}
-	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":   "https://persisted.example.test/v1",
-				"ai.chat_model": "persisted-model",
-				"ai.api_key":    "persisted-secret",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_chat",
-		map[string]any{
-			"values": map[string]string{
-				"ai.base_url":   "https://persisted.example.test/other-path",
-				"ai.chat_model": "draft-model",
-			},
-			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if captured.APIKey != "persisted-secret" {
-		t.Fatalf("captured API key = %q, want stored secret for unchanged authority", captured.APIKey)
-	}
-}
-
-func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
-	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
-	})
-
-	var captured llm.Config
 	var request llm.TranscribeRequest
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
 		return &fakeAISettingsCheckClient{
 			transcribe: func(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
 				request = req
@@ -988,12 +968,12 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 	handler := &AdminHandler{
 		SettingsRepo: &fakeServerSettingsStore{
 			values: map[string]string{
-				"ai.base_url":     "https://chat.example.test",
-				"ai.api_key":      "chat-secret",
-				"ai.chat_model":   "chat-model",
-				"ai.asr_base_url": "https://whisper.example.test",
-				"ai.asr_api_key":  "asr-secret",
-				"ai.asr_model":    "whisper-model",
+				config.AIProvidersSettingKey: testAIProviders(t, config.AIProvider{
+					ID: "whisper", Type: config.AIProviderWhisper, Name: "Whisper", BaseURL: "http://whisper.example.test",
+					Capabilities: []config.AICapability{config.AICapabilitySpeech},
+				}),
+				config.AISpeechProviderSettingKey: "whisper",
+				"ai.asr_model":                    "whisper-model",
 			},
 		},
 	}
@@ -1004,68 +984,12 @@ func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing
 		"/admin/settings/check/ai_transcription",
 		map[string]any{"values": map[string]string{}, "dirty_keys": []string{}},
 	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-
 	var response connectionCheckResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("Decode() returned error: %v", err)
-	}
-	if !response.Success {
-		t.Fatalf("response.Success = false, message = %q", response.Message)
-	}
-	if captured.ASRBaseURL != "https://whisper.example.test" ||
-		captured.ASRAPIKey != "asr-secret" ||
-		captured.ASRModel != "whisper-model" {
-		t.Fatalf("captured ASR config = %+v", captured)
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || !response.Success {
+		t.Fatalf("response = %+v, %v", response, err)
 	}
 	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 60*time.Second || request.Timeout > 75*time.Second {
 		t.Fatalf("transcription probe request = %+v, want bounded WAV probe", request)
-	}
-}
-
-func TestHandleCheckSettingsConnectionAITranscriptionDoesNotSendStoredKeysToDraftEndpoint(t *testing.T) {
-	originalFactory := newAdminAISettingsCheckClient
-	t.Cleanup(func() {
-		newAdminAISettingsCheckClient = originalFactory
-	})
-
-	var captured llm.Config
-	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
-		captured = cfg
-		return &fakeAISettingsCheckClient{}
-	}
-
-	handler := &AdminHandler{
-		SettingsRepo: &fakeServerSettingsStore{
-			values: map[string]string{
-				"ai.base_url":     "https://chat.example.test",
-				"ai.api_key":      "chat-secret",
-				"ai.chat_model":   "chat-model",
-				"ai.asr_base_url": "https://stored-whisper.example.test",
-				"ai.asr_api_key":  "asr-secret",
-				"ai.asr_model":    "whisper-model",
-			},
-		},
-	}
-
-	rec := performSettingsCheckRequest(
-		t,
-		handler,
-		"/admin/settings/check/ai_transcription",
-		map[string]any{
-			"values": map[string]string{
-				"ai.asr_base_url": "https://draft-whisper.example.test",
-			},
-			"dirty_keys": []string{"ai.asr_base_url"},
-		},
-	)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if captured.ASRAPIKey != "" || captured.APIKey != "" {
-		t.Fatalf("captured config = %+v, want no stored ASR or inherited chat secret", captured)
 	}
 }
 
@@ -1285,16 +1209,37 @@ func withChiParam(r *http.Request, key, value string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
 }
 
-func TestAdminBatchAllowsOpenRouterASR(t *testing.T) {
-	settings := &fakeServerSettingsStore{}
-	handler := &AdminHandler{SettingsRepo: settings}
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(`{"values":{"ai.asr_base_url":"https://openrouter.ai/api/v1","ai.asr_model":"openai/whisper-large-v3","subtitle_ai.transcribe_enabled":"true"}}`)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+// A binding is validated against the registry even though the batch does not
+// carry the registry, which the dependency group pulls into validation.
+func TestAdminBatchValidatesProviderBindings(t *testing.T) {
+	registry := testAIProviders(t,
+		config.AIProvider{ID: "router", Type: config.AIProviderOpenRouter, Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: "k",
+			Capabilities: []config.AICapability{config.AICapabilityChat, config.AICapabilitySpeech}},
+		config.AIProvider{ID: "chat-only", Type: config.AIProviderCustom, Name: "Chat", BaseURL: "http://llm.lan", Capabilities: []config.AICapability{config.AICapabilityChat}},
+	)
+	// The single-setting write applies the same check.
+	for value, wantErr := range map[string]bool{"router": false, "chat-only": true, "missing": true} {
+		h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{config.AIProvidersSettingKey: registry}}}
+		if _, err := h.UpdateAdminSetting(t.Context(), config.AISpeechProviderSettingKey, value, nil); (err != nil) != wantErr {
+			t.Fatalf("single write of speech provider %q: err = %v, want error %v", value, err, wantErr)
+		}
 	}
-	if settings.values["ai.asr_base_url"] != "https://openrouter.ai/api/v1" || settings.values["subtitle_ai.transcribe_enabled"] != "true" {
-		t.Fatalf("settings not saved: %+v", settings.values)
+	for _, tc := range []struct {
+		body     string
+		wantCode int
+	}{
+		{`{"values":{"ai.speech_provider_id":"router","ai.asr_model":"openai/whisper-large-v3","subtitle_ai.transcribe_enabled":"true"}}`, http.StatusOK},
+		{`{"values":{"ai.speech_provider_id":"chat-only"}}`, http.StatusBadRequest},
+		{`{"values":{"ai.text_provider_id":"missing"}}`, http.StatusBadRequest},
+		{`{"values":{"ai.asr_base_url":"https://openrouter.ai/api/v1"}}`, http.StatusBadRequest},
+	} {
+		settings := &fakeServerSettingsStore{values: map[string]string{config.AIProvidersSettingKey: registry}}
+		handler := &AdminHandler{SettingsRepo: settings}
+		rec := httptest.NewRecorder()
+		handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(tc.body)))
+		if rec.Code != tc.wantCode {
+			t.Fatalf("%s: status = %d, want %d; body = %s", tc.body, rec.Code, tc.wantCode, rec.Body.String())
+		}
 	}
 }
 
@@ -1322,7 +1267,7 @@ func TestAITranscriptionConnectionRequiresTimestampedSpeech(t *testing.T) {
 				}}
 			}
 			cfg := &config.Config{}
-			cfg.AI.BaseURL = "https://openrouter.ai/api/v1"
+			cfg.AI.ASRBaseURL = "https://openrouter.ai/api/v1"
 			cfg.AI.ASRModel = "openai/whisper-large-v3"
 			if got := checkAITranscriptionConnection(t.Context(), cfg); got.Success != tc.want {
 				t.Fatalf("connection result = %+v, want success = %v", got, tc.want)

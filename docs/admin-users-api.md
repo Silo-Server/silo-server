@@ -17,6 +17,7 @@ configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
 `account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
 and series monitors), `request_usage` and `profile_sections` (profile page layouts). A read whose flag is false answers 503.
+`profile_avatars` reports that the profile collection below carries avatars.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -249,8 +250,17 @@ They check the caller's standing when the request arrives; they do not order
 simultaneous requests around an ownership transfer, which a server sees rarely.
 
 When the Owner account is lost or locked out, someone with shell access to a node
-and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for
-example `docker compose exec silo silo owner set alice`. The command makes that
+and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`.
+In the omnibus image, `DATABASE_URL` lives in the s6 container environment, which
+`docker exec` does not load, and the bundled PostgreSQL admits the `silo` role only
+from the `silo` account, so the command runs as:
+
+```sh
+docker compose exec silo /command/s6-envdir /run/s6/container_environment \
+  /command/s6-setuidgid silo silo owner set alice
+```
+
+`silo auth local-login enable` runs the same way. The command makes that
 account the Owner, enables it, and grants it the administrator role if needed; a
 role or status change signs the account out. The previous Owner stays an
 administrator.
@@ -277,7 +287,7 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names and `last_seen_at` |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names, `last_seen_at`, and the `avatar`, `avatar_url` and `avatar_source` that `GET /api/v2/profiles` returns for the same profile |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
 | `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |

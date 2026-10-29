@@ -223,11 +223,12 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={settingsAttention.restoreAll}
+                  disabled={settingsAttention.saving}
                   aria-label={`Show ${settingsAttention.hiddenCount} hidden setup ${
                     settingsAttention.hiddenCount === 1 ? "notice" : "notices"
                   }`}
                   title="Show hidden setup notices"
-                  className="border-warning/35 bg-warning/8 text-warning hover:bg-warning/15 focus-visible:ring-ring/60 inline-flex cursor-pointer items-center justify-center gap-1.5 justify-self-start rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+                  className="border-warning/35 bg-warning/8 text-warning hover:bg-warning/15 focus-visible:ring-ring/60 inline-flex cursor-pointer items-center justify-center gap-1.5 justify-self-start rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 >
                   <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
                   {settingsAttention.hiddenCount} hidden
@@ -285,7 +286,11 @@ export default function AdminDashboard() {
       {/* Setup the server still owes, each item linking to the page that
           fixes it. The admin sidebar marks the broken ones too. Setup the
           admin hides here comes back from the header's "hidden" chip. */}
-      <SettingsAttention items={settingsAttention.visible} onDismiss={settingsAttention.dismiss} />
+      <SettingsAttention
+        items={settingsAttention.visible}
+        onDismiss={settingsAttention.dismiss}
+        dismissDisabled={settingsAttention.saving}
+      />
 
       {layout.isCustomizing && (
         <div className="surface-panel-subtle flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-2.5">

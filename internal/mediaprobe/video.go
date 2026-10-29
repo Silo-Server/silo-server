@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -126,7 +126,7 @@ func (d *SideData) UnmarshalJSON(data []byte) error {
 // ProbePrimaryVideoTrack runs a metadata-only FFprobe and returns the first
 // playable video stream using the same normalization as a catalog scan.
 func ProbePrimaryVideoTrack(ctx context.Context, ffprobePath, filePath string) (models.VideoTrack, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	cmd := fspath.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",

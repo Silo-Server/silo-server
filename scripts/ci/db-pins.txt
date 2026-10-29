@@ -76,6 +76,13 @@
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
 
+# Jellyfin Items/Latest with MediaSources: a fixed number of statements per
+# page, and every card identical to its single-item detail rendering.
+./internal/jellycompat TestLatestStatementBudgetDB
+./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
@@ -308,3 +315,8 @@
 # A Jellyfin item request resolves the viewer access scope once, however many
 # catalog reads in the request need it.
 ./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB
+
+# Administrator catalog listing: present movies, series and episodes only, per-library
+# versus earliest first-seen times, every present file with one track's facts, and two
+# statements for a page with files, whatever else it holds.
+./internal/catalog TestListAdminCatalogItemsDB

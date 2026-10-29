@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -71,11 +73,31 @@ func TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 
 			provider := pgstore.NewPostgresProvider(pool)
 			episodes := catalog.NewEpisodeRepository(pool)
+			hub := evt.NewHub("test", nil)
+			events, unsubscribe := hub.Subscribe()
+			t.Cleanup(unsubscribe)
 			handler := &ItemsHandler{
 				itemRepo:    catalog.NewItemRepository(pool),
 				seasonRepo:  catalog.NewSeasonRepository(pool),
 				episodeRepo: episodes,
 				watchState:  watchstate.NewService(provider),
+			}
+			handler.EventsHub = hub
+			// The watched event names a season's or episode's series, so a
+			// client that hasn't cached the item can refresh the series (#796).
+			eventSeries := func() string {
+				t.Helper()
+				select {
+				case env := <-events:
+					var p userStateEventPayload
+					if err := json.Unmarshal(env.Data, &p); err != nil {
+						t.Fatal(err)
+					}
+					return p.SeriesID
+				default:
+					t.Fatal("no watched event")
+					return ""
+				}
 			}
 			nextUp := catalog.NewNextUpRepository(pool, provider)
 			listNextUp := func() []catalog.NextUpResult {
@@ -107,6 +129,13 @@ func TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 			if view.Type != parent || view.AffectedCount != 3 {
 				t.Fatalf("view = %+v, want %s with the on-disk episode and the two watched deleted ones", view, parent)
 			}
+			wantSeries := series // a season names its series
+			if parent == watchstate.ParentSeries {
+				wantSeries = "" // the event's item is the series itself
+			}
+			if got := eventSeries(); got != wantSeries {
+				t.Fatalf("watched event series = %q, want %q", got, wantSeries)
+			}
 			if got := listNextUp(); len(got) != 0 {
 				t.Fatalf("next up after unwatch = %+v, want the series gone", got)
 			}
@@ -129,6 +158,12 @@ func TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres(t *testing.T) {
 			}
 			if hiddenNeverWatched != 0 {
 				t.Fatal("unwatch hid the never-watched file-less episode; want it left out")
+			}
+			if _, err := handler.SetWatchedState(ctx, userID, profileID, onDisk, true, false, catalog.AccessFilter{}); err != nil {
+				t.Fatalf("mark episode watched: %v", err)
+			}
+			if got := eventSeries(); got != series {
+				t.Fatalf("episode watched event series = %q, want %q", got, series)
 			}
 		})
 	}

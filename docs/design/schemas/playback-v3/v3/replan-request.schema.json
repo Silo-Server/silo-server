@@ -556,6 +556,18 @@
         "max_channels": {
           "type": "integer"
         },
+        "max_channels_by_codec": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "maximum": 64
+          }
+        },
         "hdr_details": {
           "$ref": "#/$defs/hdr_capabilities"
         },

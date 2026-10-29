@@ -196,9 +196,14 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	// settles on, including one an override lowered.
 	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
+	var pinRevision int64
+	if profile != nil {
+		pinRevision = profile.PINRevision
+	}
 	return access.Scope{
 		UserID:              user.ID,
 		ProfileID:           input.ProfileID,
+		ProfilePINRevision:  pinRevision,
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -33,6 +34,8 @@ type SessionSync struct {
 	ClientBuild          string
 	ClientChannel        string
 	ClientUserAgent      string
+	DeviceID             string
+	DevicePlatform       string
 	AudioTrackIndex      int
 	TranscodeAudio       bool
 	StreamBitrateKbps    int
@@ -204,8 +207,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_workload, routing_execution, routing_execution_node_id, routing_execution_node_url,
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
-				 output_container, output_protocol, stream_location)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
+				 output_container, output_protocol, stream_location, device_id, device_platform)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -247,20 +250,10 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				output_container    = EXCLUDED.output_container,
 				output_protocol     = EXCLUDED.output_protocol,
 				stream_location     = EXCLUDED.stream_location,
+				device_id           = EXCLUDED.device_id,
+				device_platform     = EXCLUDED.device_platform,
 				last_sync_at        = NOW()
-		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
-			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
-			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientBuild),
-			nullableString(s.ClientChannel), nullableString(s.ClientUserAgent),
-			s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
-			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
-			nullableString(s.TargetAudioCodec), nullableInt(s.TargetAudioChannels),
-			nullableInt(s.TargetBitrateKbps),
-			nullableString(s.TranscodeHWAccel), nullableString(s.ToneMapMode),
-			nullableString(s.RoutingWorkload), nullableString(s.RoutingExecution), nullableInt(s.RoutingExecutionNodeID), nullableString(s.RoutingExecutionNodeURL),
-			nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
-			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
-			nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation)
+		`, sessionSyncValues(s, sessionNode)...)
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -359,7 +352,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			routing_network_provider,
 			COALESCE(output_container, ''),
 			COALESCE(output_protocol, ''),
-			COALESCE(stream_location, '')
+			COALESCE(stream_location, ''),
+			COALESCE(device_id, ''),
+			COALESCE(device_platform, '')
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -414,6 +409,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.OutputContainer,
 			&s.OutputProtocol,
 			&s.StreamLocation,
+			&s.DeviceID,
+			&s.DevicePlatform,
 		); err != nil {
 			return nil, err
 		}
@@ -460,6 +457,8 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].ClientBuild != right[i].ClientBuild ||
 			left[i].ClientChannel != right[i].ClientChannel ||
 			left[i].ClientUserAgent != right[i].ClientUserAgent ||
+			left[i].DeviceID != right[i].DeviceID ||
+			left[i].DevicePlatform != right[i].DevicePlatform ||
 			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
 			left[i].TranscodeAudio != right[i].TranscodeAudio ||
 			left[i].StreamBitrateKbps != right[i].StreamBitrateKbps ||
@@ -491,6 +490,59 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 		}
 	}
 	return true
+}
+
+// sessionSyncColumns names the playback_sessions_sync columns a sync binds,
+// in the order sessionSyncValues returns them; last_sync_at is the database
+// clock and not among them.
+var sessionSyncColumns = []string{
+	"session_id", "user_id", "profile_id", "media_file_id", "requested_media_file_id", "play_method",
+	"reporting_node", "started_at", "updated_at", "client_ip",
+	"client_name", "client_version", "client_build", "client_channel", "client_user_agent",
+	"audio_track_index", "transcode_audio", "stream_bitrate_kbps", "transcode_node_url",
+	"target_resolution", "target_video_codec", "target_audio_codec", "target_audio_channels",
+	"target_bitrate_kbps",
+	"transcode_hw_accel", "tone_map_mode",
+	"routing_workload", "routing_execution", "routing_execution_node_id", "routing_execution_node_url",
+	"routing_egress", "routing_egress_node_id", "routing_egress_node_url",
+	"position_seconds", "is_paused", "has_websocket", "compat_origin", "routing_network_provider",
+	"output_container", "output_protocol", "stream_location", "device_id", "device_platform",
+}
+
+// sessionSyncValues is one session as a sync stores it, in
+// sessionSyncColumns order.
+func sessionSyncValues(s SessionSync, sessionNode string) []any {
+	return []any{s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
+		sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
+		nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientBuild),
+		nullableString(s.ClientChannel), nullableString(s.ClientUserAgent),
+		s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
+		nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
+		nullableString(s.TargetAudioCodec), nullableInt(s.TargetAudioChannels),
+		nullableInt(s.TargetBitrateKbps),
+		nullableString(s.TranscodeHWAccel), nullableString(s.ToneMapMode),
+		nullableString(s.RoutingWorkload), nullableString(s.RoutingExecution), nullableInt(s.RoutingExecutionNodeID), nullableString(s.RoutingExecutionNodeURL),
+		nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
+		s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
+		nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation,
+		nullableString(s.DeviceID), nullableString(s.DevicePlatform)}
+}
+
+// SessionSyncRowJSON renders a session as the playback_sessions_sync row a
+// sync would store for it now, so the row can be read through
+// jsonb_populate_record before, or without, a sync writing it.
+func SessionSyncRowJSON(s SessionSync, reportingNode string) (json.RawMessage, error) {
+	sessionNode := strings.TrimSpace(s.ReportingNode)
+	if sessionNode == "" {
+		sessionNode = strings.TrimSpace(reportingNode)
+	}
+	values := sessionSyncValues(s, sessionNode)
+	row := make(map[string]any, len(values)+1)
+	for i, column := range sessionSyncColumns {
+		row[column] = values[i]
+	}
+	row["last_sync_at"] = time.Now().UTC()
+	return json.Marshal(row)
 }
 
 func normalizePositionSeconds(position float64) float64 {

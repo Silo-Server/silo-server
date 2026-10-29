@@ -771,38 +771,6 @@ func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, j
 	return current, nil
 }
 
-// CurrentTargetCachedPath reports the cached image path currently stored on
-// the job's target row. The processor's local-artwork branch uses it to skip
-// unchanged art and to delete the stale hashed local/ prefix after a
-// successful re-cache. Returns ("", nil) when the row no longer exists or the
-// target type is unknown.
-func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error) {
-	if r == nil || r.pool == nil || job == nil {
-		return "", nil
-	}
-	query, args, ok := currentTargetCachedPathQuery(job)
-	if !ok {
-		return "", nil
-	}
-	var current string
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("reading current target cached path: %w", err)
-	}
-	return current, nil
-}
-
-// currentTargetCachedPathQuery reads the served path column beside the source
-// column currentTargetSourceQuery reads ("poster_source_path" ->
-// "poster_path", "source_path" -> "path").
-func currentTargetCachedPathQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
-	query, args, ok := currentTargetSourceQuery(job)
-	return strings.Replace(query, "source_path", "path", 1), args, ok
-}
-
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:
@@ -826,7 +794,11 @@ func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any,
 		return fmt.Sprintf("SELECT %s FROM media_item_localizations WHERE content_id = $1 AND language = $2", col),
 			[]any{job.TargetContentID, job.TargetLanguage}, true
 	case ImageCacheTargetSeason:
-		return "SELECT poster_source_path FROM seasons WHERE content_id = $1",
+		slot := ImageCacheImagePoster
+		if job.ImageType == ImageCacheImageBackdrop {
+			slot = ImageCacheImageBackdrop
+		}
+		return fmt.Sprintf("SELECT %s_source_path FROM seasons WHERE content_id = $1", slot),
 			[]any{job.TargetContentID}, true
 	case ImageCacheTargetSeasonLocalization:
 		return "SELECT poster_source_path FROM season_localizations WHERE season_content_id = $1 AND language = $2",
@@ -944,7 +916,7 @@ func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, path
 	return r.enqueueArtworkRepair(ctx, limit, paths)
 }
 
-const imageCacheDiscoverySurfaceCount = 14
+const imageCacheDiscoverySurfaceCount = 15
 const imageCachePosterPathColumn = "poster_path"
 const imageCacheBackdropPathColumn = "backdrop_path"
 const imageCacheLogoPathColumn = "logo_path"
@@ -1141,16 +1113,22 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 			) loc
 			LEFT JOIN media_items mi ON mi.content_id = loc.content_id
 		`, imageType, sourceColumn, candidate("loc."+sourceColumn, "loc."+pathColumn, "mi.content_id")), localizedArgs
-	case 6:
+	case 6, 14:
+		// Season posters, and season backdrops after the item-only slots.
+		// The image type names the column family: poster_* or backdrop_*.
+		imageType := ImageCacheImagePoster
+		if cursor.Surface == 14 {
+			imageType = ImageCacheImageBackdrop
+		}
 		return fmt.Sprintf(`
-			SELECT 'poster'::text AS image_type, 'season'::text AS target_type,
+			SELECT '%[1]s'::text AS image_type, 'season'::text AS target_type,
 			       s.content_id AS target_content_id, ''::text AS target_language,
-			       COALESCE(s.series_id, '') AS series_id, COALESCE(s.poster_source_path, '') AS source_path,
+			       COALESCE(s.series_id, '') AS series_id, COALESCE(s.%[1]s_source_path, '') AS source_path,
 			       'series'::text AS content_type,
 			       s.season_number, NULL::integer AS episode_number,
 			       mi.tmdb_id, mi.tvdb_id, mi.imdb_id,
 			       s.content_id AS cursor_key, ''::text AS cursor_subkey, 0::bigint AS cursor_number,
-			       %s
+			       %[2]s
 			FROM (
 				SELECT *
 				FROM seasons
@@ -1159,7 +1137,7 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) s
 			LEFT JOIN media_items mi ON mi.content_id = s.series_id
-		`, candidate("s.poster_source_path", "s.poster_path", "mi.content_id")), textArgs
+		`, imageType, candidate("s."+imageType+"_source_path", "s."+imageType+"_path", "mi.content_id")), textArgs
 	case 7:
 		return fmt.Sprintf(`
 			SELECT 'poster'::text AS image_type, 'season_localization'::text AS target_type,
@@ -1389,6 +1367,27 @@ func ladderCandidateRowsSQL() string {
 			  AND coalesce(s.poster_path, '') <> ''
 			  AND s.poster_path NOT LIKE '%://%'
 			  AND ` + ladderMissingRungSQL("s.poster_path", "@posterRung") + `
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'season'::text,
+				s.content_id,
+				''::text,
+				s.series_id,
+				s.backdrop_source_path,
+				'series'::text,
+				s.season_number,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM seasons s
+			JOIN media_items mi ON mi.content_id = s.series_id
+			WHERE s.backdrop_source_path LIKE '%://%'
+			  AND lower(s.backdrop_source_path) NOT LIKE ALL (@recachableSchemes)
+			  AND coalesce(s.backdrop_path, '') <> ''
+			  AND s.backdrop_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("s.backdrop_path", "@backdropRung") + `
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -1751,6 +1750,25 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 			WHERE s.poster_source_path LIKE '%://%'
 			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND ((cardinality($2::text[]) = 0 AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')) OR s.poster_path = ANY($2))
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'season'::text,
+				s.content_id,
+				''::text,
+				s.series_id,
+				s.backdrop_source_path,
+				'series'::text,
+				s.season_number,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM seasons s
+			JOIN media_items mi ON mi.content_id = s.series_id
+			WHERE s.backdrop_source_path LIKE '%://%'
+			  AND lower(s.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (s.backdrop_path LIKE '%://%' OR coalesce(s.backdrop_path, '') = '')) OR s.backdrop_path = ANY($2))
 			UNION ALL
 			SELECT
 				'poster'::text,

@@ -38,6 +38,12 @@ func verifyHouseholdProfile(ctx context.Context) func(profileID string) error {
 	}
 }
 
+// scopedAPIKey reports whether a scoped API key authenticated the request.
+// Scoped keys are allowlist credentials for outside tools, so the operations
+// they may reach withhold deployment details (filesystem paths, raw failure
+// text) that unscoped keys and login sessions still see.
+func scopedAPIKey(ctx context.Context) bool { return apimw.IsScopedAPIKey(ctx) }
+
 func hasScope(ctx context.Context) bool {
 	_, ok := scopeFrom(ctx)
 	return ok

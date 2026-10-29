@@ -220,6 +220,9 @@ type artworkSweepSurface struct {
 	// Used for small tables holding admin/user uploads, where a blind reset
 	// would discard the last pointer to an object that survived migration.
 	alwaysVerify bool
+	// filter, when set, narrows the surface to rows matching this SQL
+	// predicate.
+	filter string
 }
 
 func (s artworkSweepSurface) keyColumnNames() []string {
@@ -257,10 +260,23 @@ func (s artworkSweepSurface) parseKeys(raw []string) ([]any, error) {
 }
 
 func (s artworkSweepSurface) cachedPredicate() string {
-	return fmt.Sprintf(
+	predicate := fmt.Sprintf(
 		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%'`,
 		s.pathCol, s.pathCol,
 	)
+	if s.filter != "" {
+		predicate += " AND (" + s.filter + ")"
+	}
+	return predicate
+}
+
+// uploadedSourcePredicate holds for rows whose source is an image an admin
+// uploaded, which no pipeline can fetch again.
+func (s artworkSweepSurface) uploadedSourcePredicate() string {
+	if s.sourceCol == "" {
+		return "FALSE"
+	}
+	return fmt.Sprintf(`lower(coalesce(%s, '')) LIKE '%s%%'`, s.sourceCol, uploadedImageSourcePrefix)
 }
 
 func (s artworkSweepSurface) remoteSourcePredicate() string {
@@ -323,6 +339,7 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "localized item backdrops", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
 		{name: "localized item logos", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: plainClear("logo_path")},
 		{name: "season posters", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
+		{name: "season backdrops", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
 		{name: "localized season posters", table: "season_localizations", keyCols: []artworkSweepKey{textSweepKey("season_content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "episode stills", table: "episodes", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", sourceCol: "still_source_path", clearSet: plainClear("still_path")},
 		// Local extra images come from a sidecar or a generated frame, not a
@@ -796,7 +813,8 @@ func (r *ArtworkCacheReconciler) objectExistsWithRetry(ctx context.Context, key 
 // bulkResetSurface resets every cached row without per-row verification. Rows
 // with a re-downloadable provider source go back to that source so an explicit
 // manual backfill can cache them again. Rows without one are cleared so their
-// owning pipeline can refill them.
+// owning pipeline can refill them, except uploaded images: nothing can refill
+// those, so each is verified and cleared only when its object is gone.
 func (r *ArtworkCacheReconciler) bulkResetSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats) error {
 	// Counts are recorded before the error check: batches commit as they go,
 	// and the task serializes stats on failure, so an interrupted reset must
@@ -812,13 +830,19 @@ func (r *ArtworkCacheReconciler) bulkResetSurface(ctx context.Context, s artwork
 	}
 
 	cleared, err := r.bulkUpdateInBatches(ctx, s, s.clearSet,
-		fmt.Sprintf(`%s AND NOT (%s)`, s.cachedPredicate(), s.remoteSourcePredicate()))
+		fmt.Sprintf(`%s AND NOT (%s) AND NOT (%s)`, s.cachedPredicate(), s.remoteSourcePredicate(), s.uploadedSourcePredicate()))
 	stats.Cleared += cleared
 	stats.Checked += cleared
 	if err != nil {
 		return fmt.Errorf("artwork reconcile: bulk clear %s: %w", s.name, err)
 	}
-	return nil
+
+	if s.sourceCol == "" {
+		return nil
+	}
+	uploads := s
+	uploads.filter = s.uploadedSourcePredicate()
+	return r.sweepSurface(ctx, uploads, stats, func(int) {})
 }
 
 // bulkUpdateInBatches applies setClause to every row of s matching where, in

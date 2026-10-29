@@ -1,12 +1,15 @@
 package naming
 
 import (
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 var (
@@ -542,11 +545,15 @@ func parseEpisodeNumber(digits string) int {
 
 // EpisodeTitleSuffix returns the text following a recognized episode token.
 // Release-tag cleanup belongs to the caller that uses this title as evidence.
+// The root is found on the encoded path; the names are parsed as display text
+// (see fspath.Display), as ParseFilename parses them.
 func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
-	base := filepath.Base(filePath)
-	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	stem := displayStem(filePath)
 	libraryRoot := deepestContainingLibraryRoot(filePath, libraryRoots)
 	directories := directorySegmentsWithinRoot(filePath, libraryRoot)
+	for i, directory := range directories {
+		directories[i] = fspath.Display(directory)
+	}
 	allowNumericSeason := libraryRoot == "" || len(directories) > 1
 	token, ok := parseEpisodeToken(stem, directories, libraryRoot != "", allowNumericSeason, true)
 	if !ok || token.episode == 0 {
@@ -559,13 +566,17 @@ func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
 // episode name. Release-tag cleanup belongs to the caller, as with
 // EpisodeTitleSuffix.
 func AirDateTitleSuffix(filePath string) string {
-	base := filepath.Base(filePath)
-	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	stem := displayStem(filePath)
 	match := airDateRe.FindStringSubmatchIndex(stem)
 	if match == nil {
 		return ""
 	}
 	return strings.TrimLeft(stem[match[7]:], " ._-")
+}
+
+func displayStem(filePath string) string {
+	base := fspath.Display(filepath.Base(filePath))
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 func compactEpisodeMatch(name string) []int {
@@ -589,4 +600,24 @@ func parseCompactEpisode(name string, match []int, season int, hasSeason bool) e
 	}
 	episode := parseEpisodeNumber(name[match[2]+1 : match[3]])
 	return finishEpisodeToken(name, episodeToken{season: compactSeason, seasonKnown: true, compact: true, episode: episode, start: match[0], end: match[3]})
+}
+
+// ExplicitEpisodeCoordinates reads the season and episode range a name labels
+// explicitly, as in S01E05, 1x05, or S01E01E02. Bare numbers such as
+// "Room.104" or "24" are not read as episodes. end equals start for a single
+// episode. Only the base name is read.
+func ExplicitEpisodeCoordinates(name string) (season, start, end int, ok bool) {
+	name = path.Base(filepath.ToSlash(name))
+	if !hasExplicitEpisodeToken(strings.TrimSuffix(name, path.Ext(name))) {
+		return 0, 0, 0, false
+	}
+	hints := ParseFilename(name, seriesContentType)
+	if !hints.SeasonKnown || hints.EpisodeNum == 0 {
+		return 0, 0, 0, false
+	}
+	start, end = hints.EpisodeNum, hints.EpisodeNum
+	if variant := ParseVariantHints(name, seriesContentType); variant.MultiEpisodeStart == start && variant.MultiEpisodeEnd > start {
+		end = variant.MultiEpisodeEnd
+	}
+	return hints.SeasonNum, start, end, true
 }

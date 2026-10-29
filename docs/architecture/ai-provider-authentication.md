@@ -1,12 +1,47 @@
 # AI provider authentication
 
 The shared AI client serves subtitle translation, metadata translation, and
-Whisper-compatible transcription. Text requests snapshot `ai.auth_mode`, endpoint,
-API key, model, reasoning effort, and active registration at request start.
-API-key mode uses the configured
-OpenAI-compatible endpoint. ChatGPT mode uses the documented OSS token-sharing
-flow and the fixed OpenAI Responses endpoint. Transcription uses the existing
-speech endpoint and API key regardless of text authentication mode.
+Whisper-compatible transcription. Text requests snapshot `ai.auth_mode`, the text
+provider, model, reasoning effort, and active registration at request start.
+API-key mode uses the chat endpoint and key of the provider `ai.text_provider_id`
+selects. ChatGPT mode uses the documented OSS token-sharing flow and the fixed
+OpenAI Responses endpoint. Transcription uses the provider
+`ai.speech_provider_id` selects, regardless of text authentication mode, and
+never falls back to the text endpoint.
+
+## Provider registry
+
+Every API-key and local provider lives once in `ai.providers`, one encrypted
+setting holding each provider's id, type, name, base URL, key, and capabilities
+(`chat`, `embeddings`, `speech`). Known types fix their capabilities and where
+each is served (Gemini chat goes through its OpenAI-compatible path under the
+base URL); a custom provider is an OpenAI-compatible endpoint whose capabilities
+the administrator declares. A job's binding names a provider by id, and
+`config.LoadFromDB` resolves it into the endpoint and key the job's client uses.
+Loading is lenient (a binding to a missing provider leaves the job
+unconfigured), and every write is strict: settings validation rejects a binding
+the registry cannot serve, and registry writes reject a change that would leave
+a binding unserved. Registry writes take the settings lock, validate the whole
+registry with the bindings, and publish a settings change so every node reloads.
+
+A stored key goes only to the address it was saved with. A check of a draft at
+another scheme, host, or port uses only a key typed with it, and moving a
+provider to another host requires its key again. Connection-check drafts cannot
+substitute a registry; they choose providers by id.
+
+The registry's `version` records which conversions of older settings have run.
+Version 1 moved `ai.base_url`/`ai.api_key` (and their `subtitle_ai.*`
+predecessors) and `ai.asr_base_url`/`ai.asr_api_key` into providers. Version 2
+moved `recommendations.embedding_base_url`/`embedding_auth_token` and the older
+`recommendations.openai_*` and `recommendations.embedding_provider` keys; a
+server that never stored an embedding endpoint but ran recommendations (the
+switch is on or a lock exists) gets a provider at the old built-in Ollama
+default, and its model is written to `recommendations.embedding_model`, which
+no longer has a default. A converted provider resolves to exactly the
+endpoint and key the legacy settings gave its job: a known type is chosen only when its endpoint for that job equals the
+stored URL, anything else becomes a custom provider at that URL, and providers
+with the same type, URL, and key are merged. The legacy rows are left in place,
+unread, so an older build still runs against the same database.
 
 ## Identity and credentials
 

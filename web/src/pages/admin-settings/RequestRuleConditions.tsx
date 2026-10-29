@@ -96,7 +96,7 @@ function parseYear(value: string): number | undefined {
 }
 
 /** An input for a numeric TMDB ID, added with Enter or the button. */
-function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
+export function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
   const [text, setText] = useState("");
   const id = Number(text.trim());
   const valid = Number.isInteger(id) && id > 0;

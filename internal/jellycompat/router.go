@@ -269,6 +269,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/Filters", itemsHandler.HandleFiltersStub)
 			r.Get("/Items/Filters2", itemsHandler.HandleFilters2Stub)
+			r.Get("/Items/Counts", itemsHandler.HandleItemCounts)
 			r.Get("/Items/Suggestions", itemsHandler.HandleSuggestions)
 			r.Get("/Users/{id}/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/{id}/Similar", itemsHandler.HandleSimilar)

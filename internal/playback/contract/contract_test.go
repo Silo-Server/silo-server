@@ -746,3 +746,36 @@ func assertStringsEqual(t *testing.T, label string, got, want []string) {
 		t.Fatalf("%s mismatch\ngot:  %v\nwant: %v", label, got, want)
 	}
 }
+
+// A replan that omits the hls delivery still persists it as a disabled
+// placeholder carrying the start-time playlist-form opt-in. The placeholder is
+// written into the durable normalized request, so it must stay a schema-valid
+// delivery: JSON null where the schema requires an array would not be.
+func TestPinnedHLSPlaceholderSatisfiesReplanSchema(t *testing.T) {
+	schemas := compileSchemasV3(t)
+	var replan playback.ReplanRequestV3
+	if err := json.Unmarshal(mustReadFile(t, filepath.Join(goldenRootV3, "replan_request.json")), &replan); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := replan.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3]; ok {
+		t.Fatal("golden replan must omit the hls delivery for this test")
+	}
+	var negotiated playback.StartRequestV3
+	negotiated.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassHLSV3: {Features: []string{playback.FeatureHLSVariableSubstitutionV3}},
+	}
+
+	playback.PinHLSVariableSubstitutionV3(&replan.ClientPlaybackContext, negotiated)
+
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schemas["replan-request.schema.json"].Validate(instance); err != nil {
+		t.Fatalf("pinned replan violates the schema: %v", err)
+	}
+}

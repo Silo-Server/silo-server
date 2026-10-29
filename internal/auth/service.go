@@ -485,6 +485,10 @@ type IdentitySession struct {
 	// Network: the identity is a network provider's, refused while the
 	// account's primary provider refuses the account (primaryAuthority).
 	Network bool
+	// RefusePasswordChange: the sign-in surface cannot run the forced
+	// password change (CompatLogin), so an account holding a temporary
+	// password is refused.
+	RefusePasswordChange bool
 }
 
 // OpenIdentitySession opens the login session of an account that signed in
@@ -513,6 +517,9 @@ func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c 
 	}
 	if !user.Enabled {
 		return nil, ErrUserDisabled
+	}
+	if c.RefusePasswordChange && user.PasswordChangeRequired {
+		return nil, ErrPasswordChangeRequired
 	}
 	installationID, err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID)
 	if err != nil {
@@ -763,7 +770,6 @@ func (s *Service) loginWithProvider(
 		DeviceName: deviceName,
 		IPAddress:  ip,
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
-		IdentityID: identityRef(identityID),
 	}
 
 	if providerID == LocalProviderID {
@@ -815,7 +821,21 @@ func (s *Service) loginWithProvider(
 			return nil
 		})
 	} else {
-		err = s.sessions.Create(ctx, session)
+		// Account resolution committed in its own transaction. Open the
+		// session as an OAuth sign-in does, under the account lock, so a
+		// disable or unlink that committed meanwhile refuses the sign-in
+		// instead of missing its session.
+		pair, err := s.OpenIdentitySession(ctx, nil, IdentitySession{
+			UserID:               user.ID,
+			IdentityID:           identityID,
+			DeviceName:           deviceName,
+			IP:                   ip,
+			RefusePasswordChange: refusePasswordChange,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return pair, pair.User, nil
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating session: %w", err)
@@ -1143,7 +1163,60 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, fmt.Errorf("invalid refresh token: %w", ErrInvalidToken)
 	}
 
-	session, err := s.sessions.GetByID(ctx, claims.SessionID)
+	standing, err := s.checkSessionStanding(ctx, claims.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	session, user := standing.session, standing.user
+
+	// Slide the session window forward so an active client never hits the
+	// hard expires_at set at login. A failure here is non-fatal: the refresh
+	// still returns fresh tokens; the session just keeps its prior expiry.
+	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, standing.expiry); err != nil {
+		switch {
+		case !IsSessionNotFound(err):
+			return nil, sessionCheckUnavailable("extending session", err)
+		case standing.rechecked:
+			// A check on another node (a role change, a refused account)
+			// revoked the session while this refresh waited for it.
+			return nil, ErrSessionRevoked
+		}
+	}
+
+	// An impersonating administrator is not the one who must change the
+	// password, so only the account's own sessions are restricted.
+	refreshed := Claims{
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              session.ID,
+		ImpersonatorUserID:     session.ImpersonatorUserID,
+		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
+	}
+	if session.IsRemotePlayback() {
+		refreshed = remotePlaybackClaims(refreshed, session)
+	}
+	return s.generateTokenPair(refreshed)
+}
+
+// sessionStanding is what checkSessionStanding establishes about a login
+// session before tokens are issued from it.
+type sessionStanding struct {
+	session *models.AuthSession
+	user    *models.User
+	// expiry is the furthest the session may now run: Refresh slides it
+	// there, and a token that does not slide it ends no later.
+	expiry time.Time
+	// rechecked is set when the external provider was consulted.
+	rechecked bool
+}
+
+// checkSessionStanding applies the checks a login session must pass before
+// tokens are issued from it: the session and account are live, an
+// impersonating administrator still holds the role, and a session opened
+// through an external provider passes the provider re-check under its outage
+// policy. Errors follow Refresh's contract.
+func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*sessionStanding, error) {
+	session, err := s.sessions.GetByID(ctx, sessionID)
 	if err != nil {
 		if IsSessionNotFound(err) {
 			return nil, ErrSessionRevoked
@@ -1176,9 +1249,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, sessionCheckUnavailable("checking impersonator", err)
 	}
 
-	// Slide the session window forward so an active client never hits the
-	// hard expires_at set at login. A failure here is non-fatal: the refresh
-	// still returns fresh tokens; the session just keeps its prior expiry.
 	now := time.Now()
 	newExpiry := now.Add(s.jwt.RefreshExpiry())
 
@@ -1222,30 +1292,42 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
 		newExpiry = *session.AbsoluteExpiresAt
 	}
-	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
-		switch {
-		case !IsSessionNotFound(err):
-			return nil, sessionCheckUnavailable("extending session", err)
-		case rechecked:
-			// A check on another node (a role change, a refused account)
-			// revoked the session while this refresh waited for it.
-			return nil, ErrSessionRevoked
-		}
-	}
+	return &sessionStanding{session: session, user: user, expiry: newExpiry, rechecked: rechecked}, nil
+}
 
-	// An impersonating administrator is not the one who must change the
-	// password, so only the account's own sessions are restricted.
-	refreshed := Claims{
-		UserID:                 user.ID,
-		Role:                   user.Role,
-		SessionID:              session.ID,
-		ImpersonatorUserID:     session.ImpersonatorUserID,
-		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
+// RenewPluginAccess re-issues a plugin access token from claims, a valid
+// plugin token, for the same session and profile. The session must pass the
+// checks Refresh applies, so an open plugin page stops renewing exactly when
+// the session could no longer refresh. Renewal never slides the session, and
+// the new token ends no later than the session does. Errors follow Refresh's
+// contract.
+func (s *Service) RenewPluginAccess(ctx context.Context, claims *Claims, ttl time.Duration) (string, error) {
+	if claims == nil || claims.TokenType != TokenTypePluginAccess || claims.SessionID == "" {
+		return "", ErrInvalidToken
 	}
-	if session.IsRemotePlayback() {
-		refreshed = remotePlaybackClaims(refreshed, session)
+	standing, err := s.checkSessionStanding(ctx, claims.SessionID)
+	if err != nil {
+		return "", err
 	}
-	return s.generateTokenPair(refreshed)
+	session, user := standing.session, standing.user
+	// Plugins are not part of a remote-playback handoff, and a session that
+	// must change its password may only do that.
+	if session.UserID != claims.UserID || session.IsRemotePlayback() ||
+		(user.PasswordChangeRequired && session.ImpersonatorUserID == nil) {
+		return "", ErrSessionRevoked
+	}
+	ends := standing.expiry
+	if session.ExpiresAt.Before(ends) {
+		ends = session.ExpiresAt
+	}
+	return s.jwt.generateToken(Claims{
+		UserID:             user.ID,
+		Role:               user.Role,
+		SessionID:          session.ID,
+		ProfileID:          claims.ProfileID,
+		ProfilePINRevision: claims.ProfilePINRevision,
+		SessionEndsAt:      ends,
+	}, TokenTypePluginAccess, ttl)
 }
 
 func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {

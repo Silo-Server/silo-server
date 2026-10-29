@@ -42,7 +42,7 @@ type AdminSystemStats struct {
 	NetTxBps   int64            `json:"net_tx_bps"`
 }
 type AdminDiskStats struct {
-	Path        string  `json:"path,omitempty"`
+	Path        string  `json:"path,omitempty" doc:"Where the mount is; omitted for scoped API keys"`
 	Role        string  `json:"role,omitempty"`
 	UsedGB      float64 `json:"used_gb"`
 	TotalGB     float64 `json:"total_gb"`
@@ -112,29 +112,43 @@ func getAdminBuildInfo(context.Context, *struct{}) (*AdminBuildInfoOutput, error
 	}
 	return &AdminBuildInfoOutput{Body: AdminBuildInfo{Display: b.Display, Revision: b.Revision, Dirty: b.Dirty, VCSTime: vcs, BuildNumber: b.BuildNumber, BuiltAt: built, Available: b.Available}}, nil
 }
-func (reg *Registry) getAdminSystemResources(context.Context, *struct{}) (*AdminSystemResourcesOutput, error) {
+func (reg *Registry) getAdminSystemResources(ctx context.Context, _ *struct{}) (*AdminSystemResourcesOutput, error) {
 	out := AdminSystemResources{GPU: []AdminGPUStats{}, Stale: true}
 	if reg.deps.AdminResourceSampler == nil {
 		return &AdminSystemResourcesOutput{Body: out}, nil
 	}
 	s := reg.deps.AdminResourceSampler.Snapshot()
+	if scopedAPIKey(ctx) {
+		s = s.RedactPaths()
+	}
 	out.Available = s.Available
 	out.Stale = s.Stale(time.Now())
 	out.Attribution = adminResourceAttribution(s.Attribution)
 	if !s.SampledAt.IsZero() {
 		out.SampledAt = new(NewInstant(s.SampledAt))
 	}
-	if s.System != nil {
-		v := s.System
-		out.System = &AdminSystemStats{CPUPct: v.CPUPct, Load1: v.Load1, Cores: v.Cores, MemUsedMB: v.MemUsedMB, MemTotalMB: v.MemTotalMB, NetRxBps: v.NetRxBps, NetTxBps: v.NetTxBps, Disks: []AdminDiskStats{}}
-		for _, d := range v.Disks {
-			out.System.Disks = append(out.System.Disks, AdminDiskStats(d))
-		}
-	}
-	for _, g := range s.GPU {
-		out.GPU = append(out.GPU, AdminGPUStats(g))
-	}
+	out.System = adminSystemStatsOf(s.System)
+	out.GPU = adminGPUStatsOf(s.GPU)
 	return &AdminSystemResourcesOutput{Body: out}, nil
+}
+
+func adminSystemStatsOf(v *nodemetrics.SystemStats) *AdminSystemStats {
+	if v == nil {
+		return nil
+	}
+	out := &AdminSystemStats{CPUPct: v.CPUPct, Load1: v.Load1, Cores: v.Cores, MemUsedMB: v.MemUsedMB, MemTotalMB: v.MemTotalMB, NetRxBps: v.NetRxBps, NetTxBps: v.NetTxBps, Disks: []AdminDiskStats{}}
+	for _, d := range v.Disks {
+		out.Disks = append(out.Disks, AdminDiskStats(d))
+	}
+	return out
+}
+
+func adminGPUStatsOf(gpus []nodemetrics.GPUStats) []AdminGPUStats {
+	out := []AdminGPUStats{}
+	for _, g := range gpus {
+		out = append(out, AdminGPUStats(g))
+	}
+	return out
 }
 
 func adminResourceAttribution(a *nodemetrics.ResourceAttribution) *AdminResourceAttribution {

@@ -220,6 +220,19 @@ type mediaAuthModeV3 struct {
 	// the API server. Never true without headerAuth — on a legacy attempt the
 	// signed proxy URL already carries its own authority.
 	proxyEgress bool
+	// hlsVariableSubstitution is the hls delivery's
+	// hls_variable_substitution_v1 feature on /api/v2: a playlist the server
+	// rewrites (FFmpeg's real playlist, a relayed node playlist) may carry a
+	// credential-sized query once through EXT-X-DEFINE. It changes playlist
+	// text only, so it is not part of plan identity.
+	hlsVariableSubstitution bool
+}
+
+// withHLSVariableSubstitutionV3 adds the request's playlist-substitution
+// opt-in to mode. The frozen /api/v1 surface never negotiates it.
+func withHLSVariableSubstitutionV3(r *http.Request, mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
+	mode.hlsVariableSubstitution = isNativeAPIV2(r.Context()) && playback.HLSVariableSubstitutionV3(req)
+	return mode
 }
 
 // headerAuthenticatedMediaV3 resolves the negotiated media transport mode from
@@ -1871,6 +1884,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// The frozen /api/v1 surface ignored these fields as unknown. Drop them
 		// before validation so v1 neither rejects nor acts on them.
 		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
+		withoutNativeDeliveryFieldsV3(&req.ClientPlaybackContext)
 	}
 	warnings, err := req.NormalizeAndValidate()
 	if err != nil {
@@ -1946,19 +1960,18 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if audioDegraded {
 		warnings = append(warnings, playback.AudioTrackUnavailableWarningV3())
 	}
+	// serverAudio marks a track the server chose by preference alone, which
+	// the request's capabilities may still refine below.
+	serverAudio := false
 	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
-		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceID, requestedFile)
+		var saved bool
+		audioIndex, saved, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceID, requestedFile)
 		if err != nil {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to load the saved audio preference")
 		}
+		serverAudio = !saved
 	}
 	timings.mark("audio_preference")
-	// The viewer's intent on the requested file, before any version fallback
-	// remaps it; replans restore it on a version that has it.
-	intent := startIntentV3{audioIndex: audioIndex}
-	if req.SubtitleTrackID != "" || req.SubtitleTrackIndex != nil {
-		intent.subtitle = &playback.TrackIdentityV3{ID: req.SubtitleTrackID, Index: copyOptionalIntV3(req.SubtitleTrackIndex)}
-	}
 	effectiveFile := requestedFile
 	settings, settingsErr := h.plannerSettingsV3Result(r.Context())
 	timings.mark("planner_settings")
@@ -1966,6 +1979,19 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackPreflightOperationError(err)
 	}
 	timings.mark("file_preflight")
+	// preferredAudio is that choice before the refinement, which a later
+	// switch to another version refines again on that version.
+	preferredAudio := audioIndex
+	if serverAudio && settingsErr == nil {
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, requestedFile, audioIndex, settings)
+		timings.mark("audio_capabilities")
+	}
+	// The viewer's intent on the requested file, before any version fallback
+	// remaps it; replans restore it on a version that has it.
+	intent := startIntentV3{audioIndex: audioIndex}
+	if req.SubtitleTrackID != "" || req.SubtitleTrackIndex != nil {
+		intent.subtitle = &playback.TrackIdentityV3{ID: req.SubtitleTrackID, Index: copyOptionalIntV3(req.SubtitleTrackIndex)}
+	}
 	if req.StartPosition == nil {
 		req.StartPosition, err = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
 		if err != nil {
@@ -2018,7 +2044,13 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if limitErr != nil {
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
 	}
+	bufferedBase := effectiveFile
 	effectiveFile, req, audioIndex = h.lowerBufferedVersion(r, req, effectiveFile, audioIndex, settings)
+	if serverAudio && settingsErr == nil && effectiveFile != bufferedBase {
+		// A track refined on the requested file means little on another
+		// version: refine the preference again on the one that plays.
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, effectiveFile, remapAudioIndexV3(requestedFile, effectiveFile, preferredAudio), settings)
+	}
 	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
 	planned, fallbackWarnings := h.planStartV3(r, req, requestedFile, alternateBase, effectiveFile, audioIndex, settings, lowerVersion)
 	req, effectiveFile, audioIndex = planned.request, planned.file, planned.audioIndex
@@ -2127,6 +2159,10 @@ type playbackStartRequestDigestsV3 struct {
 // clients that report their app identity only there. All values stay opaque —
 // they are trimmed and length-clamped when the session stamps them.
 //
+// The device is the one the client declared for the profile device registry:
+// the X-Silo-Device-* headers on the v1 bridge, PlaybackCaller.DeclaredDevice
+// on /api/v2.
+//
 // The fallback applies only to a client that named itself. client_playback_context
 // carries no app name, so nothing in the body can identify a nameless client
 // anyway — it is labeled from its user agent, and its app_version is a
@@ -2136,8 +2172,13 @@ type playbackStartRequestDigestsV3 struct {
 // semver, on every browser session.
 func playbackClientInfoForStartV3(r *http.Request, clientContext playback.ClientPlaybackContextV3) playback.ClientInfo {
 	info := playback.ClientInfoFromRequest(r)
+	device := DeviceMetadataFromHeaders(r.Header)
+	if isNativeAPIV2(r.Context()) {
+		device, _ = r.Context().Value(playbackDeclaredDeviceContextKey{}).(DeviceMetadata)
+	}
+	info.DeviceID, info.DevicePlatform = device.DeviceID, device.DevicePlatform
 	if info.Name == "" {
-		return info
+		return info.Normalized()
 	}
 	if info.Version == "" {
 		info.Version = strings.TrimSpace(clientContext.AppVersion)
@@ -2219,13 +2260,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
+	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(req.ClientFeatures), req)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
 	}
-	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, false) }
+	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, "") }
 	if req.ProgressPersistence == playback.ProgressPersistenceClientV3 || !sessionOwnsResumeTimelineV3(effectiveFile) {
 		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
 			abort()
@@ -2297,6 +2338,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to commit the live playback session.", cause: err}
 	}
+	// The startup grace runs from here, not from admission: a slow transport
+	// preparation must not use up the client's wait for its startup timeout.
+	if err := h.sessionMgr.MarkPlanCommitted(session.ID); err != nil {
+		transport.rollback()
+		abort()
+		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to commit the live playback session.", cause: err}
+	}
 	if err := h.PlanStoreV3.SaveAttempt(r.Context(), record); err != nil {
 		transport.rollback()
 		abort()
@@ -2307,6 +2355,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, commitErr
 	}
 	h.recordSessionRecipeV3(r.Context(), result.Plan.PlanID, &transport)
+	if started, err := h.sessionMgr.GetSession(session.ID); err == nil {
+		frontend := LifecycleFrontendBridge
+		if isNativeAPIV2(r.Context()) {
+			frontend = LifecycleFrontendNative
+		}
+		h.SessionStarted(r.Context(), started, frontend)
+	}
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
@@ -3777,18 +3832,21 @@ func (h *PlaybackHandler) multipartResumeFileV3(ctx context.Context, file *model
 // language this profile has settled on for this series, this library, this
 // device, or generally — the same resolution the catalog performs when it
 // publishes `effective_audio_track_index`, so the track a client sees on the
-// detail page is the track that plays when it does not ask for one.
+// detail page is the track that plays when it does not ask for one, unless
+// playableStartAudioV3 finds one this request plays without conversion.
+// saved reports that the viewer's saved series track decided, which plays as
+// saved.
 //
 // The client sends a track identity only when the viewer picked one. Defaulting
 // to ordinal zero instead would silently play the first track on the reel.
-func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID, deviceID string, file *models.MediaFile) (int, error) {
+func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID, deviceID string, file *models.MediaFile) (index int, saved bool, err error) {
 	if file == nil || len(file.AudioTracks) == 0 || h.StoreProvider == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
-		return 0, err
+		return 0, false, err
 	}
 	seriesID := h.playbackPreferenceKey(ctx, file)
 	var seriesPref *playback.AudioTrackPreference
@@ -3796,7 +3854,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID)
 		if prefErr != nil {
 			slog.ErrorContext(ctx, "protocol v3 start: series audio preference lookup failed", "component", "api", "profile_id", profileID, "series_id", seriesID, "error", prefErr)
-			return 0, prefErr
+			return 0, false, prefErr
 		}
 		if stored != nil {
 			seriesPref = &playback.AudioTrackPreference{AudioTrackIndex: stored.AudioTrackIndex, AudioLanguage: stored.AudioLanguage, TrackSignature: stored.TrackSignature}
@@ -3813,7 +3871,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	preferredLang, err := resolvedPlaybackAudioLanguage(ctx, store, rc)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: canonical audio preference lookup failed", "component", "api", "profile_id", profileID, "device_id", deviceID, "error", err)
-		return 0, err
+		return 0, false, err
 	}
 	if playback.IsOriginalLanguagePreference(preferredLang) {
 		preferredLang = h.resolveOriginalLanguage(ctx, file)
@@ -3821,7 +3879,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 			preferredLang, err = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
 			if err != nil {
 				slog.ErrorContext(ctx, "protocol v3 start: profile audio preference fallback failed", "component", "api", "profile_id", profileID, "error", err)
-				return 0, err
+				return 0, false, err
 			}
 			if playback.IsOriginalLanguagePreference(preferredLang) {
 				preferredLang = h.resolveOriginalLanguage(ctx, file)
@@ -3833,7 +3891,39 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		// settings own the language and its scope precedence.
 		seriesPref.AudioLanguage = preferredLang
 	}
-	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)), nil
+	chosen := playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
+	return normalizeAudioTrackIndex(file, chosen), playback.SavedAudioTrackChosen(file.AudioTracks, seriesPref, chosen), nil
+}
+
+// playableStartAudioV3 refines a preference-chosen start track by planning
+// file, the version that plays, once per candidate
+// (playback.PreferUnconvertedAudioTrackV3): a same-language track this request
+// plays unconverted replaces one it would convert. Each plan takes the
+// escalation the start applies to a progressive remux with no route. The plan
+// for the chosen track alone settles most starts.
+func (h *PlaybackHandler) playableStartAudioV3(ctx context.Context, req playback.StartRequestV3, requestedFile, file *models.MediaFile, chosen int, settings playback.PlannerSettingsV3) int {
+	if file == nil || len(file.AudioTracks) < 2 {
+		return chosen
+	}
+	registry := h.transformationRegistryV3(ctx)
+	dvRPUStrippable := h.lazyDVRPUStrippableV3(ctx, file)
+	subtitles := h.downloadedSubtitleInventoryV3(ctx, file)
+	return playback.PreferUnconvertedAudioTrackV3(file, chosen, func(index int) playback.StartAudioOutcomeV3 {
+		input := playback.PlannerInputV3{
+			Request: req, RequestedFile: requestedFile, EffectiveFile: file, ServerBitrateCapKbps: serverBitrateCapV3(ctx),
+			AudioTrackIndex: index, Settings: settings, Registry: registry, DVRPUStrippable: dvRPUStrippable,
+			Now: time.Now(), AdditionalSubtitles: subtitles,
+		}
+		result, capabilityErr := h.planPlaybackWithCapabilitiesV3(ctx, input)
+		if capabilityErr != nil {
+			return playback.StartAudioOutcomeV3{}
+		}
+		result, escalateErr := h.escalateRefusedProgressiveRemuxV3(ctx, headerAuthenticatedMediaV3(req.ClientFeatures), func() playback.PlannerInputV3 { return input }, result)
+		if escalateErr != nil {
+			return playback.StartAudioOutcomeV3{}
+		}
+		return playback.StartAudioOutcomeFromResultV3(result)
+	})
 }
 
 // resumePositionV3 answers what an omitted `start_position` means: resume where
@@ -4059,6 +4149,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			opts.HWAccel = playback.HWAccelNone
 		}
 	}
+	opts.HLSVariableSubstitution = mode.hlsVariableSubstitution
 	usedToneMapFallback := false
 	var ts *playback.TranscodeSession
 	var startupFailure *localTransportStartupFailureV3
@@ -4393,6 +4484,9 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	card.RoutingExecutionNodeID = node.ID
 	card.RoutingExecution = string(noderouting.ExecutionTranscode)
 	card.RoutingEgress = string(noderouting.EgressAPI)
+	// The node never sees the token, so the API relaying its playlist reads
+	// the negotiated playlist form from the token's claims.
+	card.HLSVariableSubstitution = mode.hlsVariableSubstitution
 	if nodePlan.ProxyNode != nil {
 		card.RoutingEgress = string(noderouting.EgressProxy)
 		card.RoutingEgressNodeID = nodePlan.ProxyNode.ID
@@ -4712,6 +4806,17 @@ func plannedAudioTrackIndexV3(result playback.PlannerResultV3, fallback int) int
 // withoutNativeDeliveryFeaturesV3 drops the /api/v2-only delivery features
 // from a request that arrived through the frozen /api/v1 surface, which never
 // advertised them.
+// withoutNativeDeliveryFieldsV3 drops the delivery fields /api/v1 never had,
+// which its decoder ignored as unknown, before validation sees them.
+func withoutNativeDeliveryFieldsV3(ctx *playback.ClientPlaybackContextV3) {
+	for name, delivery := range ctx.Deliveries {
+		if delivery.MaxChannelsByCodec != nil {
+			delivery.MaxChannelsByCodec = nil
+			ctx.Deliveries[name] = delivery
+		}
+	}
+}
+
 func withoutNativeDeliveryFeaturesV3(ctx *playback.ClientPlaybackContextV3) {
 	hls, ok := ctx.Deliveries[playback.DeliveryClassHLSV3]
 	if !ok || !playback.HasFeatureV3(hls.Features, playback.FeatureHLSCopyMPEGTSV3) {
@@ -4965,8 +5070,9 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	}
 	if !isNativeAPIV2(r.Context()) {
 		// As on start: /api/v1 ignores the buffering-quality fields and the
-		// /api/v2-only delivery features.
+		// /api/v2-only delivery fields and features.
 		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
+		withoutNativeDeliveryFieldsV3(&req.ClientPlaybackContext)
 		withoutNativeDeliveryFeaturesV3(&req.ClientPlaybackContext)
 	}
 	// Reject malformed identity/bounds before doing any session lookup. When
@@ -5029,6 +5135,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	// downstream — the durable normalized request, the transport's media-auth
 	// mode, the planner's evidence tiers — reads the pinned list.
 	req.ClientFeatures = playback.PinAttemptStickyFeaturesV3(req.ClientFeatures, record.NormalizedRequest.ClientFeatures)
+	playback.PinHLSVariableSubstitutionV3(&req.ClientPlaybackContext, record.NormalizedRequest)
 	if err := req.Validate(); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
 	}
@@ -5141,7 +5248,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		}
 		if sessionRollbackErr != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", sessionRollbackErr)
-			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
+			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, "")
 		}
 		if errors.Is(err, playback.ErrReplanSupersededV3) {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
@@ -5777,10 +5884,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
-	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
-	// so this mode always equals the one the attempt started under: a reused
-	// transport cannot change the session's media security contract.
-	mode := headerAuthenticatedMediaV3(start.ClientFeatures)
+	// Media authentication and the hls playlist form are attempt-sticky (pinned
+	// in HandleReplanPlaybackV3), so this mode always equals the one the
+	// attempt started under: a reused transport cannot change the session's
+	// media security contract or the playlist form it serves.
+	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(start.ClientFeatures), start)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor

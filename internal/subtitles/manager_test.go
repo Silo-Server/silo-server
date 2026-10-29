@@ -148,7 +148,7 @@ func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, 
 	return nil, nil
 }
 
-func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
+func (s stubProvider) Download(context.Context, string, DownloadTarget) ([]byte, SubtitleFormat, error) {
 	return s.data, FormatSRT, nil
 }
 

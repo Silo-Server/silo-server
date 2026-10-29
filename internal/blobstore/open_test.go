@@ -241,6 +241,78 @@ func TestOpenRejectsRecordedStorageMismatch(t *testing.T) {
 	}
 }
 
+// An image that keeps its state under a linked directory resolves the root
+// the regular image recorded at another path. The catalog keeps its recorded
+// identity, without the row being rewritten, so a rollback still opens it.
+func TestOpenKeepsRecordedIdentityForLinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(base, "other")
+	if err := os.MkdirAll(filepath.Join(other, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The path the regular image recorded, now a link into the image's state.
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	recorded := BackendLocal + "|" + filepath.Join(linked, "artwork")
+
+	settings := &testSettings{values: map[string]string{IdentitySettingKey: recorded}}
+	stores, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(linked, "artwork"), Settings: settings})
+	if err != nil {
+		t.Fatalf("same directory by another path rejected: %v", err)
+	}
+	if got := stores.Assets.Identity(); got != recorded {
+		t.Fatalf("Identity = %q, want the recorded %q", got, recorded)
+	}
+	if err := stores.Assets.Put(context.Background(), "a.webp", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if settings.values[IdentitySettingKey] != recorded {
+		t.Fatalf("identity row rewritten to %q", settings.values[IdentitySettingKey])
+	}
+	if _, err := os.Stat(filepath.Join(state, "artwork", "a.webp")); err != nil {
+		t.Fatalf("write did not land in the linked directory: %v", err)
+	}
+
+	// The link moved to another directory: that is another location.
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, linked); err != nil {
+		t.Fatal(err)
+	}
+	settings = &testSettings{values: map[string]string{IdentitySettingKey: BackendLocal + "|" + filepath.Join(state, "artwork")}}
+	if _, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(linked, "artwork"), Settings: settings}); err == nil {
+		t.Fatal("a different directory reached through the link was accepted")
+	}
+	if SameLocalRoot(BackendS3+"|https://s3.example|artwork|", BackendLocal+"|"+filepath.Join(state, "artwork")) {
+		t.Fatal("an S3 identity matched a local root")
+	}
+
+	// The recorded root itself replaced by a link to where it moved: a store
+	// refuses a linked root, so the moved directory is another location.
+	recordedRoot := filepath.Join(base, "data", "artwork")
+	moved := filepath.Join(base, "mnt", "artwork")
+	if err := os.MkdirAll(moved, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(recordedRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, recordedRoot); err != nil {
+		t.Fatal(err)
+	}
+	settings = &testSettings{values: map[string]string{IdentitySettingKey: BackendLocal + "|" + recordedRoot}}
+	if _, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: moved, Settings: settings}); err == nil {
+		t.Fatal("a recorded root that is itself a link matched the directory it points to")
+	}
+}
+
 func TestOpenRetriesBackendRecordingAfterSettingsFailure(t *testing.T) {
 	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}
 	stores, _, err := Open(context.Background(), Options{Backend: BackendLocal, LocalPath: filepath.Join(t.TempDir(), "artwork"), Settings: settings})

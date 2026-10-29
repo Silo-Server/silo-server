@@ -1,0 +1,109 @@
+name: Trusted Linux omnibus image build
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      base_tag:
+        description: Tag of the regular Silo image in this registry that the omnibus layers on
+        required: true
+        type: string
+      build_number:
+        required: true
+        type: string
+      built_at:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    # Same trust boundary as the regular image build: never on PR code.
+    if: >-
+      github.repository == 'Silo-Server/silo-server' &&
+      contains(fromJSON('["linux/amd64","linux/arm64"]'), inputs.platform) &&
+      ((github.event_name == 'workflow_dispatch' &&
+        contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)) ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        contains(fromJSON('["main","apiv2"]'), github.event.workflow_run.head_branch)))
+    runs-on: ${{ inputs.platform == 'linux/amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: omnibus
+
+      - name: Prepare platform slug and lowercase image name
+        run: |
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+          echo "IMAGE_LC=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ inputs.platform }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          cleanup: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.created=${{ inputs.built_at }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
+            org.opencontainers.image.version=${{ inputs.image_version }}-omnibus
+
+      # No layer cache: every layer sits on this commit's regular image, so a
+      # cached layer could never match, and rebuilding is what keeps the
+      # PostgreSQL and Redis packages current.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./omnibus
+          file: ./omnibus/Dockerfile
+          platforms: ${{ inputs.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SILO_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:${{ inputs.base_tag }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: omnibus-digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
