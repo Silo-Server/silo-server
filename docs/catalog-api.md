@@ -732,6 +732,21 @@ completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
 
+## Series and season completion
+
+A v2 catalog item and a v2 season can carry `availability`, with `have` and
+`total`. On a series, `have` is released seasons whose known episodes are all
+playable for this viewer, and `total` is seasons that have aired. On a season,
+`have` is episodes with a playable file and `total` is known episodes. A file
+counts when it is present in an enabled library the viewer can access and
+within the playback-quality ceiling. A multi-episode file covers each episode
+it spans; it is linked only to the first. The field is absent for other item
+types, for specials, for a season with nothing aired and nothing in the
+library, and when the episode list is incomplete. `/api/v1` does not send it.
+
+The web client draws the same counts as the Availability card overlay, off by
+default. Apple and Android clients can ignore the field until they draw it.
+
 ## Season-list artwork
 
 `GET /api/v2/images/capabilities` advertises

@@ -27,12 +27,12 @@ type Availability struct {
 }
 
 // SeriesSeasonAvailability returns per-season episode counts for each series,
-// specials (season 0) excluded. An episode has a file when one in an enabled
-// library the viewer can access is linked to it, or when a present
-// multi-episode file of its season spans it: such a file links to its first
-// episode only. filter's library allow/deny and playback-quality ceiling
-// narrow both presence branches so a badge never counts holdings the viewer
-// cannot reach.
+// specials (season 0) excluded. An episode has a file when a present file in
+// an enabled library the viewer can access is linked to it and fits the
+// playback-quality ceiling, or when a present multi-episode file of its
+// season spans it: such a file links to its first episode only. filter's
+// library allow/deny and playback-quality ceiling narrow both presence
+// branches so a badge never counts holdings the viewer cannot reach.
 func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string, filter AccessFilter) (map[string]map[int]SeasonAvailability, error) {
 	out := map[string]map[int]SeasonAvailability{}
 	if r == nil || r.pool == nil || len(seriesContentIDs) == 0 {
@@ -47,7 +47,7 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		args = append(args, value)
 		return len(args)
 	}
-	elLibrary := make([]string, 0, 2)
+	elLibrary := make([]string, 0, 3)
 	mfLibrary := make([]string, 0, 3)
 	if filter.AllowedLibraryIDs != nil {
 		idx := bind(filter.AllowedLibraryIDs)
@@ -62,6 +62,17 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 	if ceiling := MediaFileQualityCeilingSQL("mf", filter.MaxPlaybackQuality); ceiling != "" {
 		mfLibrary = append(mfLibrary, ceiling)
 	}
+	// episode_libraries records membership, not a playable file. A 2160p-only
+	// episode would otherwise count for a 1080p viewer.
+	held := []string{
+		"held.episode_id = el.episode_id",
+		"held.media_folder_id = el.media_folder_id",
+		"held.missing_since IS NULL",
+	}
+	if ceiling := MediaFileQualityCeilingSQL("held", filter.MaxPlaybackQuality); ceiling != "" {
+		held = append(held, ceiling)
+	}
+	elLibrary = append(elLibrary, "EXISTS (SELECT 1 FROM media_files held WHERE "+strings.Join(held, " AND ")+")")
 	elExtra := ""
 	if len(elLibrary) > 0 {
 		elExtra = " AND " + strings.Join(elLibrary, " AND ")

@@ -26,6 +26,11 @@
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 
+# Poster availability counts only files the viewer can play, and stays blank
+# when a regular season has no episode rows.
+./internal/catalog TestSeriesSeasonAvailabilityDatabase
+./internal/catalog TestEpisodeMetadataIncompleteSeasonsWithoutEpisodes
+
 # Same-day episodes sorted by air date keep series title and season/episode order on every query path.
 ./internal/catalog TestQueryEpisodeAirDateTiesPostgres
 

@@ -54,11 +54,34 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		SELECT $1::text || v.suffix, $1::text, 5, v.episode, v.aired
 		FROM (VALUES ('-s5e1', 1, DATE '2999-01-01'), ('-s5e2', 2, DATE '2999-01-08')) AS v(suffix, episode, aired)`, series)
 	seed(`INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1::text || '-s5e1', $2)`, series, enabled)
+	// Season 6 has one 1080p episode and one 2160p-only episode. Season 7 is a
+	// 2160p file spanning both episodes, linked to the first.
+	seed(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, air_date)
+		SELECT $1::text || v.suffix, $1::text, v.season, v.episode, DATE '2023-01-01'
+		FROM (VALUES ('-s6e1', 6, 1), ('-s6e2', 6, 2), ('-s7e1', 7, 1), ('-s7e2', 7, 2))
+		     AS v(suffix, season, episode)`, series)
+	seed(`INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES
+		($1::text || '-s6e1', $2), ($1::text || '-s6e2', $2), ($1::text || '-s7e1', $2)`, series, enabled)
 	fileID := time.Now().UnixNano()
-	seed(`INSERT INTO media_files (id, media_folder_id, file_path, episode_id, multi_episode_start, multi_episode_end)
-		VALUES ($1, $2, $3, $4, 1, 2)`, fileID, enabled, "/season-test/"+suffix+"/S04E01-E02.mkv", series+"-s4e1")
+	seed(`INSERT INTO media_files (id, media_folder_id, file_path, episode_id, resolution, multi_episode_start, multi_episode_end)
+		VALUES ($1, $2, $3, $4, '1080p', 1, 2)`, fileID, enabled, "/season-test/"+suffix+"/S04E01-E02.mkv", series+"-s4e1")
+	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution)
+		SELECT $2, '/season-test/' || $1 || v.path, $3::text || v.episode, v.resolution
+		FROM (VALUES
+			('/S01E01.mkv', '-s1e1', '1080p'),
+			('/S01E02.mkv', '-s1e2', '1080p'),
+			('/S03E01.mkv', '-s3e1', '1080p'),
+			('/S04E04.mkv', '-s4e4', '1080p'),
+			('/S05E01.mkv', '-s5e1', '1080p'),
+			('/S06E01.mkv', '-s6e1', '1080p'),
+			('/S06E02.mkv', '-s6e2', '2160p')) AS v(path, episode, resolution)`,
+		suffix, enabled, series)
+	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution, multi_episode_start, multi_episode_end)
+		VALUES ($1, $2, $3, '2160p', 1, 2)`, enabled, "/season-test/"+suffix+"/S07E01-E02.mkv", series+"-s7e1")
+	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution)
+		VALUES ($1, $2, $3, '1080p')`, disabled, "/season-test/"+suffix+"/S02E01.mkv", series+"-s2e1")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE id = $1`, fileID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE file_path LIKE $1 OR id = $2`, "/season-test/"+suffix+"/%", fileID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE series_id = $1`, series)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id IN ($1, $2)`, enabled, disabled)
@@ -79,6 +102,8 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		3: {Aired: 0, Total: 1, Have: 1, HaveAired: 0},              // no air dates yet
 		4: {Aired: 3, Upcoming: 1, Total: 4, Have: 3, HaveAired: 2}, // e2 through the multi-episode file; e3 missing
 		5: {Aired: 0, Upcoming: 2, Total: 2, Have: 1, HaveAired: 0}, // dated, not aired yet
+		6: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 1080p and 2160p, both present
+		7: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 2160p file spans both episodes
 	}
 	if len(got) != len(want) {
 		t.Fatalf("seasons = %+v, want %+v (specials excluded)", got, want)
@@ -110,6 +135,35 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		// Season 2's only file is in the disabled (and allowed) folder, but
 		// that folder is not enabled, so presence stays empty.
 		t.Fatalf("disabled folder in allowlist: season 2 have = %d, want 0", scoped[series][2].Have)
+	}
+
+	// A 1080p ceiling keeps the 1080p episode and drops the 2160p-only episode
+	// and the 2160p multi-episode file. A 2160p ceiling still counts both.
+	cappedWant := map[int]SeasonAvailability{}
+	for season, availability := range want {
+		cappedWant[season] = availability
+	}
+	cappedWant[6] = SeasonAvailability{Aired: 2, Total: 2, Have: 1, HaveAired: 1}
+	cappedWant[7] = SeasonAvailability{Aired: 2, Total: 2, Have: 0, HaveAired: 0}
+	for _, tc := range []struct {
+		ceiling string
+		want    map[int]SeasonAvailability
+	}{
+		{ceiling: "1080p", want: cappedWant},
+		{ceiling: "2160p", want: want},
+	} {
+		got, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{MaxPlaybackQuality: tc.ceiling})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got[series]) != len(tc.want) {
+			t.Fatalf("%s seasons = %+v, want %+v", tc.ceiling, got[series], tc.want)
+		}
+		for season, w := range tc.want {
+			if got[series][season] != w {
+				t.Errorf("%s season %d = %+v, want %+v", tc.ceiling, season, got[series][season], w)
+			}
+		}
 	}
 }
 
