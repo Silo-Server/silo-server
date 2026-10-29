@@ -480,7 +480,7 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 	}
 
 	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
+	token, err := h.PluginLaunchToken(r.Context(), claims, apimw.GetProfileID(r.Context()))
 	if err != nil {
 		writeAPIError(w, err)
 		return

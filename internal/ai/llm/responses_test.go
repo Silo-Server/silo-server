@@ -186,7 +186,7 @@ func TestChatReasoningOmitsUnsupportedTemperature(t *testing.T) {
 }
 
 func TestSubscriptionDoesNotAuthorizeTranscription(t *testing.T) {
-	client := NewClient(Config{BaseURL: "https://speech.example.test", APIKey: "speech-key", AuthMode: "chatgpt", ASRModel: "whisper-1", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
+	client := NewClient(Config{ASRBaseURL: "https://speech.example.test", ASRAPIKey: "speech-key", AuthMode: "chatgpt", ASRModel: "whisper-1", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
 		t.Fatal("ChatGPT subscription token requested for transcription")
 		return "", nil
 	})})

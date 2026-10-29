@@ -29,6 +29,7 @@ import StorageSettings from "./StorageSettings";
 import SearchSettings from "./SearchSettings";
 import LoggingSettings from "./LoggingSettings";
 import EmailSettings from "./EmailSettings";
+import { isRestorePending } from "@/lib/scrollRestoration";
 import "@/styles/admin-settings.css";
 
 interface SettingsNav extends AdminSettingsSearchItem {
@@ -89,7 +90,8 @@ export default function AdminSettingsLayout() {
   useEffect(() => {
     if (!activeId) return;
 
-    window.scrollTo(0, 0);
+    // Back or Forward returns to where the page was left instead.
+    if (!isRestorePending()) window.scrollTo(0, 0);
     if (activeContentRef.current) {
       activeContentRef.current.scrollTop = 0;
     }

@@ -6,10 +6,11 @@
  * The browser can only answer MIME support probes through
  * `MediaSource.isTypeSupported(...)` and `HTMLMediaElement.canPlayType(...)`, so
  * every claim here is `declared` evidence (see §3 of
- * `docs/architecture/playback-protocol-v3.md`). We deliberately never populate
- * `video_decode[]`: on `declared` the server matches the flat codec lists and
- * ignores the detail walk, and fabricating profile/level entries we cannot
- * observe would be exactly the dishonest attestation the tier exists to avoid.
+ * `docs/architecture/playback-protocol-v3.md`). `video_decode[]` carries only
+ * the bit depths a codec's probes accepted: on `declared` an entry can narrow
+ * the flat codec claim but never widen it, and fabricating profile/level
+ * entries we cannot observe would be exactly the dishonest attestation the
+ * tier exists to avoid.
  */
 
 import {
@@ -23,11 +24,8 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
-import {
-  onMeteredConnection,
-  readMeasuredBandwidthKbps,
-  readMeteredObservedLimitKbps,
-} from "./bandwidth-probe";
+import { onMeteredConnection, readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import { detectFormFactor } from "./form-factor";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -88,6 +86,11 @@ export interface WebCapabilityProbe {
   codecsVideo: string[];
   /** Video codecs supported specifically by direct media-element playback. */
   progressiveCodecsVideo: string[];
+  /**
+   * Bit depths each probed codec decodes, for codecs whose deeper profile
+   * browsers often refuse (H.264 High 10). Absent codecs are unconstrained.
+   */
+  videoBitDepths?: Record<string, number[]>;
   /** Audio codec names the browser reported support for. */
   codecsAudio: string[];
   /** Audio codecs supported specifically inside progressive MP4 delivery. */
@@ -128,6 +131,12 @@ export function buildClientCapabilitiesV3(
     probe.progressiveCodecsVideo,
     engine?.videoCodecs ?? [],
   );
+  // The server reads `hardware` only on the strict tiers.
+  const videoDecode = Object.entries(probe.videoBitDepths ?? {}).map(([codec, bitDepths]) => ({
+    codec,
+    bit_depths: bitDepths,
+    hardware: false,
+  }));
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
@@ -138,6 +147,7 @@ export function buildClientCapabilitiesV3(
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
     hdr_details: probe.hdrDetails,
+    ...(videoDecode.length > 0 ? { video_decode: videoDecode } : {}),
   };
 }
 
@@ -244,27 +254,15 @@ export function buildDeliveriesV3(
  * Measured downlink in kbps for the planner's Auto choice: a source that fits
  * the estimate plays as-is, and only one that does not is converted.
  *
- * A fresh measurement from the background bandwidth probe wins, unless the
+ * A fresh measurement from the background bandwidth probe is used, unless the
  * link is metered (Data Saver or cellular): that measurement was taken on
- * another link, so only a limit playback observed on this kind of link counts
- * there. `connection.downlink` is never used: browsers round and cap it
- * (Chromium at 10 Mbps), so it is a guess, not a measurement. Returns
- * undefined when nothing was measured, which lets Auto send the source.
+ * another link, and a metered one is never probed. `connection.downlink` is
+ * never used: browsers round and cap it (Chromium at 10 Mbps), so it is a
+ * guess, not a measurement. Returns undefined when nothing was measured, which
+ * lets Auto send the source, under any limit the server learned.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  // On a metered link a probe result describes another link; only a limit
-  // playback observed on a metered link describes this one.
-  return onMeteredConnection() ? readMeteredObservedLimitKbps() : readMeasuredBandwidthKbps();
-}
-
-/** Coarse form factor, used by the server only for quirk lookups. */
-function detectFormFactor(): string {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent.toLowerCase();
-  if (/\b(smart-?tv|smarttv|googletv|appletv|hbbtv|netcast|webos|tizen)\b/.test(ua)) return "tv";
-  if (/\b(ipad|tablet)\b/.test(ua)) return "tablet";
-  if (/\b(iphone|ipod|android.*mobile|mobile)\b/.test(ua)) return "phone";
-  return "desktop";
+  return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
 }
 
 /** Bounded (≤128 chars) opaque platform detail; the server treats it as text. */

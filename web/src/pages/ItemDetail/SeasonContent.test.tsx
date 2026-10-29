@@ -36,15 +36,6 @@ vi.mock("@/hooks/queries/episodes", () => ({
   useItemEpisodes: mocks.useItemEpisodes,
 }));
 
-const resetProgressMocks = vi.hoisted(() => ({
-  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
-}));
-
-vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
-  useResetProgressAction: resetProgressMocks.useResetProgressAction,
-}));
-
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
@@ -86,6 +77,10 @@ vi.mock("@/components/MediaItemMenu", () => ({
     mocks.capturedMediaMenuProps.push(props);
     return <div />;
   },
+}));
+
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: () => null,
 }));
 
 vi.mock("@/components/CastCarousel", () => ({

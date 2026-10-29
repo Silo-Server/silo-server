@@ -78,6 +78,7 @@ func TestDurableCompatRetainsStreamAdmissionUntilExpiry(t *testing.T) {
 			session := startPlaybackTestSession(t, manager, 1, "profile", 1, PlayDirect)
 			session.IsJellyfinCompat = tc.compat
 			session.LastActivityAt = time.Now().Add(-time.Hour)
+			session.PlanCommittedAt = session.LastActivityAt
 			if tc.shared {
 				manager.SetCompatExpiryClaimer(func(context.Context, []SessionExpiryCandidate) (map[string]bool, error) {
 					return map[string]bool{session.ID: true}, nil

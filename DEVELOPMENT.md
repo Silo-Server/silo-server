@@ -23,8 +23,9 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Local development
 
-Source builds use [docker-compose.yml](docker-compose.yml) only for PostgreSQL
-and Redis; the deploy-oriented stack in the README is separate.
+Source builds use only the PostgreSQL and Redis services of
+[docker-compose.dev.yml](docker-compose.dev.yml); the README's `docker-compose.yml`
+runs the published omnibus image instead.
 
 ```sh
 # Create the local bootstrap configuration
@@ -36,7 +37,7 @@ printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
   'redis://localhost:6379' >> .env
 
 # Start local PostgreSQL and Redis
-docker compose up -d postgres redis
+docker compose -f docker-compose.dev.yml up -d postgres redis
 
 # Install frontend dependencies and create the embedded-frontend test stub
 cd web
@@ -44,6 +45,13 @@ pnpm install --frozen-lockfile
 cd ..
 make embed-stub
 ```
+
+`docker-compose.dev.yml` runs as the `silo-dev` Compose project with named
+volumes, so it does not reuse a development database that the earlier
+`docker compose up -d postgres redis` kept under `SILO_DATA_ROOT/postgres`.
+Stop those containers first (`docker compose down` with the earlier file), since
+they hold ports 5432 and 6379, and restore a `pg_dump` of the old database into
+the new one if you need its data.
 
 Run the backend and frontend in separate terminals, backend first:
 

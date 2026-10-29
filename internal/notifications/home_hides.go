@@ -59,7 +59,8 @@ type completedEpisode struct {
 
 // supersededInProgress returns the in-progress episodes Home's Continue
 // Watching hides because a later episode of the series was completed more
-// recently: the viewer moved past them. It applies the rule of
+// recently: the viewer moved past them. Specials have no airing position, so
+// only a later special supersedes a special. It applies the rule of
 // catalog.ContinueWatchingProgressFilter to the series' progress the
 // recompute already holds.
 func supersededInProgress(inProgress []userstore.WatchProgress, completed []completedEpisode, episodeKeys map[string]int) map[string]struct{} {
@@ -73,8 +74,9 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 		if err != nil {
 			continue
 		}
+		special := key < firstRegularEpisodeKey
 		for _, done := range completed {
-			if done.key > key && done.at.After(at) {
+			if done.key > key && done.at.After(at) && special == (done.key < firstRegularEpisodeKey) {
 				superseded[entry.MediaItemID] = struct{}{}
 				break
 			}

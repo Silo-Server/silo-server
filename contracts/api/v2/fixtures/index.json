@@ -889,6 +889,27 @@
       "body_file": "admin_apple_push_test_notification.json"
     },
     {
+      "name": "admin_catalog_capabilities",
+      "operation_id": "getAdminCatalogCapabilities",
+      "scenario": "Catalog capabilities report the item listing and its content_ids bound.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/catalog/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCatalogCapabilities",
+      "body_file": "admin_catalog_capabilities.json"
+    },
+    {
       "name": "admin_catalog_export_link",
       "operation_id": "publishCatalogExportJob",
       "scenario": "A saved signed URL retains its original seven-day expiry.",
@@ -6453,6 +6474,28 @@
       "body_file": "get_admin_item_trickplay_ok.json"
     },
     {
+      "name": "get_admin_playback_history_capabilities_ok",
+      "operation_id": "getAdminPlaybackHistoryCapabilities",
+      "scenario": "Administrator playback history capabilities name the window filter and the entry fields the server records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/playback-history/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"8e5e419f09c4d6506da92cbfdc72d8ec4f2ae7ca528d216366c0adf84abb8e43\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",
+      "body_file": "get_admin_playback_history_capabilities_ok.json"
+    },
+    {
       "name": "get_admin_section_ok",
       "operation_id": "getAdminSection",
       "scenario": "The canonical administrator section editor returns its recipe configuration and a strong validator.",
@@ -7028,6 +7071,69 @@
       "body_file": "get_favorite_authentication_required.json"
     },
     {
+      "name": "get_favorite_membership_member",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "The item is one of the profile's favorites: is_member true with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:c/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_favorite_membership_member.json"
+    },
+    {
+      "name": "get_favorite_membership_not_found",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "An item the viewer may not see is 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:hidden/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_favorite_membership_not_found.json"
+    },
+    {
+      "name": "get_favorite_membership_not_member",
+      "operation_id": "getFavoriteMembership",
+      "scenario": "The item is not one of the profile's favorites: 200 with is_member false, not a 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/favorites/movie:nope/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_favorite_membership_not_member.json"
+    },
+    {
       "name": "get_favorite_not_found",
       "operation_id": "getFavorite",
       "scenario": "The item is not one of the profile's favorites.",
@@ -7154,7 +7260,7 @@
     {
       "name": "get_home_capabilities_ok",
       "operation_id": "getHomeCapabilities",
-      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max, and listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max.",
       "request": {
         "method": "GET",
         "path": "/api/v2/home/capabilities",
@@ -7167,7 +7273,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"59a9dab7b74c563cd0809b2a1152c35a11c592c44ebda15b6ca6c64da090c7a9\""
+        "ETag": "\"15a2545d2cf1995917e84822b36872575b71f3ea27d916b054aee2524d854bf6\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -7945,6 +8051,28 @@
       "body_file": "get_person_ok.json"
     },
     {
+      "name": "get_personal_list_capability_ok",
+      "operation_id": "getPersonalListCapability",
+      "scenario": "The personal-list capability document: the favorites and watchlist membership reads are supported.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/personal-lists",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"98fb041ee1ec885522a26301c4c6120233fbe27744670884c8fe13bcc8520cdb\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListCapability",
+      "body_file": "get_personal_list_capability_ok.json"
+    },
+    {
       "name": "get_plugin_settings_authentication_required",
       "operation_id": "getPluginSettings",
       "scenario": "A plugin's settings read without a credential.",
@@ -8059,7 +8187,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"2ff6c702f87c15b4122063ead741b7271dbbbc461a5a54a97379df4b16633a18\""
+        "ETag": "\"c4488bd6fb6b5c2a8059c048014e2ad89b2e5f3b9a1816ba9a074bad84eabf16\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ProgressCapabilities",
@@ -8571,7 +8699,7 @@
       },
       "expected_status": 200,
       "response_headers": {
-        "Cache-Control": "no-cache",
+        "Cache-Control": "private, no-cache",
         "Content-Type": "application/json"
       },
       "response_media_type": "application/json",
@@ -8880,6 +9008,48 @@
       "body_file": "get_watchlist_entry_ok.json"
     },
     {
+      "name": "get_watchlist_membership_member",
+      "operation_id": "getWatchlistMembership",
+      "scenario": "The item is on the profile's watchlist: is_member true with when it was added.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:c/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_watchlist_membership_member.json"
+    },
+    {
+      "name": "get_watchlist_membership_not_member",
+      "operation_id": "getWatchlistMembership",
+      "scenario": "The item is not on the profile's watchlist: 200 with is_member false, not a 404.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/watchlist/series:nope/membership",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalListMembership",
+      "body_file": "get_watchlist_membership_not_member.json"
+    },
+    {
       "name": "guarded_delete_ok",
       "operation_id": null,
       "scenario": "A guarded DELETE whose If-Match names the current ETag: 204 with no body and no validator, since the representation is gone.",
@@ -9108,6 +9278,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AccountIdentityCollection",
       "body_file": "list_account_identities_ok.json"
+    },
+    {
+      "name": "list_admin_catalog_items_ok",
+      "operation_id": "listAdminCatalogItems",
+      "scenario": "Administrator catalog page carries an episode with its series placement and one file version, a series with no versions, string IDs and a scoped cursor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/catalog/items?limit=2",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCatalogItemCollection",
+      "body_file": "list_admin_catalog_items_ok.json"
     },
     {
       "name": "list_admin_collection_sections_ok",
@@ -10041,6 +10232,27 @@
       "body_file": "list_home_sections_invalid_image_size.json"
     },
     {
+      "name": "list_home_sections_item_limit_out_of_range",
+      "operation_id": "listHomeSections",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_home_sections_item_limit_out_of_range.json"
+    },
+    {
       "name": "list_home_sections_ok",
       "operation_id": "listHomeSections",
       "scenario": "The home page's sections with their catalog cards, artwork presigned at the requested size.",
@@ -10285,6 +10497,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_library_sections_invalid_image_size.json"
+    },
+    {
+      "name": "list_library_sections_item_limit_out_of_range",
+      "operation_id": "listLibrarySections",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_sections_item_limit_out_of_range.json"
     },
     {
       "name": "list_library_sections_ok",

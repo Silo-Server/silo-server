@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -431,7 +432,11 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	if err != nil {
 		return nil, err
 	}
-	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && file.EpisodeID != req.EpisodeID)) {
+	// A lookup by episode also returns a multi-episode file linked to an
+	// earlier episode of its range. That file serves the requested episode,
+	// and its download is registered under the file's first episode, as a
+	// season download registers it.
+	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && req.FileID > 0 && file.EpisodeID != req.EpisodeID)) {
 		return nil, catalog.ErrItemNotFound
 	}
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
@@ -826,13 +831,26 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
+	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
 		files := filesByEpisode[ep.ContentID]
 		if len(files) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
+		file := pref.pick(ep.ContentID, allowedCandidates(files, filter))
+		episodeID := ep.ContentID
+		// A multi-episode file serves each episode it spans; download it once,
+		// keyed on its first episode, so a later page of the same batch finds
+		// the entry an earlier page registered.
+		if file != nil && file.MultiEpisodeEnd > file.MultiEpisodeStart {
+			if queued[file.ID] {
+				continue
+			}
+			queued[file.ID] = true
+			episodeID = file.EpisodeID
+		}
+		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
 }
@@ -1212,9 +1230,10 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 }
 
 // ServeFile serves a download's file. Managed entries (device header present)
-// authorize on (user, profile, device) and re-check per-profile content access
-// before serving; ephemeral rows keep today's queued→downloading→completed
-// behavior. The ephemeral path never serves a managed row, and vice versa.
+// authorize on (user, profile, device); ephemeral rows authorize on the
+// account and keep the queued→downloading→completed lifecycle. Both re-check
+// the requesting profile's content access before serving. The ephemeral path
+// never serves a managed row, and vice versa.
 func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	if deviceID != "" {
 		target, err := s.ResolveManagedFile(ctx, userID, profileID, deviceID, downloadID, filter)
@@ -1236,6 +1255,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	if dl.UserID != userID || dl.IsManaged() {
 		return ErrNotFound // don't reveal existence; ephemeral path never serves managed rows
+	}
+	// Account-level rows are shared by every profile on the account, so the
+	// requesting profile's content scope (library and maturity) must admit
+	// the item before any status change or bytes.
+	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
+		return err
 	}
 	if dl.Status == StatusCancelled || dl.Status == StatusFailed {
 		return fmt.Errorf("download is %s: %w", dl.Status, ErrDownloadNotActive)
@@ -1510,7 +1535,7 @@ func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 }
 
 func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, userID int) error {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return catalog.ErrItemNotFound
@@ -1613,7 +1638,7 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 // use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
 // as raw UTF-8 in filename, which clients may misread.
 func attachmentDisposition(path string) string {
-	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(filepath.Base(path))})
+	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(fspath.Display(filepath.Base(path)))})
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {

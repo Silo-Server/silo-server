@@ -81,6 +81,13 @@ disables both mutation retries and authentication-refresh replay. The inherited
 `max_runtime_ms` setting is stored but is not enforced by the task runner; the
 editor labels that limitation rather than promising a timeout.
 
+A task can spread its scheduled starts so servers sharing a remote service do
+not start together. Each daily or weekly run of such a task starts at a random
+point in a window after its configured time, chosen when the run is scheduled,
+and `next_run_at` reports that time. The window applies to default and edited
+schedules alike and is not part of the stored triggers. `contribute_markers`
+spreads its runs over four hours. Manual runs start at once.
+
 ## History and metrics
 
 `GET /api/v2/admin/tasks/{key}/history` returns persisted executions in an `items`

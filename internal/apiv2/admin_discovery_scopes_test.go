@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
 func TestDiscoveryScopesEnforceProjectionAndOwnerAuthority(t *testing.T) {
@@ -55,4 +58,59 @@ func TestDiscoveryScopesEnforceProjectionAndOwnerAuthority(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, "GET", Prefix+"/libraries", "", bearer("sa_libraries")), TypePermissionDenied)
 	requireProblem(t, do(t, h, "POST", Prefix+"/playback/start", `{}`, bearer("sa_libraries")), TypePermissionDenied)
+}
+
+type fixedResourceSampler nodemetrics.Snapshot
+
+func (s fixedResourceSampler) Snapshot() nodemetrics.Snapshot { return nodemetrics.Snapshot(s) }
+
+// A monitoring key reads the same operations as an administrator, minus the
+// deployment layout (mount paths, raw preparation failures, and node
+// addresses, overrides and health-blob extras) and the power to force
+// aggregate refreshes.
+func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.AdminResourceSampler = fixedResourceSampler{Available: true, System: &nodemetrics.SystemStats{Cores: 4, Disks: []nodemetrics.DiskStats{{Path: "/srv/secret-media", Role: "library-0", TotalGB: 10}}}}
+	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
+	insights := new(dashboardInsightsStub)
+	deps.AdminDashboardInsights = insights
+	deps.AdminNodesRead = &adminNodesReadStub{nodes: []*nodepool.Node{{
+		ID: 3, Name: "gpu-01", Type: "transcode", URL: "http://10.0.0.9:8090", Healthy: true, CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DownloadArtifactDirOverride: new("/srv/secret-artifacts"),
+		LastStats: json.RawMessage(`{"system":{"cores":8,"disks":[{"path":"/srv/secret-scratch","role":"scratch","total_gb":5}]},"build":{"revision":"secret-build"},"artifacts":{"dir":"/srv/secret-artifacts"}}`),
+	}}}
+	users := map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{}, fakeSessions{}, fakeAPIKeys{keys: map[string]*models.APIKey{
+		"sa_monitor":        {ID: 1, UserID: 2, Scopes: []string{auth.ScopeAdminMonitorRead}},
+		"sa_member_monitor": {ID: 2, UserID: 1, Scopes: []string{auth.ScopeAdminMonitorRead}},
+		"sa_admin":          {ID: 3, UserID: 2},
+	}}, fakeUsers{users: users})
+	h := NewHandler(deps)
+
+	for _, path := range []string{"/admin/system/resources", "/admin/downloads/preparations", "/admin/nodes/summary"} {
+		rec := do(t, h, "GET", Prefix+path, "", bearer("sa_monitor"))
+		if rec.Code != 200 || strings.Contains(rec.Body.String(), "secret") {
+			t.Fatal(path, rec.Code, rec.Body.String())
+		}
+		requireProblem(t, do(t, h, "GET", Prefix+path, "", bearer("sa_member_monitor")), TypePermissionDenied)
+	}
+	rec := do(t, h, "GET", Prefix+"/admin/nodes/summary", "", bearer("sa_monitor"))
+	if !strings.Contains(rec.Body.String(), `"cores":8`) || !strings.Contains(rec.Body.String(), `"role":"scratch"`) {
+		t.Fatal("node summary lost its resource sample", rec.Body.String())
+	}
+	requireProblem(t, do(t, h, "GET", Prefix+"/admin/nodes", "", bearer("sa_monitor")), TypePermissionDenied)
+
+	// A scoped key reads cached aggregates; it cannot force the queries.
+	if rec := do(t, h, "GET", Prefix+"/admin/stats/top-activity?refresh=true", "", bearer("sa_monitor")); rec.Code != 200 || insights.refresh {
+		t.Fatal("monitor key refreshed the aggregate", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, "GET", Prefix+"/admin/stats/top-activity?refresh=true", "", bearer("sa_admin")); rec.Code != 200 || !insights.refresh {
+		t.Fatal("administrator refresh ignored", rec.Code, rec.Body.String())
+	}
+
+	// Unscoped administrators keep the full documents.
+	for path, want := range map[string]string{"/admin/system/resources": "/srv/secret-media", "/admin/downloads/preparations": "No space left", "/admin/nodes": "/srv/secret-artifacts"} {
+		if rec := do(t, h, "GET", Prefix+path, "", bearer("sa_admin")); rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
+			t.Fatal(path, rec.Code, rec.Body.String())
+		}
+	}
 }

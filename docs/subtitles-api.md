@@ -76,11 +76,11 @@ protocol and needs no equivalent native capability route.
 
 ## OpenRouter transcription configuration
 
-In Admin Settings → AI Services, select the OpenRouter speech-to-text preset:
-base URL `https://openrouter.ai/api/v1`, model `openai/whisper-large-v3-turbo`, and an
-OpenRouter API key. A shared text endpoint and key can also be used, but the
-speech model must still be a transcription model. Test it before enabling
-"Create subtitles from audio".
+In Admin Settings → AI Services, connect an OpenRouter provider (base URL
+`https://openrouter.ai/api/v1` and an OpenRouter API key), then choose it for
+speech-to-text with model `openai/whisper-large-v3-turbo`. The same provider can
+also serve text, but the speech model must still be a transcription model. Test
+it before enabling "Create subtitles from audio".
 
 Silo sends multipart audio to `/audio/transcriptions` with `verbose_json` and
 both segment and word timestamp granularities. OpenRouter receives only the

@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -44,6 +45,9 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// Connections, when set, deletes the playback connection rows of the
+	// deleted profile's devices that no other profile registers.
+	Connections *connectionstore.Store
 	// DroppedSeriesPurger removes a deleted profile's dropped series, which
 	// live in Postgres whichever store holds the profile.
 	DroppedSeriesPurger interface {
@@ -813,6 +817,20 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
 	}
 
+	// The profile's devices, read before the delete takes their registrations.
+	registry, _ := store.(userstore.DeviceRegistry)
+	var devices []string
+	if registry != nil && h.Connections != nil {
+		entries, err := registry.ListDevices(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "listing profile devices before delete failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		}
+		for _, entry := range entries {
+			if entry.ProfileID == profileID {
+				devices = append(devices, entry.DeviceID)
+			}
+		}
+	}
 	if err := store.DeleteProfile(ctx, profileID); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
@@ -835,6 +853,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 			slog.WarnContext(ctx, "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
+	forgetPlaybackConnections(ctx, h.Connections, registry, userID, devices)
 	if h.DroppedSeriesPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
@@ -1063,6 +1082,12 @@ func (h *ProfileHandler) toProfileResponses(
 	return out
 }
 
+// ResolveAvatar is the avatar_source and avatar_url a profile's stored avatar
+// reference renders as, delivered through this handler's avatar store.
+func (h *ProfileHandler) ResolveAvatar(ctx context.Context, ref string) (source, url string) {
+	return resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, ref, h.AvatarResolver)
+}
+
 // profileResponseWith builds the DTO from a profile row and its already
 // resolved preferences.
 //
@@ -1072,7 +1097,7 @@ func (h *ProfileHandler) toProfileResponses(
 func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
 ) ProfileView {
-	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar, h.AvatarResolver)
+	avatarSource, avatarURL := h.ResolveAvatar(ctx, p.Avatar)
 	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,

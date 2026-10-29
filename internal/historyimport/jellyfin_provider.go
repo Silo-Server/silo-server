@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -15,21 +16,47 @@ import (
 type JellyfinProvider struct {
 	client *JellyfinClient
 	auth   jellyfinLocalAuth
+	// playedSince, when set, limits the played-history read to items last
+	// played at or after it. Resume positions and favorites are still read in
+	// full: both are short lists, and neither carries a play date to filter on.
+	playedSince *time.Time
 }
 
 func NewJellyfinProvider(client *JellyfinClient, auth jellyfinLocalAuth) *JellyfinProvider {
 	return &JellyfinProvider{client: client, auth: auth}
 }
 
+// WithPlayedSince limits the played-history read to items last played at or
+// after since. A nil since keeps the full read.
+func (p *JellyfinProvider) WithPlayedSince(since *time.Time) *JellyfinProvider {
+	p.playedSince = since
+	return p
+}
+
 // Fetch reads played and resumable movies and episodes plus favorite movies,
 // shows, and episodes. Jellyfin records a whole-show or whole-season "mark
 // played" on each episode, so episode leaves carry those markers too.
 func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	played, err := p.client.FetchItems(ctx, p.auth, "IsPlayed", jellyfinPlayableItemTypes)
+	var warnings []string
+	var played []jellyfinItem
+	sorted := false
+	var err error
+	if p.playedSince != nil {
+		played, sorted, err = p.client.FetchPlayedSince(ctx, p.auth, *p.playedSince)
+		if err == nil && !sorted {
+			// The server ignored the newest-first sort, or the list kept
+			// moving during the read, so the early stop could miss recent
+			// plays. Read the whole played history instead.
+			slog.WarnContext(ctx, "jellyfin history import: played items not newest first or kept moving; reading the full played history", "component", "historyimport")
+			warnings = append(warnings, warnJellyfinLookbackUnsorted)
+		}
+	}
+	if err == nil && !sorted {
+		played, err = p.client.FetchItems(ctx, p.auth, "IsPlayed", jellyfinPlayableItemTypes)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
-	var warnings []string
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	// Resume positions are secondary to the played history: a slow or failing

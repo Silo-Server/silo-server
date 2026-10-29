@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -64,20 +63,6 @@ func metadataAIOnViewLimiterKey(userID int) string {
 	return "metadata-translate-on-view:" + strconv.Itoa(userID)
 }
 
-// onViewAllow checks the account budget. A shared limiter that cannot reach
-// its store allows every request and reports Remaining -1; this route falls
-// back to a per-node budget then instead of letting the provider calls
-// through unbounded.
-func (h *MetadataAIHandler) onViewAllow(ctx context.Context, userID int) ratelimit.AllowResult {
-	key := metadataAIOnViewLimiterKey(userID)
-	result := h.Limiter.Allow(ctx, key, metadataAIOnViewRate)
-	if !result.Allowed || result.Remaining != -1 {
-		return result
-	}
-	h.localLimiterOnce.Do(func() { h.localLimiter = ratelimit.NewMemoryLimiter() })
-	return h.localLimiter.Allow(ctx, key, metadataAIOnViewRate)
-}
-
 // MetadataAIHandler exposes AI translation of catalog descriptions into the
 // localization tables. The admin routes are mounted under the per-item
 // metadata curation guard; the on-view route is viewer-facing and enforces
@@ -104,11 +89,6 @@ type MetadataAIHandler struct {
 	// Redis limiter whenever Redis is configured, so every node shares one
 	// budget.
 	Limiter ratelimit.RateLimiter
-
-	// localLimiter enforces the budget on this node while the shared limiter
-	// fails open (Redis unreachable): this route spends provider money.
-	localLimiterOnce sync.Once
-	localLimiter     ratelimit.RateLimiter
 }
 
 // NewMetadataAIHandler creates a handler backed by the given service.

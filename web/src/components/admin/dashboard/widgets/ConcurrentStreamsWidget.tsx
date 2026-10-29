@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
 import {
   formatRangeTimestamp,
@@ -10,6 +10,7 @@ import {
   rangeTitle,
 } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
@@ -35,17 +36,12 @@ export function ConcurrentStreamsWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle("Concurrent streams", range)}
-        </CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-muted-foreground text-[11px] tabular-nums">
-            Peak {peak.toLocaleString()}
-          </span>
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+      <WidgetHeader title={rangeTitle("Concurrent streams", range)}>
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          Peak {peak.toLocaleString()}
+        </span>
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <TimeseriesChartBody
           query={query}

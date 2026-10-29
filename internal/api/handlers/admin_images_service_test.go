@@ -68,6 +68,9 @@ func (f *curationImageService) LocalImagePreview(context.Context, string, string
 func (f *curationImageService) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	return nil, errors.New("no local images")
 }
+func (f *curationImageService) ApplyUploadedItemImage(context.Context, metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
+	return nil, errors.New("no uploads")
+}
 func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	svc := &curationImageService{fail: true}
 	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil)

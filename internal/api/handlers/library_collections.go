@@ -991,14 +991,7 @@ func (h *LibraryCollectionHandler) cleanupDeletedCollection(ctx context.Context,
 	if h.SortPreferenceCleaner != nil {
 		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
-	store := h.ArtworkStore
-	if store == nil {
-		return
-	}
-	prefix := fmt.Sprintf("collection-images/%s/", collectionID)
-	if _, err := store.DeletePrefix(ctx, prefix); err != nil {
-		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "error", err)
-	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID)
 }
 
 type adminReorderCollectionsRequest struct {

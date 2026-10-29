@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const (
@@ -289,7 +290,9 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // not make a missing configured hardware executor permanent: temporary device
 // contention must be retried after the negative-cache interval.
 //
-// Only the standard kinds count. A Dolby Vision smoke that FFmpeg refuses is a
+// The standard kinds count, plus full-range PQ on a filter that converts it:
+// its smoke differs from the PQ smoke only in leaving the frame's range alone,
+// so it fails when they do. A Dolby Vision smoke that FFmpeg refuses is a
 // genuine answer for that build, and executors that cannot apply an RPU never
 // run it; counting it would re-probe those devices every negative-cache
 // interval for good.
@@ -313,14 +316,15 @@ func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backen
 	if index < 0 {
 		return false
 	}
-	return !slices.ContainsFunc(StandardSourceKinds(), func(kind SourceKind) bool {
+	return !slices.ContainsFunc(requiredSourceKinds(capabilities[index].Filter), func(kind SourceKind) bool {
 		return !slices.Contains(capabilities[index].SourceKinds, kind)
 	})
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
 // command the selected backend and device set can execute. The software filter
-// is only known after the listing, so its Dolby Vision smoke is always counted.
+// is only known after the listing, so its full-range PQ and Dolby Vision smokes
+// are always counted.
 func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	total := time.Duration(2+len(AllSourceKinds())) * probeCommandTimeout
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
@@ -334,11 +338,11 @@ func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 
 // smokeKindBudget is the most source kinds a backend's smoke matrix can test on
 // one device. It doesn't read the host's devices, because a server also prices
-// a remote node's probe with it: VAAPI counts the Dolby Vision smoke its OpenCL
-// path on Intel runs.
+// a remote node's probe with it: VAAPI counts the smokes of the OpenCL path it
+// runs on Intel, which include Dolby Vision.
 func smokeKindBudget(backend string) []SourceKind {
 	if backend == BackendVAAPI {
-		return AllSourceKinds()
+		return smokeKindsForFilter(HardwareFilterOpenCL)
 	}
 	return smokeKindsForFilter(hardwareFilter(backend, ""))
 }
@@ -542,7 +546,7 @@ func hardwareFilter(backend, hardwareDevice string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return fspath.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // runBounded applies the per-command probe deadline within the caller's total
@@ -595,17 +599,29 @@ func intelOpenCLFiltersListed(filters []byte) bool {
 }
 
 // smokeKindsForFilter lists the source kinds worth smoke testing on an
-// executor. The Dolby Vision kind is tried only where the filter can apply an
-// RPU; elsewhere the conversion would run and still be wrong.
+// executor. The full-range PQ and Dolby Vision kinds are tried only where the
+// filter can convert them; elsewhere the conversion would run and still be
+// wrong.
 //
 // The embedded fixture carries no RPU, so a Dolby Vision smoke proves the
 // filter accepts apply_dovi and the graph runs on the device, not the reshaping
 // itself.
 func smokeKindsForFilter(filter string) []SourceKind {
+	kinds := requiredSourceKinds(filter)
 	if FilterAppliesDolbyVision(filter) {
-		return AllSourceKinds()
+		kinds = append(kinds, SourceDolbyVision)
 	}
-	return StandardSourceKinds()
+	return kinds
+}
+
+// requiredSourceKinds lists the kinds a complete inventory for filter must
+// contain; see probeCapabilitiesComplete.
+func requiredSourceKinds(filter string) []SourceKind {
+	kinds := StandardSourceKinds()
+	if FilterConvertsFullRange(filter) {
+		kinds = append(kinds, SourcePQFullRange)
+	}
+	return kinds
 }
 
 // smokeSourceKinds runs one bounded conversion per source kind and returns only

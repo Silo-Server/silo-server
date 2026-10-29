@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -65,6 +66,7 @@ type TranscodeStartRequest struct {
 	ToneMapDVRPUPresent        bool                   `json:"tone_map_dv_rpu_present,omitempty"`
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
+	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
@@ -85,7 +87,8 @@ type TranscodeStartRequest struct {
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
 	// SubtitleRendition asks the executor to emit the selected text track as
 	// the playlist's WebVTT subtitle rendition. Only nodes advertising
-	// playback.TransportFeatureHLSSubtitleRenditionV1 receive it.
+	// playback.HLSSubtitleRenditionTransportFeatureV3 for the video target
+	// receive it.
 	SubtitleRendition bool    `json:"subtitle_rendition,omitempty"`
 	TotalDuration     float64 `json:"total_duration"`
 	RequireReady      bool    `json:"require_ready,omitempty"`
@@ -129,8 +132,13 @@ type TranscodeStartResponse struct {
 	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
 	// SubtitleRendition attests that the executor emits the requested subtitle
 	// rendition. Older nodes omit it and are rejected before the plan
-	// promises a rendition their playlist does not carry.
+	// promises a rendition their playlist does not carry; nodes that predate
+	// remux renditions omit it for a copy remux.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
+	// CopyVideoMPEGTS attests that the executor packages the requested copy
+	// remux as MPEG-TS. Older nodes omit it and are rejected before an fMP4
+	// stream is published under a plan that promises MPEG-TS.
+	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -199,6 +207,20 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
 	if req.KeyframePlaylist && !response.KeyframePlaylist {
 		return ErrKeyframePlaylistAttestationMismatch
+	}
+	return nil
+}
+
+// ErrCopyVideoMPEGTSAttestationMismatch reports an executor that ignored
+// requested MPEG-TS copy packaging.
+var ErrCopyVideoMPEGTSAttestationMismatch = errors.New("transcode node mpeg-ts copy attestation mismatch")
+
+// ValidateCopyVideoMPEGTSAttestation rejects an executor that silently
+// packaged a requested MPEG-TS copy remux as fMP4. Requests without it stay
+// compatible with older nodes, which omit the field.
+func ValidateCopyVideoMPEGTSAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.CopyVideoMPEGTS && !response.CopyVideoMPEGTS {
+		return ErrCopyVideoMPEGTSAttestationMismatch
 	}
 	return nil
 }
@@ -690,18 +712,26 @@ func (s *Server) activeSessionIDs() map[string]struct{} {
 	}
 	// Node-local prepared downloads may live under the existing persistent
 	// transcode volume. They have their own lifecycle and must never be mistaken
-	// for an orphaned HLS session directory. Protect the top-level container for
-	// both the default and an explicitly nested artifact directory.
-	if s.transcodeDir != "" && s.artifactRoot != "" {
-		if rel, err := filepath.Rel(s.transcodeDir, s.artifactRoot); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			if first, _, ok := strings.Cut(rel, string(filepath.Separator)); ok {
-				active[first] = struct{}{}
-			} else {
-				active[rel] = struct{}{}
-			}
-		}
+	// for an orphaned HLS session directory.
+	if name := s.artifactContainerName(); name != "" {
+		active[name] = struct{}{}
 	}
 	return active
+}
+
+// artifactContainerName returns the top-level directory under the transcode
+// root that holds prepared downloads, for both the default and an explicitly
+// nested artifact directory, or "" when the artifact root lies elsewhere.
+func (s *Server) artifactContainerName() string {
+	if s.transcodeDir == "" || s.artifactRoot == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(s.transcodeDir, s.artifactRoot)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return first
 }
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
@@ -1270,6 +1300,23 @@ func (s *Server) sessionOutputDir(sessionID string) string {
 	return filepath.Join(s.transcodeDir, sessionID)
 }
 
+// sessionIDPattern keeps a session id to one plain directory name under the
+// transcode root. sessionOutputDir joins it unchecked, stop and the reapers
+// RemoveAll that path, and FFmpeg expands % in the segment filename, so "." (the
+// root), ".." (its parent), separators and % are all refused.
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// validSessionID also refuses the directory holding prepared downloads when it
+// sits under the same root, as it does by default. The comparison ignores case
+// because a macOS node's volume usually does.
+func (s *Server) validSessionID(sessionID string) bool {
+	if !sessionIDPattern.MatchString(sessionID) {
+		return false
+	}
+	reserved := s.artifactContainerName()
+	return reserved == "" || !strings.EqualFold(sessionID, reserved)
+}
+
 func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
 	artifactID := chi.URLParam(r, "artifact_id")
@@ -1504,7 +1551,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	}
 	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
 		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2,
-		playback.TransportFeatureHLSSubtitleRenditionV1)
+		playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1672,6 +1719,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
 		return
 	}
+	if !s.validSessionID(req.SessionID) {
+		http.Error(w, "invalid session_id", http.StatusBadRequest)
+		return
+	}
 	if req.ThrottleSeconds < 0 {
 		http.Error(w, "throttle_seconds must not be negative", http.StatusBadRequest)
 		return
@@ -1733,6 +1784,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ToneMapDVRPUPresent:        req.ToneMapDVRPUPresent,
 		VideoBitstreamFilter:       req.VideoBitstreamFilter,
 		VideoSampleEntry:           req.VideoSampleEntry,
+		VideoRange:                 req.VideoRange,
 		CopyVideoMPEGTS:            req.CopyVideoMPEGTS,
 		KeyframePlaylist:           req.KeyframePlaylist,
 		SeekSeconds:                req.SeekSeconds,
@@ -1920,6 +1972,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 		SubtitleRendition:     session.HasSubtitleRendition(),
+		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
 	})
 }
 
@@ -2059,6 +2112,10 @@ func recipeIsComplete(card playback.RecipeCard) bool {
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
 func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
 	defer s.trackInFlight()()
+	if !s.validSessionID(sessionID) {
+		slog.WarnContext(r.Context(), "transcode node reconstruct session id rejected", "component", "transcodenode", "session", sessionID)
+		return nil, nil
+	}
 	if s.inputPaths == nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct input authority unavailable", "component", "transcodenode", "session", sessionID)
 		return nil, nil
@@ -2809,15 +2866,24 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		manifest, err = session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	}
+	if errors.Is(err, playback.ErrManifestQueryTooLong) {
+		http.Error(w, "playlist request query too long", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "get manifest", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)
 		return
 	}
+	playback.WarnIfPlaylistOversized(r.Context(), "transcodenode", sessionID, manifest)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Cache-Control", "no-store, no-transform, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
+	// Same reason as the API's manifest handler. The API relays a playlist
+	// requested without a stream token as-is, headers included, so the length
+	// has to start here.
+	w.Header().Set("Content-Length", strconv.Itoa(len(manifest)))
 	w.Write(manifest)
 }
 

@@ -178,6 +178,8 @@ type AdminRequestCapabilitiesOutputBody struct {
 	Available            bool `json:"available"`
 	GuardedConfiguration bool `json:"guarded_configuration"`
 	Routing              bool `json:"routing" doc:"Whether request routing is available: the routing rules under /admin/request-routes and the Standard/Advanced routing mode under /admin/request-routing"`
+	DiscoverLayout       bool `json:"discover_layout" doc:"Whether the Requests Discover page's layout can be edited under /admin/request-discover"`
+	DiscoverListOrder    bool `json:"discover_list_order" doc:"Whether an mdblist Discover row takes list.order. Send it only when true"`
 }
 
 func adminRequestViewer(ctx context.Context) mediarequests.Viewer {
@@ -222,6 +224,8 @@ func registerAdminRequests(reg *Registry) {
 		out.Body.Available = reg.deps.AdminRequests != nil
 		_, out.Body.GuardedConfiguration = reg.deps.AdminRequests.(guardedAdminRequests)
 		_, out.Body.Routing = reg.deps.AdminRequests.(adminRequestRoutes)
+		_, out.Body.DiscoverLayout = reg.deps.AdminRequests.(adminRequestDiscover)
+		out.Body.DiscoverListOrder = out.Body.DiscoverLayout
 		return out, nil
 	})
 	Register(reg, op(http.MethodGet, "/admin/requests", opListAdminRequests, false), func(ctx context.Context, in *AdminMediaRequestListInput) (*MediaRequestCollectionOutput, error) {

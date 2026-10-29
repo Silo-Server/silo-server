@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestSearchCursorPostgres(t *testing.T) {
@@ -256,6 +258,82 @@ func TestSearchCursorMixedAndGroupsPostgres(t *testing.T) {
 		}
 		if len(seen) != 9 {
 			t.Fatalf("sort %s traversed %d", sort, len(seen))
+		}
+	}
+}
+
+// TestSearchLeavesOutItemsInNoLibraryPostgres covers issue #2818: an item
+// left in no library (its file renamed away and held only by the scanner's
+// file removal grace) stays out of an unrestricted viewer's search, on the
+// offset and cursor pages and when Meilisearch hits are hydrated, as it
+// already does for a viewer with a disabled library.
+func TestSearchLeavesOutItemsInNoLibraryPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	repo := NewItemRepository(pool)
+	prefix := fmt.Sprintf("search-orphan-%d", time.Now().UnixNano())
+	var library int
+	if err := pool.QueryRow(ctx, "INSERT INTO media_folders(type,name,enabled) VALUES('movies',$1,true) RETURNING id", prefix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM media_items WHERE content_id LIKE $1", prefix+"%")
+		_, _ = pool.Exec(ctx, "DELETE FROM media_folders WHERE id=$1", library)
+	}()
+	member, orphan := prefix+"-member", prefix+"-orphan"
+	for _, id := range []string{member, orphan} {
+		if _, err := pool.Exec(ctx, "INSERT INTO media_items(content_id,type,title,year,status) VALUES($1,'movie','Zorblax Atlas',2024,'unmatched')", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)", member, library); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := func(items []*models.MediaItem) []string {
+		got := []string{}
+		for _, item := range items {
+			got = append(got, item.ContentID)
+		}
+		return got
+	}
+	want := []string{member}
+	for name, filter := range map[string]AccessFilter{
+		"unrestricted":  {},
+		"disabled only": {DisabledLibraryIDs: []int{-1}},
+	} {
+		// The misspelled query finds nothing by full text and takes the fuzzy
+		// fallback.
+		for _, query := range []string{"Zorblax Atlas", "Zorblaxx Atlas"} {
+			items, total, _, _, err := repo.SearchPage(ctx, query, []string{"movie"}, 10, 0, filter, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ids(items); !reflect.DeepEqual(got, want) || total != 1 {
+				t.Fatalf("%s: offset search %q = %v (total %d), want %v", name, query, got, total, want)
+			}
+			page, err := repo.SearchCursorPage(ctx, query, []string{"movie"}, 10, nil, filter, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ids(page.Items); !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s: cursor search %q = %v, want %v", name, query, got, want)
+			}
+		}
+		hydrated, err := repo.GetSearchItemsByIDsWithAccess(ctx, []string{member, orphan}, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ids(hydrated); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: hydrated hits = %v, want %v", name, got, want)
 		}
 	}
 }

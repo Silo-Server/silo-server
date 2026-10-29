@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -266,12 +267,20 @@ const PluginLaunchTTL = 5 * time.Minute
 
 // PluginLaunchToken mints the short-lived plugin access token the launch
 // cookie carries. v1 POST /auth/plugin-launch and v2 launchPlugin both call
-// it; the caller sets the cookie on its own path.
-func (h *AuthHandler) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+// it; the caller sets the cookie on its own path. A profile the viewer gate
+// verified in ctx is bound with its PIN revision, so renewing the cookie
+// stops once that PIN changes.
+func (h *AuthHandler) PluginLaunchToken(ctx context.Context, claims *auth.Claims, profileID string) (string, error) {
 	if claims == nil || claims.SessionID == "" {
 		return "", apiError(http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
 	}
-	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, strings.TrimSpace(profileID), PluginLaunchTTL)
+	profileID = strings.TrimSpace(profileID)
+	var pinRevision *int64
+	if scope, ok := access.GetScope(ctx); ok && profileID != "" && scope.ProfileID == profileID && scope.ProfileVerified {
+		revision := scope.ProfilePINRevision
+		pinRevision = &revision
+	}
+	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, profileID, pinRevision, PluginLaunchTTL)
 	if err != nil {
 		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to prepare plugin access")
 	}

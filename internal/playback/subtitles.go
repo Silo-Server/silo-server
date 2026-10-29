@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -100,7 +100,7 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -140,7 +140,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -163,7 +163,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 // LoadExternalSubtitleRaw reads an external subtitle file and returns its raw
 // contents without any conversion. Used for serving ASS/SSA files directly.
 func LoadExternalSubtitleRaw(subtitlePath string) ([]byte, error) {
-	data, err := os.ReadFile(subtitlePath)
+	data, err := fspath.ReadFile(subtitlePath)
 	if err != nil {
 		return nil, fmt.Errorf("read external subtitle: %w", err)
 	}
@@ -223,7 +223,7 @@ func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle, ffmpegPath ...string) ([]byte, error) {
 	switch strings.ToLower(sub.Format) {
 	case "srt", "vtt", "webvtt":
-		data, err := os.ReadFile(sub.Path)
+		data, err := fspath.ReadFile(sub.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read external subtitle: %w", err)
 		}
@@ -244,7 +244,7 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle,
 		if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 			ffmpeg = ffmpegPath[0]
 		}
-		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -271,11 +271,11 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle,
 // too large to be text (a VobSub .sub), or the copy fails; FFmpeg then reads
 // the original as before.
 func decodedSubtitleCopy(ctx context.Context, sub models.ExternalSubtitle) string {
-	info, err := os.Stat(sub.Path)
+	info, err := fspath.Stat(sub.Path)
 	if err != nil || info.Size() > subtitles.MaxUploadSize {
 		return ""
 	}
-	raw, err := os.ReadFile(sub.Path)
+	raw, err := fspath.ReadFile(sub.Path)
 	if err != nil {
 		return ""
 	}
@@ -312,15 +312,21 @@ func ConvertToVTT(input []byte, fromFormat string) ([]byte, error) {
 }
 
 // ConvertToVTTWithFFmpeg converts subtitle formats that require a real parser
-// (notably ASS/SSA) from in-memory data. It keeps downloaded subtitle
-// conversion on the same executable path as external sidecar conversion.
+// (notably ASS/SSA, and .sub through the demuxer subtitles.SUBDemuxer names)
+// from in-memory data. It keeps downloaded subtitle conversion on the same
+// executable path as external sidecar conversion.
 func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpegPath string) ([]byte, error) {
 	if converted, err := ConvertToVTT(input, fromFormat); err == nil {
 		return converted, nil
 	}
 	inputFormat := strings.ToLower(strings.TrimSpace(fromFormat))
-	if inputFormat == "ssa" {
+	switch inputFormat {
+	case "ssa":
 		inputFormat = "ass"
+	case string(subtitles.FormatSUB):
+		if inputFormat = subtitles.SUBDemuxer(input); inputFormat == "" {
+			return nil, errors.New("sub subtitle is neither MicroDVD nor SubViewer text")
+		}
 	}
 	if inputFormat == "" {
 		return nil, errors.New("subtitle format is required")
@@ -328,7 +334,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := fspath.CommandContext(ctx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", inputFormat, "-i", "pipe:0",
 		"-f", "webvtt", "pipe:1",

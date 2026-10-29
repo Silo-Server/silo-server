@@ -146,6 +146,81 @@ func TestApplyMMRMatchesQuadraticOracle(t *testing.T) {
 	}
 }
 
+// applyMMR leaves out candidates whose score is NaN or infinite and still
+// picks in a round where no score beats -Inf. A NaN score fails every
+// comparison, so it used to leave maxScore NaN or a round with no pick, and
+// the pick at index -1 panicked the recommendations worker (#2926).
+func TestApplyMMRLeavesOutNonFiniteScores(t *testing.T) {
+	nan, negInf := math.NaN(), math.Inf(-1)
+	embeddings := map[string][]float32{
+		"a": {1, 0},
+		"b": {0.9, 0.1},
+		"c": {0, 1},
+		"d": {0.1, 0.9},
+		"z": {0, 0},
+	}
+	tests := []struct {
+		name       string
+		candidates []ScoredItem
+		embeddings map[string][]float32
+		want       []string
+	}{
+		{
+			// A zero-norm source embedding makes every pgvector cosine
+			// score NaN.
+			name: "every score NaN",
+			candidates: []ScoredItem{
+				{MediaItemID: "a", Score: nan}, {MediaItemID: "b", Score: nan}, {MediaItemID: "c", Score: nan},
+				{MediaItemID: "d", Score: nan}, {MediaItemID: "e", Score: nan}, {MediaItemID: "f", Score: nan},
+			},
+			want: []string{},
+		},
+		{
+			name: "NaN first leaves maxScore NaN",
+			candidates: []ScoredItem{
+				{MediaItemID: "z", Score: nan}, {MediaItemID: "a", Score: 0.9}, {MediaItemID: "b", Score: 0.8},
+				{MediaItemID: "c", Score: 0.7}, {MediaItemID: "d", Score: 0.6},
+			},
+			embeddings: embeddings,
+			// c and d spread the row away from a before b, a's near
+			// duplicate.
+			want: []string{"a", "c", "b", "d"},
+		},
+		{
+			name: "NaN is the last candidate left",
+			candidates: []ScoredItem{
+				{MediaItemID: "a", Score: 0.9}, {MediaItemID: "z", Score: nan}, {MediaItemID: "b", Score: 0.8},
+				{MediaItemID: "c", Score: 0.7},
+			},
+			want: []string{"a", "b", "c"},
+		},
+		{
+			name: "negative infinity is the last candidate left",
+			candidates: []ScoredItem{
+				{MediaItemID: "a", Score: 0.9}, {MediaItemID: "b", Score: 0.8}, {MediaItemID: "c", Score: negInf},
+			},
+			embeddings: embeddings,
+			want:       []string{"a", "b"},
+		},
+		{
+			// Dividing by the tiny maxScore overflows to -Inf.
+			name: "relevance overflows to -Inf",
+			candidates: []ScoredItem{
+				{MediaItemID: "a", Score: 1e-310}, {MediaItemID: "b", Score: -1}, {MediaItemID: "c", Score: -2},
+			},
+			want: []string{"a", "b", "c"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mmrItemIDs(applyMMR(tt.candidates, tt.embeddings, defaultMMRLambda, len(tt.candidates)))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("applyMMR = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func mmrItemIDs(items []ScoredItem) []string {
 	out := make([]string, len(items))
 	for i, item := range items {

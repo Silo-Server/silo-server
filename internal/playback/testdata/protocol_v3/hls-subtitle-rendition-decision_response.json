@@ -18,10 +18,16 @@
     "software_video_decode_v1",
     "plan_invalidated_v1",
     "plan_source_duration_v1",
+    "buffering_quality_v1",
+    "playback_plan_summary_v1",
     "subrip_sidecar_v1",
     "marker_thumbnails_v1",
     "hls_subtitle_renditions_v1",
-    "plan_active_quality_v1"
+    "plan_active_quality_v1",
+    "hls_remux_subtitle_renditions_v1",
+    "hls_copy_mpegts_v1",
+    "hls_variable_substitution_v1",
+    "codec_channel_ceilings_v1"
   ],
   "outcome": "playable",
   "session_id": "11111111-1111-4111-8111-111111111111",
@@ -181,6 +187,20 @@
         "display_name": "480p",
         "height": 480,
         "bitrate_kbps": 1500,
+        "preserves_source": false
+      },
+      {
+        "label": "480p-low",
+        "display_name": "480p Low",
+        "height": 480,
+        "bitrate_kbps": 800,
+        "preserves_source": false
+      },
+      {
+        "label": "360p",
+        "display_name": "360p",
+        "height": 360,
+        "bitrate_kbps": 300,
         "preserves_source": false
       }
     ],

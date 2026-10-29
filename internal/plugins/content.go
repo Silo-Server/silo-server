@@ -17,9 +17,50 @@ type ContentAccess struct {
 	Admin         bool
 	UserID        int
 	ProfileID     string
+	// RenewedCookie, when set, replaces the plugin launch cookie on the
+	// response, so an open plugin page outlives the cookie's five minutes
+	// while its login session lasts.
+	RenewedCookie *http.Cookie
 }
 
 type ContentAccessResolver func(*http.Request) ContentAccess
+
+// WithRenewedCookie sets a renewed plugin launch cookie on w and returns a
+// writer that marks the response private, no-store as its headers are
+// written. Whatever answers the request (a plugin with its own
+// Cache-Control, a static page, or http.ServeFile's error path, which drops
+// Cache-Control), a shared cache in front of Silo never stores one viewer's
+// credential for another. A nil cookie returns w unchanged.
+func WithRenewedCookie(w http.ResponseWriter, cookie *http.Cookie) http.ResponseWriter {
+	if cookie == nil {
+		return w
+	}
+	http.SetCookie(w, cookie)
+	return &noStoreWriter{ResponseWriter: w}
+}
+
+type noStoreWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *noStoreWriter) WriteHeader(status int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *noStoreWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *noStoreWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // ContentHandler adapts only the versioned mount. The proxy and bridge remain
 // responsible for route matching, plugin access policy and forwarded bytes.
@@ -71,8 +112,9 @@ func (h *ContentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.routeAccess != nil {
 			access = h.routeAccess(r)
 		}
+		w = WithRenewedCookie(w, access.RenewedCookie)
 		ctx := WithPluginAccessUser(r.Context(), access.Authenticated, access.Admin, access.UserID, access.ProfileID)
-		h.proxy.ServeRoute(w, r.WithContext(ctx), installationID, access.Authenticated, access.Admin)
+		h.proxy.serveRoute(w, r.WithContext(ctx), installationID, access.Authenticated, access.Admin, true)
 		return
 	}
 	if r.Method != http.MethodGet {

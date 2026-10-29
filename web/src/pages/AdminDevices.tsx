@@ -1,3 +1,4 @@
+import { DeviceConnections } from "@/components/admin/DeviceConnections";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
@@ -1688,6 +1689,8 @@ function DeviceDetailPanel({
           </Button>
         </div>
       </header>
+
+      <DeviceConnections device={data} />
 
       {/* instrument readout */}
       <div className="border-border/60 grid grid-cols-2 gap-x-6 gap-y-3 border-b px-5 py-4 sm:grid-cols-4 sm:px-6">

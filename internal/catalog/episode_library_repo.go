@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -68,6 +69,23 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 
 	var insertedSeriesIDs []string
 	if restore {
+		// Lock every series this pass may add or remove memberships for in
+		// one ordered statement. Taking the spanned additions and the stale
+		// removals separately could lock two series in the opposite order to
+		// curation, which locks parents in content ID order.
+		spannedSeriesIDs, err := spannedMembershipCandidateSeries(ctx, tx, "mf.media_folder_id = $1", folderID)
+		if err != nil {
+			return 0, err
+		}
+		_, staleSeriesIDs, err := findStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+		if err != nil {
+			return 0, err
+		}
+		if lockIDs := append(spannedSeriesIDs, staleSeriesIDs...); len(lockIDs) > 0 {
+			if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, lockIDs); err != nil {
+				return 0, fmt.Errorf("locking series for episode library membership: %w", err)
+			}
+		}
 		if err := tx.QueryRow(ctx, `
 		WITH inserted AS (
 			INSERT INTO episode_libraries (
@@ -97,28 +115,55 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 	`, folderID).Scan(&insertedSeriesIDs); err != nil {
 			return 0, fmt.Errorf("restoring episode library membership: %w", err)
 		}
+		addedSeriesIDs, err := InsertSpannedEpisodeMemberships(ctx, tx, "mf.media_folder_id = $1", folderID)
+		if err != nil {
+			return 0, err
+		}
+		insertedSeriesIDs = append(insertedSeriesIDs, addedSeriesIDs...)
 	}
 
-	args := []any{folderID}
-	episodePredicate := ""
-	if episodeIDs != nil {
-		args = append(args, episodeIDs)
-		episodePredicate = " AND el.episode_id = ANY($2::text[])"
+	removed, deletedSeriesIDs, err := deleteStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+	if err != nil {
+		return 0, err
 	}
 
+	affectedSeriesIDs := append(insertedSeriesIDs, deletedSeriesIDs...)
+	if err := RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, affectedSeriesIDs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("committing episode membership reconciliation transaction: %w", err)
+	}
+	return removed, nil
+}
+
+// deleteStaleEpisodeMemberships removes the folder's memberships whose
+// episode has no active file there, limited to episodeIDs when it is non-nil,
+// and returns how many it removed and their series. It locks those series
+// before deleting: curated rebind and split lock the series row and then
+// delete its memberships, and do not retry a deadlock, so deleting first and
+// locking in the recompute would take the two in the opposite order.
+func deleteStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int, episodeIDs []string) (int, []string, error) {
+	staleEpisodeIDs, staleSeriesIDs, err := findStaleEpisodeMemberships(ctx, tx, folderID, episodeIDs)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(staleEpisodeIDs) == 0 {
+		return 0, nil, nil
+	}
+	if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, staleSeriesIDs); err != nil {
+		return 0, nil, fmt.Errorf("locking series for episode library membership removal: %w", err)
+	}
+
+	// Recheck each membership: a file may have been linked since the select.
 	var removed int
 	var deletedSeriesIDs []string
 	if err := tx.QueryRow(ctx, `
 		WITH deleted AS (
 			DELETE FROM episode_libraries el
-			WHERE el.media_folder_id = $1`+episodePredicate+`
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM media_files mf
-				WHERE mf.media_folder_id = el.media_folder_id
-				  AND mf.episode_id = el.episode_id
-				  AND mf.missing_since IS NULL
-			)
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = ANY($2::text[])
+			  AND `+NoServingEpisodeFileSQL+`
 			RETURNING el.episode_id
 		)
 		SELECT COUNT(*)::int,
@@ -128,16 +173,34 @@ func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Con
 		       )
 		FROM deleted d
 		LEFT JOIN episodes e ON e.content_id = d.episode_id
-	`, args...).Scan(&removed, &deletedSeriesIDs); err != nil {
-		return 0, fmt.Errorf("reconciling episode library membership: %w", err)
+	`, folderID, staleEpisodeIDs).Scan(&removed, &deletedSeriesIDs); err != nil {
+		return 0, nil, fmt.Errorf("reconciling episode library membership: %w", err)
 	}
+	return removed, deletedSeriesIDs, nil
+}
 
-	affectedSeriesIDs := append(insertedSeriesIDs, deletedSeriesIDs...)
-	if err := RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
-		return 0, err
+// findStaleEpisodeMemberships returns the folder's memberships whose episode
+// no present file there serves, limited to episodeIDs and the episodes a
+// multi-episode file linked to one of them could span when it is non-nil, and
+// their series.
+func findStaleEpisodeMemberships(ctx context.Context, tx pgx.Tx, folderID int, episodeIDs []string) ([]string, []string, error) {
+	scope := "el.media_folder_id = $1"
+	args := []any{folderID}
+	if episodeIDs != nil {
+		scope += " AND el.episode_id IN " + SpanReachSQL("$2::text[]")
+		args = append(args, episodeIDs)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("committing episode membership reconciliation transaction: %w", err)
+	var staleEpisodeIDs, staleSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(el.episode_id), ARRAY[]::text[]),
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM episode_libraries el
+		LEFT JOIN episodes e ON e.content_id = el.episode_id
+		WHERE `+scope+` AND `+NoServingEpisodeFileSQL, args...).Scan(&staleEpisodeIDs, &staleSeriesIDs); err != nil {
+		return nil, nil, fmt.Errorf("finding stale episode library membership: %w", err)
 	}
-	return removed, nil
+	return staleEpisodeIDs, staleSeriesIDs, nil
 }

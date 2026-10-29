@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -145,12 +146,24 @@ func TestCreditsChaptersKeepHigherPriorityAndMatchingMarkers(t *testing.T) {
 		CreditsStart: floatPtr(1405), CreditsEnd: floatPtr(1500), CreditsMarkersSource: strPtr(models.MarkerSourceScanner),
 		CreditsMarkersAlgorithm: strPtr(CreditsAudioAlgorithm), CreditsMarkersConfidence: floatPtr(0.9),
 	}
+	online := func(fileID int, episode string, confidence float64) Candidate {
+		return Candidate{
+			FileID: fileID, EpisodeID: episode, DurationSeconds: 1500, Chapters: credits,
+			CreditsStart: floatPtr(1400), CreditsEnd: floatPtr(1500), CreditsMarkersSource: strPtr(models.MarkerSourcePlugin),
+			CreditsMarkersConfidence: floatPtr(confidence),
+		}
+	}
 	repo := &fakeIntroRepository{}
 	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
 
-	summary, _ := analyzer.processCreditsChapters(context.Background(), []Candidate{manual, written, upgrade})
-	if len(repo.patches) != 1 || repo.patches[0].FileID != 30 || summary.CreditsChapterMarkersWritten != 1 {
-		t.Fatalf("patches %+v, want only the audio marker upgraded to the chapter", repo.patches)
+	summary, _ := analyzer.processCreditsChapters(context.Background(),
+		[]Candidate{manual, written, upgrade, online(40, "ep4", 0.3), online(50, "ep5", 0.99)})
+	var patched []int
+	for _, patch := range repo.patches {
+		patched = append(patched, patch.FileID)
+	}
+	if !slices.Equal(patched, []int{30, 40}) || summary.CreditsChapterMarkersWritten != 2 {
+		t.Fatalf("patched files %v, want the audio marker and the less confident online marker replaced by the chapter", patched)
 	}
 }
 

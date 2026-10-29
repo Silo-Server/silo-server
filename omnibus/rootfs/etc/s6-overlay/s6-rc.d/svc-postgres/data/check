@@ -1,0 +1,4 @@
+#!/bin/sh
+# As the silo user so peer authentication succeeds and the probe leaves no
+# failed-login lines in the log.
+exec s6-setuidgid silo pg_isready -q -h /run/postgresql -U silo -d postgres

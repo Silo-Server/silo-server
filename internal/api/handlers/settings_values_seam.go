@@ -1012,6 +1012,14 @@ func (h *SettingValuesHandler) ListSettingValues(ctx context.Context, userID int
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	// Repeats share the stored bytes here but not in the encoded response.
+	budget := maxResponseValueBytes
+	for _, view := range views {
+		if budget -= len(view.Value); budget < 0 {
+			return nil, fieldError(settingFieldKeys,
+				"The requested values are too large for one response; request fewer keys")
+		}
+	}
 	return views, nil
 }
 
@@ -1096,6 +1104,16 @@ func (h *SettingValuesHandler) ResolveEffectiveSettingContexts(ctx context.Conte
 	views, apiErr := h.resolveEffectiveContexts(ctx, store, q, contexts)
 	if apiErr != nil {
 		return nil, apiErr
+	}
+	// Repeats share the stored bytes here but not in the encoded response.
+	budget := maxResponseValueBytes
+	for _, view := range views {
+		for _, setting := range view.Settings {
+			if budget -= len(setting.Value) + len(setting.StoredValue) + len(setting.RequestedValue); budget < 0 {
+				return nil, fieldError(settingFieldKeys,
+					"The requested values are too large for one response; request fewer keys or contexts")
+			}
+		}
 	}
 	return views, nil
 }

@@ -22,6 +22,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -207,8 +209,14 @@ func isCompatHEVCV1Route(r *http.Request) bool {
 	return marked
 }
 
-func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatHEVCV1Route(r) == required {
+// validateCompatHLSRoute checks that the request arrived on the one versioned
+// route compatHLSRoutePathSegment names for source.
+func validateCompatHLSRoute(w http.ResponseWriter, r *http.Request, source PlaybackMediaSource) bool {
+	if isCompatHEVCV1Route(r) == compatHLSUsesHEVCV1Route(source) &&
+		isCompatAudioV2Route(r) == compatHLSUsesAudioV2Route(source) &&
+		isCompatRemuxV1Route(r) == compatHLSUsesRemuxV1Route(source) &&
+		isCompatRemuxDVV1Route(r) == compatHLSUsesRemuxDVV1Route(source) &&
+		isCompatRemuxTSV1Route(r) == compatHLSUsesRemuxTSV1Route(source) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -217,30 +225,6 @@ func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required 
 
 func validateCompatAudioV2Route(w http.ResponseWriter, r *http.Request, required bool) bool {
 	if isCompatAudioV2Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxTSV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxTSV1Route(r) == required {
-		return true
-	}
-	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
-	return false
-}
-
-func validateCompatRemuxDVV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
-	if isCompatRemuxDVV1Route(r) == required {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
@@ -290,7 +274,7 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 	if compatHLSUsesRemuxDVV1Route(source) {
 		return compatRemuxDVV1PathSegment
 	}
-	if source.HLSRemuxMPEGTS {
+	if compatHLSUsesRemuxTSV1Route(source) {
 		return compatRemuxTSV1PathSegment
 	}
 	if compatHLSUsesRemuxV1Route(source) {
@@ -304,6 +288,10 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 
 func compatHLSUsesAudioV2Route(source PlaybackMediaSource) bool {
 	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && !compatHLSUsesHEVCV1Route(source) && compatHLSRequiresAudioV2(source)
+}
+
+func compatHLSUsesRemuxTSV1Route(source PlaybackMediaSource) bool {
+	return source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source)
 }
 
 // HEVC encoding uses a route older API binaries cannot serve. Those binaries
@@ -346,6 +334,26 @@ func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
 	}
 	video := compatPrimaryVideoTrack(source.Version)
 	return playback.VideoSampleEntryForDVCopy(video.DVProfile) == playback.VideoSampleEntryDVH1
+}
+
+// compatContainerTS is the MPEG-TS container name in device profiles.
+const compatContainerTS = "ts"
+
+// compatRokuMPEGTS packages a Roku's video-copy HLS stream as MPEG-TS. Roku
+// players can play the audio of an fMP4 copy silently (JellyRock issue #573),
+// and Roku clients list their MPEG-TS transcoding profile first, as Jellyfin
+// would use it. The copy was negotiated for fMP4, so the profile's MPEG-TS
+// rules must accept the same video and audio. The Dolby Vision strip keeps
+// fMP4, which its hvc1 output needs.
+func compatRokuMPEGTS(userAgent string, profile DeviceProfile, source PlaybackMediaSource) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(userAgent)), "roku/") ||
+		!compatHLSCopiesVideo(source) || source.DVStripToHDR10 {
+		return false
+	}
+	if source.TranscodeAudio {
+		return profile.supportsHLSRemuxWithAudioTranscodeIn(source.Version, source.SelectedAudioStreamIndex, source.TargetAudioChannels, compatContainerTS)
+	}
+	return profile.supportsHLSRemuxIn(source.Version, source.SelectedAudioStreamIndex, compatContainerTS)
 }
 
 func compatHLSTranscodesAudio(source PlaybackMediaSource) bool {
@@ -534,13 +542,13 @@ func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) 
 }
 
 type sessionReportRequest struct {
-	ItemID              string          `json:"ItemId"`
-	MediaSourceID       string          `json:"MediaSourceId"`
-	PlaySessionID       string          `json:"PlaySessionId"`
-	PositionTicks       *int64          `json:"PositionTicks,omitempty"`
-	IsPaused            bool            `json:"IsPaused"`
-	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
-	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
+	ItemID              string         `json:"ItemId"`
+	MediaSourceID       string         `json:"MediaSourceId"`
+	PlaySessionID       string         `json:"PlaySessionId"`
+	PositionTicks       *int64         `json:"PositionTicks,omitempty"`
+	IsPaused            bool           `json:"IsPaused"`
+	AudioStreamIndex    compatIntValue `json:"AudioStreamIndex"`
+	SubtitleStreamIndex compatIntValue `json:"SubtitleStreamIndex"`
 }
 
 // HandleVideoStream serves Jellyfin-style progressive stream URLs.
@@ -759,19 +767,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	// Attach BEFORE ensureUpstreamPlayback below: this route can start a
@@ -1042,19 +1038,7 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1116,19 +1100,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
-	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
-		return
-	}
-	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxV1Route(w, r, compatHLSUsesRemuxV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxDVV1Route(w, r, compatHLSUsesRemuxDVV1Route(*source)) {
-		return
-	}
-	if !validateCompatRemuxTSV1Route(w, r, source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(*source)) {
+	if !validateCompatHLSRoute(w, r, *source) {
 		return
 	}
 	if !h.requireCompatChildHLSRoute(w, playSession, *source) {
@@ -1534,7 +1506,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// Serve ASS/SSA as raw data when requested.
 			if requestedFormat == "ass" && playback.IsASS(sub.Format) {
-				data, readErr := os.ReadFile(sub.Path)
+				data, readErr := fspath.ReadFile(sub.Path)
 				if readErr != nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
@@ -1543,7 +1515,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				return
 			}
 			if requestedFormat == "srt" && subtitleCanServeSRT(sub.Format) {
-				data, readErr := os.ReadFile(sub.Path)
+				data, readErr := fspath.ReadFile(sub.Path)
 				if readErr != nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
@@ -1935,7 +1907,14 @@ func (h *PlaybackHandler) cleanupPlaySession(
 		// finish hook records the play in watch and admin history. Mid-play
 		// replacements keep using StopSession.
 		if finisher, ok := h.sessionMgr.(sessionFinisher); ok {
-			_ = finisher.FinishSession(ctx, playSession.UpstreamSessionID)
+			err := finisher.FinishSession(ctx, playSession.UpstreamSessionID)
+			// The stop reached a replica without the native copy. Record the
+			// play from the stop's snapshot, or, when the stop reported no
+			// position, from the play's identity, which the finish hook
+			// completes from the shared live row.
+			if detached, ok := h.sessionMgr.(detachedFinisher); ok && errors.Is(err, playback.ErrSessionNotFound) {
+				detached.FinishDetached(ctx, compatDetachedSnapshot(playSession, upstreamSession))
+			}
 		} else {
 			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 		}
@@ -1955,6 +1934,11 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
 }
+
+// compatTargetAudioProfile is the profile FFmpeg's native aac encoder writes;
+// clients such as Roku require AudioProfile != Main, so leaving it unknown
+// would fail that rule closed.
+const compatTargetAudioProfile = "LC"
 
 // The compat transcode ladder always lands on H.264/AAC; these name the
 // target codecs the Jellyfin-compat pipeline hands to ffmpeg.
@@ -2361,37 +2345,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
-	audioTrackIndex := 0
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
-	if (!stop || !unidentified) && req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
-		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
-		updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
-			r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds,
-		)
-		if updatedPlaySession != nil {
-			playSession = updatedPlaySession
-		}
-		if selectionErr != nil {
-			slog.WarnContext(r.Context(), "jellycompat audio selection update failed", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"error", selectionErr,
-			)
-		} else if updatedSource != nil {
-			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
-				audioTrackIndex = resolvedAudioTrackIndex
-			}
-			slog.InfoContext(r.Context(), "jellycompat audio selection updated", "component", "jellycompat",
-				"play_session_id", playSession.ID,
-				"media_source_id", updatedSource.ID,
-				"audio_stream_index", selectedAudioStreamIndex,
-				"audio_track_index", audioTrackIndex,
-				"transcode_restarted", restarted,
-			)
-		}
+	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
+		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -2412,6 +2371,13 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 					positionSeconds, req.IsPaused, true,
 				)
 			}
+		}
+	}
+	// Jellyfin reports carry no sequence: the pause state they report is
+	// announced in arrival order. A Stopped report ends the play instead.
+	if !stop && h.sessionMgr != nil {
+		if announcer, ok := h.sessionMgr.(lifecycleAnnouncer); ok {
+			announcer.ReportPause(r.Context(), playSession.UpstreamSessionID, req.IsPaused)
 		}
 	}
 	// An ID-less Stopped report can't end the play (see below): it may be a
@@ -2560,13 +2526,14 @@ func (h *PlaybackHandler) refreshPlaySession(current *PlaybackSession) *Playback
 
 // withNegotiatedClientInfo names the client from its PlaybackInfo request when
 // the stream request didn't send a MediaBrowser header, so the native session
-// isn't labeled from the User-Agent alone.
+// isn't labeled from the User-Agent alone. The device is the DeviceId that
+// request carried; Jellyfin declares no platform.
 func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession) context.Context {
 	info := playback.ClientInfoFromContext(ctx)
-	if info.Name != "" || playSession.ClientName == "" {
-		return ctx
+	if info.Name == "" && playSession.ClientName != "" {
+		info.Name, info.Version = playSession.ClientName, playSession.ClientVersion
 	}
-	info.Name, info.Version = playSession.ClientName, playSession.ClientVersion
+	info.DeviceID = playSession.ClientDeviceID
 	return playback.WithClientInfo(ctx, info)
 }
 
@@ -2575,9 +2542,13 @@ func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession)
 // direct/remux fallback cards built from scratch) carry none; the current
 // compat request identifies the client, so the reconstructed session keeps its
 // label and JF pill. A card minted from the User-Agent alone, by a binary that
-// didn't yet name the client from PlaybackInfo, still takes the name.
+// didn't yet name the client from PlaybackInfo, still takes the name. A card
+// without a device takes the play's negotiated DeviceId.
 func fillReconstructedClientInfo(card *playback.RecipeCard, info playback.ClientInfo) {
 	card.IsJellyfinCompat = info.IsCompat
+	if card.DeviceID == "" {
+		card.DeviceID = info.DeviceID
+	}
 	if card.ClientName == "" && card.ClientUserAgent == "" {
 		card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
 	} else if card.ClientName == "" && info.Name != "" {
@@ -2640,6 +2611,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 	}
 
+	// replaced is this replica's copy of the upstream session a method switch
+	// retires. Its play ends once the switch has moved the play off it.
+	var replaced *playback.Session
 	var playMethod playback.PlayMethod
 	transcodeAudio := source.TranscodeAudio
 	switch method {
@@ -2662,6 +2636,16 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		if current, err := h.sessionMgr.GetSession(oldUpstreamSessionID); err == nil {
 			transcodeNodeURL = current.TranscodeNodeURL
 			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
+			snapshot := *current
+			replaced = &snapshot
+		} else {
+			// The old session's copy is on another replica, or a concurrent
+			// switch already removed it here. Its play still ends once this
+			// switch moves the play off it.
+			replaced = &playback.Session{
+				ID: oldUpstreamSessionID, UserID: compatSession.StreamAppUserID, ProfileID: compatSession.ProfileID,
+				MediaFileID: playSession.UpstreamMediaFileID, IsJellyfinCompat: true, Position: playback.PositionUnknown,
+			}
 		}
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
@@ -2677,6 +2661,17 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			cancel()
 		}
 	}
+
+	// Every exit from here ends the replaced session's play once: the switch
+	// moves the play off it, or the replacement fails after its copy stopped.
+	replacedFinished := false
+	finishReplaced := func() {
+		if !replacedFinished {
+			replacedFinished = true
+			h.finishReplacedUpstream(ctx, replaced)
+		}
+	}
+	defer finishReplaced()
 
 	var session *playback.Session
 	var err error
@@ -2723,6 +2718,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}); updateErr != nil {
 		_ = h.sessionMgr.StopSession(session.ID)
 		if errors.Is(updateErr, errUpstreamReplaced) {
+			// Another request moved the play off the session this one
+			// replaced, so that session's play is over all the same.
+			finishReplaced()
 			// Adopt the winner only when it serves the same play method;
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
@@ -2739,13 +2737,48 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 		return nil, updateErr
 	}
+	finishReplaced()
 	updated, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
 	h.syncSessionsNow(ctx, "compat_start")
+	if announcer, ok := h.sessionMgr.(lifecycleAnnouncer); ok {
+		announcer.AnnounceStart(ctx, session.ID, "jellyfin")
+	}
 	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
+}
+
+// compatDetachedSnapshot is the session a Jellyfin stop records when no copy
+// of it is left here: the stop's own snapshot, or the play's identity with
+// its position unknown.
+func compatDetachedSnapshot(playSession *PlaybackSession, upstreamSession *playback.Session) playback.Session {
+	snapshot := playback.Session{
+		ID:                         playSession.UpstreamSessionID,
+		MediaFileID:                playSession.UpstreamMediaFileID,
+		Position:                   playback.PositionUnknown,
+		DisableProgressPersistence: !playSession.ProgressPersistenceKnown || playSession.DisableProgressPersistence,
+	}
+	if upstreamSession != nil {
+		snapshot = *upstreamSession
+	}
+	snapshot.IsJellyfinCompat = true
+	return snapshot
+}
+
+// finishReplacedUpstream records the end of an upstream session a method
+// switch replaced, after the switch has moved the play off it. The play goes
+// on under the new session, so only the admin log records the old one.
+func (h *PlaybackHandler) finishReplacedUpstream(ctx context.Context, replaced *playback.Session) {
+	if replaced == nil {
+		return
+	}
+	if finisher, ok := h.sessionMgr.(detachedFinisher); ok {
+		snapshot := *replaced
+		snapshot.IsJellyfinCompat = true
+		finisher.FinishDetached(playback.WithEndReason(context.WithoutCancel(ctx), playback.EndReasonReplaced), snapshot)
+	}
 }
 
 func (h *PlaybackHandler) recordCompatProgressPersistence(playSessionID string, disabled bool) {
@@ -3309,6 +3342,37 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 		return nil
 	}
 	return h.requireLocalAudioDownmixCapability(ctx, compatHLSRecipeSourceAudioChannels(source))
+}
+
+// applyReportedAudioSelection switches a playback session to the audio stream a
+// progress report names and returns the session to continue with.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+	audioTrackIndex := 0
+	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
+		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
+	)
+	if updatedPlaySession != nil {
+		playSession = updatedPlaySession
+	}
+	if selectionErr != nil {
+		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"error", selectionErr,
+		)
+	} else if updatedSource != nil {
+		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
+			audioTrackIndex = resolvedAudioTrackIndex
+		}
+		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
+			"play_session_id", playSession.ID,
+			"media_source_id", updatedSource.ID,
+			"audio_stream_index", selectedAudioStreamIndex,
+			"audio_track_index", audioTrackIndex,
+			"transcode_restarted", restarted,
+		)
+	}
+	return playSession
 }
 
 func (h *PlaybackHandler) applyCompatAudioSelection(

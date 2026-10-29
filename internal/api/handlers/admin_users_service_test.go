@@ -41,11 +41,11 @@ func TestProfileLastSeen(t *testing.T) {
 // TestAdminAccountDeviceAndProfileLastSeen reads one account's devices and
 // profiles from a real store: a registered device carries its last-seen time
 // and the profile's, a device known only from saved settings carries none,
-// and the profile list reports the profile's latest registration.
+// and the profile list reports the profile's latest registration and avatar.
 func TestAdminAccountDeviceAndProfileLastSeen(t *testing.T) {
 	ctx := context.Background()
 	store := newIsolatedProfileTestStore(t, "account")
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Guest"}); err != nil {
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Guest", Avatar: "preset:avatar-3"}); err != nil {
 		t.Fatal(err)
 	}
 	registry, ok := store.(userstore.DeviceRegistry)
@@ -88,11 +88,15 @@ func TestAdminAccountDeviceAndProfileLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]*time.Time{}
+	byProfile := map[string]AdminProfileView{}
 	for _, p := range profiles {
-		seen[p.ID] = p.LastSeenAt
+		byProfile[p.ID] = p
 	}
-	if len(profiles) != 2 || seen["profile-1"] == nil || seen["profile-1"].UTC().Format(time.RFC3339Nano) != tv.LastSeenAt || seen["profile-2"] != nil {
+	parent, guest := byProfile["profile-1"], byProfile["profile-2"]
+	if len(profiles) != 2 || parent.LastSeenAt == nil || parent.LastSeenAt.UTC().Format(time.RFC3339Nano) != tv.LastSeenAt || guest.LastSeenAt != nil {
 		t.Fatalf("profile last seen: %+v", profiles)
+	}
+	if guest.Avatar != "preset:avatar-3" || guest.AvatarSource != "preset" || guest.AvatarURL != "/profile-avatars/avatar-3.svg" || parent.AvatarSource != "none" || parent.AvatarURL != "" {
+		t.Fatalf("profile avatars: %+v", profiles)
 	}
 }

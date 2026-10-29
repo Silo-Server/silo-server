@@ -2,6 +2,7 @@ import type {
   MarkerKind,
   MarkerRegionView,
   PlayerFileVersion,
+  PlayerMarkerRange,
   PlayerMarkerSegment,
   PlayerTimeRange,
 } from "../types";
@@ -114,6 +115,25 @@ export function patchVersionMarkers(
   return changed ? nextVersions : versions;
 }
 
+/**
+ * The provenance fields a region carries, taken from the singular per-kind
+ * marker. Occurrences in `marker_segments` do not carry their own: the file row
+ * stores one origin per kind, so every occurrence of a kind shares it, and
+ * inventing a per-occurrence answer would be a guess.
+ *
+ * Absent stays absent — an unrated marker's confidence is 0 in the row, and
+ * spreading that as `confidence: 0` would render a real "0%" for a range nobody
+ * rated.
+ */
+function provenanceOf(range: PlayerMarkerRange | null | undefined) {
+  return {
+    ...(range?.source ? { source: range.source } : {}),
+    ...(range?.provider ? { provider: range.provider } : {}),
+    ...(range?.confidence != null ? { confidence: range.confidence } : {}),
+    ...(range?.algorithm ? { algorithm: range.algorithm } : {}),
+  };
+}
+
 /** Prefer the complete inventory, retaining singular fields for older servers. */
 export function resolveMarkerRegions(
   version: Pick<PlayerFileVersion, "intro" | "credits" | "recap" | "preview" | "marker_segments">,
@@ -123,6 +143,7 @@ export function resolveMarkerRegions(
       kind: segment.kind,
       start: segment.start_seconds,
       end: segment.end_seconds,
+      ...provenanceOf(version[segment.kind]),
       ...(segment.thumbnail_url
         ? {
             thumbnail_url: segment.thumbnail_url,
@@ -193,10 +214,10 @@ export function resolveAutoplayMarker(
 export function resolveActiveVersionMarkers(
   version: Pick<PlayerFileVersion, "intro" | "credits" | "recap" | "preview"> | null | undefined,
 ): {
-  intro: PlayerTimeRange | null;
-  credits: PlayerTimeRange | null;
-  recap: PlayerTimeRange | null;
-  preview: PlayerTimeRange | null;
+  intro: PlayerMarkerRange | null;
+  credits: PlayerMarkerRange | null;
+  recap: PlayerMarkerRange | null;
+  preview: PlayerMarkerRange | null;
 } {
   return {
     intro: version?.intro ?? null,

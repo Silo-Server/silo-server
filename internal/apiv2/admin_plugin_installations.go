@@ -224,7 +224,7 @@ type AdminPluginInstallation struct {
 	RepositoryName     string                    `json:"repository_name,omitempty"`
 	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
-	UpdatesPaused      bool                      `json:"updates_paused"`
+	UpdatesPaused      bool                      `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
 	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
 	UserConfigSchema   []AdminPluginConfigSchema `json:"user_config_schema"`

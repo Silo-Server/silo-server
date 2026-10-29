@@ -475,7 +475,7 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 			"component", "historyimport", "unreached", unreached, "attempted", attempted, "error", firstErr)
 	}
 	if unresolved > 0 {
-		warnings = append(warnings, plexUnresolvedIDsWarning("watchlist", "items", unresolved, attempted, firstErr, aborted))
+		warnings = append(warnings, plexUnresolvedIDsWarning(plexWatchlistIDScope, "items", unresolved, attempted, firstErr, aborted))
 	}
 	return allItems, warnings, nil
 }

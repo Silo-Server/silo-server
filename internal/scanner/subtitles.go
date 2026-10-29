@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/naming"
 )
@@ -96,7 +97,7 @@ func (c *externalSubtitleDirCache) listing(dir string) (externalSubtitleDirListi
 	listing, ok := c.dirs[dir]
 	c.mu.Unlock()
 	if !ok {
-		entries, err := os.ReadDir(dir)
+		entries, err := fspath.ReadDir(dir)
 		listing = newExternalSubtitleDirListing(dir, entries, librarykind.IsMovie(c.folderType))
 		listing.err = err
 		c.mu.Lock()
@@ -139,7 +140,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 		results = append(results, ExternalSubtitleInfo{
 			Path:            filepath.Join(dir, candidate.name),
 			Format:          strings.TrimPrefix(candidate.ext, "."),
-			Title:           candidate.name,
+			Title:           fspath.Display(candidate.name),
 			Language:        tags.Language,
 			Forced:          tags.Forced,
 			HearingImpaired: tags.HearingImpaired,

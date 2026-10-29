@@ -1170,6 +1170,12 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			continue
 		}
 		manifest, err := plugins.LoadManifestFile(plugins.InstalledManifestPath(installation.InstallPath))
+		if errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+			// A row admitted before the identity check never loads; it has
+			// no settings to offer and must not hide the other plugins.
+			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1378,6 +1384,17 @@ func (h *PluginHandler) buildInstallationResponse(
 	)
 }
 
+// installationSource reports where an installation came from and whether its
+// update checks are paused. Silo checks a repository only while it is enabled
+// and refuses installs from a disabled one, so a recorded update can't be
+// applied until the repository is enabled again.
+func installationSource(repository *plugins.Repository) (sourceKind, repositoryName string, updatesPaused bool) {
+	if repository == nil {
+		return plugins.RepositorySourceExternal, "", false
+	}
+	return repository.SourceKind, repository.DisplayName, !repository.Enabled
+}
+
 func (h *PluginHandler) buildInstallationResponseWithBindings(
 	ctx context.Context,
 	installation *plugins.Installation,
@@ -1389,7 +1406,9 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) {
+		// A row admitted before the identity check never loads; list it
+		// without its manifest so the admin can still uninstall it.
+		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
 			return PluginInstallationView{}, err
 		}
 	}
@@ -1409,18 +1428,12 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		routes             []PluginRouteView
 		assets             []PluginAssetView
 		metadata           map[string]any
-		sourceKind         = plugins.RepositorySourceExternal
-		repositoryName     string
-		updatesPaused      bool
 	)
+	var repository *plugins.Repository
 	if installation.RepositoryID != nil {
-		repository := repositoriesByID[*installation.RepositoryID]
-		if repository != nil {
-			sourceKind = repository.SourceKind
-			repositoryName = repository.DisplayName
-			updatesPaused = repository.SourceKind == plugins.RepositorySourceApprovedCommunity && !repository.Enabled
-		}
+		repository = repositoriesByID[*installation.RepositoryID]
 	}
+	sourceKind, repositoryName, updatesPaused := installationSource(repository)
 	if manifest != nil {
 		globalConfigSchema = configSchemasToJSON(manifest.GetGlobalConfigSchema())
 		userConfigSchema = configSchemasToJSON(manifest.GetUserConfigSchema())

@@ -426,6 +426,38 @@ func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.Us
 		t.Fatalf("history after retry: %+v %v", history, err)
 	}
 
+	// A rewatch in progress (completed, with a resume position) is left alone
+	// unless the target asks to record it: then the mark records another play
+	// and clears the position, and a repeat with no new position in between
+	// records nothing.
+	if err := store.SetProgress(ctx, "p1", "ep-1", 300, 1200, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("SetProgress(ep-1 rewatch): %v", err)
+	}
+	if progress, err := store.GetProgress(ctx, "p1", "ep-1"); err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 300 {
+		t.Fatalf("rewatch progress = %+v, %v; want completed with a resume position", progress, err)
+	}
+	rewatchEntry := entries[0]
+	rewatchEntry.ID = ""
+	rewatchEntry.WatchedAt = watchedAt.Add(2 * time.Hour).Format(time.RFC3339)
+	rewatchTarget := targets[0]
+	for attempt, want := range []struct {
+		recordRewatch bool
+		entries       int
+	}{{false, 0}, {true, 1}, {true, 0}} {
+		rewatchTarget.RecordRewatch = want.recordRewatch
+		rewatched, err := userstore.MarkWatchedBatch(ctx, store, "p1", []userstore.MarkWatchedTarget{rewatchTarget}, []userstore.WatchHistoryEntry{rewatchEntry})
+		if err != nil || len(rewatched) != want.entries {
+			t.Fatalf("rewatch mark %d (record %v): %+v %v; want %d entries", attempt, want.recordRewatch, rewatched, err, want.entries)
+		}
+	}
+	if progress, err := store.GetProgress(ctx, "p1", "ep-1"); err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
+		t.Fatalf("rewatch mark progress = %+v, %v; want completed with no resume position", progress, err)
+	}
+	history, err = store.ListHistory(ctx, "p1", 50, 0)
+	if err != nil || len(history) != 3 {
+		t.Fatalf("history after rewatch mark: %+v %v; want one more play", history, err)
+	}
+
 	// Start incomplete so the zero-duration mark must update the row.
 	if err := store.SetProgressAt(ctx, "p1", "known-duration", 120, 1200, false, watchedAt); err != nil {
 		t.Fatal(err)
@@ -633,15 +665,16 @@ func RunPersonalListPage(t *testing.T, newStore func(t *testing.T) userstore.Use
 // RunPersonalListMembership checks that each favorites and watchlist add and
 // remove reports whether it changed a row: the API seam notifies providers,
 // recommendations, and clients only for a change, so a repeated write must
-// report false.
+// report false. The batch lookup cards read sees only the acting profile's
+// rows.
 func RunPersonalListMembership(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("FavoritesMembership", func(t *testing.T) {
 		store := newStore(t)
-		testPersonalListMembership(t, store, store.AddFavorite, store.RemoveFavorite)
+		testPersonalListMembership(t, store, store.AddFavorite, store.RemoveFavorite, store.ListFavoritesByMediaItems)
 	})
 	t.Run("WatchlistMembership", func(t *testing.T) {
 		store := newStore(t)
-		testPersonalListMembership(t, store, store.AddToWatchlist, store.RemoveFromWatchlist)
+		testPersonalListMembership(t, store, store.AddToWatchlist, store.RemoveFromWatchlist, store.ListWatchlistByMediaItems)
 	})
 }
 
@@ -652,7 +685,7 @@ func RunPersonalListMembership(t *testing.T, newStore func(t *testing.T) usersto
 func RunNotInterested(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("NotInterestedMembership", func(t *testing.T) {
 		store := newStore(t)
-		testPersonalListMembership(t, store, store.MarkNotInterested, store.UnmarkNotInterested)
+		testPersonalListMembership(t, store, store.MarkNotInterested, store.UnmarkNotInterested, store.ListNotInterestedByMediaItems)
 	})
 	t.Run("NotInterestedReadsAndDelete", func(t *testing.T) {
 		store := newStore(t)
@@ -677,10 +710,6 @@ func RunNotInterested(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 		}
 		if entry, err := store.GetNotInterested(ctx, "p2", listC); err != nil || entry != nil {
 			t.Fatalf("another profile's mark leaked: %+v, %v", entry, err)
-		}
-		marked, err := store.ListNotInterestedByMediaItems(ctx, "p1", []string{listA, "m-z", "m-none"})
-		if err != nil || len(marked) != 1 || !marked[listA] {
-			t.Fatalf("ListNotInterestedByMediaItems = %v, %v", marked, err)
 		}
 
 		// Marks written in one second tie on added_at in the SQLite store
@@ -720,10 +749,12 @@ func RunNotInterested(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	})
 }
 
-func testPersonalListMembership(t *testing.T, store userstore.UserStore, add, remove func(ctx context.Context, profileID, mediaItemID string) (bool, error)) {
+func testPersonalListMembership(t *testing.T, store userstore.UserStore, add, remove func(ctx context.Context, profileID, mediaItemID string) (bool, error), lookup func(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)) {
 	ctx := context.Background()
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateProfile: %v", err)
+	for _, id := range []string{"p1", "p2"} {
+		if err := store.CreateProfile(ctx, userstore.Profile{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateProfile %s: %v", id, err)
+		}
 	}
 	for _, step := range []struct {
 		name string
@@ -739,6 +770,17 @@ func testPersonalListMembership(t *testing.T, store userstore.UserStore, add, re
 		if err != nil || changed != step.want {
 			t.Fatalf("%s = %v, %v; want %v", step.name, changed, err, step.want)
 		}
+	}
+	for _, id := range []string{listB, listD} {
+		if _, err := add(ctx, "p1", id); err != nil {
+			t.Fatalf("add %s: %v", id, err)
+		}
+	}
+	if _, err := add(ctx, "p2", listC); err != nil {
+		t.Fatalf("add %s for p2: %v", listC, err)
+	}
+	if got, err := lookup(ctx, "p1", []string{listA, listB, listC, "m-none"}); err != nil || len(got) != 1 || !got[listB] {
+		t.Fatalf("lookup = %v, %v; want only %s", got, err, listB)
 	}
 }
 

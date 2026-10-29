@@ -48,19 +48,25 @@ function normalize(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+// A track tagged und (undetermined) has no known language.
+const UNDETERMINED_LANGUAGE = "und";
+
 function normalizeConcreteLanguage(value: string | undefined | null): string | null {
   const normalized = normalize(value);
-  if (!normalized || isOriginalLanguagePreference(normalized)) {
+  if (
+    !normalized ||
+    normalized === UNDETERMINED_LANGUAGE ||
+    isOriginalLanguagePreference(normalized)
+  ) {
     return null;
   }
   return normalized;
 }
 
 function sameLanguageCode(a: string | undefined | null, b: string | undefined | null): boolean {
-  const left = normalizeConcreteLanguage(a);
-  const right = normalizeConcreteLanguage(b);
-  if (!left || !right) return false;
-  return normalizeLanguageCode(left) === normalizeLanguageCode(right);
+  const left = normalizeLanguageCode(normalizeConcreteLanguage(a));
+  const right = normalizeLanguageCode(normalizeConcreteLanguage(b));
+  return left !== "" && left === right;
 }
 
 function languageMatchRank(candidate: string | undefined | null, preferred: string): number {
@@ -179,10 +185,11 @@ function findPreferredSubtitleIndexWithSignature(
 export interface SubtitleAutoSelectOptions {
   mode: SubtitleMode;
   tracks: PlayerSubtitleInfo[];
+  /** Effective subtitle language: null for none set, "" for "no subtitles". */
   preferredLanguage: string | null;
   preferredTrackSignature?: PlayerSubtitleTrackSignature | null;
+  /** Language of the audio track that plays; null or und when unknown. */
   audioLanguage: string | null;
-  profileLanguage: string | null;
   showForcedSubtitles: boolean;
 }
 
@@ -201,34 +208,27 @@ function findForcedSubtitleIndex(
 /**
  * Determines which subtitle track to auto-select on playback start.
  * Returns the track's backend index, or null if no track should be selected.
+ *
+ * Auto compares the audio that plays with the subtitle language, as the
+ * Android and Apple players and the server's Jellyfin mapping do: audio
+ * already in the subtitle language needs no full subtitles (only its forced
+ * track, when forced subtitles are on); any other audio gets the subtitle
+ * language's best full track. With no subtitle language set, Auto shows no full
+ * subtitles. Unknown audio never counts as a match.
  */
 export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): number | null {
-  const {
-    mode,
-    tracks,
-    preferredLanguage,
-    preferredTrackSignature,
-    audioLanguage,
-    profileLanguage,
-    showForcedSubtitles,
-  } = options;
+  const { mode, tracks, preferredLanguage, preferredTrackSignature, showForcedSubtitles } = options;
   const signature = preferredTrackSignature ?? null;
 
   if (tracks.length === 0) return null;
   const preferredSubtitleLang = normalizeConcreteLanguage(preferredLanguage);
-  const normalizedProfileLanguage = normalize(profileLanguage);
-  const effectiveProfileLang =
-    normalizeConcreteLanguage(profileLanguage) ??
-    (isOriginalLanguagePreference(normalizedProfileLanguage)
-      ? preferredSubtitleLang
-      : normalizedProfileLanguage === ""
-        ? "en"
-        : null);
-  const effectiveAudioLang = normalizeConcreteLanguage(audioLanguage) ?? effectiveProfileLang;
+  const audioLang = normalizeConcreteLanguage(options.audioLanguage);
+  const forcedForAudio = () =>
+    showForcedSubtitles ? findForcedSubtitleIndex(tracks, audioLang) : null;
 
   switch (mode) {
     case "off":
-      return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
+      return forcedForAudio();
 
     case "always": {
       const exactMatch = findExactSubtitleSignatureMatch(tracks, signature);
@@ -240,14 +240,14 @@ export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): n
 
     case "auto": {
       if (preferredLanguage === "") return null;
-      if (effectiveProfileLang && sameLanguageCode(effectiveAudioLang, effectiveProfileLang)) {
-        return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
+      if (!preferredSubtitleLang || sameLanguageCode(audioLang, preferredSubtitleLang)) {
+        return forcedForAudio();
       }
-      const lang = preferredSubtitleLang ?? effectiveProfileLang;
-      if (!lang) {
-        return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
-      }
-      const match = findPreferredSubtitleIndexWithSignature(tracks, lang, signature);
+      const match = findPreferredSubtitleIndexWithSignature(
+        tracks,
+        preferredSubtitleLang,
+        signature,
+      );
       return match >= 0 ? match : null;
     }
 

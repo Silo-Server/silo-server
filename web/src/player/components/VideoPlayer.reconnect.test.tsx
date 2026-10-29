@@ -69,6 +69,7 @@ vi.mock("hls.js", () => ({
       MANIFEST_LOAD_ERROR: "manifestLoadError",
       MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
       MANIFEST_PARSING_ERROR: "manifestParsingError",
+      FRAG_LOAD_ERROR: "fragLoadError",
     };
     static isSupported = () => true;
 

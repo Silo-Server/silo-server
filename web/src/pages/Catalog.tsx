@@ -638,6 +638,8 @@ function CatalogResults({
           ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
             <ItemGrid
               totalItems={catalogQuery.data?.totalItems ?? 0}
+              knownItems={catalogQuery.data?.knownItems}
+              stale={catalogQuery.isPlaceholderData}
               pages={catalogQuery.data?.pages ?? new Map()}
               pageSize={limit}
               loading={catalogQuery.isLoading}

@@ -24,6 +24,10 @@ const (
 	audioCodecMP3       = "mp3"
 	audioCodecAC3       = "ac3"
 	audioCodecEAC3      = "eac3"
+	audioCodecTrueHD    = "truehd"
+	audioCodecFLAC      = "flac"
+	audioCodecALAC      = "alac"
+	audioCodecDTS       = "dts"
 	subtitleCodecTextV3 = "text"
 )
 

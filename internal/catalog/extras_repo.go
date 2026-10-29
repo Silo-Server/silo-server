@@ -29,9 +29,9 @@ func NewExtraRepository(pool *pgxpool.Pool) *ExtraRepository {
 	return &ExtraRepository{pool: pool}
 }
 
-// Upsert inserts or refreshes an extra. The content_id is deterministic
-// (contentid.ForLocal of the backing file path), so rescans converge on the
-// same row; kind/title/parent follow the latest scan classification. The
+// Upsert inserts or refreshes an extra. The scanner derives the content_id
+// from the backing file path and keeps it across rescans, so rescans converge
+// on the same row; kind/title/parent follow the latest scan classification. The
 // still columns are left alone; Upsert returns the row's current
 // still_source so the scanner can tell whether its sidecar changed.
 func (r *ExtraRepository) Upsert(ctx context.Context, extra models.MediaExtra) (string, error) {

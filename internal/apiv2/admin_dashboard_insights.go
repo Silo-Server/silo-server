@@ -15,17 +15,25 @@ type AdminDashboardInsightsService interface {
 }
 type AdminDashboardWindowInput struct {
 	Hours   int  `query:"hours" minimum:"1" maximum:"744" default:"24"`
-	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading."`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
 type AdminDashboardTopInput struct {
 	Days    int  `query:"days" minimum:"1" maximum:"30" default:"7"`
 	Limit   int  `query:"limit" minimum:"1" maximum:"25" default:"10"`
-	Refresh bool `query:"refresh" default:"false"`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
 type AdminDashboardDownloadsInput struct {
 	Limit   int  `query:"limit" minimum:"1" maximum:"25" default:"10"`
-	Refresh bool `query:"refresh" default:"false"`
+	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
+
+// cacheRefresh honors a refresh request from administrators only. A scoped API
+// key reads the shared cached aggregate, so a monitoring tool polling these
+// reads cannot force the aggregate queries on every call.
+func cacheRefresh(ctx context.Context, requested bool) bool {
+	return requested && !scopedAPIKey(ctx)
+}
+
 type AdminDashboardTimeseriesPoint struct {
 	T                  Instant `json:"t"`
 	Streams            int64   `json:"streams"`
@@ -109,7 +117,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminTimeseries(ctx, in.Hours, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminTimeseries(ctx, in.Hours, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -126,7 +134,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminPlaybackActivity(ctx, in.Hours, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminPlaybackActivity(ctx, in.Hours, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -140,7 +148,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminTopActivity(ctx, in.Days, in.Limit, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminTopActivity(ctx, in.Days, in.Limit, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
@@ -157,7 +165,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if reg.deps.AdminDashboardInsights == nil {
 			return nil, unavailable("dashboard statistics")
 		}
-		s, err := reg.deps.AdminDashboardInsights.ReadAdminDownloadsStats(ctx, in.Limit, in.Refresh)
+		s, err := reg.deps.AdminDashboardInsights.ReadAdminDownloadsStats(ctx, in.Limit, cacheRefresh(ctx, in.Refresh))
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}

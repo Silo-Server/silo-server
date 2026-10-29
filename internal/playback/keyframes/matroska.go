@@ -12,8 +12,9 @@ import (
 	"slices"
 )
 
-// ErrNoIndex means the file has no usable keyframe index: no Cues, or none
-// for its video track.
+// ErrNoIndex means the file has no usable keyframe index: no Cues, none for
+// its video track, video cues that aren't independent, or unusable timing
+// metadata.
 var ErrNoIndex = errors.New("keyframes: no keyframe index")
 
 // notMatroskaError reports a file that isn't Matroska or WebM: a stable fact
@@ -63,6 +64,8 @@ const (
 	idCueTime               = 0xB3
 	idCueTrackPos           = 0xB7
 	idCueTrack              = 0xF7
+	idCueCodecState         = 0xEA
+	idCueReference          = 0xDB
 	idCluster               = 0x1F43B675
 	trackTypeVideo          = 1
 	defaultTimescale        = 1_000_000 // nanoseconds per timestamp tick
@@ -253,8 +256,9 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 
 	ticks, clusters, complete := cuePoints(cues, video)
 	if !complete || len(ticks) == 0 {
-		// A malformed cue point ends the list early; the points read so
-		// far would leave out later keyframes.
+		// A malformed cue point ends the list early, so the points read so
+		// far would leave out later keyframes; a dependent video cue isn't
+		// a boundary a segment can start at.
 		return matroskaIndex{}, ErrNoIndex
 	}
 	if err := checkCueCoverage(r, segStart, segEnd, video, ticks, clusters); err != nil {
@@ -279,6 +283,9 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 func readElementHeader(r io.ReaderAt, off int64) (id uint64, size int64, headerLen int64, err error) {
 	var buf [12]byte
 	n, err := r.ReadAt(buf[:], off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return 0, 0, 0, err
+	}
 	if n == 0 {
 		if err == nil {
 			err = io.EOF
@@ -438,10 +445,10 @@ func seekPosition(seekHead []byte, target uint64) (int64, bool) {
 
 // parseInfo reads Info's timestamp scale, defaulting when it is absent, and
 // duration. ok is false for an explicit scale Matroska doesn't allow (zero)
-// or that doesn't fit: cue times scaled by a guess would plan wrong segments.
+// or that doesn't fit, or incomplete metadata: guessed scaling is unsafe.
 func parseInfo(info []byte) (timescale int64, duration float64, ok bool) {
 	timescale, ok = defaultTimescale, true
-	children(info, func(id uint64, v []byte) {
+	complete := childrenComplete(info, func(id uint64, v []byte) {
 		switch id {
 		case idTimestampScale:
 			if s := int64(readUint(v)); s > 0 {
@@ -453,7 +460,7 @@ func parseInfo(info []byte) (timescale int64, duration float64, ok bool) {
 			duration = readFloat(v)
 		}
 	})
-	return timescale, duration, ok
+	return timescale, duration, complete && ok
 }
 
 func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool) {
@@ -487,7 +494,9 @@ func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool)
 // the segment's data; both are sorted and without duplicates. Matroska
 // muxers index video keyframes, so the times are keyframe times; whether
 // every keyframe has one is checked separately (checkCueCoverage).
-// It reports false when a malformed cue point stopped the walk early.
+// It reports false when a malformed cue point stopped the walk early, or
+// when a video cue declares frame dependencies or needs decoder state
+// outside the initial TrackEntry: that frame can't start a segment.
 //
 // A crafted Cues element can hold over a million points, so it counts them
 // first and allocates each list once, at its final length.
@@ -516,7 +525,8 @@ func cuePoints(cues []byte, video uint64) (ticks []uint64, clusters []int64, ok 
 
 // walkCuePoints calls fn for each cue point that indexes the video track,
 // with the position of the cluster holding it (negative when the cue doesn't
-// say). It reports false when a malformed cue point stopped the walk early.
+// say). It reports false when a malformed cue point stopped the walk early,
+// or when a video cue isn't independent (see cuePoints).
 func walkCuePoints(cues []byte, video uint64, fn func(ticks uint64, cluster int64)) bool {
 	complete := true
 	complete = childrenComplete(cues, func(id uint64, point []byte) {
@@ -535,8 +545,9 @@ func walkCuePoints(cues []byte, video uint64, fn func(ticks uint64, cluster int6
 				t, hasTime = readUint(v), true
 			case idCueTrackPos:
 				var (
-					track uint64
-					pos   int64 = -1
+					track     uint64
+					pos       int64 = -1
+					dependent bool
 				)
 				// Malformed data here could hide the video track's entry.
 				if !childrenComplete(v, func(id uint64, v []byte) {
@@ -545,12 +556,19 @@ func walkCuePoints(cues []byte, video uint64, fn func(ticks uint64, cluster int6
 						track = readUint(v)
 					case idCueClusterPosition:
 						pos = int64(readUint(v))
+					case idCueReference:
+						dependent = true
+					case idCueCodecState:
+						dependent = dependent || readUint(v) != 0
 					}
 				}) {
 					complete = false
 				}
 				if track == video {
 					isVideo, cluster = true, pos
+					if dependent {
+						complete = false
+					}
 				}
 			}
 		}) {
