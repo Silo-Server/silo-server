@@ -8,6 +8,7 @@
 package subsync
 
 import (
+	"cmp"
 	"errors"
 	"math"
 	"slices"
@@ -189,24 +190,23 @@ type windowLag struct {
 // choosing a lag, which finds subtitles whose windows are each too weak to
 // stand out (dialog under a laugh track or a score).
 func Align(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) (Alignment, error) {
-	signals, maps, search, err := prepare(windows, cues)
+	signals, cues, search, err := prepare(windows, cues)
 	if err != nil {
 		return Alignment{}, err
 	}
-	best := alignWindows(signals, maps, search)
+	best := alignWindows(signals, cues, search)
 	if best.Matched() {
 		return best, nil
 	}
-	if joint, ok := alignJoint(signals, maps, search); ok && joint.Matched() {
+	if joint, ok := alignJoint(signals, cues, search); ok && joint.Matched() {
 		return joint, nil
 	}
 	return best, nil
 }
 
-// prepare turns windows into speech signals and the cues they can reach
-// into one cue map per ratio of scaleCandidates, which both searches share,
-// with a searcher sized for the longest window.
-func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) ([]*speechSignal, []cueMap, *searcher, error) {
+// prepare turns windows into speech signals and drops the cues none of
+// them can reach, with a searcher sized for the longest window.
+func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) ([]*speechSignal, []subtitles.SubtitleCue, *searcher, error) {
 	if len(cues) == 0 {
 		return nil, nil, nil, ErrNoCues
 	}
@@ -225,21 +225,17 @@ func prepare(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) (
 	if len(cues) == 0 {
 		return nil, nil, nil, ErrNoCues
 	}
-	maps := make([]cueMap, len(scaleCandidates))
-	for i, scale := range scaleCandidates {
-		maps[i] = newCueMap(cues, scale)
-	}
-	return signals, maps, newSearcher(longest), nil
+	return signals, cues, newSearcher(longest), nil
 }
 
 // alignWindows fits a line through the windows' own best lags.
-func alignWindows(signals []*speechSignal, maps []cueMap, search *searcher) Alignment {
+func alignWindows(signals []*speechSignal, cues []subtitles.SubtitleCue, search *searcher) Alignment {
 	var best Alignment
 	var bestFit lineFit
 	var bestMap cueMap
 	var bestScale float64
-	for i, scale := range scaleCandidates {
-		cues := maps[i]
+	for _, scale := range scaleCandidates {
+		cues := newCueMap(cues, scale)
 		var lags []windowLag
 		for _, s := range signals {
 			if lag, ok := search.bestLag(s, cues); ok {
@@ -445,12 +441,25 @@ func newCueMap(cues []subtitles.SubtitleCue, scale float64) cueMap {
 	for _, c := range cues {
 		end = max(end, toFrame(c.End.Seconds()*scale)+1)
 	}
-	fine := make([]byte, end)
+	// Each frame is written at most once however long or overlapping the
+	// cues are: the cue spans are sorted and only their union is filled,
+	// so a subtitle of many long overlapping cues costs no more than the
+	// map's length.
+	spans := make([][2]int, 0, len(cues))
 	for _, c := range cues {
-		from, to := toFrame(c.Start.Seconds()*scale), toFrame(c.End.Seconds()*scale)
-		for i := max(from, 0); i < to && i < len(fine); i++ {
+		from, to := max(toFrame(c.Start.Seconds()*scale), 0), min(toFrame(c.End.Seconds()*scale), end)
+		if from < to {
+			spans = append(spans, [2]int{from, to})
+		}
+	}
+	slices.SortFunc(spans, func(a, b [2]int) int { return cmp.Compare(a[0], b[0]) })
+	fine := make([]byte, end)
+	filled := 0 // every frame before filled is written
+	for _, span := range spans {
+		for i := max(span[0], filled); i < span[1]; i++ {
 			fine[i] = 1
 		}
+		filled = max(filled, span[1])
 	}
 	coarse := make([]float64, (end+coarseFactor-1)/coarseFactor)
 	for i, v := range fine {

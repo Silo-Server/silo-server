@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -225,11 +226,29 @@ func TestAlignFindsDialogUnderALaughTrack(t *testing.T) {
 
 // alignWindowsOnly is Align without the joint search.
 func alignWindowsOnly(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) Alignment {
-	signals, maps, search, err := prepare(windows, cues)
+	signals, cues, search, err := prepare(windows, cues)
 	if err != nil {
 		return Alignment{}
 	}
-	return alignWindows(signals, maps, search)
+	return alignWindows(signals, cues, search)
+}
+
+// The cue map marks exactly the union of the cues' spans, whatever their
+// order, overlap, or reach past the start of the clock.
+func TestCueMapMarksTheUnionOfCues(t *testing.T) {
+	cue := func(from, to float64) subtitles.SubtitleCue {
+		return subtitles.SubtitleCue{Start: seconds(from), End: seconds(to), Lines: []string{"x"}}
+	}
+	m := newCueMap([]subtitles.SubtitleCue{
+		cue(0.08, 0.12), cue(0.02, 0.05), cue(0.03, 0.04), // nested, unsorted
+		cue(0.10, 0.15),  // overlapping the first
+		cue(-0.05, 0.01), // before the clock starts
+		cue(0.18, 0.18),  // empty
+	}, 1)
+	want := []byte{1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0}
+	if !slices.Equal(m.fine, want) {
+		t.Fatalf("fine = %v, want %v", m.fine, want)
+	}
 }
 
 func TestAlignInputs(t *testing.T) {

@@ -5,7 +5,11 @@ package subsync
 // evidence too weak to win any single window still adds up where the
 // subtitle belongs, while wrong lags, scattered, cancel out.
 
-import "math"
+import (
+	"math"
+
+	"github.com/Silo-Server/silo-server/internal/subtitles"
+)
 
 // lagCurve is one window's coarse correlation over every lag searched, as
 // widened standard scores: pooled[k] is coarse lag k-coarseRange (cue frame
@@ -163,7 +167,7 @@ func localLag(s *speechSignal, m cueMap, offset, prom float64) (windowLag, bool)
 // alignJoint finds the line the windows' summed lag curves agree on best,
 // then each window's own lag near it, fitted as alignWindows fits. ok is
 // false when no window produced a curve.
-func alignJoint(signals []*speechSignal, maps []cueMap, search *searcher) (Alignment, bool) {
+func alignJoint(signals []*speechSignal, cues []subtitles.SubtitleCue, search *searcher) (Alignment, bool) {
 	pool := int(math.Round(jointPoolSeconds / (frameSeconds * coarseFactor)))
 
 	var best jointPeak
@@ -171,8 +175,8 @@ func alignJoint(signals []*speechSignal, maps []cueMap, search *searcher) (Align
 	var bestMap cueMap
 	var bestScale float64
 	var bestCurves []lagCurve
-	for i, scale := range scaleCandidates {
-		m := maps[i]
+	for _, scale := range scaleCandidates {
+		m := newCueMap(cues, scale)
 		var curves []lagCurve
 		for _, s := range signals {
 			if c := search.curve(s, m, pool); c != nil {

@@ -94,11 +94,11 @@ func TestEval(t *testing.T) {
 
 // rawJoint runs the joint search alone.
 func rawJoint(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) Alignment {
-	signals, maps, search, err := prepare(windows, cues)
+	signals, cues, search, err := prepare(windows, cues)
 	if err != nil {
 		return Alignment{}
 	}
-	a, _ := alignJoint(signals, maps, search)
+	a, _ := alignJoint(signals, cues, search)
 	return a
 }
 
