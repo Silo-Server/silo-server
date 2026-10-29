@@ -94,7 +94,7 @@ git clone https://github.com/Silo-Server/silo-server.git
 cd silo-server
 cp .env.example .env
 chmod 600 .env
-printf '\nSECRET_KEY=%s\n' "$(openssl rand -base64 48)" >> .env
+key="$(openssl rand -base64 48)" && printf '\nSECRET_KEY=%s\n' "$key" >> .env
 ```
 
 Set `MEDIA_ROOT` in `.env` to the absolute path of your media, then:

@@ -204,8 +204,12 @@ done
 
 source_cluster=""
 if [[ -n "${DATABASE_URL:-}" ]]; then
-  # Silo's database is elsewhere; only its directories move.
-  (( ${#clusters[@]} == 0 )) || log "leaving the cluster in $(host "${clusters[0]}") alone: DATABASE_URL points Silo at another database"
+  # Silo's database is elsewhere; only its directories move. The earlier file
+  # set DATABASE_URL for Silo itself, so one in .env never reached it: beside
+  # the earlier stack's cluster, that cluster is the database Silo used.
+  if (( ${#clusters[@]} > 0 )); then
+    fail "DATABASE_URL in .env names another database, but the earlier stack ran Silo on the cluster in $(host "${clusters[0]}"): its Compose file set DATABASE_URL itself. Remove DATABASE_URL from .env to move that cluster here, or move $(host "${clusters[0]}") aside to keep using the other database"
+  fi
 elif (( ${#clusters[@]} > 1 )); then
   fail "found more than one PostgreSQL cluster under $host_root/postgres; move aside every one but the cluster Silo used"
 elif (( ${#clusters[@]} == 0 )); then

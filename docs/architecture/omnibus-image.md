@@ -267,7 +267,9 @@ into place, when:
   named volumes or other paths, and starting would make an empty server
   beside it.
 - The earlier install's directories exist without a cluster and `DATABASE_URL`
-  is unset.
+  is unset, or `.env` sets a `DATABASE_URL` beside the earlier stack's cluster:
+  the earlier file set `DATABASE_URL` for Silo itself, so that cluster is the
+  database Silo used, and moving on would point Silo at another one.
 - The old cluster's `PG_VERSION` is a link or holds no version number, it has
   a `postmaster.pid` (a server may still have it open), was written by another
   PostgreSQL major version, or keeps its WAL or a tablespace outside the data
