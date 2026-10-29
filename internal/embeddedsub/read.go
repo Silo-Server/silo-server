@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,9 @@ type ReadOptions struct {
 	// holds while reading; 0 means DefaultMaxBytes. A read that would hold
 	// more returns ErrTooLarge.
 	MaxBytes int64
+	// IdleIO makes the reads at the idle I/O priority on Linux, for a read
+	// nobody is waiting on. Network filesystems ignore it.
+	IdleIO bool
 }
 
 const (
@@ -118,7 +122,13 @@ func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, fr
 	if concurrency <= 0 {
 		concurrency = DefaultConcurrency
 	}
-	r := newFileReader(ctx, f, concurrency)
+	var src io.ReaderAt = f
+	if opts.IdleIO {
+		idle := newIdleReader(f, concurrency)
+		defer idle.close()
+		src = idle
+	}
+	r := newFileReader(ctx, src, concurrency)
 	b := newBudget(opts.MaxBytes)
 	var res *Result
 	switch idx.Container {

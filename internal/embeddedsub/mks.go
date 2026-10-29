@@ -50,6 +50,21 @@ func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 		return fmt.Errorf("embeddedsub: invalid timestamp scale %d", scale)
 	}
 	bw := bufio.NewWriterSize(w, 64<<10)
+	if _, err := bw.Write(mksHead(t, scale)); err != nil {
+		return err
+	}
+	if err := mksClusters(packets, scale, func(cluster []byte, _ []mksBlock) error {
+		_, err := bw.Write(cluster)
+		return err
+	}); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// mksHead is a stream's EBML header, the start of its segment, of unknown
+// size, and its Info and Tracks.
+func mksHead(t *Track, scale int64) []byte {
 	var b []byte
 	var header []byte
 	header = matroska.AppendUint(header, matroska.IDEBMLVersion, 1)
@@ -63,17 +78,36 @@ func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 	b = matroska.AppendID(b, matroska.IDSegment)
 	b = matroska.AppendUnknownSize(b)
 	var info []byte
-	info = matroska.AppendUint(info, matroska.IDTimestampScale, uint64(scale))
+	info = matroska.AppendUint(info, matroska.IDTimestampScale, uint64(scale)) //nolint:gosec // G115: callers check that scale is positive
 	info = matroska.AppendString(info, matroska.IDMuxingApp, "silo")
 	info = matroska.AppendString(info, matroska.IDWritingApp, "silo")
 	b = matroska.AppendElement(b, matroska.IDInfo, info)
-	b = matroska.AppendElement(b, matroska.IDTracks, matroska.AppendElement(nil, matroska.IDTrackEntry, mksTrackEntry(t)))
-	if _, err := bw.Write(b); err != nil {
-		return err
-	}
+	return matroska.AppendElement(b, matroska.IDTracks, matroska.AppendElement(nil, matroska.IDTrackEntry, mksTrackEntry(t)))
+}
 
+// mksBlock is where a block went in its cluster, for a cue.
+type mksBlock struct {
+	// ticks is the block's timestamp; rel the offset of its BlockGroup in
+	// the cluster's data.
+	ticks int64
+	rel   int64
+	// duration is how long the block's frames show, however the source
+	// said so: WriteMKS leaves an inferred one out of the block.
+	duration time.Duration
+}
+
+// mksClusters encodes packets as Matroska clusters and passes each whole
+// Cluster element to emit with the blocks it holds. emit may keep neither.
+// Without packets it emits one empty cluster: FFmpeg can't open a Matroska
+// stream that ends before its first cluster, and a window can hold no
+// packets.
+func mksClusters(packets []Packet, scale int64, emit func(cluster []byte, blocks []mksBlock) error) error {
+	if len(packets) == 0 {
+		return emit(matroska.AppendElement(nil, matroska.IDCluster, matroska.AppendUint(nil, matroska.IDClusterTimestamp, 0)), nil)
+	}
 	var (
 		cluster   []byte
+		blocks    []mksBlock
 		clusterTS int64
 		open      bool
 	)
@@ -81,8 +115,7 @@ func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 		if !open {
 			return nil
 		}
-		_, err := bw.Write(matroska.AppendElement(nil, matroska.IDCluster, cluster))
-		return err
+		return emit(matroska.AppendElement(nil, matroska.IDCluster, cluster), blocks)
 	}
 	for i := 0; i < len(packets); {
 		group := packets[i : i+lacedRun(packets[i:])]
@@ -98,16 +131,19 @@ func WriteMKS(w io.Writer, t *Track, scale int64, packets []Packet) error {
 			// cluster at zero.
 			clusterTS, open = max(ticks, 0), true
 			cluster = matroska.AppendUint(cluster[:0], matroska.IDClusterTimestamp, uint64(clusterTS))
+			blocks = blocks[:0]
 			if rel = ticks - clusterTS; rel < math.MinInt16 {
 				return errors.New("embeddedsub: packet timestamp too far before zero for Matroska")
 			}
 		}
+		var duration time.Duration
+		for _, f := range group {
+			duration += f.Duration
+		}
+		blocks = append(blocks, mksBlock{ticks: ticks, rel: int64(len(cluster)), duration: duration})
 		cluster = matroska.AppendElement(cluster, matroska.IDBlockGroup, mksBlockGroup(group, rel, scale))
 	}
-	if err := flush(); err != nil {
-		return err
-	}
-	return bw.Flush()
+	return flush()
 }
 
 // lacedRun returns how many packets, from the first, are the frames of one
