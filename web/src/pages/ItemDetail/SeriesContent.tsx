@@ -80,7 +80,7 @@ export default function SeriesContent({
   const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Creator"), [item.crew]);
 
   const title = item.title ?? "";
-  const firstYear = item.first_air_date?.slice(0, 4);
+  const firstYear = item.first_air_date?.slice(0, 4) ?? (item.year ? String(item.year) : undefined);
   const lastYear = item.last_air_date?.slice(0, 4);
   const yearDisplay = firstYear
     ? lastYear && lastYear !== firstYear

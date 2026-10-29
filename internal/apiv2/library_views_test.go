@@ -121,6 +121,8 @@ func (f *fakeLibraryAdmin) SetLibraryProviders(_ context.Context, id int, levels
 
 type fakeLibraryViews struct {
 	err error
+	// lastViewer is the viewer LibrarySections last saw.
+	lastViewer handlers.SectionViewer
 }
 
 func fakeCard() handlers.SectionItemView {
@@ -143,6 +145,7 @@ func (f *fakeLibraryViews) LibrarySections(_ context.Context, libraryID int, vie
 	if f.err != nil {
 		return handlers.SectionsView{}, f.err
 	}
+	f.lastViewer = viewer
 	return handlers.SectionsView{Sections: []handlers.SectionView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}}}, nil
 }
 

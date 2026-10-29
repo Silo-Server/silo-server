@@ -33,6 +33,10 @@ import (
 // that was redirected to another scheme, host or port, which it does not follow.
 const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to another address. Enter the address it redirects to, such as its https:// URL, and enter the API key again."
 
+// adminMeilisearchKeyRejectedMessage answers a check whose key, or missing
+// key, Meilisearch refused for an authenticated request.
+const adminMeilisearchKeyRejectedMessage = "Meilisearch refused the API key, or requires one. Enter a key that can manage indexes and documents, such as the Default Admin API Key."
+
 const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
 type adminSettingsConnectionCheckRequest struct {
@@ -195,7 +199,7 @@ func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCh
 
 func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, connection *chatgpt.Service) connectionCheckResponse {
 	if cfg.AI.AuthMode != llm.AuthModeChatGPT && strings.TrimSpace(cfg.AI.BaseURL) == "" {
-		return connectionCheckResponse{Success: false, Message: "Text AI base URL is required."}
+		return connectionCheckResponse{Success: false, Message: "Choose a text provider."}
 	}
 	if strings.TrimSpace(cfg.AI.ChatModel) == "" {
 		return connectionCheckResponse{Success: false, Message: "Chat model is required."}
@@ -229,14 +233,10 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, con
 }
 
 func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
-	effectiveBaseURL := strings.TrimSpace(cfg.AI.ASRBaseURL)
-	if effectiveBaseURL == "" {
-		effectiveBaseURL = strings.TrimSpace(cfg.AI.BaseURL)
-	}
-	if effectiveBaseURL == "" {
+	if strings.TrimSpace(cfg.AI.ASRBaseURL) == "" {
 		return connectionCheckResponse{
 			Success: false,
-			Message: "Speech-to-text base URL is required.",
+			Message: "Choose a speech-to-text provider.",
 		}
 	}
 	if strings.TrimSpace(cfg.AI.ASRModel) == "" {
@@ -285,13 +285,13 @@ func transcriptionCheckFailureMessage(err error) string {
 	if status, ok := errors.AsType[*llm.HTTPError](err); ok {
 		switch status.StatusCode {
 		case http.StatusUnauthorized:
-			return "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."
+			return "Speech-to-text authentication failed. Replace the provider's API key in AI Services."
 		case http.StatusForbidden:
 			return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
 		case http.StatusPaymentRequired:
 			return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
 		case http.StatusNotFound:
-			return "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."
+			return "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."
 		case http.StatusTooManyRequests:
 			return "Speech-to-text provider is rate limiting requests. Try again later."
 		}
@@ -324,6 +324,9 @@ func checkMeilisearchConnection(ctx context.Context, settings map[string]string)
 		if errors.Is(err, catalog.ErrMeilisearchCheckRedirected) {
 			return connectionCheckResponse{Message: adminMeilisearchRedirectMessage, safeMessage: adminMeilisearchRedirectMessage}
 		}
+		if errors.Is(err, catalog.ErrMeilisearchCheckKeyRejected) {
+			return connectionCheckResponse{Message: adminMeilisearchKeyRejectedMessage, safeMessage: adminMeilisearchKeyRejectedMessage}
+		}
 		return connectionCheckResponse{Success: false, Message: err.Error()}
 	}
 	return connectionCheckResponse{Success: true, Message: "Meilisearch connection successful"}
@@ -351,38 +354,15 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 	}
 
 	storedMeilisearchURL := merged[catalog.SearchSettingMeilisearchURL]
-	var storedAIConfig *config.Config
-	if kind == "ai_chat" || kind == "ai_transcription" {
-		storedAIConfig, err = config.LoadFromDB(merged)
-		if err != nil {
-			return nil, err
-		}
-	}
-	// A stored configuration that does not load has no base URL its
-	// embedding token may go to.
-	storedEmbeddingBaseURL := ""
-	if kind == "recommendations_embedding" {
-		if stored, loadErr := config.LoadFromDB(merged); loadErr == nil {
-			storedEmbeddingBaseURL = stored.Recommendations.EmbeddingBaseURL
-		}
-	}
 	for _, key := range req.DirtyKeys {
-		if key == recommendations.EmbeddingLockSettingKey {
-			// The lock is server state the embedding check compares a draft
-			// against, not a value a draft can replace.
+		// The lock is server state the embedding check compares a draft
+		// against, and the provider registry holds stored keys a draft could
+		// otherwise send elsewhere. AI and embedding drafts select a provider
+		// by id, which reaches only that provider's own address.
+		if key == recommendations.EmbeddingLockSettingKey || machineManagedSettingKeys[key] {
 			continue
 		}
 		merged[key] = req.Values[key]
-	}
-	if storedAIConfig != nil {
-		draftAIConfig, loadErr := config.LoadFromDB(merged)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		protectAIConnectionCheckSecrets(kind, req, storedAIConfig, draftAIConfig, merged)
-	}
-	if kind == "recommendations_embedding" {
-		protectEmbeddingConnectionCheckSecret(req, storedEmbeddingBaseURL, merged)
 	}
 	if kind == "meilisearch" &&
 		(storedMeilisearchURL == "" || endpointAuthority(storedMeilisearchURL) != endpointAuthority(merged[catalog.SearchSettingMeilisearchURL])) &&
@@ -391,57 +371,6 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 	}
 
 	return merged, nil
-}
-
-// embeddingTokenSettingKeys hold the embedding provider's token: the token,
-// then the legacy OpenAI key it falls back to.
-var embeddingTokenSettingKeys = []string{"recommendations.embedding_auth_token", "recommendations.openai_api_key"}
-
-// protectEmbeddingConnectionCheckSecret sends the stored embedding token only
-// to the base URL it was saved for (same scheme, host and port). A draft that
-// points the check elsewhere, by its base URL or a legacy provider setting,
-// is checked with the token it carries itself, or none, so a check cannot
-// hand the saved token to another server.
-func protectEmbeddingConnectionCheckSecret(req adminSettingsConnectionCheckRequest, storedBaseURL string, settings map[string]string) {
-	draft, err := config.LoadFromDB(settings)
-	if err == nil && storedBaseURL != "" && endpointAuthority(draft.Recommendations.EmbeddingBaseURL) == endpointAuthority(storedBaseURL) {
-		return
-	}
-	for _, key := range embeddingTokenSettingKeys {
-		if !hasExplicitDraftSecret(req, key) {
-			settings[key] = ""
-		}
-	}
-}
-
-func protectAIConnectionCheckSecrets(
-	kind string,
-	req adminSettingsConnectionCheckRequest,
-	storedCfg *config.Config,
-	draftCfg *config.Config,
-	settings map[string]string,
-) {
-	storedEndpoint := storedCfg.AI.BaseURL
-	draftEndpoint := draftCfg.AI.BaseURL
-	if kind == "ai_transcription" {
-		if strings.TrimSpace(storedCfg.AI.ASRBaseURL) != "" {
-			storedEndpoint = storedCfg.AI.ASRBaseURL
-		}
-		if strings.TrimSpace(draftCfg.AI.ASRBaseURL) != "" {
-			draftEndpoint = draftCfg.AI.ASRBaseURL
-		}
-	}
-	if endpointAuthority(storedEndpoint) == endpointAuthority(draftEndpoint) {
-		return
-	}
-
-	if kind == "ai_transcription" && !hasExplicitDraftSecret(req, "ai.asr_api_key") {
-		settings["ai.asr_api_key"] = ""
-	}
-	if !hasExplicitDraftSecret(req, "ai.api_key") {
-		settings["ai.api_key"] = ""
-		settings["subtitle_ai.api_key"] = ""
-	}
 }
 
 func hasExplicitDraftSecret(req adminSettingsConnectionCheckRequest, key string) bool {
@@ -702,7 +631,7 @@ func checkRecommendationsEmbeddingConnection(
 	if strings.TrimSpace(cfg.Recommendations.EmbeddingBaseURL) == "" {
 		return connectionCheckResponse{
 			Success: false,
-			Message: "Embedding base URL is required.",
+			Message: "Choose an embedding provider.",
 		}
 	}
 	if strings.TrimSpace(cfg.Recommendations.EmbeddingModel) == "" {

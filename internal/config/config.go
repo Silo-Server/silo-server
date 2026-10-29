@@ -205,6 +205,21 @@ type PlaybackConfig struct {
 	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
 	// from one complete keyframe-planned playlist (#1466).
 	KeyframePlaylist bool `yaml:"-"`
+	// AutomaticBandwidthProbeOff is playback.bandwidth_probe_automatic turned
+	// off, so a zero config keeps automatic speed tests on.
+	AutomaticBandwidthProbeOff bool `yaml:"-"`
+	// BandwidthProbeMaxAgeDays is playback.bandwidth_probe_max_age_days; 0
+	// means DefaultBandwidthProbeMaxAgeDays.
+	BandwidthProbeMaxAgeDays int `yaml:"-"`
+}
+
+// BandwidthProbeMaxAge is how long a connection speed reading lasts.
+func (c PlaybackConfig) BandwidthProbeMaxAge() time.Duration {
+	days := c.BandwidthProbeMaxAgeDays
+	if days <= 0 {
+		days = DefaultBandwidthProbeMaxAgeDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // RedisConfig holds Redis connection settings.
@@ -237,11 +252,22 @@ type authConfigRaw struct {
 }
 
 // AudiobookshelfCompatConfig holds the dedicated ABS-compat listener setting.
-// The listener binds its own port (:13378, ABS's
+// The listener binds its own port (ABS_PORT, default :13378, ABS's
 // conventional port) and serves the full ABS protocol — login, libraries,
 // items, sessions — without colliding with silo's SPA on the main listener.
+// An empty Listen means the listener is disabled.
 type AudiobookshelfCompatConfig struct {
 	Listen string `yaml:"-"`
+}
+
+// WithBootstrapListen returns the config of a process started with ABS_PORT:
+// an enabled listener moves to listen, a disabled one stays disabled. An empty
+// listen changes nothing.
+func (c AudiobookshelfCompatConfig) WithBootstrapListen(listen string) AudiobookshelfCompatConfig {
+	if c.Listen != "" && listen != "" {
+		c.Listen = listen
+	}
+	return c
 }
 
 // JellyfinCompatConfig holds compatibility proxy settings.
@@ -279,6 +305,7 @@ type jellyfinCompatConfigRaw struct {
 // RecommendationsConfig holds AI recommendation engine settings.
 type RecommendationsConfig struct {
 	Enabled                bool    `yaml:"-"`
+	EmbeddingProviderID    string  `yaml:"-"` // resolved into EmbeddingBaseURL and EmbeddingAuthToken
 	EmbeddingBaseURL       string  `yaml:"-"`
 	EmbeddingModel         string  `yaml:"-"`
 	EmbeddingAuthToken     string  `yaml:"-"`
@@ -301,13 +328,19 @@ type RecommendationsConfig struct {
 // transcription (operators often run a dedicated Whisper server). Settings
 // load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
 type AIConfig struct {
-	AuthMode          string `yaml:"-"`
-	ReasoningEffort   string `yaml:"-"`
-	BaseURL           string `yaml:"-"`
-	APIKey            string `yaml:"-"`
-	ChatModel         string `yaml:"-"`
-	ASRBaseURL        string `yaml:"-"` // empty = BaseURL
-	ASRAPIKey         string `yaml:"-"` // empty = APIKey
+	AuthMode        string `yaml:"-"`
+	ReasoningEffort string `yaml:"-"`
+	// TextProviderID selects the API-key text provider in ai.providers;
+	// BaseURL and APIKey are its resolved chat endpoint and key.
+	TextProviderID string `yaml:"-"`
+	BaseURL        string `yaml:"-"`
+	APIKey         string `yaml:"-"`
+	ChatModel      string `yaml:"-"`
+	// SpeechProviderID selects the speech-to-text provider; ASRBaseURL and
+	// ASRAPIKey are its resolved endpoint and key, empty when none is chosen.
+	SpeechProviderID  string `yaml:"-"`
+	ASRBaseURL        string `yaml:"-"`
+	ASRAPIKey         string `yaml:"-"`
 	ASRModel          string `yaml:"-"`
 	MaxConcurrentJobs int    `yaml:"-"` // one shared bound across all AI job services
 }
@@ -398,6 +431,10 @@ type MetadataConfig struct {
 	// PersonRefreshPerMinute caps background person metadata lookups per API
 	// node (metadata.person_refresh_per_minute).
 	PersonRefreshPerMinute int `yaml:"-"`
+	// FallbackLanguage is the language refreshes fall back to before the
+	// original language (metadata.fallback_language). Empty means none: the
+	// setting's "original" value. An empty stored setting is the default, en.
+	FallbackLanguage string `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.
@@ -514,6 +551,10 @@ const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 
+// defaultJellyfinCompatPlaybackSessionTTL matches playback.MaxTokenTTL, the
+// lifetime the compat router gives a play session when nothing overrides it.
+const defaultJellyfinCompatPlaybackSessionTTL = "24h"
+
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
 func parseDuration(s string) (time.Duration, error) {
@@ -607,7 +648,7 @@ func setDefaults() *configRaw {
 			WebDir:                DefaultJellyfinWebDir,
 			WebInstallDir:         DefaultJellyfinWebInstallDir,
 			SessionTTL:            "87600h",
-			PlaybackSessionTTL:    "6h",
+			PlaybackSessionTTL:    defaultJellyfinCompatPlaybackSessionTTL,
 		},
 	}
 }

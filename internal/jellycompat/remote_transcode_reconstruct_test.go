@@ -182,7 +182,7 @@ func (s failLocalRecipeStore) Update(id string, fn func(*PlaybackSession) error)
 	})
 }
 
-func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFails(t *testing.T) {
+func TestEnsureLocalTranscodeKeepsRemoteRuntimeAndRestoresRecipeWhenCentralUpdateFails(t *testing.T) {
 	previousTimeout := compatManifestStartupTimeout
 	compatManifestStartupTimeout = time.Second
 	t.Cleanup(func() { compatManifestStartupTimeout = previousTimeout })
@@ -245,10 +245,12 @@ func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFa
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("ensure local transcode error = %v, want central update failure", err)
 	}
+	// The node fences a stopped transport against reconstruction, so the
+	// rollback must leave the remote job running for the restored recipe.
 	select {
 	case <-remoteStopped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("remote runtime was not stopped during local replacement")
+		t.Fatal("remote runtime was stopped although the local replacement rolled back")
+	default:
 	}
 	if got := recipeStore.Operations(); len(got) != 2 || got[0] != "delete:upstream-1" || got[1] != "put:upstream-1" {
 		t.Fatalf("node recipe operations = %v, want delete followed by rollback put", got)
@@ -260,6 +262,58 @@ func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFa
 	stored, ok := baseStore.Get("play-1")
 	if !ok || stored.Recipe == nil || stored.Recipe.TranscodeNodeURL != remoteNode.URL {
 		t.Fatalf("central recipe = %+v, found=%v, want prior remote recipe", stored.Recipe, ok)
+	}
+}
+
+func TestPersistLocalTranscodeStopsReplacedRemoteAfterCommit(t *testing.T) {
+	baseStore := NewPlaybackSessionStore(time.Hour, nil)
+	var recipeAtStop atomic.Pointer[playback.RecipeCard]
+	remoteStopped := make(chan struct{}, 1)
+	remoteNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1" {
+			if stored, ok := baseStore.Get("play-1"); ok {
+				recipeAtStop.Store(stored.Recipe)
+			}
+			remoteStopped <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(remoteNode.Close)
+
+	oldRecipe := playback.NewRecipeCard(7, "profile-1", 42, remoteNode.URL, playback.TranscodeOpts{
+		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		SegmentDuration: 2,
+	})
+	baseStore.Put(PlaybackSession{
+		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true, Recipe: &oldRecipe,
+	})
+	recipeStore := &stubRecipeNodeStore{cards: map[string]playback.RecipeCard{"upstream-1": oldRecipe}}
+	handler := &PlaybackHandler{
+		playbackStore: baseStore,
+		sessionMgr: &lockedCompatSessionManager{session: playback.Session{
+			ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
+			PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode,
+		}},
+		tm:              playback.NewTranscodeManager(),
+		JWTSecret:       "test-secret",
+		RecipeNodeStore: recipeStore,
+	}
+
+	if err := handler.persistTranscodeRecipe(context.Background(), "play-1", "upstream-1", playback.TranscodeOpts{
+		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		SegmentDuration: 2, HWAccel: playback.HWAccelNone,
+	}); err != nil {
+		t.Fatalf("persist local recipe: %v", err)
+	}
+	select {
+	case <-remoteStopped:
+	default:
+		t.Fatal("replaced remote runtime was not stopped after the local recipe committed")
+	}
+	if got := recipeAtStop.Load(); got == nil || got.TranscodeNodeURL != "" {
+		t.Fatalf("central recipe when the remote stop arrived = %+v, want the committed local recipe", got)
 	}
 }
 
@@ -299,6 +353,8 @@ func (m *lockedCompatSessionManager) SetTranscodeStreamDetails(
 	transcodeAudio bool,
 	hwAccel string,
 	mode tonemap.Mode,
+	targetResolution string,
+	targetBitrateKbps int,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -307,6 +363,8 @@ func (m *lockedCompatSessionManager) SetTranscodeStreamDetails(
 	m.session.TranscodeAudio = transcodeAudio
 	m.session.TranscodeHWAccel = hwAccel
 	m.session.ToneMapMode = mode
+	m.session.TargetResolution = targetResolution
+	m.session.TargetBitrateKbps = targetBitrateKbps
 	return nil
 }
 

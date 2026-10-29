@@ -19,7 +19,7 @@ type AdminSubtitleListInput struct {
 	LimitParam
 	Cursor      string `query:"cursor" maxLength:"8192"`
 	Provider    string `query:"provider" maxLength:"128"`
-	Language    string `query:"language" maxLength:"128"`
+	Language    string `query:"language" maxLength:"128" doc:"BCP 47 tag or ISO 639 code; legacy spellings of the same language also match"`
 	UserID      ID     `query:"user_id"`
 	MediaFileID ID     `query:"media_file_id"`
 	Search      string `query:"q" maxLength:"1024" doc:"Case-insensitive release-name pattern; percent and underscore retain SQL wildcard semantics."`
@@ -30,7 +30,7 @@ type AdminStoredSubtitle struct {
 	MediaFileID      ID      `json:"media_file_id"`
 	MediaContentID   string  `json:"media_content_id,omitempty"`
 	Provider         string  `json:"provider"`
-	Language         string  `json:"language"`
+	Language         string  `json:"language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$" doc:"BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)"`
 	Format           string  `json:"format"`
 	ReleaseName      string  `json:"release_name"`
 	Score            float64 `json:"score"`

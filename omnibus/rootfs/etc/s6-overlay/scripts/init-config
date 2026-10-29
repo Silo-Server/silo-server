@@ -1,0 +1,178 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Lay out /config, decide which bundled services run, and publish the
+# connection settings Silo needs as environment for the later services.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+# Start from nothing: a restart of this container keeps /run, and a flag left
+# from the last start (such as node access) must not outlive its setting.
+rm -rf "$STATE_DIR"
+install -d -m 0755 "$STATE_DIR"
+
+# One directory per service, each owned by that service's account. /config
+# stays root's, so no service account can swap a service directory for a
+# symlink; inside one, files are written as its account, never as root.
+install -d -o root -g root -m 0755 /config
+install -d -o silo -g silo /config/silo
+install -d -o postgres -g postgres -m 0750 /config/postgres
+install -d -o redis -g redis -m 0750 /config/redis
+install -d -o meilisearch -g meilisearch -m 0750 /config/meilisearch
+# Root-owned, so the postgres account opens it read-write (see lib.sh) but
+# never replaces it. A file from an earlier image is fixed in place: replacing
+# it would let a second container lock a different file.
+[[ -f "$PG_LOCK" ]] || install /dev/null "$PG_LOCK"
+chown root:postgres "$PG_LOCK"
+chmod 0660 "$PG_LOCK"
+# Local artwork can put millions of files under /config/silo, too many to walk
+# on every start. Walk it when the silo account's ids differ from the last
+# walk's, or when an entry in the top two levels is owned wrong, as in a
+# restored or copied-in directory. Delete the marker to force a walk.
+owner_marker=/config/.silo-owner
+silo_ids="$(id -u silo):$(id -g silo)"
+if [[ "$(cat "$owner_marker" 2>/dev/null)" != "$silo_ids" ]] ||
+  [[ -n "$(find /config/silo -mindepth 1 -maxdepth 2 \( ! -user silo -o ! -group silo \) -print -quit)" ]]; then
+  own_tree silo silo /config/silo
+  printf '%s\n' "$silo_ids" > "$owner_marker"
+fi
+s6-setuidgid silo mkdir -p /config/silo/artwork /config/silo/compat /config/silo/plugins
+install -d -o postgres -g postgres -m 2775 /run/postgresql
+# Silo's transcode and prepared-download defaults live under /tmp. Mount them
+# to keep them across container recreation. Silo owns these entries, and /tmp's
+# sticky bit lets an owner replace its own, so drop a symlink in their place
+# before root touches them.
+for dir in /tmp/silo-transcode /tmp/silo-download-artifacts; do
+  [[ ! -L "$dir" ]] || rm -f "$dir"
+done
+install -d -o silo -g silo /tmp/silo-transcode /tmp/silo-download-artifacts
+# Mounted copies can hold files from an earlier PUID, or from the Compose
+# stack's root-run Silo, that Silo must be able to clean up.
+own_tree silo silo /tmp/silo-transcode
+own_tree silo silo /tmp/silo-download-artifacts
+
+# Proxy and transcode nodes run against the main server's PostgreSQL and
+# Redis and start none of the bundled services.
+case "${MODE:-integrated}" in
+  integrated|api) ;;
+  *)
+    if [[ -z "${DATABASE_URL:-}" || -z "${REDIS_URL:-}" ]]; then
+      echo "MODE=$MODE needs DATABASE_URL and REDIS_URL pointing at the main server's PostgreSQL and Redis" >&2
+      exit 1
+    fi
+    for name in ENABLE_REDIS ENABLE_MEILISEARCH ENABLE_NODE_ACCESS; do
+      if truthy "${!name:-false}"; then warn "$name has no effect with MODE=$MODE"; fi
+    done
+    log "mode: $MODE, on the main server's PostgreSQL and Redis"
+    exit 0
+    ;;
+esac
+
+# ENABLE_NODE_ACCESS opens the bundled PostgreSQL and Redis to proxy and
+# transcode nodes on other hosts, behind passwords. Silo itself keeps using the
+# socket and loopback.
+node_access=false
+if truthy "${ENABLE_NODE_ACCESS:-false}"; then node_access=true; fi
+
+# PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere.
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  : > "$STATE_DIR/postgres.enabled"
+  export_env DATABASE_URL "postgres://silo@/silo?host=/run/postgresql&sslmode=disable"
+  postgres_state="bundled"
+  if [[ "$node_access" == true ]]; then
+    if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
+      echo "ENABLE_NODE_ACCESS needs POSTGRES_PASSWORD, the password nodes sign in to PostgreSQL with as silo" >&2
+      exit 1
+    fi
+    : > "$STATE_DIR/postgres.network"
+    postgres_state="bundled, open to nodes"
+  fi
+  # Tune the bundled cluster by default, within half the container's memory,
+  # since Silo shares the container with it. A database of the deployment's
+  # own keeps Silo's default, which leaves it alone.
+  [[ -n "${POSTGRES_TUNE:-}${SILO_POSTGRES_TUNE:-}" ]] || export_env POSTGRES_TUNE auto
+  [[ -n "${POSTGRES_TUNE_MEMORY_BUDGET_PERCENT:-}${SILO_POSTGRES_TUNE_MEMORY_BUDGET_PERCENT:-}" ]] ||
+    export_env POSTGRES_TUNE_MEMORY_BUDGET_PERCENT 50
+else
+  # Not the URL itself: it can carry a password.
+  postgres_state="external"
+  if [[ "$node_access" == true ]]; then
+    warn "ENABLE_NODE_ACCESS opens only the bundled PostgreSQL; nodes reach the one DATABASE_URL names directly"
+  fi
+fi
+
+# Redis: off by default. An explicit REDIS_URL always wins over the bundle.
+# Meilisearch search keeps its paging sessions in Redis and answers 503
+# without it, so choosing Meilisearch turns the bundled Redis on too. Silo
+# trims and lowercases the provider, so compare it the same way.
+env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+if [[ -n "${REDIS_URL:-}" ]]; then
+  redis_state="external"
+  if [[ "$node_access" == true ]]; then
+    warn "ENABLE_NODE_ACCESS opens only the bundled Redis; nodes reach the one REDIS_URL names directly"
+  fi
+elif [[ "$node_access" == true ]]; then
+  # Nodes need Redis, and the one the main server uses. The password goes
+  # into a URL, so keep it to characters that need no escaping there.
+  if [[ ! "${REDIS_PASSWORD:-}" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+    echo "ENABLE_NODE_ACCESS needs REDIS_PASSWORD made of letters, digits, and . _ ~ - (openssl rand -hex 24 makes one)" >&2
+    exit 1
+  fi
+  : > "$STATE_DIR/redis.enabled"
+  # $STATE_DIR is root's, so writing here as root is safe; only redis reads it.
+  (umask 077 && printf 'requirepass %s\n' "$REDIS_PASSWORD" > "$STATE_DIR/redis-auth.conf")
+  chown redis:redis "$STATE_DIR/redis-auth.conf"
+  export_env REDIS_URL "redis://:$REDIS_PASSWORD@127.0.0.1:6379"
+  redis_state="bundled, open to nodes"
+elif truthy "${ENABLE_REDIS:-false}" || truthy "${ENABLE_MEILISEARCH:-false}" || [[ "$env_provider" == meilisearch ]]; then
+  : > "$STATE_DIR/redis.enabled"
+  export_env REDIS_URL "redis://127.0.0.1:6379"
+  redis_state="bundled"
+  truthy "${ENABLE_REDIS:-false}" || redis_state="bundled (Meilisearch search needs it)"
+else
+  redis_state="off"
+fi
+
+# Meilisearch: off by default. The master key is generated once and kept in
+# /config/meilisearch/master-key unless MEILI_MASTER_KEY is provided. Silo
+# connects to it through SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and
+# SILO_MEILISEARCH_API_KEY; a value the deployment sets itself wins.
+user_provider="${SILO_SEARCH_PROVIDER:-}"
+if truthy "${ENABLE_MEILISEARCH:-false}"; then
+  : > "$STATE_DIR/meilisearch.enabled"
+  key_file=/config/meilisearch/master-key
+  if [[ -n "${MEILI_MASTER_KEY:-}" ]]; then
+    key="$MEILI_MASTER_KEY"
+  elif [[ -s "$key_file" ]]; then
+    key="$(s6-setuidgid meilisearch cat "$key_file")"
+  else
+    key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf '%s\n' "$key" | (umask 077 && write_as meilisearch "$key_file")
+    log "generated a Meilisearch master key at $key_file"
+  fi
+  (umask 077 && printf '%s' "$key" > "$STATE_DIR/meili-master-key")
+  if [[ -z "$user_provider" ]]; then
+    export_env SILO_SEARCH_PROVIDER meilisearch
+    : > "$SEARCH_MARKER"
+  fi
+  [[ -n "${SILO_MEILISEARCH_URL:-}" ]] || export_env SILO_MEILISEARCH_URL "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}"
+  [[ -n "${SILO_MEILISEARCH_API_KEY:-}" ]] || export_env SILO_MEILISEARCH_API_KEY "$key"
+  meilisearch_state="bundled"
+else
+  # Turning the bundle off moves search back to PostgreSQL. The marker says
+  # this image chose Meilisearch, so a provider set any other way is left
+  # alone. svc-search-marker deletes it once Silo is up, which means Silo has
+  # stored the change; until then every start retries it. After that the admin
+  # UI can change the provider again.
+  if [[ -e "$SEARCH_MARKER" && -z "$user_provider" ]]; then
+    export_env SILO_SEARCH_PROVIDER postgres
+    : > "$STATE_DIR/search-marker.retire"
+  fi
+  meilisearch_state="off"
+fi
+# A provider the deployment sets itself replaces the image's choice for good.
+[[ -z "$user_provider" ]] || rm -f "$SEARCH_MARKER"
+
+log "postgres: $postgres_state"
+log "redis: $redis_state"
+log "meilisearch: $meilisearch_state"

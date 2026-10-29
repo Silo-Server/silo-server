@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/clientclock"
 )
 
 // StatusEvent identifies one local-device report for one registry revision.
@@ -17,6 +19,16 @@ type StatusEvent struct {
 
 var ErrInvalidStatusEvent = errors.New("invalid download status event")
 
+// validate refuses an event without a revision or time, or one dated further
+// ahead than a device clock plausibly drifts. A time slightly ahead of now is
+// kept as reported so the device's own ordering of its events survives.
+func (e StatusEvent) validate(now time.Time) error {
+	if e.Revision < 1 || e.UpdatedAt.IsZero() || clientclock.TooFarAhead(e.UpdatedAt, now) {
+		return ErrInvalidStatusEvent
+	}
+	return nil
+}
+
 func (s *Service) ReportStatus(ctx context.Context, userID int, profileID, deviceID, id string, event StatusEvent) (*Download, error) {
 	if profileID == "" || deviceID == "" {
 		return nil, ErrProfileRequired
@@ -24,8 +36,8 @@ func (s *Service) ReportStatus(ctx context.Context, userID int, profileID, devic
 	if event.Status != StatusDownloading && event.Status != StatusCompleted {
 		return nil, ErrInvalidStatus
 	}
-	if event.Revision < 1 || event.UpdatedAt.IsZero() || event.UpdatedAt.After(time.Now()) {
-		return nil, ErrInvalidStatusEvent
+	if err := event.validate(time.Now()); err != nil {
+		return nil, err
 	}
 	d, err := s.repo.ReportStatus(ctx, userID, profileID, deviceID, id, event)
 	if err == nil && event.Status == StatusCompleted && s.artifacts != nil {

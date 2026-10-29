@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/go-chi/chi/v5"
@@ -24,10 +24,12 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -45,8 +47,9 @@ const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	watcher *nodeconfig.Watcher
-	tracker *nodesessions.Tracker
+	probeLimiter *bandwidthprobe.Limiter
+	watcher      *nodeconfig.Watcher
+	tracker      *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
 	nodeRowID            func() (int, bool)
@@ -142,6 +145,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
+		probeLimiter: bandwidthprobe.NewLimiter(),
 	}
 	if watcher != nil {
 		server.nodeRowID = watcher.NodeRowID
@@ -250,6 +254,8 @@ func (s *Server) router() chi.Router {
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Accept", "Authorization", "Content-Type", proxyRangeHeader,
+			"X-Silo-Device-Name", "X-Silo-Device-Platform", "X-Silo-Client-Family", "X-Profile-Token",
+			"X-Silo-Device-Id", "X-Silo-Client", "X-Silo-Client-Version", "X-Profile-Id", "X-Silo-Client-Build", "X-Silo-Client-Channel",
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
 		// direct_stream_resume_v1 has the client re-request a byte range with
@@ -261,7 +267,7 @@ func (s *Server) router() chi.Router {
 		// different origin than the web app, which is the normal deployment.
 		ExposedHeaders: []string{
 			"Accept-Ranges", "Content-Encoding", "Content-Length", "Content-Range",
-			"ETag", "Last-Modified",
+			"ETag", "Last-Modified", "Retry-After",
 		},
 		MaxAge: 86400,
 	}))
@@ -273,6 +279,7 @@ func (s *Server) router() chi.Router {
 	r.Group(func(r chi.Router) {
 		// Streaming and download bytes count toward the node's measured egress.
 		r.Use(s.meterEgress)
+		r.Get("/stream/bandwidth-probe/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/bandwidth-probe/{token}", s.handleBandwidthProbe))
 		r.Head("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Get("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Head("/stream/remux/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/remux/{token}", s.handleRemux))
@@ -408,7 +415,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -798,7 +805,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(claims.MediaPath)
+	f, err := fspath.Open(claims.MediaPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -810,7 +817,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := filepath.Base(claims.MediaPath)
+	filename := fspath.Display(filepath.Base(claims.MediaPath))
 	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
 		w.Header().Set("Content-Disposition", disposition)
 	}
@@ -1005,6 +1012,7 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 		SourceAudioChannels:       claims.SourceAudioChannels,
 		TargetAudioChannels:       claims.TargetAudioChannels,
 		TargetAudioBitrateKbps:    claims.TargetAudioBitrateKbps,
+		CopyAudioCodec:            claims.CopyAudioCodec,
 	})
 }
 
@@ -1183,7 +1191,8 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 
 	resp, err := transcodeproxy.DoNode(s.httpClient, req, claims.TranscodeNode, "stream")
 	if err != nil {
-		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
+		// The forwarded query can carry the player's account token.
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", logredact.SanitizeURLError(err), "url", logredact.SanitizeURL(targetURL), "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}

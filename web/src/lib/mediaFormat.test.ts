@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   audioTrackHasAtmos,
   audioTrackLabel,
+  compactHdrSuffix,
   formatChannels,
   formatCodecLabel,
   formatFileSize,
@@ -100,6 +101,14 @@ describe("prettyResolution", () => {
   it("returns null for missing values", () => {
     expect(prettyResolution(undefined)).toBeNull();
     expect(prettyResolution("  ")).toBeNull();
+  });
+});
+
+describe("compactHdrSuffix", () => {
+  it("keeps HDR10+, but Dolby Vision wins on a DV + HDR10+ file", () => {
+    expect(compactHdrSuffix("HDR10+")).toBe("HDR10+");
+    expect(compactHdrSuffix("DV HDR10+")).toBe("DV");
+    expect(compactHdrSuffix("HDR10")).toBe("HDR");
   });
 });
 

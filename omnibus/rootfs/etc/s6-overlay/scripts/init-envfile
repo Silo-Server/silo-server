@@ -1,0 +1,75 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# FILE__NAME=/path makes NAME the contents of that file, so secrets such as
+# SECRET_KEY can come from Docker or Compose secrets instead of the environment.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+# The container environment holds SECRET_KEY. Only root, which runs these
+# scripts and drops privileges per service, needs to read it.
+chmod 0700 "$CONTAINER_ENV"
+
+# service_uids: the uids the service accounts run as. init-adduser runs after
+# this and maps the silo account onto PUID, so take PUID as it will, including
+# one loaded from FILE__PUID, along with the silo account's current uid.
+service_uids() {
+  local puid=911
+  if [[ -f "$CONTAINER_ENV/PUID" ]]; then
+    puid="$(<"$CONTAINER_ENV/PUID")"
+  fi
+  printf '%s\n' "$puid" "$(id -u silo)" "$(id -u postgres)" "$(id -u redis)" "$(id -u meilisearch)"
+}
+
+# trusted_source PATH: whether root may read PATH as a secret. A service account
+# that could rewrite the file, replace it, or change a link on the way to it
+# could otherwise point root at SECRET_KEY and have it exported under another
+# name. So PATH must resolve, outside /config and the image's state, to a
+# regular file that no service account owns and that group and others cannot
+# write, in directories only root can change. Any other owner is fine: Docker
+# and Kubernetes secrets are root's, and a Compose file secret keeps its owner
+# from the host.
+trusted_source() {
+  local real dir owner
+  real="$(realpath -e -- "$1" 2>/dev/null)" || return 1
+  [[ -f "$real" ]] || return 1
+  case "$real" in
+    /config/* | "$CONTAINER_ENV"/* | "$STATE_DIR"/*) return 1 ;;
+  esac
+  owner="$(stat -c '%u' "$real")"
+  if [[ "$owner" != 0 ]] && service_uids | grep -qxF -- "$owner"; then
+    return 1
+  fi
+  [[ -z "$(find "$real" -maxdepth 0 -perm /022)" ]] || return 1
+  dir="${real%/*}"
+  while [[ -n "$dir" ]]; do
+    [[ "$(stat -c '%u' "$dir")" == 0 ]] || return 1
+    # Not writable by group or others, unless sticky: there only an entry's
+    # owner, root here, can replace it.
+    [[ -z "$(find "$dir" -maxdepth 0 -perm /022 ! -perm -1000)" ]] || return 1
+    dir="${dir%/*}"
+  done
+  printf '%s' "$real"
+}
+
+# FILE__PUID goes first, so the rest are checked against the PUID init-adduser
+# will apply.
+files=()
+if [[ -e "$CONTAINER_ENV/FILE__PUID" ]]; then
+  files+=("$CONTAINER_ENV/FILE__PUID")
+fi
+for f in "$CONTAINER_ENV"/FILE__*; do
+  if [[ -e "$f" && "$f" != "$CONTAINER_ENV/FILE__PUID" ]]; then
+    files+=("$f")
+  fi
+done
+for f in "${files[@]}"; do
+  name="${f##*/FILE__}"
+  path="$(<"$f")"
+  if real="$(trusted_source "$path")"; then
+    printf '%s' "$(<"$real")" > "$CONTAINER_ENV/$name"
+    log "loaded $name from $path"
+  else
+    warn "FILE__$name points at $path, which is not a regular file outside /config that no service account owns or can change; $name is not set from it"
+  fi
+done

@@ -6,5 +6,6 @@
     "openapi": "/api/v2/openapi.json",
     "capabilities": "/api/v2/capabilities",
     "identity": "/api/v2/system/identity"
-  }
+  },
+  "request_origin": "http://api.example.test"
 }

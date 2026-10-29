@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -258,6 +259,49 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 	}
 }
 
+// TestLoadProgressPage_HugeLimitDoesNotPreallocate pins that a client-supplied
+// Limit far beyond the profile's progress rows sizes nothing by Limit. Both
+// scan loops used Limit as the result slice's capacity, so
+// /Items?IsPlayed=true&Limit=100000000 asked for about 120 GB and crashed the
+// server. Limit=math.MaxInt, which parseItemsQuery accepts, makes the unfixed
+// make() panic at once, so the test catches a revert without measuring memory.
+// The page must still hold every row.
+func TestLoadProgressPage_HugeLimitDoesNotPreallocate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query itemsQuery
+	}{
+		{name: "raw-offset fast path", query: itemsQuery{limit: math.MaxInt}},
+		{name: "general loop", query: itemsQuery{limit: math.MaxInt, enableTotalRecordCount: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items := map[string]*models.MediaItem{
+				"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+				"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
+			}
+			userData := &resumeFilteringUserData{entries: []upstreamProgress{
+				{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+				{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+			}}
+			h := resumeTestHandler(userData, items)
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("loadProgressPage sized an allocation by Limit: %v", r)
+				}
+			}()
+			dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", tc.query, nil, nil)
+			if err != nil {
+				t.Fatalf("loadProgressPage: %v", err)
+			}
+			if got := dtoNames(dtos); len(got) != 2 || got[0] != "Movie One" || got[1] != "Movie Two" {
+				t.Fatalf("names = %v, want [Movie One Movie Two]", got)
+			}
+		})
+	}
+}
+
 // fakeDismissalStore embeds userstore.UserStore so only the methods
 // FilterResumeProgress touches need real implementations.
 type fakeDismissalStore struct {
@@ -311,5 +355,93 @@ func TestDirectUserDataServiceFilterResumeProgressDropsDismissedEntries(t *testi
 	}
 	if len(got) != 1 || got[0].MediaItemID != "movie-2" {
 		t.Fatalf("filtered = %+v, want only movie-2", got)
+	}
+}
+
+// A ParentId must scope Resume. Moonfin for Roku resumes a series by asking
+// for one resumable item under it; ignoring ParentId answered with whatever
+// the profile played last, so Resume started the wrong title.
+// resumeSeriesEpisodeRepo lists a fixed set of episodes for each series.
+type resumeSeriesEpisodeRepo struct {
+	countingEpisodeRepo
+	bySeries map[string][]*models.Episode
+}
+
+func (r *resumeSeriesEpisodeRepo) ListIDsBySeriesIDs(_ context.Context, seriesIDs []string) (map[string][]string, error) {
+	ids := map[string][]string{}
+	for _, seriesID := range seriesIDs {
+		for _, episode := range r.bySeries[seriesID] {
+			ids[seriesID] = append(ids[seriesID], episode.ContentID)
+		}
+	}
+	return ids, nil
+}
+
+// resumableUserData answers ListResumableProgress from a fixed set of
+// in-progress entries and records the ids it was asked about.
+type resumableUserData struct {
+	mockUserDataService
+	inProgress map[string]upstreamProgress
+	asked      []string
+}
+
+func (u *resumableUserData) ListResumableProgress(_ context.Context, _ *Session, ids []string) ([]upstreamProgress, error) {
+	u.asked = append(u.asked, ids...)
+	var result []upstreamProgress
+	for _, id := range ids {
+		if entry, ok := u.inProgress[id]; ok {
+			result = append(result, entry)
+		}
+	}
+	return result, nil
+}
+
+// Resume under a series reads that series' episodes the viewer can see,
+// however much else the profile has watched since, and a movie ParentId lists
+// nothing.
+func TestParentResumeReadsTheSeriesEpisodes(t *testing.T) {
+	episodes := []*models.Episode{
+		{ContentID: "ep-1", SeriesID: "series-1", Title: "Episode One", SeasonNumber: 1, EpisodeNumber: 1},
+		{ContentID: "ep-2", SeriesID: "series-1", Title: "Episode Two", SeasonNumber: 1, EpisodeNumber: 2},
+		// Without a pool, visibleEpisodeIDs falls back to live files, so an
+		// episode with none stands in for one the viewer may not see.
+		{ContentID: "ep-hidden", SeriesID: "series-1", Title: "Hidden Episode", SeasonNumber: 1, EpisodeNumber: 3},
+	}
+	episodeRepo := &resumeSeriesEpisodeRepo{
+		countingEpisodeRepo: countingEpisodeRepo{
+			episodesByID: map[string]*models.Episode{"ep-1": episodes[0], "ep-2": episodes[1], "ep-hidden": episodes[2]},
+			hasFilesByID: map[string]bool{"ep-1": true, "ep-2": true},
+		},
+		bySeries: map[string][]*models.Episode{"series-1": episodes},
+	}
+	userData := &resumableUserData{inProgress: map[string]upstreamProgress{
+		"ep-hidden": {MediaItemID: "ep-hidden", PositionSeconds: 30, DurationSeconds: 100},
+		"ep-2":      {MediaItemID: "ep-2", PositionSeconds: 20, DurationSeconds: 100},
+		"movie-1":   {MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
+	}}
+	h := resumeTestHandler(userData, map[string]*models.MediaItem{
+		"series-1": {ContentID: "series-1", Type: "series", Title: "Series One"},
+		"movie-1":  {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+	})
+	h.episodeRepo = episodeRepo
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	dtos, total, err := h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "series-1"}, nil)
+	if err != nil {
+		t.Fatalf("loadParentResume: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 1 || got[0] != "Episode Two" || total != 1 {
+		t.Fatalf("resume under series-1 = %v (total %d), want [Episode Two]", got, total)
+	}
+	if fmt.Sprint(userData.asked) != "[ep-1 ep-2]" {
+		t.Fatalf("progress read for %v, want only the series' visible episodes", userData.asked)
+	}
+
+	dtos, _, err = h.loadParentResume(context.Background(), session, itemsQuery{limit: 1, parentItemID: "movie-1"}, nil)
+	if err != nil {
+		t.Fatalf("loadParentResume: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 0 {
+		t.Fatalf("resume under movie-1 = %v, want none", got)
 	}
 }

@@ -80,7 +80,7 @@ type CreateConnectionResult struct {
 }
 
 type RotateWebhookResult struct {
-	WebhookURL string `json:"webhook_url"`
+	WebhookURL string `json:"webhook_url" format:"uri-reference"`
 }
 
 type ProfileMappingsResponse struct {

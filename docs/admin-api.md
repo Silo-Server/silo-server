@@ -7,8 +7,10 @@
 
 Server-administration operations under `/api/v2/admin`. Every `/api/v2/admin`
 operation requires an authenticated account with the server-wide `admin` role — the
-same authorization as `/api/v2/admin/sessions` — and none of them are part of
-the client-facing contract that third-party apps build against. Acting-administrator
+same authorization as `/api/v2/admin/sessions`. These operations are part of the
+`/api/v2` contract and its 1.0 additive-only lock, like every other native route.
+Player and viewer apps don't need them; administration and monitoring tools build
+on them, usually with a [scoped API key](api-keys-api.md#monitoring-and-session-control-scopes). Acting-administrator
 authority belongs to the account: a secondary profile on an administrator account does
 not inherit it. A few deliberately public reads outside `/api/v2/admin` (marked
 `public` in the route tables) are documented beside the admin writes they pair with.
@@ -190,7 +192,10 @@ display names come from `/api/v2/network-access/capabilities`.
 `stream_location` on each v2 admin session row reports `local` or `remote` using
 the same trusted client-IP and provider-path classification as the bitrate
 policy. Private, loopback, and link-local clients on the default path are local;
-provider paths and public or unknown client addresses are remote. The web
+provider paths and public or unknown client addresses are remote. A client is
+also unknown, and so remote, when its request came through a forwarder outside
+`clientip.trusted_proxies`, or a trusted proxy's forwarding headers name no
+usable client address: the resolved address is then the forwarder's own. The web
 Activity panel shows this separately from the access-network badge.
 `GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
 feature detection. The displayed location is fixed at playback negotiation,
@@ -894,7 +899,8 @@ is not an error. History and alerting are Prometheus's job — the same numbers
 are exposed as `streamapp_node_*` gauges on this process's dedicated opt-in `/metrics`
 endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
-paths themselves appear only here, behind admin auth.
+paths themselves appear only here, behind admin auth. A scoped API key receives
+the same document without disk `path` values.
 
 ## `GET /api/v2/admin/stream-telemetry/parity`
 
@@ -1341,15 +1347,15 @@ season binge reads as one show and a title's `media_item_id` is a series
 content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
-(`admin_playback_history.watched_seconds`) that *ended* inside the same window
+(`admin_playback_history`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry with no finalized session in the window reports `0`. Because
-`watched_seconds` records a session's final absolute position, a resumed
-session would claim the already-watched stretch again, so each
-session's contribution is capped at its wall-clock length; the figure is an
-estimate until playback records true elapsed viewing time.
+minute. An entry with no finalized session in the window reports `0`. Each
+session contributes its measured watch time (`played_seconds`, below). A
+session recorded before watch time was measured only knows where it ended
+(`watched_seconds`), so its end position is capped at its wall-clock length;
+that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
@@ -1493,15 +1499,70 @@ to the operation, acting account and profile, filters and limit; `offset` is ref
 read the live log. Account and file identifiers are strings, instants are RFC 3339, and
 `duration_seconds` is null when the media duration was never recorded. A deleted account
 lists with an empty `username`; an item no longer in the catalog lists with an empty
-`media_title` and `media_type`. The stored client address is not part of this projection,
-matching v1. A missing database returns 503; storage errors are masked as 500.
+`media_title` and `media_type`. A missing database returns 503; storage errors are
+masked as 500.
 
-Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
-attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
-like the other filters, so a cursor from one window is refused under another. Each entry
-also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
-they come from the catalog episode and its series (`series_title` is empty when the series
-left the catalog); for anything else they are empty and null.
+Several v2-only additions have no v1 counterpart. `ended_after` and `ended_before`
+(RFC 3339 instants) bound the window: `ended_after` keeps attempts that ended at or
+after it (inclusive), `ended_before` keeps attempts that ended strictly before it
+(exclusive), so consecutive windows that share a bound list each attempt once. An
+unparsable value is 422, and the cursor binds both like the other filters, so a cursor
+from one window is refused under another. Each entry also carries `series_title`,
+`season_number` and `episode_number`: for an episode attempt they come from the catalog
+episode and its series (`series_title` is empty when the series left the catalog); for
+anything else they are empty and null.
+
+`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
+resumed partway through reports the resume point plus what was watched. `played_seconds`
+is the measured watch time: media advanced through by normal playback, without pauses,
+seeks or buffering. The playback session measures it from its progress reports
+(`playback.WatchTime`): a position advance between two reports counts as watched when it
+fits playback at up to twice normal speed plus a short allowance for report jitter, and
+anything larger is a seek. Time after the last progress report before the stop is not
+counted. A session finalized more than once keeps the largest measurement when the
+copies overlap in time (copies on several replicas), and adds them when one began
+measuring after the other ended (a session rebuilt under the same id after it was
+finalized). `measured` says whether the attempt has a measurement. With one,
+`start_position_seconds` is the first position it saw (where the play began or
+resumed), `paused_seconds` the time spent paused between reports, and `measured_since`
+and `measured_until` the first and last report behind it. Without one, which includes
+every attempt recorded before measurement existed, `played_seconds` and those four
+fields are null.
+
+`client_ip` is the viewer's last address on the playback session, or null when none was
+recorded. Rows written by earlier server versions hold the address of the request that
+ended the attempt instead: the administrator's when an administrator stopped or
+terminated it, and none when it expired.
+
+`device_id` and `device_platform` are the device the client declared when playback
+started, as on the live session rows above; `client_name` and `client_version` are the
+app the client reported. `video_decision` and `audio_decision` are how each stream was
+delivered on the transport the attempt ended on, with the live rows' values: `direct`,
+`remux` (copied into a new container) or `transcode`. These describe the play, so the
+first finalization that knows one records it and later ones never change it, even one
+that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
+client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
+(the liveness reaper ended it after the client went quiet), `aborted` (the server
+abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
+continues under a new session with its own row). Every end records a row, including a
+stop, close or abort handled by a server that did not hold the session's live copy;
+that row takes the start time, client and device from the shared live row when one is
+left. The one exception is a Jellyfin session copy that never reported progress: it may
+only have served media while another copy took the play's reports, so it leaves the row
+to that copy and records nothing. A play whose media file left the catalog before the end
+was recorded still gets its row, without the item and duration only the file gave. When
+an attempt is finalized more than once (copies on several servers, a retried stop), the
+end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
+that end's sequence number on the sessions channel (null on rows recorded before
+lifecycle numbers existed). Every one of these fields is
+null when unknown, which includes every attempt recorded before it existed; `end_reason`
+is also null for a server teardown the client never recovered from (an encoder exit, a
+withdrawn plan).
+
+`GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
+`watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
+`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
+detection.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
@@ -1515,7 +1576,8 @@ for source configuration and `/api/v2/admin/history-imports` for mappings, crede
 and runs. All operations require an acting administrator. Mutations enforce the
 demo restriction; reads do not.
 `GET /api/v2/admin/history-imports/capabilities` reports availability, guarded
-configuration, durable administrative runs, and the 200-mapping bulk limit.
+configuration, durable administrative runs, the 200-mapping bulk limit, and
+`played_lookback` with its `max_lookback_hours` bound.
 
 Read a source or mapping by ID before editing it. The response contains its canonical
 configuration and a strong `ETag`. Send that exact tag in `If-Match` on source,
@@ -1547,6 +1609,29 @@ locations when available, and counts for each outcome. A source with more than 2
 mappings is rejected before any run admission. Bulk work is partially successful;
 it is not an atomic transaction across mappings. Mutations are not automatically
 retryable after an uncertain response.
+
+Run and bulk start take an optional body. Without one, with an empty or
+whitespace-only body (whatever its `Content-Type`), or with `lookback_hours`
+omitted or `null`, a run imports the full history; any other body must be
+`application/json`. `{"lookback_hours": N}`, N a plain JSON integer (1 to 8760),
+imports only items last played in the N hours before the run was queued: the
+cutoff is fixed at admission and stored with the run, so a run that waits in the
+queue still reads its window, and a bulk start gives every run one cutoff.
+Resume positions and favorites are still read in full. A lookback never removes
+or un-marks anything: items outside the window are left as they are. Because
+favorites are read in full, an item un-favorited in Silo but still a favorite in
+Jellyfin is favorited again by every run, as a full import already does;
+scheduled lookback runs make that more noticeable. If Jellyfin does not return
+plays newest first, the run reads the full played history instead and records a
+warning saying so. A play during the read can move an unread item ahead of the
+pages already read; the run detects that, reads the window again once, and falls
+back to the full played history if the list moves again. Only Jellyfin sources support it; an Emby or Plex source
+answers 422 `validation_failed`, and a bulk start on one queues nothing. A
+completed lookback run does not update the mapping's `last_imported_at`, which
+records the last completed full import. Run responses carry the cutoff as
+`played_since`, absent for a full import. The intended pattern is one full
+import per mapping, then recurring lookback runs with a window comfortably wider
+than the interval between them.
 
 Cancellation records intent. A queued run can become cancelled immediately; a running
 worker acknowledges cancellation at its next boundary. Pending cancellation returns
@@ -1689,6 +1774,19 @@ A stored capability hash alone does not establish freshness or worker protocol
 compatibility. Worker readiness and wire behavior remain owned by the worker
 protocol layer. No native client or Jellyfin caller consumes this administrator
 inventory operation.
+
+`GET /api/v2/admin/nodes/summary` (`listAdminNodeSummaries`) pages the same
+nodes, in the same order and with the same limits and cursor rules, as a
+monitoring view. Each item keeps `id`, `name`, `type`, `enabled`, `healthy`,
+`active_jobs`, `group`, `max_jobs`, `max_bandwidth_kbps`, `egress_kbps`,
+`last_health_check`, `created_at`, `drain_requested` and `drain_state`. It leaves
+out every address (`url`, `public_url`, `network_access`), configuration override,
+capability document and the configuration tag. In place of the opaque
+`last_stats` it carries `resources`: the node's last sample in the shape of
+`GET /api/v2/admin/system/resources` (`sampled_at`, `system`, `gpu`,
+`attribution`), without mount paths, build identity or download-storage
+measurements. `resources` is absent when the node reported no sample. Scoped API
+keys read nodes only through this operation.
 
 ## Server status detail
 
@@ -1886,6 +1984,31 @@ Capabilities advertise `user_filter` and `summary` when the reader is available.
 adds `available` for this loader and `node_observations` for the Redis reader.
 These reads require an acting administrator and do not enforce a demo restriction.
 
+With `device_identity: true` in the capabilities, detailed rows may carry
+`device_id` and `device_platform`: the device the client declared for the
+profile device registry when playback started (`X-Silo-Device-Id` and
+`X-Silo-Device-Platform`, on `/api/v2/playback/start` or the v1 bridge's start).
+It is not the playback device the v2 `X-Device-ID` header names. The platform is
+only what the client declared; the server never derives one from the user agent.
+A Jellyfin play carries the `DeviceId` of its MediaBrowser authorization and no
+platform; an Audiobookshelf play carries neither. A session rebuilt after a
+restart from the server's recovery card keeps its device; one rebuilt from a
+stream token comes back without it, as it does without its client name. The
+fields are absent when the client declared none, and the frozen v1 row never
+carries them.
+
+With `lifecycle_events: true` in the capabilities, the admin sessions channel
+announces session starts, pauses, resumes and ends
+([realtime-api.md](realtime-api.md#playback-session-lifecycle-events)), and detailed
+rows carry `lifecycle_seq`: the number of the session's last lifecycle transition.
+A row's `is_paused` then comes from that same transition, so a row and an event with
+equal numbers agree. A session whose lifecycle has ended is left out of the list, and
+a native session no server holds in memory but whose attempt is still live (media a
+node keeps serving after its API server restarted) is listed from the row recorded at
+its start, at the attempt's last position, with an empty `reporting_node`. Rows for
+sessions that started before the server recorded lifecycle transitions omit
+`lifecycle_seq` and keep the observed `is_paused`.
+
 `GET /api/v2/admin/node-sessions` returns `{items, page, undecodable}` using the
 owning node-session reader. Optional positive string `node_id` filters by the
 registered node URL; invalid IDs fail validation and unknown nodes return 404.
@@ -1953,6 +2076,8 @@ error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
 `speed`, `updated_at`) of a running job, `progress_unavailable` when the worker
 cannot report progress, the `log_session_id` its FFmpeg output is logged under,
 and the download rows waiting on it with their account, profile, and device.
+A scoped API key receives items without `error`, because failure text can quote
+file paths.
 
 `POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
 take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
@@ -2644,6 +2769,17 @@ characters in them are stored as U+FFFD. `q` also matches the reported and
 rewritten paths in the change log. Nested `scan_runs` carry the same optional
 `result` as the scan history.
 
+Events are not kept forever. The `cleanup_autoscan_events` step of the daily
+`database_maintenance` task deletes finished events that completed more than
+`autoscan.events_retention_days` ago (server setting, default 30, accepted range
+1..3650). Running events, and events with a scan run still accepted or running,
+are kept. A scan run whose event was pruned stays in the scan history but loses
+the fields it took from the event: `autoscan_event_id`, `source_id`, `plugin_id`,
+`capability_id`, `event_status` and `event_completed_at`. The Activity panel then
+labels it Autoscan instead of the source, and scan search no longer matches it by
+source, capability or event status. The status `latest_event_at` is absent once
+every event is gone.
+
 The Activity panel keeps polling and numbered pages through at most100 cursor
 reads per requested page. Captured authority/PIN cache identity, stale-response
 checks and no previous-page placeholders isolate authority transitions. Unsupported
@@ -2947,7 +3083,8 @@ jobs, not prepared downloads stored on the node, which are unavailable while it
 is stopped.
 
 `GET /api/v2/admin/nodes/capabilities` (`getAdminNodeCapabilities`) advertises
-`drain: true`. The web nodes page shows `Draining · N transcodes left` and then
+`drain: true`, and `summary: true` when `GET /api/v2/admin/nodes/summary` is
+served. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 
@@ -3073,6 +3210,11 @@ library chains as on v1. Success is 201 with the installation. There is no repla
 and no database uniqueness, so the row is non-retryable: a lost response may follow a
 committed install and the client reconciles from the installation list.
 
+A manifest whose ID or version maps to an empty, `.` or `..` directory name (after the host
+replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacement package
+that names a different plugin ID than the installation. Both are refused as package errors
+(422) and nothing is installed.
+
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
 before the write; any enabled change rebuilds the event subscriber index. Repeating the
@@ -3119,14 +3261,18 @@ restart, an update or a configuration change clears that failure.
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
 an enabled plugin is restarted. Row delete and file removal are not one transaction and a
-repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. Success is
-204.
+repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A row
+admitted before the host refused IDs and versions that map to an empty, `.` or `..` directory
+name never loads: the installation list shows it without manifest fields, the user settings
+list omits it, and deleting it removes the row but leaves its files on disk. Success is 204.
 
 `POST /api/v2/admin/plugins/uploads` installs one uploaded archive from the multipart
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at
 `body.archive`, an oversize body 413. A zip archive is installed from its manifest; any
 other file is treated as a plugin binary whose manifest the server obtains by executing
-it, exactly as v1 does. Success is 201 with the installation. Non-retryable: the same
+it, exactly as v1 does. Either way, the server ignores manifest fields and enum values it
+doesn't know, such as ones a newer SDK added, so such a plugin still installs and starts;
+the stored manifest keeps them as the plugin wrote them. Success is 201 with the installation. Non-retryable: the same
 plugin_id is replaced, so a delayed retry can replace a newer installation. The frozen
 bridge route keeps its own answers (an oversize or malformed form is 400 `bad_request`).
 

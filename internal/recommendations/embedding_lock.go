@@ -3,6 +3,7 @@ package recommendations
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 )
@@ -40,20 +41,32 @@ func ParseEmbeddingLock(raw string) (*EmbeddingLock, error) {
 	return &lock, nil
 }
 
-// Validate ensures the lock matches the provided embedding configuration.
-func (l EmbeddingLock) ValidateConfig(baseURL, model string) error {
-	if l.BaseURL != "" && l.BaseURL != baseURL {
-		return fmt.Errorf("recommendations reset required: embedding base URL changed from %q to %q", l.BaseURL, baseURL)
+// SameEmbeddingModel reports whether two model names name one model: they are
+// equal, or one is the other behind a vendor prefix, the way a gateway such as
+// OpenRouter names it (google/gemini-embedding-001). The same model returns the
+// same vectors whichever provider serves it. Two different prefixes name
+// different models.
+func SameEmbeddingModel(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
 	}
-	if l.Model != "" && l.Model != model {
+	return a == b || strings.HasSuffix(a, "/"+b) || strings.HasSuffix(b, "/"+a)
+}
+
+// ValidateConfig ensures the lock accepts the configured model. The embedding
+// space belongs to the model, so a different provider serving the same model
+// is accepted; the vector size is still checked once one is returned.
+func (l EmbeddingLock) ValidateConfig(model string) error {
+	if l.Model != "" && !SameEmbeddingModel(l.Model, model) {
 		return fmt.Errorf("recommendations reset required: embedding model changed from %q to %q", l.Model, model)
 	}
 	return nil
 }
 
 // Validate ensures the lock matches the provided embedding configuration.
-func (l EmbeddingLock) Validate(baseURL, model string, sourceDimensions int) error {
-	if err := l.ValidateConfig(baseURL, model); err != nil {
+func (l EmbeddingLock) Validate(model string, sourceDimensions int) error {
+	if err := l.ValidateConfig(model); err != nil {
 		return err
 	}
 	if l.SourceDimensions != 0 && l.SourceDimensions != sourceDimensions {

@@ -1,12 +1,4 @@
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   createBrowserRouter,
   createRoutesFromElements,
@@ -30,6 +22,7 @@ import { CHANGE_PASSWORD_PATH } from "@/hooks/usePostSignInNavigation";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useNavigationDirection } from "@/hooks/useNavigationDirection";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
@@ -115,6 +108,7 @@ const AdminSettingsLayout = lazy(() => import("@/pages/admin-settings/AdminSetti
 const AdminNodes = lazy(() => import("@/pages/AdminNodes"));
 const AdminDownloads = lazy(() => import("@/pages/AdminDownloads"));
 const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
+const AdminRequestDiscover = lazy(() => import("@/pages/AdminRequestDiscover"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
@@ -175,22 +169,6 @@ const HOT_ROUTE_CHUNKS: readonly RouteChunkImport[] = [
   importRecommendations,
   importCollections,
 ];
-
-/**
- * Scrolls to top on pathname change. Kept in place of react-router's
- * `<ScrollRestoration>`, which the data router would now allow: that one
- * restores the previous offset on back/forward, while every page here expects
- * to open at the top.
- */
-function useScrollRestoration() {
-  const { pathname } = useLocation();
-  // Layout effect, not effect: after paint the browser has already shown one
-  // frame of the new route at the old route's scroll offset, which reads as
-  // a jump to the top rather than an arrival at it.
-  useLayoutEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
-}
 
 /** Announces route changes to screen readers via an aria-live region. */
 function RouteAnnouncer() {
@@ -519,6 +497,7 @@ function AppRoutes() {
                     <Route path="collections/:id/edit" />
                   </Route>
                   <Route path="requests" element={<AdminRequests />} />
+                  <Route path="requests/discover" element={<AdminRequestDiscover />} />
                   <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="autoscan/activity" element={<AdminAutoscanActivity />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
@@ -794,17 +773,18 @@ function PlaybackCapabilityPrewarmer() {
 }
 
 /**
- * Measures throughput to the server in the background so Auto quality can
- * tell a 4K-capable link from a slow one. Signed-out screens stay quiet and a
- * fresh cached measurement skips the probe. There is deliberately no
- * re-measure on `connection` change events: Chromium fires them whenever its
- * rounded estimate moves, which would spend a probe every few minutes.
+ * Keeps a connection speed reading for Auto quality, so it can tell a
+ * 4K-capable link from a slow one. Signed-out screens stay quiet; once a
+ * profile is active, the app reads what the server keeps for this connection
+ * and runs the quick test only when no reading proves the link (see
+ * bandwidth-probe.ts). The reads are profile-scoped, and the test's target
+ * follows the profile's libraries, so a profile switch starts over.
  */
-function BandwidthProbePrewarmer() {
-  const { user } = useAuth();
-  const isAuthenticated = Boolean(user);
+export function BandwidthProbePrewarmer() {
+  const { user, profile } = useAuth();
+  const profileId = user ? profile?.id : undefined;
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!profileId) return;
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void import("@/player/bandwidth-probe")
@@ -818,7 +798,7 @@ function BandwidthProbePrewarmer() {
       cancelled = true;
       cleanup?.();
     };
-  }, [isAuthenticated]);
+  }, [profileId]);
   return null;
 }
 

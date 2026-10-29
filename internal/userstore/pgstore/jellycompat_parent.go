@@ -22,7 +22,7 @@ func (s *PostgresUserStore) ApplyJellycompatParent(ctx context.Context, profileI
 		for _, target := range edit.Targets {
 			ids = append(ids, target.MediaItemID)
 		}
-		if err := s.removeHistoryItems(ctx, tx, profileID, ids, time.Now().UTC()); err != nil {
+		if err := s.clearWatchedState(ctx, tx, profileID, ids, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

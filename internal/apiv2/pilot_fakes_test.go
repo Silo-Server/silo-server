@@ -1384,7 +1384,7 @@ func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationI
 		User: handlers.UserView{ID: 3, Username: in.Username, Email: in.Email, Role: "user", Permissions: []string{}, DownloadAllowed: true}}, nil
 }
 
-func (f *fakeSessionService) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+func (f *fakeSessionService) PluginLaunchToken(_ context.Context, claims *auth.Claims, profileID string) (string, error) {
 	if claims == nil || claims.SessionID == "" {
 		return "", &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Invalid or missing authentication token"}
 	}

@@ -222,6 +222,15 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// checked only here: changing it takes no inbox lock, so a second check
 	// under the locks would not close the gap before commit. A delivery
 	// created in that gap is like one created just before the change.
+	//
+	// A copy of an episode that another library already holds (a 4K library
+	// beside an HD one) is no news to a profile that can open it there, so
+	// that profile is not captured. The delivery dedupe key alone would let
+	// the copy through once retention has removed the first delivery.
+	earlier, err := w.releases.EarlierEpisodeCopies(ctx, tx, eventIDs(fanout))
+	if err != nil {
+		return 0, err
+	}
 	recipients := newRecipientAccess(w.scopes)
 	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fanout))
 	profiles := make(map[string]struct{})
@@ -244,6 +253,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 				return 0, err
 			}
 			if !allowed {
+				continue
+			}
+			elsewhere, err := recipients.canOpenInAny(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, earlier[event.ID])
+			if err != nil {
+				return 0, err
+			}
+			if elsewhere {
 				continue
 			}
 			captured[candidate.key()] = struct{}{}

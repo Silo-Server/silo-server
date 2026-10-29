@@ -32,7 +32,7 @@ func benchmarkExternalSubtitleDirCache(b *testing.B, cold bool) {
 						}
 					}
 				}
-				cache := newExternalSubtitleDirCache()
+				cache := newExternalSubtitleDirCache("movies")
 				if _, err := cache.Detect(paths[0]); err != nil {
 					b.Fatal(err)
 				}
@@ -40,7 +40,7 @@ func benchmarkExternalSubtitleDirCache(b *testing.B, cold bool) {
 				i := 0
 				for b.Loop() {
 					if cold {
-						cache = newExternalSubtitleDirCache()
+						cache = newExternalSubtitleDirCache("movies")
 					}
 					if _, err := cache.Detect(paths[i%count]); err != nil {
 						b.Fatal(err)

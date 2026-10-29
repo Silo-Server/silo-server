@@ -70,11 +70,12 @@ func RunAtomicJellycompatParentFavorite(t *testing.T, store userstore.UserStore,
 	if err := writer.ApplyJellycompatParent(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(false, false, 0, 0)
+	// Unplayed clears the children's watched state and keeps their plays.
+	check(false, false, 0, 2)
 	edit.Targets = nil
 	edit.IsFavorite = true
 	if err := writer.ApplyJellycompatParent(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(true, false, 0, 0)
+	check(true, false, 0, 2)
 }

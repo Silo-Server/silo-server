@@ -136,28 +136,28 @@ describe("ActionBar marker re-detection", () => {
   });
 });
 
-describe("ActionBar reset progress", () => {
+describe("ActionBar Mark Unwatched for a partly watched item", () => {
   it("leaves Play from Beginning to the Play button's resume prompt", async () => {
-    const onResetProgress = vi.fn();
+    const onMarkUnwatched = vi.fn();
     renderBar(
       <ActionBar
         contentId="movie-1"
         playHref="/watch/movie-1"
         playLabel="Resume"
         restartHref="/watch/movie-1?restart=1"
-        onResetProgress={onResetProgress}
+        onMarkUnwatched={onMarkUnwatched}
       />,
     );
 
     await userEvent.click(screen.getByTitle("More"));
     expect(screen.queryByRole("menuitem", { name: "Play from Beginning" })).toBeNull();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Reset Progress" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Mark Unwatched" }));
 
-    expect(onResetProgress).toHaveBeenCalledOnce();
+    expect(onMarkUnwatched).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("offers Play from Beginning before Reset Progress when Play does not ask", async () => {
+  it("offers Play from Beginning before Mark Unwatched when Play does not ask", async () => {
     renderBar(
       <ActionBar
         contentId="movie-1"
@@ -165,13 +165,13 @@ describe("ActionBar reset progress", () => {
         playLabel="Resume"
         restartHref="/watch/movie-1?restart=1"
         versions={[{ file_id: 1 }, { file_id: 2 }] as never}
-        onResetProgress={vi.fn()}
+        onMarkUnwatched={vi.fn()}
       />,
     );
 
     await userEvent.click(screen.getByTitle("More"));
     const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
-    expect(labels.slice(0, 2)).toEqual(["Play from Beginning", "Reset Progress"]);
+    expect(labels.slice(0, 2)).toEqual(["Play from Beginning", "Mark Unwatched"]);
   });
 });
 

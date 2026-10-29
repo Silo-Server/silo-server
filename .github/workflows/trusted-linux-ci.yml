@@ -652,7 +652,7 @@ jobs:
       - *libvips-restore
       - *libvips-install
 
-      # The image docker-compose.yml runs: the schema needs pgvector.
+      # The image docker-compose.dev.yml runs: the schema needs pgvector.
       - name: Start Postgres
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
 

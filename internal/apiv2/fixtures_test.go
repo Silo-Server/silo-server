@@ -1764,7 +1764,60 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, notInterestedFixtureCases()...)
 	cases = append(cases, notificationSeriesFixtureCases()...)
 	cases = append(cases, notificationSeriesMuteFixtureCases()...)
-	return append(cases, seasonalThemeFixtureCases()...)
+	cases = append(cases, seasonalThemeFixtureCases()...)
+	cases = append(cases, personalListMembershipFixtureCases()...)
+	cases = append(cases, sectionItemLimitFixtureCases()...)
+	return append(cases, adminCatalogItemsFixtureCases()...)
+}
+
+// sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
+// section reads, which getHomeCapabilities advertises as
+// section_item_limit_max.
+func sectionItemLimitFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "list_home_sections_item_limit_out_of_range", operationID: opListHomeSections,
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_library_sections_item_limit_out_of_range", operationID: "listLibrarySections",
+			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/library/1/sections?item_limit=101", headers: viewer,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
+}
+
+// personalListMembershipFixtureCases covers the favorites and watchlist
+// membership reads, which answer a non-member with 200 rather than 404.
+func personalListMembershipFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_favorite_membership_member", operationID: "getFavoriteMembership",
+			scenario: "The item is one of the profile's favorites: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_member", operationID: "getFavoriteMembership",
+			scenario: "The item is not one of the profile's favorites: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_favorite_membership_not_found", operationID: "getFavoriteMembership",
+			scenario: "An item the viewer may not see is 404.",
+			method:   http.MethodGet, path: "/api/v2/favorites/movie:hidden/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_personal_list_capability_ok", operationID: "getPersonalListCapability",
+			scenario: "The personal-list capability document: the favorites and watchlist membership reads are supported.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/personal-lists", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/PersonalListCapability"},
+		{name: "get_watchlist_membership_member", operationID: "getWatchlistMembership",
+			scenario: "The item is on the profile's watchlist: is_member true with when it was added.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:c/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+		{name: "get_watchlist_membership_not_member", operationID: "getWatchlistMembership",
+			scenario: "The item is not on the profile's watchlist: 200 with is_member false, not a 404.",
+			method:   http.MethodGet, path: "/api/v2/watchlist/series:nope/membership", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalListMembership"},
+	}
 }
 
 // fixtureSeasonalThemes is recipes.SeasonalThemes with every list link moved
@@ -1857,12 +1910,12 @@ func resumePositionFixtureCases() []fixtureCase {
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
 // first sections, the include_items bound, and the capability document that
-// advertises it.
+// advertises it and the item_limit bound of the aggregate section reads.
 func homeLayoutItemsFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
 		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
-			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max, and listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max.",
 			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
 		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
@@ -2158,6 +2211,7 @@ func fixtureDeps() Dependencies {
 	deps.SubtitleReads = &fakeSubtitleReads{}
 	deps.AdminSubtitleList = &fakeAdminSubtitleList{}
 	deps.AdminPlaybackHistory = &fakeAdminPlaybackHistory{}
+	deps.AdminCatalogItems = &fakeAdminCatalogItems{}
 	deps.AdminSubtitleMetadata = fixtureAdminSubtitleMetadata()
 	deps.AdminSubtitleProviderConfiguration = fixtureAdminProviderConfiguration()
 	deps.SubtitleAICancel = &fakeSubtitleAICancel{}
@@ -2232,6 +2286,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 		} else {
 			r = httptest.NewRequest(c.method, c.path, nil)
+		}
+		// Absolute discovery URLs and origins in published fixtures use a
+		// reserved test host.
+		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" {
+			r.Host = "api.example.test"
 		}
 		for k, v := range c.headers {
 			r.Header.Set(k, v)

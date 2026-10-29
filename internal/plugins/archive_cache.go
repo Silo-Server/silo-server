@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -79,24 +80,24 @@ func NewArchiveCacheAt(archives archiveStore, root string) *ArchiveCache {
 // (install-XXXX), so a replaced binary — even at the same version — lands in
 // a fresh directory here too and the resident supervisor's install-path
 // change detection stays meaningful on this host.
-func (c *ArchiveCache) LocalInstallPath(installation *Installation) string {
+// Invalid identities are rejected before callers can read the returned path.
+func (c *ArchiveCache) LocalInstallPath(installation *Installation) (string, error) {
 	if installation == nil {
-		return ""
+		return "", errors.New("plugin installation is required")
+	}
+	id, version, err := pluginIdentitySegments(installation.PluginID, installation.Version)
+	if err != nil {
+		return "", err
 	}
 	if c == nil || c.root == "" {
-		return installation.InstallPath
+		return installation.InstallPath, nil
 	}
-	release := filepath.Base(filepath.Dir(installation.InstallPath))
-	if release == "." || release == string(filepath.Separator) || release == "" {
+	releaseName := filepath.Base(filepath.Dir(installation.InstallPath))
+	release, err := pluginPathSegment(releaseName, "plugin release")
+	if err != nil || releaseName == string(filepath.Separator) {
 		release = "install"
 	}
-	return filepath.Join(
-		c.root,
-		sanitizeFilesystemSegment(installation.PluginID),
-		sanitizeFilesystemSegment(installation.Version),
-		sanitizeFilesystemSegment(release),
-		"plugin",
-	)
+	return pluginPathUnder(c.root, id, version, release, "plugin")
 }
 
 // Ensure makes the installation's files present at LocalInstallPath,
@@ -136,7 +137,10 @@ func (c *ArchiveCache) ensure(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	binaryPath := c.LocalInstallPath(installation)
+	binaryPath, err := c.LocalInstallPath(installation)
+	if err != nil {
+		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
+	}
 
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
 		if trustVerified && c.stillVerified(installation.ID, binaryPath, manifest) {
@@ -173,14 +177,14 @@ func (c *ArchiveCache) ensure(
 	if len(archive.ManifestJSON) > 0 && !bytes.Equal(archive.ManifestJSON, manifestBytes) {
 		return nil, fmt.Errorf("stored plugin manifest mismatch for installation %d", installation.ID)
 	}
-	if installation.PluginID != "" && manifest.GetPluginId() != installation.PluginID {
+	if manifest.GetPluginId() != installation.PluginID {
 		return nil, fmt.Errorf(
 			"stored plugin archive plugin_id %q does not match installation %q",
 			manifest.GetPluginId(),
 			installation.PluginID,
 		)
 	}
-	if installation.Version != "" && manifest.GetVersion() != installation.Version {
+	if manifest.GetVersion() != installation.Version {
 		return nil, fmt.Errorf(
 			"stored plugin archive version %q does not match installation %q",
 			manifest.GetVersion(),
@@ -250,7 +254,15 @@ func (c *ArchiveCache) pruneStaleReleases(ctx context.Context, installation *Ins
 	if c == nil || c.root == "" {
 		return
 	}
-	pluginRoot := filepath.Join(c.root, sanitizeFilesystemSegment(installation.PluginID))
+	// keepDir must be the release LocalInstallPath derived under the root:
+	// <root>/<id>/<version>/<release>. Its grandparent is then this plugin's
+	// directory under the root, and nothing outside it is listed or removed.
+	binaryPath, err := c.LocalInstallPath(installation)
+	keepDir = filepath.Clean(keepDir)
+	if err != nil || keepDir != filepath.Dir(binaryPath) {
+		return
+	}
+	pluginRoot := filepath.Dir(filepath.Dir(keepDir))
 	versions, err := os.ReadDir(pluginRoot)
 	if err != nil {
 		return

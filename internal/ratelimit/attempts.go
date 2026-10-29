@@ -43,6 +43,14 @@ func ProfilePINKey(userID int, profileID string) string {
 // account (auth.DeviceLoginService).
 var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 20, Window: 15 * time.Minute}
 
+// SignInNamePolicy bounds password sign-ins per sign-in name: ten attempts,
+// then fifteen minutes locked. The client address budgets cannot bound
+// guessing at one name from many addresses; this holds it near a thousand
+// guesses a day, while a person who mistypes a few times never meets it.
+// The lock is temporary, so a stranger cannot shut an account out for good.
+// auth.Service keys it by name (auth.SignInAttemptLimiter).
+var SignInNamePolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
+
 // AttemptLimiter counts attempts at a secret per key under an AttemptPolicy.
 // The Redis backend shares the count across every node of a cluster; the
 // memory backend is per process and serves Redis-less single-node
@@ -87,6 +95,14 @@ func NewQuickConnectCodeAttemptLimiter(client *redis.Client) *AttemptLimiter {
 	return newSharedAttemptLimiter(client, QuickConnectCodePolicy)
 }
 
+// NewSignInNameAttemptLimiter returns the per-name password sign-in limiter,
+// shared through Redis on the same terms as the profile PIN limiter. A
+// process builds one and gives it to every auth.Service it runs, so the
+// native, Jellyfin and Audiobookshelf listeners spend one count per name.
+func NewSignInNameAttemptLimiter(client *redis.Client) *AttemptLimiter {
+	return newSharedAttemptLimiter(client, SignInNamePolicy)
+}
+
 func newSharedAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimiter {
 	if client != nil {
 		return NewRedisAttemptLimiter(client, p)
@@ -128,7 +144,11 @@ func (l *AttemptLimiter) Reset(ctx context.Context, key string) {
 // RetryAfterSeconds rounds a lockout remainder up to whole seconds for a
 // Retry-After header, never below one.
 func RetryAfterSeconds(d time.Duration) int {
-	s := int((d + time.Second - 1) / time.Second)
+	// Divide before rounding: adding a second first overflows a saturated d.
+	s := int(d / time.Second)
+	if d%time.Second > 0 {
+		s++
+	}
 	if s < 1 {
 		return 1
 	}

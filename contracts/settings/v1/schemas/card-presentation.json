@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/contracts/settings/v1/schemas/card-presentation.json",
   "title": "Media card presentation",
-  "description": "Semantic density and caption presets that each client family maps to platform-appropriate card dimensions.",
+  "description": "Semantic density preset that each client family maps to platform-appropriate card dimensions.",
   "type": "object",
   "additionalProperties": false,
   "required": ["poster_size", "caption"],
@@ -12,6 +12,8 @@
       "enum": ["compact", "standard", "large"]
     },
     "caption": {
+      "description": "Retired in revision 24. Every card shows its title and details; clients send title_metadata and ignore the stored member. The other members stay valid so older clients can still write them.",
+      "deprecated": true,
       "type": "string",
       "enum": ["title_metadata", "title", "artwork"]
     }

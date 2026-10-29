@@ -99,7 +99,7 @@ type ChatGPTAccountInput struct {
 }
 type ChatGPTCompleteInput struct {
 	Body struct {
-		CallbackURL string `json:"callback_url" minLength:"1" maxLength:"32768"`
+		CallbackURL string `json:"callback_url" format:"uri" minLength:"1" maxLength:"32768"`
 	}
 }
 type ChatGPTDisconnectOutput struct {

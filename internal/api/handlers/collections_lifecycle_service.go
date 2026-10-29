@@ -265,6 +265,7 @@ func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete collection")
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
 
 	return nil
 }

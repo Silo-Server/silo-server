@@ -88,7 +88,10 @@ func registerAdminRecommendations(reg *Registry) {
 		{"cowatch", "triggerAdminRecommendationCowatch", AdminRecommendationsService.TriggerCowatch},
 		{"recommendations", "triggerAdminRecommendationRefresh", AdminRecommendationsService.TriggerRecommendations},
 	} {
-		Register(reg, op(http.MethodPost, "/trigger/"+action.path, action.id, "Start process-local recommendation work without a durable job receipt."), func(ctx context.Context, _ *struct{}) (*AdminRecommendationStartedOutput, error) {
+		trigger := op(http.MethodPost, "/trigger/"+action.path, action.id, "Start process-local recommendation work without a durable job receipt.")
+		// A job already running on this process or another server is 409.
+		trigger.Errors = append(trigger.Errors, http.StatusConflict)
+		Register(reg, trigger, func(ctx context.Context, _ *struct{}) (*AdminRecommendationStartedOutput, error) {
 			if reg.deps.AdminRecommendations == nil {
 				return nil, unavailable("recommendations")
 			}

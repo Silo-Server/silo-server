@@ -71,9 +71,9 @@ func symlinkedTitle(t *testing.T, files map[string]string) (library, title strin
 	return library, title
 }
 
-func runLocalJob(t *testing.T, job *models.MetadataImageCacheJob, resolver LibraryRootResolver) (*fakeLocalImageCacheJobs, *fakeByteImageCacher) {
+func runLocalJob(t *testing.T, job *models.MetadataImageCacheJob, resolver LibraryRootResolver) (*fakeImageCacheJobs, *fakeByteImageCacher) {
 	t.Helper()
-	jobs := &fakeLocalImageCacheJobs{fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}}
+	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}
 	cacher := &fakeByteImageCacher{thumbhash: "th"}
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(resolver)

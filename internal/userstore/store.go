@@ -74,7 +74,6 @@ type UserStore interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	DeleteProfile(ctx context.Context, id string) error
-	VerifyPIN(ctx context.Context, profileID, pin string) (bool, error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error
@@ -137,7 +136,16 @@ type UserStore interface {
 	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
+	// RemoveHistoryItems removes the items' plays from history ("Remove from
+	// history"): it deletes the plays dated at or before removedAt, or before
+	// the newest play when that is later, hides any that arrive later with
+	// such a date, and clears the items' watched state and progress.
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
+	// ClearWatchedState marks the items unwatched: it deletes their progress
+	// and stops their plays dated at or before clearedAt, or before the
+	// newest play when that is later, from counting as watched or being
+	// imported again. The plays stay in history.
+	ClearWatchedState(ctx context.Context, profileID string, mediaItemIDs []string, clearedAt time.Time) error
 	DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source WatchHistorySource) error
 	ListHomeDismissals(ctx context.Context, profileID, surface string) ([]HomeItemDismissal, error)
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error

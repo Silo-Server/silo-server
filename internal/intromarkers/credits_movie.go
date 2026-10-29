@@ -42,7 +42,7 @@ func movieTailWindow(candidate Candidate) fingerprintWindow {
 	if duration <= 0 {
 		return fingerprintWindow{}
 	}
-	return fingerprintWindow{Start: creditsLimitsFor(true).windowStart(duration), End: duration}
+	return fingerprintWindow{Start: creditsLimitsFor(true).WindowStart(duration), End: duration}
 }
 
 // movieCreditsTailParams are the parameters that shape a movie tail payload.
@@ -166,7 +166,7 @@ func (e *ChromaprintExtractor) SampleMovieSilences(ctx context.Context, candidat
 func placeMovieCredits(candidate Candidate, keyframes []creditsKeyframe, silences func(fingerprintWindow) ([]mediasample.Interval, error)) (Segment, bool, error) {
 	limits := creditsLimitsFor(true)
 	evidence := creditsEvidence{Keyframes: keyframes}
-	windowStart := limits.windowStart(candidate.DurationSeconds)
+	windowStart := limits.WindowStart(candidate.DurationSeconds)
 	draft, ok := placeVideoCredits(buildRuns(keyframes), keyframes, nil, windowStart, candidate.DurationSeconds, limits)
 	if !ok || silences == nil {
 		segment, ok := combineCredits(candidate, evidence, limits)

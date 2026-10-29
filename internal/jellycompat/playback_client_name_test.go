@@ -142,7 +142,7 @@ func TestStaticStreamNamesClientFromPlaybackInfo(t *testing.T) {
 
 func TestFillReconstructedClientInfo(t *testing.T) {
 	const agent = "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/79.0"
-	request := playback.ClientInfo{Name: "Jellyfin Web", Version: "10.11.6", UserAgent: "request-agent", IsCompat: true}
+	request := playback.ClientInfo{Name: "Jellyfin Web", Version: "10.11.6", UserAgent: "request-agent", DeviceID: "jf-device", IsCompat: true}
 	tests := []struct {
 		name string
 		card playback.RecipeCard
@@ -151,17 +151,17 @@ func TestFillReconstructedClientInfo(t *testing.T) {
 		{
 			name: "card with no client metadata",
 			card: playback.RecipeCard{},
-			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: "request-agent", IsJellyfinCompat: true},
+			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: "request-agent", DeviceID: "jf-device", IsJellyfinCompat: true},
 		},
 		{
 			name: "card named from the User-Agent alone",
 			card: playback.RecipeCard{ClientUserAgent: agent},
-			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: agent, IsJellyfinCompat: true},
+			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: agent, DeviceID: "jf-device", IsJellyfinCompat: true},
 		},
 		{
-			name: "card that already names its client",
-			card: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent},
-			want: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent, IsJellyfinCompat: true},
+			name: "card that already names its client and device",
+			card: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent, DeviceID: "card-device"},
+			want: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent, DeviceID: "card-device", IsJellyfinCompat: true},
 		},
 	}
 	for _, tt := range tests {
@@ -169,10 +169,10 @@ func TestFillReconstructedClientInfo(t *testing.T) {
 			card := tt.card
 			fillReconstructedClientInfo(&card, request)
 			if card.ClientName != tt.want.ClientName || card.ClientVersion != tt.want.ClientVersion ||
-				card.ClientUserAgent != tt.want.ClientUserAgent || card.IsJellyfinCompat != tt.want.IsJellyfinCompat {
-				t.Fatalf("card client = %q %q %q compat=%v, want %q %q %q compat=%v",
-					card.ClientName, card.ClientVersion, card.ClientUserAgent, card.IsJellyfinCompat,
-					tt.want.ClientName, tt.want.ClientVersion, tt.want.ClientUserAgent, tt.want.IsJellyfinCompat)
+				card.ClientUserAgent != tt.want.ClientUserAgent || card.DeviceID != tt.want.DeviceID || card.IsJellyfinCompat != tt.want.IsJellyfinCompat {
+				t.Fatalf("card client = %q %q %q device=%q compat=%v, want %q %q %q device=%q compat=%v",
+					card.ClientName, card.ClientVersion, card.ClientUserAgent, card.DeviceID, card.IsJellyfinCompat,
+					tt.want.ClientName, tt.want.ClientVersion, tt.want.ClientUserAgent, tt.want.DeviceID, tt.want.IsJellyfinCompat)
 			}
 		})
 	}

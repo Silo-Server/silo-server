@@ -24,7 +24,7 @@ type AdminMetadataTranslationService interface {
 type AdminTranslateLibraryInput struct {
 	ID   ID `path:"library_id" doc:"The library" example:"1"`
 	Body struct {
-		TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the language to fill in" example:"de"`
+		TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form" example:"de"`
 	}
 }
 
@@ -41,7 +41,7 @@ type AdminLibraryTranslationCancelInput struct {
 type AdminTranslateMetadataInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body struct {
-		TargetLanguage  string `json:"target_language" minLength:"1" maxLength:"16"`
+		TargetLanguage  string `json:"target_language" minLength:"1" maxLength:"16" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form"`
 		IncludeChildren *bool  `json:"include_children,omitempty" nullable:"true" doc:"Defaults true for item targets; ignored for season and episode targets."`
 		Force           bool   `json:"force,omitempty" doc:"Also replace text an earlier AI translation wrote. Provider and manual text is never replaced."`
 	}

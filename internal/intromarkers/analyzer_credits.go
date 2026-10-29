@@ -41,9 +41,10 @@ func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Cand
 			continue
 		}
 		// A file's chapters can place credits on its other versions even
-		// when its own marker came from a higher-priority source.
+		// when its own marker came from a higher-priority source, and
+		// replace its own online credits rated below them.
 		sources[candidate.EpisodeID] = append(sources[candidate.EpisodeID], chapterSourceMarker{candidate: candidate, segment: segment})
-		if owned && a.patchCredits(ctx, candidate, segment, &summary) {
+		if (owned || candidate.yieldsToChapter(kindCredits, segment)) && a.patchCredits(ctx, candidate, segment, &summary) {
 			summary.CreditsChapterMarkersWritten++
 		}
 	}

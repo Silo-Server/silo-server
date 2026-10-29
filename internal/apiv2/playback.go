@@ -9,10 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/google/uuid"
 )
 
 const playbackCacheControl = "no-store"
@@ -39,6 +40,10 @@ type PlaybackService interface {
 }
 
 type PlaybackCapabilities struct {
+	BandwidthProbeURL           string `json:"bandwidth_probe_url,omitempty" format:"uri"`
+	BandwidthProbeTargetKbps    *int   `json:"bandwidth_probe_target_kbps,omitempty" nullable:"false" doc:"With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from."`
+	BandwidthProbeAutomatic     *bool  `json:"bandwidth_probe_automatic,omitempty" nullable:"false" doc:"With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works."`
+	BandwidthProbeMaxAgeSeconds *int   `json:"bandwidth_probe_max_age_seconds,omitempty" nullable:"false" doc:"With connection_speed_v1: how long a speed reading stays current."`
 	Capability
 	InstallationID   ID                    `json:"installation_id,omitempty"`
 	ProtocolVersions []int                 `json:"protocol_versions"`
@@ -63,11 +68,21 @@ type PlaybackStartBody struct {
 	SubtitleTrackIndex         *int                               `json:"subtitle_track_index,omitempty" nullable:"false"`
 	Metered                    bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
 	BandwidthEstimateKbps      *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`
+	BandwidthEstimateSource    string                             `json:"bandwidth_estimate_source,omitempty" enum:"probe,observed_rebuffer"`
+	ObservedThroughputKbps     *int                               `json:"observed_throughput_kbps,omitempty" nullable:"false" minimum:"100" maximum:"1000000" doc:"What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps."`
+	LearnedLimit               string                             `json:"learned_limit,omitempty" enum:"ignore,clear"`
 	BandwidthCapKbps           *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
 	Capabilities               playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      playback.ClientPlaybackContextV3   `json:"client_playback_context"`
 }
+type PlaybackBandwidthLimit struct {
+	Kbps      int    `json:"kbps"`
+	Source    string `json:"source" enum:"observed_rebuffer"`
+	ExpiresAt string `json:"expires_at" format:"date-time"`
+}
+
 type PlaybackPlan struct {
+	BandwidthLimit         *PlaybackBandwidthLimit         `json:"bandwidth_limit,omitempty"`
 	ProtocolVersion        int                             `json:"protocol_version"`
 	PlanID                 string                          `json:"plan_id"`
 	PlanAttemptKey         string                          `json:"plan_attempt_key"`
@@ -122,12 +137,14 @@ type PlaybackDecision struct {
 	ProtocolVersion int                        `json:"protocol_version"`
 	ServerFeatures  []string                   `json:"server_features"`
 	Outcome         playback.DecisionOutcomeV3 `json:"outcome"`
-	SessionID       string                     `json:"session_id,omitempty"`
+	SessionID       string                     `json:"session_id,omitempty" doc:"Present only when outcome is playable. A terminal decision (adaptation_unavailable), from start or replan, carries none; read outcome before comparing sessions."`
 	PlaybackPlan    *PlaybackPlan              `json:"playback_plan,omitempty"`
 	Terminal        *playback.TerminalV3       `json:"terminal,omitempty"`
 }
 
 type PlaybackRequestHeaders struct {
+	SiloDeviceID string `header:"X-Silo-Device-Id" doc:"The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)" example:"iphone-1"`
+
 	UserAgent       string `header:"User-Agent"`
 	DeviceID        string `header:"X-Device-ID"`
 	ClientName      string `header:"X-Client-Name" doc:"App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored"`
@@ -162,7 +179,6 @@ func (h PlaybackRequestHeaders) clientInfo() playback.ClientInfo {
 // Unlike the settings operations they carry no length limits: an over-long
 // value is clamped when recorded, and must never refuse playback.
 type PlaybackDeviceHeaders struct {
-	SiloDeviceID       string `header:"X-Silo-Device-Id" doc:"The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)" example:"iphone-1"`
 	SiloDeviceName     string `header:"X-Silo-Device-Name" doc:"Optional display name recorded on the device registry (first 120 characters)" example:"Living room"`
 	SiloDevicePlatform string `header:"X-Silo-Device-Platform" doc:"Optional platform recorded on the device registry (first 40 characters)" example:"iOS"`
 }
@@ -226,27 +242,30 @@ type PlaybackMutationOutput struct {
 // PlaybackReplanBody is the v3 replan request: failure recovery, seek
 // re-anchor, and track, quality or output changes for a live session.
 type PlaybackReplanBody struct {
-	InstallationID        ID                                 `json:"installation_id" minLength:"1"`
-	ProtocolVersion       int                                `json:"protocol_version"`
-	ClientFeatures        []string                           `json:"client_features,omitempty"`
-	Operation             playback.ReplanOperationV3         `json:"operation,omitempty" enum:"failure_recovery,seek_reanchor,seek_failure_recovery,track_change,quality_change,output_change"`
-	PlaybackAttemptID     string                             `json:"playback_attempt_id" minLength:"8" maxLength:"128"`
-	ReplanRequestID       string                             `json:"replan_request_id" minLength:"8" maxLength:"128" doc:"Client-minted identity of this replan; a retry with the same body replays the durable decision"`
-	FailedPlanID          string                             `json:"failed_plan_id" minLength:"8" maxLength:"128"`
-	PlanAttemptID         string                             `json:"plan_attempt_id" minLength:"8" maxLength:"128"`
-	PlanAttemptKey        string                             `json:"plan_attempt_key" minLength:"8" maxLength:"128"`
-	AttemptedPlanKeys     []string                           `json:"attempted_plan_keys" maxItems:"16"`
-	LocalMutations        []string                           `json:"local_mutations,omitempty" maxItems:"8"`
-	AttemptCount          int                                `json:"attempt_count" minimum:"1" maximum:"8"`
-	QualityPreference     string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
-	PositionSeconds       float64                            `json:"position_seconds" minimum:"0"`
-	Metered               bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
-	BandwidthEstimateKbps *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`
-	BandwidthCapKbps      *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
-	SelectedTracks        playback.SelectedTracksV3          `json:"selected_tracks"`
-	Failure               playback.FailureV3                 `json:"failure,omitzero"`
-	Capabilities          playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
-	ClientPlaybackContext playback.ClientPlaybackContextV3   `json:"client_playback_context"`
+	InstallationID          ID                                 `json:"installation_id" minLength:"1"`
+	ProtocolVersion         int                                `json:"protocol_version"`
+	ClientFeatures          []string                           `json:"client_features,omitempty"`
+	Operation               playback.ReplanOperationV3         `json:"operation,omitempty" enum:"failure_recovery,seek_reanchor,seek_failure_recovery,track_change,quality_change,output_change"`
+	PlaybackAttemptID       string                             `json:"playback_attempt_id" minLength:"8" maxLength:"128"`
+	ReplanRequestID         string                             `json:"replan_request_id" minLength:"8" maxLength:"128" doc:"Client-minted identity of this replan; a retry with the same body replays the durable decision"`
+	FailedPlanID            string                             `json:"failed_plan_id" minLength:"8" maxLength:"128"`
+	PlanAttemptID           string                             `json:"plan_attempt_id" minLength:"8" maxLength:"128"`
+	PlanAttemptKey          string                             `json:"plan_attempt_key" minLength:"8" maxLength:"128"`
+	AttemptedPlanKeys       []string                           `json:"attempted_plan_keys" maxItems:"16"`
+	LocalMutations          []string                           `json:"local_mutations,omitempty" maxItems:"8"`
+	AttemptCount            int                                `json:"attempt_count" minimum:"1" maximum:"8"`
+	QualityPreference       string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
+	PositionSeconds         float64                            `json:"position_seconds" minimum:"0"`
+	Metered                 bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
+	BandwidthEstimateKbps   *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`
+	BandwidthEstimateSource string                             `json:"bandwidth_estimate_source,omitempty" enum:"probe,observed_rebuffer"`
+	ObservedThroughputKbps  *int                               `json:"observed_throughput_kbps,omitempty" nullable:"false" minimum:"100" maximum:"1000000" doc:"What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps."`
+	LearnedLimit            string                             `json:"learned_limit,omitempty" enum:"ignore,clear"`
+	BandwidthCapKbps        *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
+	SelectedTracks          playback.SelectedTracksV3          `json:"selected_tracks"`
+	Failure                 playback.FailureV3                 `json:"failure,omitzero"`
+	Capabilities            playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext   playback.ClientPlaybackContextV3   `json:"client_playback_context"`
 }
 type PlaybackReplanInput struct {
 	PlaybackRequestHeaders
@@ -268,7 +287,7 @@ type PlaybackRouteEventBody struct {
 	PlanID                string            `json:"plan_id,omitempty" maxLength:"128"`
 	PlanAttemptID         string            `json:"plan_attempt_id,omitempty" maxLength:"128"`
 	PlanAttemptKey        string            `json:"plan_attempt_key,omitempty" maxLength:"128"`
-	Event                 string            `json:"event" enum:"plan_selected,plan_invalidated,plan_failed,first_frame,terminal,stopped,runtime_correction_applied,runtime_correction_succeeded,runtime_correction_failed,seek_reanchor_requested,seek_reanchored"`
+	Event                 string            `json:"event" enum:"plan_selected,plan_invalidated,plan_failed,first_frame,terminal,stopped,runtime_correction_applied,runtime_correction_succeeded,runtime_correction_failed,seek_reanchor_requested,seek_reanchored,plan_summary"`
 	FailureClassification string            `json:"failure_classification,omitempty" maxLength:"64"`
 	FallbackReason        string            `json:"fallback_reason,omitempty" maxLength:"64"`
 	AppliedQuirkIDs       []string          `json:"applied_quirk_ids,omitempty" maxItems:"16"`
@@ -332,9 +351,25 @@ func registerPlayback(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: PlaybackCapabilities{InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}}, nil
+		body := PlaybackCapabilities{InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}
+		if playback.HasFeatureV3(view.Features, playback.FeatureConnectionSpeedV1) {
+			// The origin the client reached, as a reverse proxy forwards it: r.Host
+			// behind a TLS-terminating proxy is the internal host the proxy dialed.
+			if r := requestFrom(ctx); r != nil {
+				body.BandwidthProbeURL = handlers.RequestBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
+			}
+			body.BandwidthProbeAutomatic = new(view.BandwidthProbeAutomatic)
+			body.BandwidthProbeMaxAgeSeconds = new(view.BandwidthProbeMaxAgeSeconds)
+			if view.BandwidthProbeTargetKbps > 0 {
+				body.BandwidthProbeTargetKbps = new(view.BandwidthProbeTargetKbps)
+			}
+		}
+		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
 	Register(reg, op(http.MethodPost, "/start", opStartPlayback), func(ctx context.Context, in *PlaybackStartInput) (*PlaybackStartOutput, error) {
+		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {
+			return nil, NewProblem(TypeMalformedRequest, "bandwidth_estimate_source requires bandwidth_estimate_kbps")
+		}
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p
@@ -392,6 +427,9 @@ func registerPlayback(reg *Registry) {
 }
 func registerPlaybackReplan(reg *Registry, op func(method, path, id string) Operation) {
 	Register(reg, op(http.MethodPost, "/{session_id}/replan", opReplanPlayback), func(ctx context.Context, in *PlaybackReplanInput) (*PlaybackReplanOutput, error) {
+		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {
+			return nil, NewProblem(TypeMalformedRequest, "bandwidth_estimate_source requires bandwidth_estimate_kbps")
+		}
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p
@@ -414,7 +452,7 @@ func registerPlaybackReplan(reg *Registry, op func(method, path, id string) Oper
 	})
 }
 func (in PlaybackReplanBody) domain() playback.ReplanRequestV3 {
-	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthCapKbps: in.BandwidthCapKbps, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
+	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func registerPlaybackRouteEvents(reg *Registry, op func(method, path, id string) Operation) {
 	Register(reg, op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
@@ -449,7 +487,7 @@ func (reg *Registry) playbackCaller(ctx context.Context, headers PlaybackRequest
 		return handlers.PlaybackCaller{}, validationProblem("body.installation_id", "invalid", "Expected the installation identifier from capabilities.")
 	}
 	client := headers.clientInfo()
-	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, UserAgent: headers.UserAgent, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
+	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, ConnectionDeviceID: headers.SiloDeviceID, UserAgent: headers.UserAgent, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
 }
 
 // playbackProblem maps a service error onto the shared problem catalog: the
@@ -488,7 +526,7 @@ func playbackMutation(view handlers.PlaybackMutationView, err error) (*PlaybackM
 	return &PlaybackMutationOutput{Body: body}, nil
 }
 func (in PlaybackStartBody) domain(fileID int) playback.StartRequestV3 {
-	return playback.StartRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID, ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID, QualityPreference: in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions, SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition, ProgressPersistence: in.ProgressPersistence, AudioTrackID: in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex, SubtitleTrackID: in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthCapKbps: in.BandwidthCapKbps, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
+	return playback.StartRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID, ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID, QualityPreference: in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions, SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition, ProgressPersistence: in.ProgressPersistence, AudioTrackID: in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex, SubtitleTrackID: in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 	out := PlaybackDecision{ProtocolVersion: in.ProtocolVersion, ServerFeatures: in.ServerFeatures, Outcome: in.Outcome, SessionID: in.SessionID, Terminal: in.Terminal}
@@ -496,7 +534,7 @@ func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 		p := in.PlaybackPlan
 		stream := p.Stream
 		stream.URL = playbackV2MediaURL(stream.URL)
-		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality}
+		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, BandwidthLimit: playbackBandwidthLimit(p.BandwidthLimit), Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality}
 	}
 	return out
 }
@@ -543,4 +581,11 @@ func playbackV2Subtitle(in playback.SubtitleDecisionV3) playback.SubtitleDecisio
 		out.Artifact = &artifact
 	}
 	return out
+}
+
+func playbackBandwidthLimit(limit *playback.BandwidthLimitV3) *PlaybackBandwidthLimit {
+	if limit == nil {
+		return nil
+	}
+	return &PlaybackBandwidthLimit{Kbps: limit.Kbps, Source: limit.Source, ExpiresAt: limit.ExpiresAt}
 }

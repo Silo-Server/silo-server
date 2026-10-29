@@ -370,11 +370,8 @@ func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Contex
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
 	}
 	if h.ArtworkResolver == nil {
 		return ""

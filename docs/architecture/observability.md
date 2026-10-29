@@ -181,7 +181,7 @@ the OTel metrics SDK is out of scope.
 ## Local collector (example)
 
 ```yaml
-# docker-compose.yml (dev)
+# docker-compose.dev.yml
 otel-collector:
   image: otel/opentelemetry-collector:latest
   command: ["--config=/etc/otelcol/config.yaml"]

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, fireEvent, render, renderHook } from "@testing-library/react";
 import { createElement, useEffect, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
@@ -7,6 +7,7 @@ import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 import { resetCodecDetectionForTests } from "@/player/hooks/useCodecDetection";
 import { resetSessionMutations } from "@/player/session-mutations";
+import { forgetBandwidthEstimate } from "@/player/bandwidth-readings";
 
 const realtimeOptions = vi.hoisted(() => ({
   current: null as null | {
@@ -50,6 +51,17 @@ vi.mock("@/player/lifecycle-v2", () => ({
     });
   },
 }));
+const releasedMedia = vi.hoisted(() => vi.fn());
+vi.mock("@/player/bandwidth-probe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/player/bandwidth-probe")>();
+  return {
+    ...actual,
+    mediaElementReleased: (element: HTMLMediaElement) => {
+      releasedMedia(element);
+      actual.mediaElementReleased(element);
+    },
+  };
+});
 vi.mock("@/player/hooks/usePlaybackRealtime", () => ({
   usePlaybackRealtime: vi.fn((options) => {
     realtimeOptions.current = options;
@@ -377,6 +389,20 @@ describe("useAudiobookPlayback", () => {
     });
   });
 
+  // H7: a removed element's media events never reach the document, where the
+  // speed test watches for media.
+  it("releases its element's media hold when the player goes away", async () => {
+    function Harness() {
+      const playback = useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds: 0 });
+      return createElement("audio", { ref: playback.audioRef });
+    }
+    const { container, unmount } = render(createElement(Harness), { wrapper });
+    await flushAsyncWork();
+    const audio = container.querySelector("audio");
+    unmount();
+    expect(releasedMedia).toHaveBeenCalledWith(audio);
+  });
+
   it("starts a playback session and builds a tokenized stream URL", async () => {
     const { result } = renderAudiobookPlayback();
 
@@ -450,6 +476,17 @@ describe("useAudiobookPlayback", () => {
   });
 
   it("replans a failed media-element route without starting a new attempt", async () => {
+    // A speed reading this device keeps: the start sends it, a replan never does.
+    onTestFinished(forgetBandwidthEstimate);
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        readings: [
+          { kbps: 48_000, measuredAt: Date.now(), maxAgeMs: 86_400_000, network: "unknown" },
+        ],
+        writtenAt: Date.now(),
+      }),
+    );
     const observed: {
       startBody?: Record<string, unknown>;
       replanBody?: Record<string, unknown>;
@@ -497,6 +534,11 @@ describe("useAudiobookPlayback", () => {
     });
     expect(typeof observed.replanBody?.plan_attempt_id).toBe("string");
     expect(startCalls()).toHaveLength(1);
+    expect(observed.startBody).toMatchObject({
+      bandwidth_estimate_kbps: 48_000,
+      bandwidth_estimate_source: "probe",
+    });
+    expect(observed.replanBody).not.toHaveProperty("bandwidth_estimate_kbps");
   });
 
   it("allows another recovery attempt after a transient recovery request failure", async () => {
