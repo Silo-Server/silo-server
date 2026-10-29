@@ -37,8 +37,8 @@ const (
 const docTypeMatroska = "matroska"
 
 // errBadElement marks an element that isn't where, or what, the file says:
-// a structural problem, unlike a failed read.
-var errBadElement = errors.New("embeddedsub: bad element")
+// a structural problem, unlike a failed read. An optional one is skipped.
+var errBadElement = fmt.Errorf("%w: bad element", ErrMalformed)
 
 // ReadIndex reads the subtitle tracks of a Matroska, MP4 or MOV file and
 // where their packets are. For Matroska it reads the EBML header, the seek
@@ -96,7 +96,7 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 		return nil, err
 	}
 	if layout.info < 0 || layout.tracks < 0 {
-		return nil, errors.New("embeddedsub: Matroska Info or Tracks not found")
+		return nil, fmt.Errorf("%w: Matroska Info or Tracks not found", ErrMalformed)
 	}
 	el, err := readSegmentElements(r, head, layout)
 	if err != nil {
@@ -104,7 +104,7 @@ func readMatroskaIndex(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	}
 	scale, ok := parseTimestampScale(el.info)
 	if !ok {
-		return nil, errors.New("embeddedsub: Matroska Info has an invalid TimestampScale")
+		return nil, fmt.Errorf("%w: Matroska Info has an invalid TimestampScale", ErrMalformed)
 	}
 	idx := &Index{Container: ContainerMatroska, TimestampScale: scale, segmentEnd: layout.end}
 	idx.Tracks = subtitleTracks(el.tracks)
@@ -147,10 +147,10 @@ func segmentStart(head []byte, size int64) (segmentLayout, error) {
 	pos := int64(hl) + hdrSize
 	id, segSize, n, ok := matroska.ParseElementHeader(tail(head, pos))
 	if !ok {
-		return segmentLayout{}, fmt.Errorf("embeddedsub: no Matroska segment header at %d", pos)
+		return segmentLayout{}, fmt.Errorf("%w: no Matroska segment header at %d", ErrMalformed, pos)
 	}
 	if id != matroska.IDSegment {
-		return segmentLayout{}, fmt.Errorf("embeddedsub: element %#x where the Matroska segment should be", id)
+		return segmentLayout{}, fmt.Errorf("%w: element %#x where the Matroska segment should be", ErrMalformed, id)
 	}
 	layout := segmentLayout{start: pos + int64(n), end: size, info: -1, tracks: -1, cues: -1}
 	if segSize != matroska.UnknownSize && layout.start+segSize < size {

@@ -142,7 +142,7 @@ func readMP4Index(r io.ReaderAt, size int64, head []byte) (*Index, error) {
 	})
 	movieTimescale, ok := mvhdTimescale(mvhd)
 	if !ok {
-		return nil, errors.New("embeddedsub: MP4 movie header missing or invalid")
+		return nil, fmt.Errorf("%w: MP4 movie header missing or invalid", ErrMalformed)
 	}
 	idx := &Index{Container: ContainerMP4, TimestampScale: 1}
 	for _, trak := range traks {
@@ -180,16 +180,16 @@ func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err er
 			boxSize = size - pos
 		case 1:
 			if len(hdr) < 16 {
-				return nil, nil, errors.New("embeddedsub: MP4 box header cut off")
+				return nil, nil, fmt.Errorf("%w: MP4 box header cut off", ErrMalformed)
 			}
 			big := binary.BigEndian.Uint64(hdr[8:])
 			if big > math.MaxInt64 {
-				return nil, nil, errors.New("embeddedsub: MP4 box size out of range")
+				return nil, nil, fmt.Errorf("%w: MP4 box size out of range", ErrMalformed)
 			}
 			boxSize, hl = int64(big), 16
 		}
 		if boxSize < hl || boxSize > size-pos {
-			return nil, nil, fmt.Errorf("embeddedsub: MP4 box at %d has bad size %d", pos, boxSize)
+			return nil, nil, fmt.Errorf("%w: MP4 box at %d has bad size %d", ErrMalformed, pos, boxSize)
 		}
 		switch string(hdr[4:8]) {
 		case "ftyp":
@@ -200,7 +200,7 @@ func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err er
 			}
 		case "moov":
 			if boxSize > maxMoovSize {
-				return nil, nil, fmt.Errorf("embeddedsub: MP4 moov of %d bytes is over the limit", boxSize)
+				return nil, nil, fmt.Errorf("%w: MP4 moov of %d bytes is over the limit", ErrMalformed, boxSize)
 			}
 			box, err := readBox(r, head, pos, boxSize)
 			if err != nil {
@@ -210,7 +210,7 @@ func findMoov(r io.ReaderAt, size int64, head []byte) (moov, ftyp []byte, err er
 		}
 		pos += boxSize
 	}
-	return nil, nil, ErrNotSupportedContainer
+	return nil, nil, fmt.Errorf("%w: no MP4 moov box", ErrMalformed)
 }
 
 // readBox returns the size bytes at pos, from head when it holds them.
@@ -504,7 +504,10 @@ func expandSamples(s stblBoxes, fileSize int64) ([]mp4Sample, error) {
 			if size == 0 {
 				size = binary.BigEndian.Uint32(s.stsz[12+4*len(samples):])
 			}
-			if off+int64(size) > fileSize {
+			if size > maxPacketSize {
+				return nil, fmt.Errorf("MP4 sample of %d bytes", size)
+			}
+			if off > fileSize-int64(size) {
 				return nil, errors.New("MP4 sample past the end of the file")
 			}
 			samples = append(samples, mp4Sample{offset: off, size: size})
@@ -550,7 +553,7 @@ type mp4Read struct {
 
 // readMP4Packets reads the samples that show in [from, to), merging
 // neighbors into one read.
-func readMP4Packets(ctx context.Context, r *fileReader, t *Track, from, to time.Duration, concurrency int) (*Result, error) {
+func readMP4Packets(ctx context.Context, r *fileReader, b *budget, t *Track, from, to time.Duration, concurrency int) (*Result, error) {
 	m := t.mp4
 	whole := from == WholeFrom && to == WholeTo
 	var sel []int
@@ -573,7 +576,7 @@ func readMP4Packets(ctx context.Context, r *fileReader, t *Track, from, to time.
 		reads = append(reads, mp4Read{start: s.offset, end: end, samples: []int{i}})
 	}
 	results, err := runJobs(ctx, len(reads), concurrency, func(j int) jobResult {
-		return m.readSamples(r, reads[j])
+		return m.readSamples(r, b, reads[j])
 	})
 	if err != nil {
 		return nil, err
@@ -595,8 +598,13 @@ func readMP4Packets(ctx context.Context, r *fileReader, t *Track, from, to time.
 	return res, nil
 }
 
-func (m *mp4Track) readSamples(r io.ReaderAt, rd mp4Read) jobResult {
-	buf, err := readUpTo(r, rd.start, int(rd.end-rd.start))
+func (m *mp4Track) readSamples(r io.ReaderAt, b *budget, rd mp4Read) jobResult {
+	n := int(rd.end - rd.start)
+	if err := b.take(n); err != nil {
+		return jobResult{err: err}
+	}
+	defer b.give(n)
+	buf, err := readUpTo(r, rd.start, n)
 	if err != nil {
 		return jobResult{err: err}
 	}
@@ -607,6 +615,9 @@ func (m *mp4Track) readSamples(r io.ReaderAt, rd mp4Read) jobResult {
 		if hi > int64(len(buf)) {
 			jr.damage = append(jr.damage, corrupt("MP4 sample at %d is cut off", s.offset))
 			continue
+		}
+		if err := b.take(int(s.size)); err != nil {
+			return jobResult{err: err}
 		}
 		jr.packets = append(jr.packets, Packet{
 			PTS: m.pts(s.dts), Duration: ticksToDuration(int64(s.delta), int64(m.timescale)),

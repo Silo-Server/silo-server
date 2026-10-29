@@ -284,6 +284,10 @@ func TestReadPacketsKeyframesAndDurationsForRemux(t *testing.T) {
 
 func TestReadPacketsRefusals(t *testing.T) {
 	path, idx := readFixture(t, libraryFixture(t))
+	// The PGS track's first packet decompresses to 12 kB.
+	if _, err := ReadPackets(context.Background(), path, idx, pgsTrack, WholeFrom, WholeTo, ReadOptions{MaxBytes: 8 << 10}); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("over the memory limit: err = %v", err)
+	}
 	tests := []struct {
 		number uint64
 		want   error
@@ -415,6 +419,15 @@ func TestReadPacketsWindows(t *testing.T) {
 	if want := []wantPacket{{ms(30_000), ms(15_000), "chain2"}, {ms(32_500), ms(12_000), "chain1"}, {ms(41_000), ms(2000), "u"}}; !slices.Equal(got, want) {
 		t.Fatalf("uncued window = %+v", got)
 	}
+	// A window keeps a laced block whole, as FFmpeg converts its frames.
+	lacedPath, lacedIdx := readFixture(t, libraryFixture(t))
+	res, err := ReadPackets(context.Background(), lacedPath, lacedIdx, lacedTrack, ms(3500), ms(3600), ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := packetList(res.Packets); len(got) != 3 || got[0].data != "x1" || got[2].data != "x3" {
+		t.Fatalf("laced window = %+v", got)
+	}
 	// A packet without a duration shows until the next starts: the window
 	// starting between two gets the earlier one.
 	got, _ = read(pgs, ms(45_000), ms(52_000), ReadOptions{})
@@ -451,14 +464,23 @@ func TestReadIndexWithoutCues(t *testing.T) {
 }
 
 func TestReadIndexRejectsOtherFiles(t *testing.T) {
-	for name, data := range map[string][]byte{
-		"empty":                        nil,
-		"text":                         []byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"),
-		"webm-ish but another doctype": el(matroska.IDEBML, strEl(matroska.IDDocType, "notmkv")),
+	header := el(matroska.IDEBML, strEl(matroska.IDDocType, "matroska"))
+	for name, tt := range map[string]struct {
+		data []byte
+		want error
+	}{
+		"empty":                        {nil, ErrNotSupportedContainer},
+		"text":                         {[]byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"), ErrNotSupportedContainer},
+		"webm-ish but another doctype": {el(matroska.IDEBML, strEl(matroska.IDDocType, "notmkv")), ErrNotSupportedContainer},
+		// Damage the caller falls back to FFmpeg for, unlike a failed read.
+		"Matroska without a segment":   {slices.Concat(header, el(matroska.IDVoid, make([]byte, 8))), ErrMalformed},
+		"Matroska without tracks":      {slices.Concat(header, el(matroska.IDSegment, el(matroska.IDInfo))), ErrMalformed},
+		"MP4 box running past the end": {mp4Box("ftyp", []byte("isom"))[:10], ErrMalformed},
+		"MP4 without a moov":           {slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("mdat", make([]byte, 64))), ErrMalformed},
 	} {
-		path := writeFixture(t, data)
-		if _, err := ReadIndex(context.Background(), path); !errors.Is(err, ErrNotSupportedContainer) {
-			t.Errorf("%s: err = %v", name, err)
+		path := writeFixture(t, tt.data)
+		if _, err := ReadIndex(context.Background(), path); !errors.Is(err, tt.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tt.want)
 		}
 	}
 }

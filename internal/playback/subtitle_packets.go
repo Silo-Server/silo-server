@@ -150,7 +150,15 @@ func startSubtitleCommand(cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (
 		return nil, err
 	}
 	feed := make(chan error, 1)
-	go func() { feed <- in.write(stdin) }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = stdin.Close()
+				feed <- fmt.Errorf("write subtitle packets panicked: %v", r)
+			}
+		}()
+		feed <- in.write(stdin)
+	}()
 	return func() (error, error) {
 		waitErr := cmd.Wait()
 		return waitErr, <-feed

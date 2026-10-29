@@ -151,3 +151,14 @@ func TestMP4TracksTheReaderRefuses(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandSamplesRejectsOffsetsPastTheFile(t *testing.T) {
+	stbl := stblBoxes{
+		stts: be32(0, 1, 1, 1000), stsc: be32(0, 1, 1, 1, 1), stsz: be32(0, 0x200, 1),
+		// A chunk offset whose end overflows int64.
+		stco: slices.Concat(be32(0, 1), be32(0x7FFFFFFF, 0xFFFFFF00)), co64: true,
+	}
+	if _, err := expandSamples(stbl, 1<<20); err == nil {
+		t.Fatal("a sample past the end of the file was listed")
+	}
+}

@@ -3,6 +3,7 @@ package embeddedsub
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
@@ -74,16 +75,9 @@ func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 	c.mu.Unlock()
 
 	if !loading {
-		// The read is shared, so one caller giving up doesn't fail the
-		// others; it is a handful of small reads.
-		load.idx, load.err = ReadIndex(context.WithoutCancel(ctx), path)
-		c.mu.Lock()
-		delete(c.loading, key)
-		if load.err == nil {
-			c.add(cacheKey{path: path, size: load.idx.Size, mtime: load.idx.ModTime.UnixNano()}, load.idx)
-		}
-		c.mu.Unlock()
-		close(load.done)
+		// The read is shared and runs on its own, so any caller, the first
+		// included, can give up on it without failing the others.
+		go c.load(context.WithoutCancel(ctx), key, load)
 	}
 	select {
 	case <-load.done:
@@ -91,6 +85,24 @@ func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// load reads the index for key and publishes it to the callers waiting on
+// load. A panic fails them rather than leaving them waiting.
+func (c *Cache) load(ctx context.Context, key cacheKey, load *cacheLoad) {
+	defer func() {
+		if r := recover(); r != nil {
+			load.idx, load.err = nil, fmt.Errorf("embeddedsub: index read panicked: %v", r)
+		}
+		c.mu.Lock()
+		delete(c.loading, key)
+		if load.err == nil {
+			c.add(cacheKey{path: key.path, size: load.idx.Size, mtime: load.idx.ModTime.UnixNano()}, load.idx)
+		}
+		c.mu.Unlock()
+		close(load.done)
+	}()
+	load.idx, load.err = ReadIndex(ctx, key.path)
 }
 
 // add stores idx under key and evicts down to the budget. c.mu is held.

@@ -31,6 +31,13 @@ var (
 	// ErrNotSupportedContainer means the file is neither Matroska nor an
 	// MP4 or MOV file the reader understands.
 	ErrNotSupportedContainer = errors.New("embeddedsub: not a Matroska or MP4 file")
+	// ErrMalformed means the file's metadata or index is damaged: the
+	// reader can't find its tracks or their packets. The caller falls back
+	// to FFmpeg, which may still demux it.
+	ErrMalformed = errors.New("embeddedsub: malformed file")
+	// ErrTooLarge means a read would hold more packet data than
+	// ReadOptions.MaxBytes allows.
+	ErrTooLarge = errors.New("embeddedsub: subtitle packets over the read's memory limit")
 	// ErrTrackNotFound means the index has no subtitle track with the
 	// requested number.
 	ErrTrackNotFound = errors.New("embeddedsub: no such subtitle track")

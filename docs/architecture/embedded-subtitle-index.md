@@ -78,12 +78,22 @@ leaves that cue out isn't shifted.
 subtracted. A packet without a duration shows until the next one starts,
 so the last packet to start by `from` is always included. Cues that carry
 CueDuration bound the lookback exactly; otherwise it starts at 30 s and widens
-when a block read turns out to last longer, up to 10 minutes.
+when a block read turns out to last longer, up to 10 minutes, so a long
+packet that started earlier than any packet read can still be missed. The
+frames of a laced block are kept or dropped together, since FFmpeg converts
+each frame with the ones after it in view.
 
 ## Use
 
 An `Index` is immutable and safe for concurrent use; `Cache` keeps them by
 path, size and modification time. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each
-small read, keeps up to 16 reads in flight, and refuses a file whose size or
+small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
+data by default (`ErrTooLarge`), and refuses a file whose size or
 modification time changed since it was indexed (`ErrFileChanged`).
+
+Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
+`ErrNoCues`, `ErrIncompleteCues`, `ErrUnsupported` and `ErrTooLarge` describe
+the file: fall back to FFmpeg. `ErrFileChanged` means index the file again. A
+`DamagedError` comes with the packets that were readable; a whole-track
+reader falls back. Any other error is a failed read or the caller's context.

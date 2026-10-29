@@ -25,7 +25,7 @@ const (
 	// nearClusterStart is how close to its cluster's start a block must be
 	// for one read to fetch both the cluster's head and the block.
 	nearClusterStart = 12 << 10
-	maxBlockSize     = 32 << 20
+	maxBlockSize     = maxPacketSize
 	// scanWindow and maxClusterChildren bound walking a cluster for blocks
 	// whose cues have no CueRelativePosition.
 	scanWindow         = 64 << 10
@@ -49,11 +49,12 @@ type clusterHead struct {
 
 // matroskaRead is one ReadPackets call on a Matroska file.
 type matroskaRead struct {
-	r     *fileReader
-	idx   *Index
-	t     *Track
-	mu    sync.Mutex
-	heads map[int64]*clusterHead
+	r      *fileReader
+	budget *budget
+	idx    *Index
+	t      *Track
+	mu     sync.Mutex
+	heads  map[int64]*clusterHead
 	// scanned counts the clusters walked for cues without a relative
 	// position.
 	scanned int
@@ -72,13 +73,13 @@ type jobResult struct {
 	err     error
 }
 
-func readMatroskaPackets(ctx context.Context, r *fileReader, idx *Index, t *Track, from, to time.Duration, opts ReadOptions, concurrency int) (*Result, error) {
+func readMatroskaPackets(ctx context.Context, r *fileReader, b *budget, idx *Index, t *Track, from, to time.Duration, opts ReadOptions, concurrency int) (*Result, error) {
 	whole := from == WholeFrom && to == WholeTo
 	lookback := max(t.maxCueDuration, cmp0(opts.Lookback, DefaultLookback))
 	if t.allCueDurations {
 		lookback = t.maxCueDuration
 	}
-	m := &matroskaRead{r: r, idx: idx, t: t, heads: map[int64]*clusterHead{}}
+	m := &matroskaRead{r: r, budget: b, idx: idx, t: t, heads: map[int64]*clusterHead{}}
 	done := make([]bool, len(t.Cues))
 	res := &Result{}
 	var damage []error
@@ -95,15 +96,21 @@ func readMatroskaPackets(ctx context.Context, r *fileReader, idx *Index, t *Trac
 		if err != nil {
 			return nil, err
 		}
+		// longest is how long a block shows from its start: a laced
+		// block's last frame ends where the block does.
 		longest := time.Duration(0)
+		starts := map[int64]time.Duration{}
 		for _, jr := range results {
 			if jr.err != nil {
 				return nil, jr.err
 			}
 			damage = append(damage, jr.damage...)
 			for _, p := range jr.packets {
+				if p.lace == 0 {
+					starts[p.pos] = p.PTS
+				}
 				if !p.inferredDuration {
-					longest = max(longest, p.Duration)
+					longest = max(longest, p.End()-starts[p.pos])
 				}
 			}
 			res.Packets = append(res.Packets, jr.packets...)
@@ -200,9 +207,15 @@ func (m *matroskaRead) head(pos int64) (h *clusterHead, owner bool) {
 }
 
 // loadHead reads the cluster at pos's header and Timestamp into h, using
-// buf when it already holds the cluster's first bytes.
+// buf when it already holds the cluster's first bytes. It also runs on its
+// own goroutine, so a panic becomes the head's error.
 func (m *matroskaRead) loadHead(h *clusterHead, pos int64, buf []byte) {
 	defer close(h.ready)
+	defer func() {
+		if r := recover(); r != nil {
+			h.err = fmt.Errorf("embeddedsub: cluster head read panicked: %v", r)
+		}
+	}()
 	h.dataStart, h.dataEnd, h.timestamp, h.err = m.readClusterHead(pos, buf)
 }
 
@@ -285,6 +298,9 @@ func parseClusterHead(b []byte, pos, segEnd int64) (dataStart, dataEnd, timestam
 // could add; both reads go out at once.
 func (m *matroskaRead) readCue(i int) ([]Packet, error) {
 	c := m.t.Cues[i]
+	if c.ClusterPosition >= m.idx.segmentEnd || c.RelativePosition >= m.idx.segmentEnd-c.ClusterPosition {
+		return nil, corrupt("cue points past the end of the segment")
+	}
 	h, owner := m.head(c.ClusterPosition)
 	buf, bufStart, err := m.fetchCue(c, h, owner)
 	if err != nil {
@@ -300,10 +316,11 @@ func (m *matroskaRead) readCue(i int) ([]Packet, error) {
 	if at < bufStart || at >= bufStart+int64(len(buf)) {
 		return nil, corrupt("block at %d is cut off", at)
 	}
-	element, err := m.readElement(at, buf[at-bufStart:])
+	element, held, err := m.readElement(at, buf[at-bufStart:])
 	if err != nil {
 		return nil, err
 	}
+	defer m.budget.give(held)
 	return m.blockPackets(element, at, h, &c)
 }
 
@@ -331,33 +348,39 @@ func (m *matroskaRead) fetchCue(c Cue, h *clusterHead, owner bool) ([]byte, int6
 }
 
 // readElement returns the whole block element at at, given its first
-// bytes, reading the rest when they don't hold it.
-func (m *matroskaRead) readElement(at int64, first []byte) (blockElement, error) {
+// bytes, reading the rest when they don't hold it. held is what it claimed
+// from the budget for the rest, to give back once the block is used.
+func (m *matroskaRead) readElement(at int64, first []byte) (_ blockElement, held int, _ error) {
 	id, size, hl, ok := matroska.ParseElementHeader(first)
 	if !ok {
 		if len(first) < matroska.MaxHeaderLen {
-			return blockElement{}, corrupt("block at %d is cut off", at)
+			return blockElement{}, 0, corrupt("block at %d is cut off", at)
 		}
-		return blockElement{}, corrupt("no element at block position %d", at)
+		return blockElement{}, 0, corrupt("no element at block position %d", at)
 	}
 	if id != matroska.IDSimpleBlock && id != matroska.IDBlockGroup {
-		return blockElement{}, corrupt("cue points at element %#x at %d, not a block", id, at)
+		return blockElement{}, 0, corrupt("cue points at element %#x at %d, not a block", id, at)
 	}
 	if size < 0 || size > maxBlockSize {
-		return blockElement{}, corrupt("block at %d has unsupported size %d", at, size)
+		return blockElement{}, 0, corrupt("block at %d has unsupported size %d", at, size)
 	}
-	total := int64(hl) + size
-	if total > int64(len(first)) {
-		rest, err := readUpTo(m.r, at+int64(len(first)), int(total)-len(first))
+	total := hl + int(size)
+	if total > len(first) {
+		if err := m.budget.take(total); err != nil {
+			return blockElement{}, 0, err
+		}
+		rest, err := readUpTo(m.r, at+int64(len(first)), total-len(first))
 		if err != nil {
-			return blockElement{}, err
+			m.budget.give(total)
+			return blockElement{}, 0, err
 		}
-		if int64(len(first)+len(rest)) < total {
-			return blockElement{}, corrupt("block at %d is cut off", at)
+		if len(first)+len(rest) < total {
+			m.budget.give(total)
+			return blockElement{}, 0, corrupt("block at %d is cut off", at)
 		}
-		first = append(first[:len(first):len(first)], rest...)
+		first, held = append(first[:len(first):len(first)], rest...), total
 	}
-	return blockElement{id: id, data: first[hl:total]}, nil
+	return blockElement{id: id, data: first[hl:total]}, held, nil
 }
 
 type blockElement struct {
@@ -384,9 +407,15 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 	// is absent or zero.
 	duration := blk.duration
 	if duration == 0 && m.t.DefaultDuration > 0 {
+		if m.t.DefaultDuration > time.Duration(math.MaxInt64/laces) {
+			return nil, corrupt("track default duration %d out of range", m.t.DefaultDuration)
+		}
 		duration = int64(m.t.DefaultDuration) * laces / scale
 	}
-	if duration > math.MaxInt64/max(laces, 1)/2 {
+	// Each frame's share, its timestamp, and the duration in nanoseconds
+	// must all fit.
+	whole, ok := ticksDuration(duration, scale)
+	if !ok || duration > math.MaxInt64/2/laces || ticks > math.MaxInt64-duration {
 		return nil, corrupt("block at %d has duration %d", at, duration)
 	}
 	packets := make([]Packet, 0, laces)
@@ -394,6 +423,9 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 		data, err := m.payload(frame)
 		if err != nil {
 			return nil, fmt.Errorf("block at %d: %w", at, err)
+		}
+		if err := m.budget.take(len(data)); err != nil {
+			return nil, err
 		}
 		pts, ok := ticksDuration(ticks, scale)
 		if !ok {
@@ -407,11 +439,11 @@ func (m *matroskaRead) blockPackets(e blockElement, at int64, h *clusterHead, cu
 			// frame's own BlockDuration.
 			p.Duration = time.Duration(lace * scale)
 		case blk.hasDuration && blk.duration > 0:
-			p.Duration = time.Duration(blk.duration * scale)
+			p.Duration = whole
 		case cue != nil && cue.Duration > 0:
 			p.Duration, p.inferredDuration = cue.Duration, true
 		default:
-			p.Duration, p.inferredDuration = time.Duration(duration*scale), true
+			p.Duration, p.inferredDuration = whole, true
 		}
 		packets = append(packets, p)
 		ticks += lace
@@ -441,6 +473,9 @@ func (m *matroskaRead) scanCluster(cues []int) ([]Packet, []error, error) {
 	m.mu.Lock()
 	m.scanned++
 	m.mu.Unlock()
+	if h.err == nil && pos >= m.idx.segmentEnd {
+		h.err = corrupt("cue points past the end of the segment")
+	}
 	if h.err != nil {
 		if errors.Is(h.err, errCorrupt) {
 			return nil, []error{h.err}, nil
@@ -505,6 +540,10 @@ func (s *clusterScan) step(at int64) (next int64, more bool, err error) {
 		return 0, false, nil
 	}
 	total := hl + int(size)
+	if err := s.m.budget.take(total); err != nil {
+		return 0, false, err
+	}
+	defer s.m.budget.give(total)
 	data, err := s.w.get(at, total)
 	if err != nil {
 		return 0, false, err
