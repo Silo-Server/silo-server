@@ -27,6 +27,9 @@ type CalendarEvent struct {
 	PosterThumbhash string
 	IsPremiere      bool
 	IsFinale        bool
+	// IsDigitalRelease marks a movie listed on its digital release date
+	// because that date comes before its primary release date.
+	IsDigitalRelease bool
 }
 
 // CalendarFilter holds the parameters for a calendar query.
@@ -79,7 +82,7 @@ func (r *CalendarRepository) ListEvents(ctx context.Context, f CalendarFilter) (
 			&ev.ContentID, &ev.Type, &ev.Title, &episodeTitle, &seriesID,
 			&seasonNum, &episodeNum, &ev.AirDate, &ev.AirTime, &ev.AirTimezone,
 			&ev.PosterPath, &ev.PosterThumbhash,
-			&ev.IsPremiere, &ev.IsFinale,
+			&ev.IsPremiere, &ev.IsFinale, &ev.IsDigitalRelease,
 		); err != nil {
 			return nil, fmt.Errorf("scanning calendar row: %w", err)
 		}
@@ -144,7 +147,7 @@ func (r *CalendarRepository) buildListEventsQuery(f CalendarFilter) (string, []a
 SELECT content_id, type, title, episode_title, series_id,
        season_number, episode_number, air_date, air_time, air_timezone,
        poster_path, poster_thumbhash,
-       is_premiere, is_finale
+       is_premiere, is_finale, is_digital_release
 FROM (
 %s UNION ALL %s UNION ALL %s
 ) combined
@@ -154,10 +157,16 @@ FROM (
 	return query, args
 }
 
+// movieCalendarDateExpr is the day a movie is listed on: its primary or its
+// digital release, whichever comes first. LEAST skips a NULL, so a movie with
+// only one of the two dates is listed on that one. The expression matches
+// idx_media_items_movie_calendar_date.
+const movieCalendarDateExpr = "LEAST(mi.release_date, mi.digital_release_date)"
+
 func (r *CalendarRepository) buildMovieBranch(startArg, endArg, restrictArg int, f CalendarFilter, args *[]any, argIdx *int) string {
 	conditions := []string{
 		"mi.type = 'movie'",
-		fmt.Sprintf("mi.release_date BETWEEN $%d::date AND $%d::date", startArg, endArg),
+		fmt.Sprintf("%s BETWEEN $%d::date AND $%d::date", movieCalendarDateExpr, startArg, endArg),
 	}
 	r.appendLibraryExistsClauses("mi.content_id", f, &conditions, args, argIdx)
 	r.appendContentRatingClause("mi", f, &conditions, args, argIdx)
@@ -166,11 +175,12 @@ func (r *CalendarRepository) buildMovieBranch(startArg, endArg, restrictArg int,
 	return fmt.Sprintf(`SELECT mi.content_id, 'movie'::text AS type,
        mi.title, NULL::text AS episode_title, NULL::text AS series_id,
        NULL::int AS season_number, NULL::int AS episode_number,
-       mi.release_date AS air_date, NULL::text AS air_time, NULL::text AS air_timezone,
+       %[1]s AS air_date, NULL::text AS air_time, NULL::text AS air_timezone,
        mi.poster_path, mi.poster_thumbhash,
-       FALSE AS is_premiere, FALSE AS is_finale
+       FALSE AS is_premiere, FALSE AS is_finale,
+       COALESCE(mi.digital_release_date < mi.release_date, mi.digital_release_date IS NOT NULL) AS is_digital_release
 FROM media_items mi
-WHERE %s`, strings.Join(conditions, " AND "))
+WHERE %[2]s`, movieCalendarDateExpr, strings.Join(conditions, " AND "))
 }
 
 func (r *CalendarRepository) buildFilteredEpisodesCTE(startArg, endArg, restrictArg int, f CalendarFilter, args *[]any, argIdx *int) string {
@@ -198,7 +208,8 @@ func (r *CalendarRepository) buildEpisodeBranch() string {
        fe.air_date, fe.air_time, fe.air_timezone,
        fe.poster_path, fe.poster_thumbhash,
        (fe.episode_number = 1) AS is_premiere,
-       (fe.episode_number = sf.max_episode_number) AS is_finale
+       (fe.episode_number = sf.max_episode_number) AS is_finale,
+       FALSE AS is_digital_release
 FROM filtered_episodes fe
 LEFT JOIN season_finales sf ON sf.series_id = fe.series_id AND sf.season_number = fe.season_number`
 }
@@ -227,7 +238,7 @@ func (r *CalendarRepository) buildSeasonBranch() string {
        fs.season_number, NULL::int AS episode_number,
        fs.air_date, fs.air_time, fs.air_timezone,
        fs.poster_path, fs.poster_thumbhash,
-       TRUE AS is_premiere, FALSE AS is_finale
+       TRUE AS is_premiere, FALSE AS is_finale, FALSE AS is_digital_release
 FROM filtered_seasons fs
 LEFT JOIN episode_one_with_air_date e1
        ON e1.series_id = fs.series_id AND e1.season_number = fs.season_number

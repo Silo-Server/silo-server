@@ -74,6 +74,7 @@ const episodeCatalogSelectBody = `(
 		COALESCE(si.keywords, '{}'::text[]) AS keywords,
 		COALESCE(si.original_language, '') AS original_language,
 		CASE WHEN e.air_date IS NULL THEN NULL ELSE e.air_date::text END AS release_date,
+		NULL::date AS digital_release_date,
 		NULL::text AS first_air_date,
 		NULL::text AS last_air_date,
 		e.air_date AS last_air_date_at,

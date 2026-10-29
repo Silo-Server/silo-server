@@ -86,29 +86,31 @@ func TestMerge_ReleaseDatesLockBlocksReplace(t *testing.T) {
 	t.Parallel()
 
 	source := &MetadataResult{
-		HasMetadata:  true,
-		Year:         1982,
-		ReleaseDate:  "1982-06-25",
-		FirstAirDate: "1982-06-25",
-		LastAirDate:  "1983-01-01",
+		HasMetadata:        true,
+		Year:               1982,
+		ReleaseDate:        "1982-06-25",
+		DigitalReleaseDate: "1999-10-26",
+		FirstAirDate:       "1982-06-25",
+		LastAirDate:        "1983-01-01",
 	}
 	target := &MetadataResult{
-		Year:         1990,
-		ReleaseDate:  "1990-01-01",
-		FirstAirDate: "1990-01-01",
-		LastAirDate:  "1991-01-01",
+		Year:               1990,
+		ReleaseDate:        "1990-01-01",
+		DigitalReleaseDate: "2001-01-01",
+		FirstAirDate:       "1990-01-01",
+		LastAirDate:        "1991-01-01",
 	}
 
 	MergeMetadata(source, target, []MetadataField{FieldReleaseDates}, MergeReplaceUnlocked)
 
-	if target.Year != 1990 || target.ReleaseDate != "1990-01-01" ||
+	if target.Year != 1990 || target.ReleaseDate != "1990-01-01" || target.DigitalReleaseDate != "2001-01-01" ||
 		target.FirstAirDate != "1990-01-01" || target.LastAirDate != "1991-01-01" {
 		t.Errorf("locked dates overwritten: %+v", target)
 	}
 
 	// Unlocked, replace mode applies the source values.
 	MergeMetadata(source, target, nil, MergeReplaceUnlocked)
-	if target.Year != 1982 || target.ReleaseDate != "1982-06-25" {
+	if target.Year != 1982 || target.ReleaseDate != "1982-06-25" || target.DigitalReleaseDate != "1999-10-26" {
 		t.Errorf("unlocked replace did not apply: %+v", target)
 	}
 }

@@ -21898,7 +21898,7 @@ export interface components {
        * @example America/New_York
        */
       air_timezone?: string;
-      /** @description series_premiere, season_premiere, finale; empty, never null */
+      /** @description series_premiere, season_premiere, finale, digital (a movie listed on its digital release, which comes before its primary release); empty, never null */
       badges: string[];
       /** @example episode:severance-s02e01 */
       content_id: string;

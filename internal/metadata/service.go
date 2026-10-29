@@ -9141,6 +9141,9 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	if item.ReleaseDate != nil {
 		result.ReleaseDate = *item.ReleaseDate
 	}
+	if item.DigitalReleaseDate != nil {
+		result.DigitalReleaseDate = *item.DigitalReleaseDate
+	}
 	if item.SeasonCount != nil {
 		result.SeasonCount = *item.SeasonCount
 	}
@@ -9213,6 +9216,9 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	}
 	if r.ReleaseDate != "" {
 		item.ReleaseDate = &r.ReleaseDate
+	}
+	if r.DigitalReleaseDate != "" {
+		item.DigitalReleaseDate = &r.DigitalReleaseDate
 	}
 	if r.SeasonCount > 0 {
 		item.SeasonCount = &r.SeasonCount

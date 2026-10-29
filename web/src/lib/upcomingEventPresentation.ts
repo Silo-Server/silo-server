@@ -12,7 +12,8 @@ interface UpcomingPresentationEvent {
   badges: string[];
 }
 
-// Every client shows these labels in capitals: PREMIERE, NEW SEASON, FINALE.
+// Every client shows these labels in capitals: PREMIERE, NEW SEASON, FINALE,
+// DIGITAL.
 export function upcomingBadgeLabel(badge: string): string {
   switch (badge) {
     case "series_premiere":
@@ -21,6 +22,8 @@ export function upcomingBadgeLabel(badge: string): string {
       return "New Season";
     case "finale":
       return "Finale";
+    case "digital":
+      return "Digital";
     default:
       return badge;
   }
@@ -33,6 +36,8 @@ export function upcomingBadgeClass(badge: string): string {
       return "border-primary/40 bg-primary/20 text-primary";
     case "finale":
       return "border-orange-800/55 bg-orange-950/90 text-orange-50 shadow-sm backdrop-blur-none";
+    case "digital":
+      return "border-sky-800/55 bg-sky-950/90 text-sky-50 shadow-sm backdrop-blur-none";
     default:
       return "border-border/50 bg-surface";
   }

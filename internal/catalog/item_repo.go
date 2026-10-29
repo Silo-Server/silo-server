@@ -242,6 +242,7 @@ var itemColumnNames = []string{
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 	advisoryAgeColumn, advisorySourceColumn,
+	"digital_release_date::text",
 }
 
 // nullableStringItemColumns are media_items columns that may hold NULL but
@@ -380,6 +381,7 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -458,6 +460,7 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
 	}
 }
 
@@ -685,7 +688,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age,
 			advisory_age, advisory_source,
 			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
-			clearart_path, clearart_source_path, disc_path, disc_source_path
+			clearart_path, clearart_source_path, disc_path, disc_source_path,
+			digital_release_date
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -700,7 +704,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$48,
 			$49, $50,
 			$51, $52, $53, $54, $55, $56,
-			$57, $58, $59, $60
+			$57, $58, $59, $60,
+			$61
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -738,6 +743,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			keywords = EXCLUDED.keywords,
 			original_language = EXCLUDED.original_language,
 			release_date = EXCLUDED.release_date,
+			digital_release_date = EXCLUDED.digital_release_date,
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
 			air_time = EXCLUDED.air_time,
@@ -822,6 +828,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.ClearArtSourcePath,
 		item.DiscPath,
 		item.DiscSourcePath,
+		item.DigitalReleaseDate,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)

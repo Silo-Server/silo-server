@@ -449,6 +449,9 @@ func buildBadges(ev catalog.CalendarEvent) []string {
 	if ev.IsFinale {
 		badges = append(badges, "finale")
 	}
+	if ev.IsDigitalRelease {
+		badges = append(badges, "digital")
+	}
 	if badges == nil {
 		badges = []string{}
 	}

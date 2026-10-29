@@ -466,6 +466,36 @@ func TestHandleGetCalendar_MarksWatchedItems(t *testing.T) {
 	}
 }
 
+func TestHandleGetCalendar_BadgesDigitalReleases(t *testing.T) {
+	day := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
+	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
+		{ContentID: "movie-digital", Type: "movie", Title: "Digital", AirDate: day, IsDigitalRelease: true},
+		{ContentID: "movie-cinema", Type: "movie", Title: "Cinema", AirDate: day},
+	}}
+	handler := &CalendarHandler{repo: repo}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	var resp calendarResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	badges := map[string][]string{}
+	for _, d := range resp.Events {
+		for _, item := range d.Items {
+			badges[item.ContentID] = item.Badges
+		}
+	}
+	if got := badges["movie-digital"]; len(got) != 1 || got[0] != "digital" {
+		t.Fatalf("digital movie badges = %v, want [digital]", got)
+	}
+	if got, ok := badges["movie-cinema"]; !ok || len(got) != 0 {
+		t.Fatalf("cinema movie badges = %v (listed %v), want []", got, ok)
+	}
+}
+
 func TestHandleGetCalendar_EmptyRestrictionAnswersBeforeLibraryIDValidation(t *testing.T) {
 	repo := &stubCalendarRepo{}
 	handler := &CalendarHandler{repo: repo, personal: &stubCalendarPersonal{watchlist: nil}}

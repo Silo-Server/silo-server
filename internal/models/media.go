@@ -727,6 +727,7 @@ type MediaItem struct {
 	Keywords                     []string
 	OriginalLanguage             string
 	ReleaseDate                  *string // ISO date, nullable
+	DigitalReleaseDate           *string // ISO date (movies only): earliest digital release in any country, nullable
 	FirstAirDate                 *string // ISO date (series only), nullable
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable

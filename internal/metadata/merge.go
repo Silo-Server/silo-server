@@ -46,6 +46,7 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	if !isLocked(FieldReleaseDates) {
 		mergeInt(&target.Year, source.Year, mode)
 		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.DigitalReleaseDate, source.DigitalReleaseDate, mode)
 		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	}
@@ -124,6 +125,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	if !isLocked(FieldReleaseDates) {
 		mergeInt(&target.Year, source.Year, mode)
 		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.DigitalReleaseDate, source.DigitalReleaseDate, mode)
 		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	}

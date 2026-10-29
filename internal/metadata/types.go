@@ -337,6 +337,10 @@ type MetadataResult struct {
 	BackdropPath      string
 	BackdropThumbhash string
 	LogoPath          string
+	// DigitalReleaseDate is a movie's earliest digital release in any
+	// country, YYYY-MM-DD. The calendar lists the movie on the earlier of it
+	// and ReleaseDate.
+	DigitalReleaseDate string
 	// Series-specific
 	ReleaseDate  string
 	SeasonCount  int

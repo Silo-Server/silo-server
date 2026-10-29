@@ -978,6 +978,26 @@ used cannot be deleted (`409`) until those rows stop showing it.
 Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
 unchanged and carries no counts.
 
+## Calendar movie dates
+
+`GET /api/v2/calendar` lists each movie once, on its earliest release: the earlier
+of its primary `release_date` and its digital release date. The digital date is
+the earliest digital (streaming or purchase) release in any country. When the
+digital date is the one shown, the event carries the `digital` badge. A movie
+whose primary release comes first, or falls on the same day, has no badge. The
+frozen `/api/v1/calendar` serves the same dates and badges, because both read
+the same events.
+
+The digital date is a calendar input only. Item detail, sorting, filters and
+the year still use `release_date`, and no item response carries the digital
+date.
+
+Metadata providers supply it as `digital_release_date` (`YYYY-MM-DD`) in the
+`metadata` Struct of a movie's `GetMetadata` response. The host ignores the key
+on other item types and drops a value that is not a calendar date. The TMDB
+plugin derives it from TMDB's type 4 (digital) release dates. Locking release
+dates on an item also locks the digital date.
+
 ## Advisory age
 
 Movies and series may carry `advisory_age`, a recommended minimum viewer age from

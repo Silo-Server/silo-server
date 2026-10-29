@@ -44,7 +44,7 @@ type CalendarEvent struct {
 	PosterURL       string   `json:"poster_url,omitempty" format:"uri-reference" example:"https://s3.example.test/poster.jpg"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
 	Watched         bool     `json:"watched" example:"false"`
-	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale; empty, never null"`
+	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale, digital (a movie listed on its digital release, which comes before its primary release); empty, never null"`
 }
 
 // CalendarDay is one local day with its events in airing order.
