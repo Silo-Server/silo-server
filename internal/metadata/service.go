@@ -7670,8 +7670,8 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 
 	// Explicit structured IDs from the file or folder are treated as trusted.
 	// When present, they override scanner ambiguity and become the authoritative
-	// external IDs used for dedup/link/create. Filename tags take precedence
-	// over folder tags because the file is generally the freshest artifact.
+	// external IDs used for dedup/link/create. Folder tags take precedence
+	// over file-name tags for the same provider, as the scanner stores them.
 	trustedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, contentRootPath, groupOverride, libraryRoots...)
 	if trustedIDs != nil {
 		applyFolderIDHints(res, trustedIDs)
