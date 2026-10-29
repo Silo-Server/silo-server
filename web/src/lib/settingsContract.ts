@@ -553,6 +553,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [5, 5],
     resolutionOrder: ["profile_device", "profile_client", "default"],
     defaultValue: null,
+    adminDefault: true,
     label: "Primary menu",
     description: "The ordered visible destinations shared by like clients.",
     category: "navigation",

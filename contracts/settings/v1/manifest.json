@@ -1383,7 +1383,8 @@
       "label": "Primary menu",
       "description": "The ordered visible destinations shared by like clients.",
       "recommended_control": "panel",
-      "notes": "Search and profile remain fixed client utilities. Home is required by primary-menu.json; omitting any other supported built-in hides it. Semantic destination identities are unique even when labels differ. A null default lets each family keep its native baseline until the user customizes it. Family scope synchronizes like clients while profile_device remains an explicit escape hatch for one screen; clients ignore built-in destinations they do not support."
+      "admin_default": true,
+      "notes": "Search and profile remain fixed client utilities. Home is required by primary-menu.json; omitting any other supported built-in hides it. Semantic destination identities are unique even when labels differ. A null default lets each family keep its native baseline until the user customizes it. Family scope synchronizes like clients while profile_device remains an explicit escape hatch for one screen; clients ignore built-in destinations they do not support. The administrator can replace the default for the whole server, which is how one menu reaches every profile including a new account's; a profile with no stored value inherits it, and clearing the profile value returns to it."
     },
     {
       "key": "nav.shortcuts",
