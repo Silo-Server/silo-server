@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Heart, List, Search } from "lucide-react";
+import {
+  Bell,
+  CalendarDays,
+  Clock,
+  FolderOpen,
+  Heart,
+  List,
+  LogOut,
+  Search,
+  Settings,
+  Shield,
+  UserCircle,
+  UsersRound,
+} from "lucide-react";
 
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -65,6 +79,8 @@ function useTabletUp(): boolean {
 interface MenuLink {
   key: string;
   label: string;
+  /** The same glyph the sidebar used for this destination. */
+  icon: ReactNode;
   onSelect: () => void;
 }
 
@@ -98,8 +114,9 @@ function MenuColumn({
               link.onSelect();
               onNavigate();
             }}
-            className="text-popover-foreground cursor-pointer rounded-lg px-2 py-1.5 text-[0.8125rem] font-medium"
+            className="text-popover-foreground flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-[0.8125rem] font-medium"
           >
+            {link.icon}
             {link.label}
           </DropdownMenuItem>
         ) : (
@@ -110,8 +127,9 @@ function MenuColumn({
               link.onSelect();
               onNavigate();
             }}
-            className="text-popover-foreground hover:bg-accent focus-visible:ring-ring flex min-h-11 items-center rounded-lg px-2 text-left text-[0.9375rem] font-medium focus-visible:ring-2 focus-visible:outline-none"
+            className="text-popover-foreground hover:bg-accent focus-visible:ring-ring flex min-h-11 items-center gap-2.5 rounded-lg px-2 text-left text-[0.9375rem] font-medium focus-visible:ring-2 focus-visible:outline-none"
           >
+            {link.icon}
             {link.label}
           </button>
         ),
@@ -174,10 +192,16 @@ export default function TopNav() {
 
   const accountLinks = useMemo<MenuLink[]>(() => {
     const entries: MenuLink[] = [
-      { key: "collections", label: "Collections", onSelect: () => navigate("/collections") },
+      {
+        key: "collections",
+        label: "Collections",
+        icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
+        onSelect: () => navigate("/collections"),
+      },
       {
         key: "history",
         label: "History",
+        icon: <Clock className="h-[18px] w-[18px] shrink-0" />,
         onSelect: () => navigate(buildPersonalCatalogHref("history")),
       },
     ];
@@ -185,32 +209,59 @@ export default function TopNav() {
       entries.push({
         key: "notifications",
         label: "Notifications",
+        icon: <Bell className="h-[18px] w-[18px] shrink-0" />,
         onSelect: () => navigate("/notifications"),
       });
     }
-    entries.push({ key: "calendar", label: "Calendar", onSelect: () => navigate("/calendar") });
+    entries.push({
+      key: "calendar",
+      label: "Calendar",
+      icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" />,
+      onSelect: () => navigate("/calendar"),
+    });
     if (showAdminNav) {
-      entries.push({ key: "admin", label: "Admin", onSelect: () => navigate("/admin") });
+      entries.push({
+        key: "admin",
+        label: "Admin",
+        icon: <Shield className="h-[18px] w-[18px] shrink-0" />,
+        onSelect: () => navigate("/admin"),
+      });
     }
-    entries.push({ key: "settings", label: "Settings", onSelect: () => navigate("/settings") });
+    entries.push({
+      key: "settings",
+      label: "Settings",
+      icon: <Settings className="h-[18px] w-[18px] shrink-0" />,
+      onSelect: () => navigate("/settings"),
+    });
     return entries;
   }, [navigate, showAdminNav, showNotificationsNav]);
 
   const profileLinks = useMemo<MenuLink[]>(() => {
     const entries: MenuLink[] = [
-      { key: "rooms", label: "Watch party", onSelect: () => navigate("/rooms") },
+      {
+        key: "rooms",
+        label: "Watch party",
+        icon: <UsersRound className="h-[18px] w-[18px] shrink-0" />,
+        onSelect: () => navigate("/rooms"),
+      },
     ];
     if (profile) {
       entries.push({
         key: "switch-profile",
         label: "Switch Profile",
+        icon: <UserCircle className="h-[18px] w-[18px] shrink-0" />,
         onSelect: () => {
           clearProfile();
           navigate("/profiles");
         },
       });
     }
-    entries.push({ key: "logout", label: "Logout", onSelect: logout });
+    entries.push({
+      key: "logout",
+      label: "Logout",
+      icon: <LogOut className="h-[18px] w-[18px] shrink-0" />,
+      onSelect: logout,
+    });
     return entries;
   }, [clearProfile, logout, navigate, profile]);
 
