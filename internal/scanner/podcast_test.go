@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -158,6 +159,45 @@ func TestParsePodcastShowSkipsAFileStillChanging(t *testing.T) {
 	}
 	if _, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil); !errors.Is(err, errPodcastFileChanging) {
 		t.Fatalf("parsePodcastShow error = %v, want errPodcastFileChanging", err)
+	}
+}
+
+// A show folder whose name needs fspath encoding is listed encoded, and its
+// episodes are still stat'ed and probed by their real names.
+func TestParsePodcastShowReadsAnEncodedShowName(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n")
+	// A Latin-1 name, as older tools write one. A file system that takes only
+	// UTF-8 names, such as APFS, gets a name holding a code point from
+	// fspath's reserved range instead, which is escaped the same way.
+	showDir := ""
+	for _, name := range []string{"B\xe5rd", "B\U0010FE80rd"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o755); err == nil {
+			showDir = filepath.Join(dir, name)
+			break
+		}
+	}
+	if showDir == "" {
+		t.Skip("file system takes no name that needs encoding")
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "01.mp3"), []byte(podcastProbeJSON("61")), 0o644); err != nil {
+		t.Fatalf("write episode: %v", err)
+	}
+	encoded := fspath.Encode(showDir)
+	if encoded == showDir {
+		t.Fatalf("%q needs no encoding", showDir)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, encoded, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 || got.Episodes[0].Path != filepath.Join(encoded, "01.mp3") {
+		t.Fatalf("episodes = %+v, want the one episode under the encoded show path", got.Episodes)
+	}
+	if ep := got.Episodes[0]; ep.Probe == nil || ep.Probe.Duration != 61 || ep.Size == 0 {
+		t.Fatalf("probe = %+v, size %d; want the 61-second probe and the file's size", ep.Probe, ep.Size)
 	}
 }
 

@@ -115,7 +115,7 @@ var errPodcastFileChanging = errors.New("podcast file changed while it was probe
 // look current.
 func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*ProbeData, os.FileInfo, error) {
 	for attempt := 1; ; attempt++ {
-		before, err := os.Stat(path)
+		before, err := fspath.Stat(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
 		}
@@ -123,11 +123,11 @@ func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*Pro
 		if err != nil {
 			return nil, nil, fmt.Errorf("probe podcast file %s: %w", path, err)
 		}
-		after, err := os.Stat(path)
+		after, err := fspath.Stat(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
 		}
-		if os.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) {
+		if fspath.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) {
 			return probed, before, nil
 		}
 		if attempt == 2 {
