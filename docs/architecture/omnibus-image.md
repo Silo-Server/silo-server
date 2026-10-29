@@ -233,9 +233,13 @@ successfully. `redis` and `meilisearch` exit at once. `postgres` runs
   collation-dependent indexes, since the copy was built under glibc 2.36.
 - Redis and Meilisearch data stay behind. Redis holds nothing a single node
   cannot rebuild, and Silo builds a new index when `ENABLE_MEILISEARCH` is
-  turned on. A search provider the admin UI pointed at the old `meilisearch`
-  service goes back to `postgres` in the copy, unless `ENABLE_MEILISEARCH` is
-  on, in which case `init-config` hands Silo the bundled instance.
+  turned on. The Compose file still starts the bundled Redis unless `.env`
+  sets `ENABLE_REDIS=false`, as the earlier stack always ran one: Silo offers
+  the Watch Party room socket only with Redis. The image's own default stays
+  off, since a node ignores the setting and warns when it is on. A search
+  provider the admin UI pointed at the old `meilisearch` service goes back to
+  `postgres` in the copy, unless `ENABLE_MEILISEARCH` is on, in which case
+  `init-config` hands Silo the bundled instance.
 
 It does nothing when the omnibus install already has a database of its own
 and none of the earlier stack is here, and refuses, before anything is moved

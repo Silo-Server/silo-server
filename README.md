@@ -86,8 +86,8 @@ Existing library data is preserved when upgrading.
 ## Quick start
 
 Requires Docker Compose 2.24 or newer. The default Compose file runs the
-omnibus image: Silo with a bundled PostgreSQL and pgvector, plus Redis and
-Meilisearch when you turn them on.
+omnibus image: Silo with a bundled PostgreSQL (with pgvector) and Redis, plus
+Meilisearch when you turn it on.
 
 ```sh
 git clone https://github.com/Silo-Server/silo-server.git

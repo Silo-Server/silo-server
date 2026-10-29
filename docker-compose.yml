@@ -1,6 +1,6 @@
 # Silo in one container. The omnibus image runs Silo with a bundled
-# PostgreSQL, and starts the bundled Redis and Meilisearch when ENABLE_REDIS
-# or ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
+# PostgreSQL and Redis, and starts the bundled Meilisearch when
+# ENABLE_MEILISEARCH is set. Settings come from .env; see .env.example.
 # docs/architecture/omnibus-image.md describes the image.
 #
 # For hardware transcoding, layer docker-compose.vaapi.yml or
@@ -45,8 +45,11 @@ services:
       # Back it up SEPARATELY from your database dumps; losing it makes encrypted
       # secrets unrecoverable. See docs/architecture/secret-encryption.md.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-      # Both are off by default. Set to "true" to start the bundled service.
-      ENABLE_REDIS: ${ENABLE_REDIS:-false}
+      # Watch Party rooms need Redis, and the multi-container stack always
+      # ran it, so it is on here unless .env sets ENABLE_REDIS=false or a
+      # REDIS_URL of its own. The image itself leaves it off, for nodes.
+      ENABLE_REDIS: ${ENABLE_REDIS:-true}
+      # Off by default. Set to "true" to start the bundled Meilisearch.
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
       # Until the postgres service below has run once, Silo creates no empty
       # database, so `up --no-deps silo` cannot start a new install in front
@@ -119,7 +122,7 @@ services:
       SILO_OMNIBUS_IMAGE: ${SILO_OMNIBUS_IMAGE:-}
       POSTGRES_PASSWORD_SET: ${POSTGRES_PASSWORD:+set}
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
-      ENABLE_REDIS: ${ENABLE_REDIS:-false}
+      ENABLE_REDIS: ${ENABLE_REDIS:-true}
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
   redis: *bridge
