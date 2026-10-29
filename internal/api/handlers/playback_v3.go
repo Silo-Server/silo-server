@@ -1391,6 +1391,7 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 	input.SubtitleRenditionExecutable = snapshot.subtitleRenditionExecutable
 	input.RemuxSubtitleRenditionExecutable = snapshot.remuxSubtitleRenditionExecutable
 	input.LocalNetwork = streamlocation.FromContext(ctx) == streamlocation.Local
+	input.SubtitleTrackFacts = h.SubtitleTrackFacts
 	result := playback.PlanPlaybackV3(input)
 	if result.SubtitleRendition && result.Plan != nil && !h.subtitleRenditionRoutableV3(ctx, result, proxyAllowed) {
 		// The planning gate counts any executor that emits renditions, but
@@ -4877,7 +4878,17 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
-		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded)), clientFeatures)
+		rebuilt := playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded))
+		// The rebuild knows no request to evaluate native selection against;
+		// keep what planning decided for each embedded track that is still
+		// the same stream.
+		for i := range rebuilt {
+			planned, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, rebuilt[i].CombinedIndex)
+			if ok && planned.Source == playback.SubtitleSourceEmbeddedV3 && rebuilt[i].StreamIndex != nil && planned.StreamIndex != nil && *planned.StreamIndex == *rebuilt[i].StreamIndex {
+				rebuilt[i].NativeSelectable = planned.NativeSelectable
+			}
+		}
+		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, rebuilt, clientFeatures)
 	}
 	plan.Subtitle.Inventory = inventory
 	// Only render and convert publish a client-fetchable artifact; off and

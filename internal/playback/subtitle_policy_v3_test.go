@@ -16,7 +16,7 @@ func subtitlePolicyForTrackV3(codec string, index int) func(transcodeAllowed boo
 	req := validStartRequestV3()
 	req.SubtitleTrackIndex = &index
 	return func(transcodeAllowed bool) SubtitlePolicyResultV3 {
-		return ResolveSubtitlePolicyV3(file, req, transcodeAllowed, DeliveryClassOriginalHTTPV3, nil)
+		return ResolveSubtitlePolicyV3(file, req, transcodeAllowed, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	}
 }
 
@@ -111,7 +111,7 @@ func TestResolveSubtitlePolicyV3StillRejectsInvalidIdentity(t *testing.T) {
 	req := validStartRequestV3()
 	req.SubtitleTrackID = "not-a-track-id"
 
-	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil, 0, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_track_invalid" {
 		t.Fatalf("a malformed identity must stay terminal: %#v", result)
 	}
