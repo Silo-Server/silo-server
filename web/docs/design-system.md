@@ -146,7 +146,7 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 ### Ambient Tokens
 
 - `--ambient`: dominant color extracted from the currently featured artwork. Set dynamically via JavaScript. Used for subtle background glow and atmosphere. Falls back to `--primary` when no artwork color is available.
-- `--ambient-glow-opacity`: the opacity of the `.ambient-glow` class, a radial gradient using `--ambient` placed behind hero sections and detail page headers. Should be barely perceptible — felt more than seen.
+- `--ambient-glow-opacity`: the opacity of the `.ambient-glow` class, a radial gradient using `--ambient` placed behind hero sections and detail page headers. The glow should be barely perceptible, felt more than seen.
 
 ### Border Tokens
 
