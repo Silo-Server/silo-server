@@ -159,6 +159,41 @@ func TestQueuedMovieIdentityPreservesCurrentProviderAnchor(t *testing.T) {
 	}
 }
 
+// A folder and a file name can carry different IDs from one provider. The
+// queued identity must read them in the order the scanner stored the group's
+// IDs, or the comparison reports a change that no rescan can clear.
+func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *testing.T) {
+	const libraryRoot = "/movies"
+	for _, tt := range []struct{ name, path, wantTmdb string }{
+		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
+		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
+			assignment := assignments[tt.path]
+			scanned := naming.InferGroupIdentity(tt.path, "movies", assignment)
+
+			h := newTestHarness()
+			file := &models.MediaFile{
+				ID: 1, MediaFolderID: 10, FilePath: tt.path,
+				GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+				ObservedRootPath: scanned.ObservedRootPath, CanonicalRootPath: assignment.RootPath,
+				BaseType: scanned.BaseType, BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear,
+			}
+			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+				MediaFolderID: 10, GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+				BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear, InferredType: scanned.BaseType, State: "resolved", OverrideSource: "none",
+				TmdbID: scanned.TmdbID, ImdbID: scanned.ImdbID, TvdbID: scanned.TvdbID,
+			})
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+			skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
+			if err != nil || skeleton == nil || skeleton.TmdbID != tt.wantTmdb {
+				t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v error=%v", scanned, skeleton, err)
+			}
+		})
+	}
+}
+
 func TestScannedGroupIdentityComparisonIgnoresPresentationVariants(t *testing.T) {
 	group := &models.ScannedMediaGroup{BaseTitle: "Example Movie", BaseYear: 2020, InferredType: "movie"}
 	for _, title := range []string{"Example.Movie", "Example Movie Extended Edition", "Example Movie Director's Cut"} {

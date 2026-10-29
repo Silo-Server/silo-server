@@ -7425,13 +7425,18 @@ func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 	return providerIDs
 }
 
+// trustedStructuredIDsForSkeleton reads the explicit provider tags on a file's
+// folder and name. A folder tag wins and the file name only fills providers the
+// folder leaves out, as naming.InferGroupIdentity does when it stores a group's
+// IDs: the scanned-group comparison would otherwise see a folder and file that
+// disagree as an identity change no rescan can clear.
 func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string, libraryRoots ...string) *naming.FolderIDHints {
 	folderIDs := naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(observedRootPath, libraryRoots))
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
 		folderIDs = naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(contentRootPath, libraryRoots))
 	}
 	fileIDs := naming.ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
-	return mergeFolderIDHints(folderIDs, fileIDs)
+	return mergeFolderIDHints(fileIDs, folderIDs)
 }
 
 // seriesContentIDForGroup returns the series item already linked to another
