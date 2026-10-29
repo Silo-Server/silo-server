@@ -153,7 +153,7 @@ func (c *extrasClassifier) classify(path string) (extraCandidate, bool) {
 	// 1x05) or its season folder: the 03 in "Season 03 Recap-trailer.mp4"
 	// beside the season folders is a bare number, not an episode.
 	if !librarykind.IsMovie(c.folderType) && c.keepsEpisodeToken(candidate) {
-		if hints := naming.ParseFilename(path, c.folderType); hints != nil &&
+		if hints := naming.ParseFilename(path, c.folderType, c.libraryRoots...); hints != nil &&
 			hints.Type == "series" && hints.EpisodeNum > 0 {
 			if candidate.SupplementalDir != "" || hints.SeasonKnown {
 				return extraCandidate{}, false

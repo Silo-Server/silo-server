@@ -103,9 +103,15 @@ func TestClassifyExtraPathSeriesLibrary(t *testing.T) {
 	// A suffix-marked file beside the season folders is a show extra even
 	// when its title carries a bare number; an episode with a season, from its
 	// code or its season folder, stays an episode.
-	candidate, ok = classifier.classify("/tv/Show/Season 03 Recap-trailer.mp4")
-	if !ok || candidate.Kind != models.ExtraKindTrailer {
-		t.Fatalf("suffix trailer beside season folders should classify, got ok=%v kind=%q", ok, candidate.Kind)
+	// A numeric show folder (24/) is the show, not a season.
+	for _, filePath := range []string{
+		"/tv/Show/Season 03 Recap-trailer.mp4",
+		"/tv/24/03-trailer.mp4",
+	} {
+		candidate, ok := classifier.classify(filePath)
+		if !ok || candidate.Kind != models.ExtraKindTrailer {
+			t.Errorf("suffix trailer beside season folders should classify: %s, got ok=%v kind=%q", filePath, ok, candidate.Kind)
+		}
 	}
 	for _, filePath := range []string{
 		"/tv/Show/Show S01E02-clip.mkv",

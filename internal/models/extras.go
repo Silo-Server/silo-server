@@ -71,8 +71,8 @@ type ItemVideo struct {
 // (featurette, deleted scene, local trailer file, ...) belonging to a parent
 // movie or series. Its ContentID is minted from the backing file path with
 // contentid.ForLocal (see the scanner's extraContentID), making it a playable
-// watch target through
-// GetWatchDetail's fallback chain; access control is the parent's.
+// watch target through GetWatchDetail's fallback chain; access control is the
+// parent's.
 type MediaExtra struct {
 	ContentID string
 	ParentID  string // media_items.content_id of the owning movie/series
