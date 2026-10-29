@@ -84,7 +84,9 @@ genre samplers) and co-watch pairs do not use embeddings and stay.
 The reset runs synchronously while holding the embeddings, taste profile and
 recommendation jobs' claims and the stale profile sweep's lock, so none of
 them runs beside it on any server. It returns `409` while any of them is
-running and `500` when the transaction fails, which leaves every row in place.
+running, while a catalog import with embeddings runs, or while saved embedding
+settings wait for a server restart, and `500` when the transaction fails, which
+leaves every row in place.
 A profile refresh that was already running when the reset committed can still
 write one taste profile from the old embeddings; the profile's next refresh
 after re-embedding replaces it.
