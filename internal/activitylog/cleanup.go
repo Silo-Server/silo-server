@@ -69,6 +69,11 @@ func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, p
 	}
 
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+	// Last activity is a summary of the retained log: an account idle past
+	// retention shows none, as it did when the summary was read from the log.
+	if _, err := pool.Exec(ctx, `DELETE FROM user_last_activity WHERE last_active_at < $1`, cutoff); err != nil {
+		slog.WarnContext(ctx, "activitylog last activity cleanup error", "component", "activitylog", "error", err)
+	}
 	if pm != nil {
 		if err := pm.EnsureFuturePartitions(ctx); err != nil {
 			slog.WarnContext(ctx, "activitylog ensure future partitions error", "component", "activitylog", "error", err)

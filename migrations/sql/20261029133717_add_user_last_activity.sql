@@ -5,7 +5,7 @@
 -- It lives outside users so recording activity never bumps admin_revision,
 -- the users row's edit validator.
 CREATE TABLE public.user_last_activity (
-    user_id        integer PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id        bigint PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
     last_active_at timestamp with time zone NOT NULL
 );
 

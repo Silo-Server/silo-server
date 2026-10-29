@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
 func TestRecordLastActivityKeepsNewestDB(t *testing.T) {
@@ -65,10 +67,18 @@ func TestRecordLastActivityKeepsNewestDB(t *testing.T) {
 	if got := lastActive(); !got.Equal(base.Add(time.Minute)) {
 		t.Fatalf("stale batch moved last_active_at to %v", got)
 	}
-	if err := recordLastActivity(ctx, pool, []LogEntry{{Timestamp: base.Add(2 * time.Minute), UserID: &user}}); err != nil {
+
+	// An audited mutation stored its own row; the consumer records only the
+	// account's activity and does not store a second row.
+	consumer := NewConsumer(pool, logstream.NewHub("test", nil))
+	if err := consumer.insertBatch(ctx, []LogEntry{{Timestamp: base.Add(2 * time.Minute), UserID: &user, RequestID: "last-active-" + suffix, Method: "PUT", Persisted: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := lastActive(); !got.Equal(base.Add(2 * time.Minute)) {
 		t.Fatalf("last_active_at = %v, want %v", got, base.Add(2*time.Minute))
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM activity_log WHERE request_id=$1`, "last-active-"+suffix).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("persisted entry stored %d rows: %v", stored, err)
 	}
 }
