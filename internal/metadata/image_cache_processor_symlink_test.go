@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -158,6 +159,46 @@ func TestProcessLocalImageAcceptsSymlinkedSeriesFolderWithCatalogedEpisode(t *te
 	jobs, cacher := runLocalJob(t, job, resolver)
 	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "series-poster" {
 		t.Fatalf("cached %d images (failed text %q), want the series poster", len(cacher.byteReqs), jobs.failedText)
+	}
+}
+
+// A linked title folder whose name needs fspath encoding reaches the processor
+// encoded, as the scanner stores it, and its cataloged video still vouches for
+// it, so every check decodes the path before it reaches the file system.
+func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithAnEncodedName(t *testing.T) {
+	library, storeRoot := t.TempDir(), t.TempDir()
+	// A Latin-1 name, as older tools write one. A file system that takes only
+	// UTF-8 names, such as APFS, gets a name holding a code point from
+	// fspath's reserved range instead, which is escaped the same way.
+	store := ""
+	for _, name := range []string{"B\xe5rd (2020)", "B\U0010FE80rd (2020)"} {
+		if err := os.Mkdir(filepath.Join(storeRoot, name), 0o755); err == nil {
+			store = filepath.Join(storeRoot, name)
+			break
+		}
+	}
+	if store == "" {
+		t.Skip("file system takes no name that needs encoding")
+	}
+	for name, body := range map[string]string{"Example (2020).mkv": "video", "poster.jpg": "poster-bytes"} {
+		if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawTitle := filepath.Join(library, filepath.Base(store))
+	if err := os.Symlink(store, rawTitle); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	title := fspath.Encode(rawTitle)
+	if title == rawTitle {
+		t.Fatalf("%q needs no encoding", rawTitle)
+	}
+
+	job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
+	resolver := &catalogedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Example (2020).mkv")}}
+	jobs, cacher := runLocalJob(t, job, resolver)
+	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "poster-bytes" {
+		t.Fatalf("cached %d images (failed text %q), want the poster", len(cacher.byteReqs), jobs.failedText)
 	}
 }
 

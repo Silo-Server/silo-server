@@ -1207,7 +1207,7 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 		}
 		return escaped
 	}
-	resolvedImageDir, err := filepath.EvalSymlinks(filepath.Dir(localPath))
+	resolvedImageDir, err := fspath.EvalSymlinks(filepath.Dir(localPath))
 	if err != nil {
 		noteIOErr(err)
 		return nil, untrusted()
@@ -1216,7 +1216,7 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 		// Only a folder the image physically sits in can vouch for it: one
 		// above the link that leads out holds the image only through that
 		// link.
-		resolvedDir, err := filepath.EvalSymlinks(dir)
+		resolvedDir, err := fspath.EvalSymlinks(dir)
 		if err != nil {
 			noteIOErr(err)
 			continue
@@ -1269,7 +1269,7 @@ func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImag
 	if err != nil || !filepath.IsLocal(imageRel) {
 		return nil, false, nil
 	}
-	root, err := os.OpenRoot(dir)
+	root, err := os.OpenRoot(fspath.Decode(dir))
 	if err != nil {
 		return nil, false, err
 	}
@@ -1292,17 +1292,17 @@ func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImag
 			noteIOErr(err)
 			continue
 		}
-		inside, err := root.Stat(rel)
+		inside, err := root.Stat(fspath.Decode(rel))
 		if err != nil {
 			noteIOErr(err)
 			continue
 		}
-		cataloged, err := os.Stat(file)
+		cataloged, err := fspath.Stat(file)
 		if err != nil {
 			noteIOErr(err)
 			continue
 		}
-		if !os.SameFile(inside, cataloged) {
+		if !fspath.SameFile(inside, cataloged) {
 			continue
 		}
 		data, err := readLocalImageFile(localPath, root, imageRel)
@@ -1337,7 +1337,7 @@ func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, 
 			return "", false, nil
 		}
 		full := filepath.Join(resolvedDir, next)
-		info, err := os.Lstat(full)
+		info, err := fspath.Lstat(full)
 		if err != nil {
 			return "", false, err
 		}
@@ -1348,7 +1348,7 @@ func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, 
 		if links++; links > maxFolderLinks {
 			return "", false, nil
 		}
-		target, err := os.Readlink(full)
+		target, err := fspath.Readlink(full)
 		if err != nil {
 			return "", false, err
 		}
