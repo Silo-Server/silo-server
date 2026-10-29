@@ -39,6 +39,7 @@ import { ResetButton } from "./ResetButton";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 const DEVICE_SCOPE = { scope: "profile_device" } as const;
+const PROFILE_SCOPE = { scope: "profile" } as const;
 
 /** The server setting holding the administrator's menu for every profile, as JSON text. */
 const ADMIN_MENU_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.NAV_PRIMARY_MENU);
@@ -307,6 +308,9 @@ function MenuSettings() {
   if (saved !== null && !showSaved) setSaved(null);
   const menuItems = showSaved ? saved.items : baselineMenu.items;
   const deviceOverride = customization.primaryMenuSource === "profile_device";
+  const profileOverride =
+    customization.primaryMenuSource === "profile" ||
+    customization.primaryMenuSource === "profile_client";
   const sharedMenuSet = sharedMenu !== null || saved !== null;
   const locked = busy || deviceOverride;
   const atLimit = menuItems.length >= 64;
@@ -371,6 +375,23 @@ function MenuSettings() {
     }
   }
 
+  /**
+   * Clears this profile's own menu row. A row wins over the default, so a
+   * profile that has one keeps its own menu however the default is set — the
+   * administrator's own profile included, which is what makes a save here look
+   * like it did nothing.
+   */
+  async function clearProfileOverride() {
+    try {
+      await clearValue.mutateAsync({
+        key: SETTING_KEYS.NAV_PRIMARY_MENU,
+        identity: customization.primaryMenuSource === "profile" ? PROFILE_SCOPE : CLIENT_SCOPE,
+      });
+    } catch (error) {
+      toast.error(errorMessage(error, "Couldn't clear this profile's menu"));
+    }
+  }
+
   // The poster section already explains why neither can be edited.
   if (blocker) return null;
 
@@ -389,6 +410,15 @@ function MenuSettings() {
       }
     >
       <>
+        {profileOverride ? (
+          <OverrideNotice
+            action="Use the menu everyone gets"
+            disabled={locked}
+            onAction={() => void clearProfileOverride()}
+          >
+            This profile has its own menu, so it will keep that instead of the one set here.
+          </OverrideNotice>
+        ) : null}
         {deviceOverride ? (
           <OverrideNotice
             action="Match my other browsers"

@@ -210,6 +210,22 @@ describe("InterfaceSettings", () => {
     );
   });
 
+  it("offers to drop a profile menu that would shadow the default", async () => {
+    mocks.useUICustomization.mockReturnValue(
+      customization({ primaryMenu: MOVIES_MENU, primaryMenuSource: "profile_client" }),
+    );
+
+    render(<InterfaceSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Use the menu everyone gets" }));
+
+    await waitFor(() =>
+      expect(clearMutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.NAV_PRIMARY_MENU,
+        identity: { scope: "profile_client" },
+      }),
+    );
+  });
+
   it("keeps editors closed when effective customization could not be loaded", () => {
     mocks.useUICustomization.mockReturnValue(
       customization({
