@@ -48,6 +48,12 @@ const (
 	// claimLease outlasts the read it covers, so a claim never runs out
 	// under a read that is still going.
 	claimLease = wholeReadTimeout + time.Minute
+	// foregroundWait is how long a request waits on a whole read before it
+	// demuxes the source instead, which streams its first cues at once. It
+	// sits well inside the response's write stall window
+	// (httpstream.DefaultStallWindow), which runs from the request's start
+	// until the first byte. The read goes on, and keeps the track.
+	foregroundWait = 90 * time.Second
 	// defaultPollInterval is how often a request waiting on another
 	// server's read looks for its result.
 	defaultPollInterval = time.Second
@@ -90,6 +96,8 @@ type Store struct {
 	// probeStart returns a source's start time; tests replace it.
 	probeStart   func(ctx context.Context, path string) (time.Duration, error)
 	pollInterval time.Duration
+	// foregroundWait is foregroundWait; tests shorten it.
+	foregroundWait time.Duration
 
 	mu      sync.Mutex
 	flights map[flightKey]*flight
@@ -112,8 +120,10 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		opts:         opts,
 		pollInterval: defaultPollInterval,
 		flights:      map[flightKey]*flight{},
-		starts:       map[sourceVersion]time.Duration{},
-		mirrors:      map[string]*mirrorFetch{},
+		// A request's wait on a whole read; see foregroundWait.
+		foregroundWait: foregroundWait,
+		starts:         map[sourceVersion]time.Duration{},
+		mirrors:        map[string]*mirrorFetch{},
 	}
 	s.probeStart = func(ctx context.Context, path string) (time.Duration, error) {
 		return playback.SubtitleSourceStartTime(ctx, s.ffmpegPath(), path)
@@ -302,7 +312,11 @@ func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSu
 		return t, nil
 	}
 	key := flightKey{fileID: ref.MediaFileID, stream: ref.StreamIndex, version: v, background: background}
-	return s.shared(ctx, key, func(ctx context.Context) (*Track, error) {
+	wait := s.foregroundWait
+	if background {
+		wait = 0
+	}
+	return s.shared(ctx, key, wait, func(ctx context.Context) (*Track, error) {
 		return s.readWhole(ctx, path, ref, number, v, background)
 	})
 }

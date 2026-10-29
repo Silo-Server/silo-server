@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -318,4 +319,31 @@ func TestSubtitleTrackFacts(t *testing.T) {
 	if got := s.SubtitleTrackFacts(t.Context(), &changed).OverrideTags(&changed, changed.SubtitleTracks[0]); got != playback.SubtitleFactUnknownV3 {
 		t.Fatalf("facts from another version of the file: %v", got)
 	}
+}
+
+// A request stops waiting on a slow read and demuxes instead; the read goes
+// on and keeps the track for the next request.
+func TestSlowReadsHandOverToTheDemux(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	path, file := fixtureFile(t, ffmpeg, true)
+	s, repo, _ := newTestStore(t, ffmpeg)
+	s.foregroundWait = 20 * time.Millisecond
+	// The read's own lookup stalls until released.
+	release := make(chan struct{})
+	var calls atomic.Int32
+	repo.trackHook = func(context.Context) error {
+		if calls.Add(1) == 2 {
+			<-release
+		}
+		return nil
+	}
+	ref := *playback.EmbeddedSubtitleRefFor(file, 0)
+	if _, err := s.WholeTrack(t.Context(), path, ref); !errors.Is(err, errStillReading) {
+		t.Fatalf("slow read: %v", err)
+	}
+	close(release)
+	waitFor(t, "the read to keep the track", func() bool {
+		tr, _ := repo.Track(t.Context(), file.ID, 1)
+		return tr != nil
+	})
 }

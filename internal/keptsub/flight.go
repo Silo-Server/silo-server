@@ -2,8 +2,13 @@ package keptsub
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 )
+
+// errStillReading means a caller stopped waiting for a read that goes on.
+var errStillReading = errors.New("keptsub: the track is still being read")
 
 // flightKey names one read of a track: of one source version, in the
 // foreground or the background. Foreground and background reads don't
@@ -26,23 +31,33 @@ type flight struct {
 }
 
 // shared runs fn once for every concurrent caller with the same key. fn
-// runs on its own context, which ends when every caller has gone, so a
-// caller giving up doesn't fail the others, and the last one stops the
-// read.
-func (s *Store) shared(ctx context.Context, key flightKey, fn func(context.Context) (*Track, error)) (*Track, error) {
+// runs on its own context, which ends when every caller whose context
+// ended has gone, so a caller giving up doesn't fail the others, and the
+// last one stops the read. A caller that waits longer than wait, when wait
+// is set, gets errStillReading and leaves the read running: what it reads
+// is still kept.
+func (s *Store) shared(ctx context.Context, key flightKey, wait time.Duration, fn func(context.Context) (*Track, error)) (*Track, error) {
 	s.mu.Lock()
 	f := s.flights[key]
 	if f == nil {
-		readCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimLease)
 		f = &flight{done: make(chan struct{}), cancel: cancel}
 		s.flights[key] = f
 		go s.run(readCtx, key, f, fn)
 	}
 	f.waiters++
 	s.mu.Unlock()
+	var timeout <-chan time.Time
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		timeout = timer.C
+	}
 	select {
 	case <-f.done:
 		return f.track, f.err
+	case <-timeout:
+		return nil, errStillReading
 	case <-ctx.Done():
 		s.mu.Lock()
 		f.waiters--
