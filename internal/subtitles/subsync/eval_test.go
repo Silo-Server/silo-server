@@ -141,10 +141,11 @@ func sameTiming(a, b subtitles.Timing, runtime float64, tolerance time.Duration)
 	return true
 }
 
-// report logs, per kind of case, how many decide matched rightly,
-// wrongly, or not at all.
+// report logs, per kind of case, how many decide matched rightly or
+// wrongly, matched without a timing to compare (production no_match), or
+// did not match.
 func report(t *testing.T, name string, cases []evalCase, outs []evalOutcome, decide func(evalOutcome) (bool, subtitles.Timing)) {
-	type tally struct{ n, right, wrong, none int }
+	type tally struct{ n, right, wrong, unverified, none int }
 	tallies := map[string]*tally{}
 	for i, c := range cases {
 		key := c.kind
@@ -161,8 +162,10 @@ func report(t *testing.T, name string, cases []evalCase, outs []evalOutcome, dec
 		switch {
 		case !ok:
 			tl.none++
-		case c.kind == "negative" || c.kind == "nomatch":
-			tl.wrong++ // wrong for a negative; unverified for a prod no_match
+		case c.kind == "negative":
+			tl.wrong++
+		case c.kind == "nomatch":
+			tl.unverified++ // production rejected it; no timing to compare
 		case sameTiming(timing, c.expect, c.job.runtime, 300*time.Millisecond):
 			tl.right++
 		default:
@@ -177,8 +180,9 @@ func report(t *testing.T, name string, cases []evalCase, outs []evalOutcome, dec
 	t.Logf("== %s", name)
 	for _, k := range keys {
 		tl := tallies[k]
-		t.Logf("  %-22s n=%5d right=%5d (%5.1f%%) wrong/match=%5d (%5.1f%%) none=%5d", k, tl.n, tl.right,
-			100*float64(tl.right)/float64(tl.n), tl.wrong, 100*float64(tl.wrong)/float64(tl.n), tl.none)
+		t.Logf("  %-22s n=%5d right=%5d (%5.1f%%) wrong=%5d (%5.1f%%) unverified=%5d (%5.1f%%) none=%5d", k, tl.n,
+			tl.right, 100*float64(tl.right)/float64(tl.n), tl.wrong, 100*float64(tl.wrong)/float64(tl.n),
+			tl.unverified, 100*float64(tl.unverified)/float64(tl.n), tl.none)
 	}
 }
 
@@ -221,6 +225,9 @@ func loadEvalSpeech(t *testing.T, path string) map[int][]mediasample.SpeechLevel
 			t.Fatalf("speech %d: %v", id, err)
 		}
 		out[id] = windows
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("read speech: %v", err)
 	}
 	return out
 }
@@ -320,7 +327,7 @@ func buildEvalCases(jobs []*evalJob, speech map[int][]mediasample.SpeechLevels) 
 		switch j.status {
 		case "no_match":
 			cases = append(cases, evalCase{kind: "nomatch", job: j, cues: j.cues, windows: w})
-		default:
+		case "synced", "already_synced":
 			known = append(known, j)
 			cases = append(cases, evalCase{kind: "known", job: j, cues: j.cues, expect: j.truth, windows: w})
 		}
