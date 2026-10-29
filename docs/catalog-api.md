@@ -985,12 +985,12 @@ of its primary `release_date` and its digital release date. The digital date is
 the earliest digital (streaming or purchase) release in any country. When the
 digital date is the one shown, the event carries the `digital` badge. A movie
 whose primary release comes first, or falls on the same day, has no badge. The
-frozen `/api/v1/calendar` serves the same dates and badges, because both read
-the same events.
+frozen `/api/v1/calendar` lists movies on the same dates, because both read the
+same events, but never sends the `digital` badge.
 
-The digital date is a calendar input only. Item detail, sorting, filters and
-the year still use `release_date`, and no item response carries the digital
-date.
+The digital date picks only the calendar day, which the upcoming titles in the
+For You discover row also follow. Item detail, sorting, filters and the year
+still use `release_date`, and no item response carries the digital date.
 
 Metadata providers supply it as `digital_release_date` (`YYYY-MM-DD`) in the
 `metadata` Struct of a movie's `GetMetadata` response. The host ignores the key

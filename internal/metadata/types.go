@@ -41,8 +41,9 @@ const (
 	FieldImages
 	FieldAirSchedule
 	FieldVideos
-	// FieldReleaseDates locks Year, ReleaseDate, and First/LastAirDate so a
-	// refresh (or an NFO at priority 1) cannot overwrite manual corrections.
+	// FieldReleaseDates locks Year, ReleaseDate, DigitalReleaseDate, and
+	// First/LastAirDate so a refresh (or an NFO at priority 1) cannot
+	// overwrite manual corrections.
 	FieldReleaseDates
 )
 

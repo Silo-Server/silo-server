@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -175,7 +176,23 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, err)
 		return
 	}
+	withoutV2OnlyBadges(resp)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// calendarBadgeDigital marks a movie listed on its digital release date. It is
+// a /api/v2 badge: the frozen v1 contract keeps its original badge set.
+const calendarBadgeDigital = "digital"
+
+// withoutV2OnlyBadges drops the badges /api/v1 never had. v1 lists events on
+// the same dates as v2, because both read the same calendar.
+func withoutV2OnlyBadges(resp calendarResponse) {
+	for d := range resp.Events {
+		for i := range resp.Events[d].Items {
+			item := &resp.Events[d].Items[i]
+			item.Badges = slices.DeleteFunc(item.Badges, func(b string) bool { return b == calendarBadgeDigital })
+		}
+	}
 }
 
 // Calendar answers the viewer's calendar for a validated query. The repo
@@ -450,7 +467,7 @@ func buildBadges(ev catalog.CalendarEvent) []string {
 		badges = append(badges, "finale")
 	}
 	if ev.IsDigitalRelease {
-		badges = append(badges, "digital")
+		badges = append(badges, calendarBadgeDigital)
 	}
 	if badges == nil {
 		badges = []string{}

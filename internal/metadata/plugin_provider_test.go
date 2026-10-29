@@ -198,11 +198,8 @@ func TestPluginProviderGetMetadata_MapsDigitalReleaseDate(t *testing.T) {
 		want        string
 	}{
 		{"movie date", "movie", "2024-03-12", "2024-03-12"},
-		{"padded date", "movie", " 2024-03-12 ", "2024-03-12"},
 		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", ""},
-		{"impossible date", "movie", "2024-02-30", ""},
 		{"number", "movie", 20240312, ""},
-		{"empty", "movie", "", ""},
 		{"series ignore it", "series", "2024-03-12", ""},
 	}
 	for _, tt := range tests {

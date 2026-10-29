@@ -466,24 +466,25 @@ func TestHandleGetCalendar_MarksWatchedItems(t *testing.T) {
 	}
 }
 
-func TestHandleGetCalendar_BadgesDigitalReleases(t *testing.T) {
+func TestCalendar_BadgesDigitalReleases(t *testing.T) {
 	day := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
 	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
 		{ContentID: "movie-digital", Type: "movie", Title: "Digital", AirDate: day, IsDigitalRelease: true},
 		{ContentID: "movie-cinema", Type: "movie", Title: "Cinema", AirDate: day},
 	}}
 	handler := &CalendarHandler{repo: repo}
-	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12", nil)
-	rec := httptest.NewRecorder()
 
-	handler.HandleGetCalendar(rec, req)
-
-	var resp calendarResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	view, err := handler.Calendar(context.Background(), CalendarQuery{
+		Start:    time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
+		End:      time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
+		Filter:   calendarFilterAll,
+		Location: time.UTC,
+	}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Calendar() error = %v", err)
 	}
 	badges := map[string][]string{}
-	for _, d := range resp.Events {
+	for _, d := range view.Events {
 		for _, item := range d.Items {
 			badges[item.ContentID] = item.Badges
 		}

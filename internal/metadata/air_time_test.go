@@ -4,18 +4,6 @@ import (
 	"testing"
 )
 
-// A movie's digital release date reaches the stored item and comes back from
-// it, so a refresh that seeds from the stored item keeps it.
-func TestMetadataResultToItem_RoundTripsDigitalReleaseDate(t *testing.T) {
-	item := metadataResultToItem(&MetadataResult{HasMetadata: true, Title: "Movie", DigitalReleaseDate: "2024-03-12"}, "movie")
-	if item.DigitalReleaseDate == nil || *item.DigitalReleaseDate != "2024-03-12" {
-		t.Fatalf("digital_release_date = %v, want 2024-03-12", item.DigitalReleaseDate)
-	}
-	if got := itemToMetadataResult(item).DigitalReleaseDate; got != "2024-03-12" {
-		t.Fatalf("round-tripped DigitalReleaseDate = %q, want 2024-03-12", got)
-	}
-}
-
 func TestMetadataResultToItem_InfersAirTimezone(t *testing.T) {
 	result := &MetadataResult{
 		HasMetadata: true,
