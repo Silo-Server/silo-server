@@ -170,29 +170,42 @@ func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *te
 		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999"},
 		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
-			assignment := assignments[tt.path]
-			scanned := naming.InferGroupIdentity(tt.path, "movies", assignment)
+		// A new file goes through skeleton creation; a file already linked to
+		// a provisional item goes through the reused-item check.
+		for _, linked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/linked=%t", tt.name, linked), func(t *testing.T) {
+				_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
+				assignment := assignments[tt.path]
+				scanned := naming.InferGroupIdentity(tt.path, "movies", assignment)
 
-			h := newTestHarness()
-			file := &models.MediaFile{
-				ID: 1, MediaFolderID: 10, FilePath: tt.path,
-				GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
-				ObservedRootPath: scanned.ObservedRootPath, CanonicalRootPath: assignment.RootPath,
-				BaseType: scanned.BaseType, BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear,
-			}
-			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
-				MediaFolderID: 10, GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
-				BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear, InferredType: scanned.BaseType, State: "resolved", OverrideSource: "none",
-				TmdbID: scanned.TmdbID, ImdbID: scanned.ImdbID, TvdbID: scanned.TvdbID,
+				h := newTestHarness()
+				file := &models.MediaFile{
+					ID: 1, MediaFolderID: 10, FilePath: tt.path,
+					GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+					ObservedRootPath: scanned.ObservedRootPath, CanonicalRootPath: assignment.RootPath,
+					BaseType: scanned.BaseType, BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear,
+				}
+				h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+					MediaFolderID: 10, GroupKeyVersion: scanned.GroupKeyVersion, ContentGroupKey: scanned.ContentGroupKey,
+					BaseTitle: scanned.BaseTitle, BaseYear: scanned.BaseYear, InferredType: scanned.BaseType, State: "resolved", OverrideSource: "none",
+					TmdbID: scanned.TmdbID, ImdbID: scanned.ImdbID, TvdbID: scanned.TvdbID,
+				})
+				if linked {
+					file.ContentID = "pending-item"
+					if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{
+						ContentID: file.ContentID, Status: "pending", Title: scanned.BaseTitle, Year: scanned.BaseYear, Type: "movie",
+						Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+					}); err != nil {
+						t.Fatalf("seed provisional item: %v", err)
+					}
+				}
+				worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+				skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
+				if err != nil || skeleton == nil || reused != linked || skeleton.TmdbID != tt.wantTmdb {
+					t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v reused=%t error=%v", scanned, skeleton, reused, err)
+				}
 			})
-			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-			skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
-			if err != nil || skeleton == nil || skeleton.TmdbID != tt.wantTmdb {
-				t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v error=%v", scanned, skeleton, err)
-			}
-		})
+		}
 	}
 }
 
