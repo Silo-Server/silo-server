@@ -185,7 +185,9 @@ A conversion is held until it completes (or passes 16 MiB), so one that fails
 before anything reaches the response falls back to the demux. Windows
 (`position`/`duration`, and PGS `windowed=1`) come from the kept track, else
 from `ReadPackets` for just the window, else from FFmpeg's seek through the
-source as before. Only a file without usable cues and without a kept track
+source as before. A window open to the end (a position without a duration)
+covers most of the track, so it is read whole and kept first, as a
+whole-track request would. Only a file without usable cues and without a kept track
 still runs FFmpeg over the source for a window.
 
 The native route, offline downloads' embedded sidecars and AI translation
