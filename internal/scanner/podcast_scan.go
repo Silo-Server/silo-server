@@ -175,11 +175,16 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 		}
 	}
 	for path := range seenPaths {
+		cur := afterByPath[path]
+		if cur == nil {
+			// Listed but not indexed, such as an episode still being written.
+			continue
+		}
 		prev, cataloged := beforeByPath[path]
 		switch {
 		case !cataloged:
 			result.New++
-		case prev.MissingSince != nil || podcastFileRevisionChanged(prev, afterByPath[path]):
+		case (prev.MissingSince != nil && cur.MissingSince == nil) || podcastFileRevisionChanged(prev, cur):
 			result.Updated++
 		default:
 			result.Unchanged++

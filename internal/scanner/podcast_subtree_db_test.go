@@ -547,3 +547,57 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 	}
 	f.requireOnlyPodcastItems(t)
 }
+
+// TestScanSubtreeCountsOnlyTheEpisodesItIndexed: an episode still being
+// written is skipped until a later scan, so the scan that skips it reports no
+// change for it. A new one has no row yet, and one that comes back stays
+// missing. Otherwise every scan during a download publishes a catalog event
+// for a catalog that didn't change.
+func TestScanSubtreeCountsOnlyTheEpisodesItIndexed(t *testing.T) {
+	f := newPodcastSubtreeFixture(t)
+	// Prints the probe stored in the file, then grows the file while a
+	// ".growing" marker sits beside it, as a download still being written would.
+	writeFakeTool(t, f.ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"if [ -e \"$last.growing\" ]; then printf ' ' >> \"$last\"; fi\n")
+	show := filepath.Join(f.root, "Show A")
+	f.addEpisode(t, "Show A", "01.mp3", "Show A", "One", "1")
+	returning := f.addEpisode(t, "Show A", "02.mp3", "Show A", "Two", "2")
+	requireCounts(t, show, f.scanSubtree(t, show), 2, 0, 0, 0)
+
+	if err := os.Remove(returning); err != nil {
+		t.Fatalf("remove episode: %v", err)
+	}
+	requireCounts(t, show, f.scanSubtree(t, show), 0, 0, 1, 1)
+
+	f.addEpisode(t, "Show A", "02.mp3", "Show A", "Two", "2")
+	downloading := f.addEpisode(t, "Show A", "03.mp3", "Show A", "Three", "3")
+	for _, path := range []string{returning, downloading} {
+		if err := os.WriteFile(path+".growing", nil, 0o644); err != nil {
+			t.Fatalf("mark %s growing: %v", path, err)
+		}
+	}
+	// The returning episode's row is unchanged: it is still missing.
+	requireCounts(t, show, f.scanSubtree(t, show), 0, 0, 2, 0)
+	if !f.fileRow(t, returning).missing {
+		t.Fatalf("%s: present while it is still being written, want it still missing", returning)
+	}
+	var rows int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM media_files WHERE media_folder_id = $1 AND file_path = $2`, f.folder.ID, downloading,
+	).Scan(&rows); err != nil {
+		t.Fatalf("count rows for %s: %v", downloading, err)
+	}
+	if rows != 0 {
+		t.Fatalf("%s: %d rows while it is still being written, want none", downloading, rows)
+	}
+
+	// Once both have settled, the next scan indexes and counts them.
+	for _, path := range []string{returning, downloading} {
+		if err := os.Remove(path + ".growing"); err != nil {
+			t.Fatalf("unmark %s: %v", path, err)
+		}
+	}
+	requireCounts(t, show, f.scanSubtree(t, show), 1, 1, 1, 0)
+	f.requireEpisodeOf(t, returning, show, "Show A")
+	f.requireEpisodeOf(t, downloading, show, "Show A")
+}
