@@ -186,11 +186,18 @@ func withoutV2OnlyBadges(resp calendarResponse) {
 	for d := range resp.Events {
 		for i := range resp.Events[d].Items {
 			item := &resp.Events[d].Items[i]
-			item.Badges = slices.DeleteFunc(item.Badges, func(b string) bool {
-				return b == catalog.HomeReleaseDigital || b == catalog.HomeReleasePhysical
-			})
+			item.Badges = v1CalendarBadges(item.Badges)
 		}
 	}
+}
+
+// v1CalendarBadges returns badges without the home-release badges, which the
+// frozen /api/v1 contract never had. It copies, because a badge slice can be
+// shared between responses.
+func v1CalendarBadges(badges []string) []string {
+	return slices.DeleteFunc(slices.Clone(badges), func(b string) bool {
+		return b == catalog.HomeReleaseDigital || b == catalog.HomeReleasePhysical
+	})
 }
 
 // Calendar answers the viewer's calendar for a validated query. The repo

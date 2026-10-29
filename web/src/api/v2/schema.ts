@@ -22666,7 +22666,7 @@ export interface components {
       air_date: string;
       /** @description Local wall-clock time, HH:MM */
       air_time?: string;
-      /** @description Empty, never null */
+      /** @description The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null */
       badges: string[];
       /** Format: int64 */
       episode_number?: number;

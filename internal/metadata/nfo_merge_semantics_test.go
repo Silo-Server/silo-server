@@ -103,6 +103,20 @@ func TestMerge_ReleaseDatesLockBlocksReplace(t *testing.T) {
 		LastAirDate:         "1991-01-01",
 	}
 
+	// A scheduled refresh fills only empty fields, but a stored item still
+	// takes the providers' current home release dates unless they are locked.
+	filled := *target
+	MergeMetadata(source, &filled, nil, MergeFillEmpty)
+	refreshHomeReleaseDates(&filled, source, nil)
+	if filled.ReleaseDate != "1990-01-01" || filled.DigitalReleaseDate != "1999-10-26" || filled.PhysicalReleaseDate != "1992-03-11" {
+		t.Errorf("fill-empty refresh: %+v", filled)
+	}
+	locked := *target
+	refreshHomeReleaseDates(&locked, source, []MetadataField{FieldReleaseDates})
+	if locked.DigitalReleaseDate != "2001-01-01" || locked.PhysicalReleaseDate != "1995-01-01" {
+		t.Errorf("locked refresh replaced home release dates: %+v", locked)
+	}
+
 	MergeMetadata(source, target, []MetadataField{FieldReleaseDates}, MergeReplaceUnlocked)
 
 	if target.Year != 1990 || target.ReleaseDate != "1990-01-01" || target.DigitalReleaseDate != "2001-01-01" || target.PhysicalReleaseDate != "1995-01-01" ||

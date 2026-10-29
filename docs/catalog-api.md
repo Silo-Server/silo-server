@@ -990,17 +990,19 @@ fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
 movies on the same dates, because both read the same events, but never sends
 these two badges.
 
-The home release dates pick only the calendar day, which the upcoming titles in
-the For You discover row also follow. Item detail, sorting, filters and the
-year still use `release_date`, and no item response carries the home release
-dates.
+The home release dates pick only the calendar day. The upcoming titles in the
+For You discover row follow the same day, and their `upcoming_event.badges`
+carry the same `digital` or `physical` badge on `/api/v2` (never on
+`/api/v1/recommendations/discover`). Item detail, sorting, filters and the year
+still use `release_date`, and no item response carries the home release dates.
 
 Metadata providers supply them as `digital_release_date` and
 `physical_release_date` (`YYYY-MM-DD`) in the `metadata` Struct of a movie's
 `GetMetadata` response. The host ignores the keys on other item types and drops
 a value that is not a calendar date. The TMDB plugin derives them from TMDB's
-type 4 (digital) and type 5 (physical) release dates. Locking release dates on
-an item also locks the home release dates.
+type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
+ones included, takes the provider's current dates, because providers revise
+them; locking release dates on an item also locks them.
 
 ## Advisory age
 
