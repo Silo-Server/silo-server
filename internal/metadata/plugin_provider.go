@@ -321,7 +321,8 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		LastAirDate:          response.GetItem().GetLastAirDate(),
 		AirTime:              response.GetItem().GetAirTime(),
 		ReleaseDate:          response.GetItem().GetReleaseDate(),
-		DigitalReleaseDate:   digitalReleaseDateFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata()),
+		DigitalReleaseDate:   movieDateFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata(), "digital_release_date"),
+		PhysicalReleaseDate:  movieDateFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata(), "physical_release_date"),
 	}, nil
 }
 
@@ -787,23 +788,23 @@ func advisoryFromPluginMetadata(value *structpb.Struct) (int, string) {
 	return age, source
 }
 
-// digitalReleaseDateFromPluginMetadata reads a movie's earliest digital
-// release from the plugin's "digital_release_date" key. Anything that is not a
-// real YYYY-MM-DD date is dropped: the value picks the day the calendar lists
-// the movie on, and the column is a DATE.
-func digitalReleaseDateFromPluginMetadata(contentType string, value *structpb.Struct) string {
+// movieDateFromPluginMetadata reads a movie's home release date from the
+// plugin metadata key ("digital_release_date" or "physical_release_date").
+// Anything that is not a real YYYY-MM-DD date is dropped: the value picks the
+// day the calendar lists the movie on, and the column is a DATE.
+func movieDateFromPluginMetadata(contentType string, value *structpb.Struct, key string) string {
 	if contentType != "movie" || value == nil {
 		return ""
 	}
-	raw, ok := value.AsMap()["digital_release_date"].(string)
+	raw, ok := value.GetFields()[key].GetKind().(*structpb.Value_StringValue)
 	if !ok {
 		return ""
 	}
-	raw = strings.TrimSpace(raw)
-	if _, err := time.Parse(time.DateOnly, raw); err != nil {
+	date := strings.TrimSpace(raw.StringValue)
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
 		return ""
 	}
-	return raw
+	return date
 }
 
 func keywordsFromPluginMetadata(value *structpb.Struct) []string {

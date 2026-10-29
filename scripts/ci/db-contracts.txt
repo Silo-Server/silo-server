@@ -734,6 +734,6 @@
 # collection posters alone: neither checks them against storage nor clears them.
 ./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
 
-# The calendar lists a movie once, on the earlier of its primary and digital
-# release dates, and the item round-trips the digital date.
-./internal/catalog TestCalendarMovieEarliestReleaseDB
+# The calendar lists a movie once, on its earliest digital or physical release
+# and never on its theatrical date, and the item round-trips both dates.
+./internal/catalog TestCalendarMovieHomeReleaseDB

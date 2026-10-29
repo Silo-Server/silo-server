@@ -180,17 +180,15 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// calendarBadgeDigital marks a movie listed on its digital release date. It is
-// a /api/v2 badge: the frozen v1 contract keeps its original badge set.
-const calendarBadgeDigital = "digital"
-
-// withoutV2OnlyBadges drops the badges /api/v1 never had. v1 lists events on
-// the same dates as v2, because both read the same calendar.
+// withoutV2OnlyBadges drops the home-release badges /api/v1 never had. v1
+// lists events on the same dates as v2, because both read the same calendar.
 func withoutV2OnlyBadges(resp calendarResponse) {
 	for d := range resp.Events {
 		for i := range resp.Events[d].Items {
 			item := &resp.Events[d].Items[i]
-			item.Badges = slices.DeleteFunc(item.Badges, func(b string) bool { return b == calendarBadgeDigital })
+			item.Badges = slices.DeleteFunc(item.Badges, func(b string) bool {
+				return b == catalog.HomeReleaseDigital || b == catalog.HomeReleasePhysical
+			})
 		}
 	}
 }
@@ -466,8 +464,9 @@ func buildBadges(ev catalog.CalendarEvent) []string {
 	if ev.IsFinale {
 		badges = append(badges, "finale")
 	}
-	if ev.IsDigitalRelease {
-		badges = append(badges, calendarBadgeDigital)
+	// A movie's badge names the home release it is listed on.
+	if ev.HomeRelease != "" {
+		badges = append(badges, ev.HomeRelease)
 	}
 	if badges == nil {
 		badges = []string{}

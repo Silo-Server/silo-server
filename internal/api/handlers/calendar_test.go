@@ -466,11 +466,12 @@ func TestHandleGetCalendar_MarksWatchedItems(t *testing.T) {
 	}
 }
 
-func TestCalendar_BadgesDigitalReleases(t *testing.T) {
+func TestCalendar_BadgesHomeReleases(t *testing.T) {
 	day := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
 	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
-		{ContentID: "movie-digital", Type: "movie", Title: "Digital", AirDate: day, IsDigitalRelease: true},
-		{ContentID: "movie-cinema", Type: "movie", Title: "Cinema", AirDate: day},
+		{ContentID: "movie-digital", Type: "movie", Title: "Digital", AirDate: day, HomeRelease: catalog.HomeReleaseDigital},
+		{ContentID: "movie-physical", Type: "movie", Title: "Physical", AirDate: day, HomeRelease: catalog.HomeReleasePhysical},
+		{ContentID: "episode", Type: "episode", Title: "Show", AirDate: day},
 	}}
 	handler := &CalendarHandler{repo: repo}
 
@@ -489,11 +490,13 @@ func TestCalendar_BadgesDigitalReleases(t *testing.T) {
 			badges[item.ContentID] = item.Badges
 		}
 	}
-	if got := badges["movie-digital"]; len(got) != 1 || got[0] != "digital" {
-		t.Fatalf("digital movie badges = %v, want [digital]", got)
+	for id, want := range map[string]string{"movie-digital": "digital", "movie-physical": "physical"} {
+		if got := badges[id]; len(got) != 1 || got[0] != want {
+			t.Fatalf("%s badges = %v, want [%s]", id, got, want)
+		}
 	}
-	if got, ok := badges["movie-cinema"]; !ok || len(got) != 0 {
-		t.Fatalf("cinema movie badges = %v (listed %v), want []", got, ok)
+	if got, ok := badges["episode"]; !ok || len(got) != 0 {
+		t.Fatalf("episode badges = %v (listed %v), want []", got, ok)
 	}
 }
 

@@ -41,7 +41,7 @@ const (
 	FieldImages
 	FieldAirSchedule
 	FieldVideos
-	// FieldReleaseDates locks Year, ReleaseDate, DigitalReleaseDate, and
+	// FieldReleaseDates locks Year, ReleaseDate, the home release dates, and
 	// First/LastAirDate so a refresh (or an NFO at priority 1) cannot
 	// overwrite manual corrections.
 	FieldReleaseDates
@@ -338,10 +338,11 @@ type MetadataResult struct {
 	BackdropPath      string
 	BackdropThumbhash string
 	LogoPath          string
-	// DigitalReleaseDate is a movie's earliest digital release in any
-	// country, YYYY-MM-DD. The calendar lists the movie on the earlier of it
-	// and ReleaseDate.
-	DigitalReleaseDate string
+	// DigitalReleaseDate and PhysicalReleaseDate are a movie's earliest
+	// digital and physical (disc) releases in any country, YYYY-MM-DD. The
+	// calendar lists the movie on the earlier of the two.
+	DigitalReleaseDate  string
+	PhysicalReleaseDate string
 	// Series-specific
 	ReleaseDate  string
 	SeasonCount  int

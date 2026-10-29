@@ -188,23 +188,27 @@ func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
 	}
 }
 
-// The digital release date rides the plugin's metadata Struct and decides the
-// day the calendar lists a movie on, so only a real movie date is kept.
-func TestPluginProviderGetMetadata_MapsDigitalReleaseDate(t *testing.T) {
+// The home release dates ride the plugin's metadata Struct and decide the day
+// the calendar lists a movie on, so only a real movie date is kept.
+func TestPluginProviderGetMetadata_MapsHomeReleaseDates(t *testing.T) {
 	tests := []struct {
-		name        string
-		contentType string
-		value       any
-		want        string
+		name         string
+		contentType  string
+		value        any
+		wantDigital  string
+		wantPhysical string
 	}{
-		{"movie date", "movie", "2024-03-12", "2024-03-12"},
-		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", ""},
-		{"number", "movie", 20240312, ""},
-		{"series ignore it", "series", "2024-03-12", ""},
+		{"movie dates", "movie", "2024-03-12", "2024-03-12", "2024-03-12"},
+		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", "", ""},
+		{"number", "movie", 20240312, "", ""},
+		{"series ignore them", "series", "2024-03-12", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			metadata, err := structpb.NewStruct(map[string]any{"digital_release_date": tt.value})
+			metadata, err := structpb.NewStruct(map[string]any{
+				"digital_release_date":  tt.value,
+				"physical_release_date": tt.value,
+			})
 			if err != nil {
 				t.Fatalf("structpb.NewStruct() error = %v", err)
 			}
@@ -229,8 +233,9 @@ func TestPluginProviderGetMetadata_MapsDigitalReleaseDate(t *testing.T) {
 			if err != nil || result == nil {
 				t.Fatalf("GetMetadata() = %v, %v", result, err)
 			}
-			if result.DigitalReleaseDate != tt.want {
-				t.Fatalf("DigitalReleaseDate = %q, want %q", result.DigitalReleaseDate, tt.want)
+			if result.DigitalReleaseDate != tt.wantDigital || result.PhysicalReleaseDate != tt.wantPhysical {
+				t.Fatalf("home release dates = (%q, %q), want (%q, %q)",
+					result.DigitalReleaseDate, result.PhysicalReleaseDate, tt.wantDigital, tt.wantPhysical)
 			}
 		})
 	}

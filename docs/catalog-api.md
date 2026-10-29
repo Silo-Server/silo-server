@@ -980,23 +980,27 @@ unchanged and carries no counts.
 
 ## Calendar movie dates
 
-`GET /api/v2/calendar` lists each movie once, on its earliest release: the earlier
-of its primary `release_date` and its digital release date. The digital date is
-the earliest digital (streaming or purchase) release in any country. When the
-digital date is the one shown, the event carries the `digital` badge. A movie
-whose primary release comes first, or falls on the same day, has no badge. The
-frozen `/api/v1/calendar` lists movies on the same dates, because both read the
-same events, but never sends the `digital` badge.
+`GET /api/v2/calendar` lists each movie once, on its first home release: the
+earlier of its digital (streaming or purchase) and physical (disc) release
+dates, each the earliest in any country. A theatrical release never reaches a
+media server, so the calendar does not use `release_date` for movies, and a
+movie with no home release date yet is not listed. The event carries a
+`digital` or `physical` badge naming the release it is listed on; when both
+fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
+movies on the same dates, because both read the same events, but never sends
+these two badges.
 
-The digital date picks only the calendar day, which the upcoming titles in the
-For You discover row also follow. Item detail, sorting, filters and the year
-still use `release_date`, and no item response carries the digital date.
+The home release dates pick only the calendar day, which the upcoming titles in
+the For You discover row also follow. Item detail, sorting, filters and the
+year still use `release_date`, and no item response carries the home release
+dates.
 
-Metadata providers supply it as `digital_release_date` (`YYYY-MM-DD`) in the
-`metadata` Struct of a movie's `GetMetadata` response. The host ignores the key
-on other item types and drops a value that is not a calendar date. The TMDB
-plugin derives it from TMDB's type 4 (digital) release dates. Locking release
-dates on an item also locks the digital date.
+Metadata providers supply them as `digital_release_date` and
+`physical_release_date` (`YYYY-MM-DD`) in the `metadata` Struct of a movie's
+`GetMetadata` response. The host ignores the keys on other item types and drops
+a value that is not a calendar date. The TMDB plugin derives them from TMDB's
+type 4 (digital) and type 5 (physical) release dates. Locking release dates on
+an item also locks the home release dates.
 
 ## Advisory age
 

@@ -50,7 +50,7 @@ func TestBuildListEventsQuery_RejectsExplicitLibraryOutsideAllowedScope(t *testi
 		AllowedLibraryIDs: []int{1, 2},
 	})
 
-	if !strings.Contains(query, "WHERE mi.type = 'movie' AND LEAST(mi.release_date, mi.digital_release_date) BETWEEN $1::date AND $2::date AND 1 = 0") {
+	if !strings.Contains(query, "WHERE mi.type = 'movie' AND LEAST(mi.digital_release_date, mi.physical_release_date) BETWEEN $1::date AND $2::date AND 1 = 0") {
 		t.Fatalf("expected movie branch to short-circuit inaccessible library selection, got:\n%s", query)
 	}
 	if !strings.Contains(query, "e.air_date BETWEEN $1::date AND $2::date AND e.season_number > 0 AND 1 = 0") {
@@ -105,10 +105,11 @@ func TestBuildListEventsQuery_EmptyRestrictionMatchesNothing(t *testing.T) {
 	}
 }
 
-// TestCalendarMovieEarliestReleaseDB pins the movie calendar date: a movie is
-// listed once, on the earlier of its primary and digital release dates, and is
-// flagged as a digital release only when the digital date is the one shown.
-func TestCalendarMovieEarliestReleaseDB(t *testing.T) {
+// TestCalendarMovieHomeReleaseDB pins the movie calendar date: a movie is
+// listed once, on its earliest home release (digital or physical), never on
+// its primary (usually theatrical) date, and the event names which release it
+// is. A movie with no home release yet is not listed.
+func TestCalendarMovieHomeReleaseDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
@@ -126,18 +127,20 @@ func TestCalendarMovieEarliestReleaseDB(t *testing.T) {
 
 	date := func(s string) *string { return &s }
 	movies := []struct {
-		name        string
-		primary     *string
-		digital     *string
-		wantDate    string
-		wantDigital bool
+		name     string
+		primary  *string
+		digital  *string
+		physical *string
+		wantDate string
+		wantKind string
 	}{
-		{"digital first", date("2026-12-10"), date("2026-11-05"), "2026-11-05", true},
-		{"primary first", date("2026-11-03"), date("2026-12-20"), "2026-11-03", false},
-		{"same day", date("2026-11-12"), date("2026-11-12"), "2026-11-12", false},
-		{"no digital date", date("2026-11-14"), nil, "2026-11-14", false},
-		{"digital only", nil, date("2026-11-20"), "2026-11-20", true},
-		{"digital first outside window", date("2026-11-25"), date("2026-10-01"), "", false},
+		{"digital only", date("2026-10-02"), date("2026-11-05"), nil, "2026-11-05", HomeReleaseDigital},
+		{"physical first", nil, date("2026-11-20"), date("2026-11-03"), "2026-11-03", HomeReleasePhysical},
+		{"digital first", nil, date("2026-11-08"), date("2026-11-22"), "2026-11-08", HomeReleaseDigital},
+		{"same day", nil, date("2026-11-12"), date("2026-11-12"), "2026-11-12", HomeReleaseDigital},
+		{"physical only", nil, nil, date("2026-11-18"), "2026-11-18", HomeReleasePhysical},
+		{"theatrical only", date("2026-11-14"), nil, nil, "", ""},
+		{"home release after the window", date("2026-11-25"), date("2026-12-15"), nil, "", ""},
 	}
 
 	itemRepo := NewItemRepository(pool)
@@ -146,12 +149,13 @@ func TestCalendarMovieEarliestReleaseDB(t *testing.T) {
 		id := fmt.Sprintf("movie:calendar-digital-%d-%d", suffix, i)
 		ids[id] = m.name
 		if err := itemRepo.Upsert(ctx, &models.MediaItem{
-			ContentID:          id,
-			Type:               "movie",
-			Title:              fmt.Sprintf("Calendar Digital %d %s", suffix, m.name),
-			Status:             "matched",
-			ReleaseDate:        m.primary,
-			DigitalReleaseDate: m.digital,
+			ContentID:           id,
+			Type:                "movie",
+			Title:               fmt.Sprintf("Calendar Digital %d %s", suffix, m.name),
+			Status:              "matched",
+			ReleaseDate:         m.primary,
+			DigitalReleaseDate:  m.digital,
+			PhysicalReleaseDate: m.physical,
 		}); err != nil {
 			t.Fatalf("upsert %s: %v", m.name, err)
 		}
@@ -160,14 +164,15 @@ func TestCalendarMovieEarliestReleaseDB(t *testing.T) {
 			batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = $1`, id)
 		})
 
-		// The item round-trips the date, so a later upsert of the read-back
-		// item cannot clear it.
+		// The item round-trips the dates, so a later upsert of the read-back
+		// item cannot clear them.
 		stored, err := itemRepo.GetByID(ctx, id)
 		if err != nil {
 			t.Fatalf("get %s: %v", m.name, err)
 		}
-		if got, want := derefDate(stored.DigitalReleaseDate), derefDate(m.digital); got != want {
-			t.Fatalf("%s: stored digital release date = %q, want %q", m.name, got, want)
+		got := [2]string{derefDate(stored.DigitalReleaseDate), derefDate(stored.PhysicalReleaseDate)}
+		if want := [2]string{derefDate(m.digital), derefDate(m.physical)}; got != want {
+			t.Fatalf("%s: stored (digital, physical) = %q, want %q", m.name, got, want)
 		}
 	}
 
@@ -199,15 +204,8 @@ func TestCalendarMovieEarliestReleaseDB(t *testing.T) {
 			}
 			continue
 		}
-		if !listed {
-			t.Errorf("%s: not listed, want %s", m.name, m.wantDate)
-			continue
-		}
-		if d := ev.AirDate.Format(time.DateOnly); d != m.wantDate {
-			t.Errorf("%s: listed on %s, want %s", m.name, d, m.wantDate)
-		}
-		if ev.IsDigitalRelease != m.wantDigital {
-			t.Errorf("%s: IsDigitalRelease = %v, want %v", m.name, ev.IsDigitalRelease, m.wantDigital)
+		if d := ev.AirDate.Format(time.DateOnly); !listed || d != m.wantDate || ev.HomeRelease != m.wantKind {
+			t.Errorf("%s: listed %v on %s as %q, want %s as %q", m.name, listed, d, ev.HomeRelease, m.wantDate, m.wantKind)
 		}
 	}
 }

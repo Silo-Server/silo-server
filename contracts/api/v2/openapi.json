@@ -23896,7 +23896,7 @@
             "type": "string"
           },
           "badges": {
-            "description": "series_premiere, season_premiere, finale, digital (a movie listed on its digital release, which comes before its primary release); empty, never null",
+            "description": "series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null",
             "items": {
               "type": "string"
             },
