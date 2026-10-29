@@ -165,10 +165,10 @@ func TestQueuedMovieIdentityPreservesCurrentProviderAnchor(t *testing.T) {
 // IDs, or the comparison reports a change that no rescan can clear.
 func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *testing.T) {
 	const libraryRoot = "/movies"
-	for _, tt := range []struct{ name, path, wantTmdb string }{
-		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
-		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999"},
-		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
+	for _, tt := range []struct{ name, path, wantTmdb, wantImdb string }{
+		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
+		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999", ""},
+		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984", "tt1111111"},
 	} {
 		// A new file goes through skeleton creation; a file already linked to
 		// a provisional item goes through the reused-item check.
@@ -201,7 +201,7 @@ func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *te
 				}
 				worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
 				skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false, libraryRoot)
-				if err != nil || skeleton == nil || reused != linked || skeleton.TmdbID != tt.wantTmdb {
+				if err != nil || skeleton == nil || reused != linked || skeleton.TmdbID != tt.wantTmdb || skeleton.ImdbID != tt.wantImdb {
 					t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v reused=%t error=%v", scanned, skeleton, reused, err)
 				}
 			})

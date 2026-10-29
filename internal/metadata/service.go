@@ -7430,13 +7430,24 @@ func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 // folder leaves out, as naming.InferGroupIdentity does when it stores a group's
 // IDs: the scanned-group comparison would otherwise see a folder and file that
 // disagree as an identity change no rescan can clear.
+//
+// A bare IMDb ID ending the folder name ("Movie (2020) {tmdb-1} tt1234567")
+// is not a structured tag, so on its own it adds no trusted ID. It still beats
+// an IMDb tag in the file name, which the scanner also lets it do.
 func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string, libraryRoots ...string) *naming.FolderIDHints {
-	folderIDs := naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(observedRootPath, libraryRoots))
+	observedAnchor := skeletonFolderAnchorName(observedRootPath, libraryRoots)
+	folderIDs := naming.ParseStructuredFolderIDs(observedAnchor)
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
 		folderIDs = naming.ParseStructuredFolderIDs(skeletonFolderAnchorName(contentRootPath, libraryRoots))
 	}
 	fileIDs := naming.ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
-	return mergeFolderIDHints(fileIDs, folderIDs)
+	merged := mergeFolderIDHints(fileIDs, folderIDs)
+	if merged != nil && merged.ImdbID != "" {
+		if folder := naming.ParseFolderIDs(observedAnchor); folder != nil && folder.ImdbID != "" {
+			merged.ImdbID = folder.ImdbID
+		}
+	}
+	return merged
 }
 
 // seriesContentIDForGroup returns the series item already linked to another
