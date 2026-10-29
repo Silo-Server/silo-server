@@ -156,6 +156,10 @@ func localLag(s *speechSignal, m cueMap, offset, prom float64) (windowLag, bool)
 		return windowLag{}, false
 	}
 	best := argmax(fine)
+	// The margins can hold the cues the chosen lag's own stretch lacks.
+	if !hasEnoughCues(y[best:best+len(s.fine)], minCueSeconds/frameSeconds) {
+		return windowLag{}, false
+	}
 	lagFrames := lag - span + best
 	return windowLag{At: s.middle(), OffsetSeconds: -float64(lagFrames) * frameSeconds, Score: fine[best], Prominence: prom, signal: s}, true
 }

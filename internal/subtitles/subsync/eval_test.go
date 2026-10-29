@@ -65,6 +65,8 @@ type evalOutcome struct {
 	baseErr, jointErr error
 }
 
+// TestEval aligns every case before and after the joint search and logs
+// the tallies of each kind; result.tsv in the corpus holds every case.
 func TestEval(t *testing.T) {
 	dir := os.Getenv("SUBSYNC_CORPUS")
 	if dir == "" {
@@ -79,7 +81,9 @@ func TestEval(t *testing.T) {
 	started := time.Now()
 	outs := runEval(cases)
 	t.Logf("aligned %d cases twice in %s", len(cases), time.Since(started).Round(time.Second))
-	writeEval(cases, outs, filepath.Join(dir, "result.tsv"))
+	if err := writeEval(cases, outs, filepath.Join(dir, "result.tsv")); err != nil {
+		t.Fatal(err)
+	}
 	report(t, "window search only (before)", cases, outs, func(o evalOutcome) (bool, subtitles.Timing) {
 		return o.baseErr == nil && o.base.Matched(), o.base.Timing
 	})
@@ -98,6 +102,7 @@ func rawJoint(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) 
 	return a
 }
 
+// runEval aligns each case both ways, on every CPU.
 func runEval(cases []evalCase) []evalOutcome {
 	out := make([]evalOutcome, len(cases))
 	var wg sync.WaitGroup
@@ -136,6 +141,8 @@ func sameTiming(a, b subtitles.Timing, runtime float64, tolerance time.Duration)
 	return true
 }
 
+// report logs, per kind of case, how many decide matched rightly,
+// wrongly, or not at all.
 func report(t *testing.T, name string, cases []evalCase, outs []evalOutcome, decide func(evalOutcome) (bool, subtitles.Timing)) {
 	type tally struct{ n, right, wrong, none int }
 	tallies := map[string]*tally{}
@@ -175,7 +182,8 @@ func report(t *testing.T, name string, cases []evalCase, outs []evalOutcome, dec
 	}
 }
 
-func writeEval(cases []evalCase, outs []evalOutcome, path string) {
+// writeEval writes one line per case: its expectation and both results.
+func writeEval(cases []evalCase, outs []evalOutcome, path string) error {
 	var b strings.Builder
 	b.WriteString("kind\tjob\tfile\tstatus\texpect_ms\texpect_scale\tbase_matched\tbase_ms\tbase_scale\tbase_in\tbase_win\tbase_prom\tjoint_ms\tjoint_scale\tjoint_in\tjoint_win\tjoint_mean_prom\tjoint_prom\traw_ms\traw_scale\traw_in\traw_win\traw_prom\tpath\tsource\n")
 	for i, c := range cases {
@@ -185,9 +193,10 @@ func writeEval(cases []evalCase, outs []evalOutcome, path string) {
 			o.baseErr == nil && o.base.Matched(), o.base.Timing.OffsetMS, o.base.Timing.Normalized().Scale, o.base.Inliers, o.base.Windows, o.base.Prominence,
 			o.joint.Timing.OffsetMS, o.joint.Timing.Normalized().Scale, o.joint.Inliers, o.joint.Windows, o.joint.Prominence, o.joint.JointProminence, o.raw.Timing.OffsetMS, o.raw.Timing.Normalized().Scale, o.raw.Inliers, o.raw.Windows, o.raw.JointProminence, c.job.path, c.source)
 	}
-	_ = os.WriteFile(path, []byte(b.String()), 0o644)
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
+// loadEvalSpeech reads speech.tsv into each media file's windows.
 func loadEvalSpeech(t *testing.T, path string) map[int][]mediasample.SpeechLevels {
 	f, err := os.Open(path)
 	if err != nil {
@@ -216,6 +225,8 @@ func loadEvalSpeech(t *testing.T, path string) map[int][]mediasample.SpeechLevel
 	return out
 }
 
+// loadEvalJobs reads jobs.tsv with each job's parsed sidecar, skipping
+// jobs without speech, a readable sidecar, or cues.
 func loadEvalJobs(t *testing.T, path, subs string, speech map[int][]mediasample.SpeechLevels) []*evalJob {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -259,7 +270,8 @@ func loadEvalJobs(t *testing.T, path, subs string, speech map[int][]mediasample.
 var episodeTag = regexp.MustCompile(`S\d+E\d+`)
 
 // titleOf names the title a sidecar belongs to: its file name up to the
-// year or episode tag, so versions in other folders compare equal.
+// year, bracket, or episode tag, so other releases and versions in other
+// folders compare equal.
 func titleOf(path string) string {
 	name := strings.NewReplacer(".", " ", "_", " ").Replace(strings.ToLower(filepath.Base(path)))
 	if i := strings.IndexAny(name, "([{"); i > 0 {
@@ -268,9 +280,16 @@ func titleOf(path string) string {
 	if loc := episodeTag.FindStringIndex(strings.ToUpper(name)); loc != nil {
 		name = name[:loc[0]]
 	}
+	if loc := yearTag.FindStringIndex(name); loc != nil && loc[0] > 0 {
+		name = name[:loc[0]]
+	}
 	return strings.TrimSpace(strings.Trim(name, " .-_"))
 }
 
+// yearTag is a release year standing alone in a file name.
+var yearTag = regexp.MustCompile(`\b(19|20)\d\d\b`)
+
+// unescapeCopy undoes the escaping of COPY TO STDOUT text format.
 func unescapeCopy(s string) string {
 	return strings.NewReplacer(`\\`, `\`, `\t`, "\t", `\n`, "\n").Replace(s)
 }
@@ -290,6 +309,8 @@ func transformCues(cues []subtitles.SubtitleCue, k, d float64) []subtitles.Subti
 	return out
 }
 
+// buildEvalCases makes the known and nomatch cases from production jobs,
+// a shifted case per known job, and a negative per media file.
 func buildEvalCases(jobs []*evalJob, speech map[int][]mediasample.SpeechLevels) []evalCase {
 	r := rand.New(rand.NewPCG(7, 11))
 	var cases []evalCase
