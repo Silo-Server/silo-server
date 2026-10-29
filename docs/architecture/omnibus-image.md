@@ -278,6 +278,9 @@ into place, when:
   its largest collation-dependent index twice over (the index and its WAL) plus
   1 GiB, or for copying a Silo directory that cannot be hard-linked while
   keeping that room for the database's first start.
+- The copy's search uses a Meilisearch chosen in the admin UI and nothing
+  turns Redis on (`ENABLE_REDIS`, `ENABLE_MEILISEARCH`, node access, or a
+  `REDIS_URL`): its paging sessions need the Redis the earlier stack always ran.
 - The copy has enabled proxy or transcode nodes and node access is off: they
   reached the old services on published ports.
 

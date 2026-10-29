@@ -119,6 +119,7 @@ services:
       SILO_OMNIBUS_IMAGE: ${SILO_OMNIBUS_IMAGE:-}
       POSTGRES_PASSWORD_SET: ${POSTGRES_PASSWORD:+set}
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
+      ENABLE_REDIS: ${ENABLE_REDIS:-false}
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
   redis: *bridge
