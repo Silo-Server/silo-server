@@ -64,7 +64,7 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/events/ws-ticket$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/capabilities$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(playback-activity|top-activity|downloads)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(timeseries|playback-activity|top-activity|downloads)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+$`)},

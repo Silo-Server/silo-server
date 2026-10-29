@@ -161,7 +161,7 @@ answers any owner.
 | Area | Paths under `/api/v2` |
 |---|---|
 | Live sessions | `/admin/sessions`, `/admin/sessions/summary`, `/admin/sessions/capabilities`, `/admin/sessions/command-capabilities`, `/events/capabilities` |
-| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
+| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/timeseries`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
 | Accounts | `/admin/users`, `/admin/users/capabilities`, `/admin/users/{id}`, and `/admin/users/{id}/` `profiles`, `devices`, `ips`, `downloads`, `downloads/summary`, `watch-summary` |
 | Devices and addresses | `/admin/devices`, `/admin/devices/capabilities`, `/admin/ips` |
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |

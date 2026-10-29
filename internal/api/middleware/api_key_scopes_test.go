@@ -48,6 +48,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"monitor history", monitor, http.MethodGet, "/api/v2/admin/playback-history", true},
 		{"monitor history capabilities", monitor, http.MethodGet, "/api/v2/admin/playback-history/capabilities", true},
 		{"monitor activity stats", monitor, http.MethodGet, "/api/v2/admin/stats/top-activity", true},
+		{"monitor stream timeseries", monitor, http.MethodGet, "/api/v2/admin/stats/timeseries", true},
 		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
 		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},
 		{"monitor download entries", monitor, http.MethodGet, "/api/v2/admin/downloads/entries", true},
