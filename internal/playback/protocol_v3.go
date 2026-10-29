@@ -273,7 +273,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -638,6 +638,29 @@ const (
 	subtitleIdentityContainerV3 = "container_track_id"
 )
 
+// Native embedded subtitle limitations: renderer defects a client declares on a
+// native_embedded entry so the planner keeps the tracks that player would get
+// wrong off the native route. Honored on /api/v2, which advertises
+// FeatureNativeEmbeddedLimitationsV3.
+const (
+	// NativeEmbeddedLimitationForcedUnlistedV3: the player cannot select a
+	// track flagged Forced.
+	NativeEmbeddedLimitationForcedUnlistedV3 = "forced_unlisted"
+	// NativeEmbeddedLimitationHiddenTrackPreemptionV3: the player draws a track
+	// it does not list instead of the selected one when the file has a Forced
+	// track in the playing audio's language or a default-flagged bitmap track.
+	NativeEmbeddedLimitationHiddenTrackPreemptionV3 = "hidden_track_preemption"
+	// NativeEmbeddedLimitationLiteralOverrideTagsV3: the player prints ASS
+	// override tags such as {\an8} inside text cues instead of applying them.
+	NativeEmbeddedLimitationLiteralOverrideTagsV3 = "literal_override_tags"
+)
+
+// FeatureNativeEmbeddedLimitationsV3 tells a client the server honors
+// native_embedded limitations. A client that needs one must not send its
+// native_embedded entry to a server that does not advertise this. It exists
+// only on /api/v2 (see NativeServerFeaturesV3).
+const FeatureNativeEmbeddedLimitationsV3 = "native_embedded_limitations_v1"
+
 // NativeEmbeddedSubtitleCapabilityV3 attests native selection for one container
 // and codec set. Stream indexes and container track IDs are distinct namespaces.
 type NativeEmbeddedSubtitleCapabilityV3 struct {
@@ -646,6 +669,10 @@ type NativeEmbeddedSubtitleCapabilityV3 struct {
 	TrackIdentity   string   `json:"track_identity"`
 	ASSStyling      bool     `json:"ass_styling"`
 	FontAttachments bool     `json:"font_attachments"`
+	// Limitations narrows the entry to the tracks its player shows correctly.
+	// Planning skips an entry that names a value it does not know, rather than
+	// guess what that player gets wrong.
+	Limitations []string `json:"limitations,omitempty" maxItems:"16" doc:"Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection."`
 }
 
 type DeliverySubtitleCapabilitiesV3 struct {
@@ -1496,6 +1523,19 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 					return errors.New("invalid native subtitle codec")
 				}
 				native.Codecs[j] = normalizeNativeSubtitleCodecV3(codec)
+			}
+			// Only the shape is validated: a value this server does not know
+			// disables its entry during planning instead of failing a request
+			// that a newer client may legitimately send.
+			if len(native.Limitations) > 16 {
+				return errors.New("native subtitle limitation list exceeds supported size")
+			}
+			for j, limitation := range native.Limitations {
+				limitation = strings.ToLower(strings.TrimSpace(limitation))
+				if limitation == "" || len(limitation) > 64 {
+					return errors.New("invalid native subtitle limitation")
+				}
+				native.Limitations[j] = limitation
 			}
 		}
 		seenTransformations := make(map[string]struct{}, len(delivery.Transformations))

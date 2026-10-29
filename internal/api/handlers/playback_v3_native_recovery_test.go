@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -242,5 +243,76 @@ func TestRemapSubtitleSelectionKeepsDownloadedSelectionWhenLookupFails(t *testin
 	}
 	if request.SubtitleTrackIndex == nil || *request.SubtitleTrackIndex != 0 {
 		t.Fatalf("selection changed on a lookup failure: %+v", request)
+	}
+}
+
+// A client that switches between native-selectable rows on the stream it
+// plays reports the switch, and the server answers with the same media: same
+// file, delivery, stream and recipe, with only the subtitle selection moved.
+// The client then applies the plan in place.
+func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
+	for name, replan := range map[string]func(*playback.ReplanRequestV3){
+		"subtitle_track_changed": func(r *playback.ReplanRequestV3) {
+			r.Operation = playback.ReplanOperationFailureRecoveryV3
+			r.Failure = playback.FailureV3{Classification: "subtitle_track_changed"}
+		},
+		"track_change": func(r *playback.ReplanRequestV3) {
+			r.Operation = playback.ReplanOperationTrackChangeV3
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := v3HandlerFixtureFile(t)
+			file.Container = "mkv"
+			file.FilePath = writePlaybackTestMediaFile(t, "movie.mkv")
+			file.AudioTracks[0].Language = "eng"
+			file.SubtitleTracks = []models.SubtitleTrack{
+				{Index: 2, ContainerTrackID: "3", Codec: "subrip", Language: "eng"},
+				{Index: 3, ContainerTrackID: "4", Codec: "subrip", Language: "spa"},
+			}
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+			start := v3HandlerStartRequest()
+			start.Capabilities.Containers = []string{"mkv"}
+			start.ClientFeatures = append(start.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
+			start.SubtitleTrackIndex = new(0)
+			start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
+			caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+			caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{
+				Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id",
+				Limitations: []string{playback.NativeEmbeddedLimitationForcedUnlistedV3, playback.NativeEmbeddedLimitationHiddenTrackPreemptionV3, playback.NativeEmbeddedLimitationLiteralOverrideTagsV3},
+			}}
+			start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
+			started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+			before := started.PlaybackPlan
+			if before.Delivery != playback.DeliveryOriginalHTTPV3 || before.Subtitle.Embedded == nil || before.Subtitle.Embedded.ContainerTrackID != "3" {
+				t.Fatalf("start plan = %+v subtitle = %+v, want native track 3", before, before.Subtitle)
+			}
+			for i, row := range before.Subtitle.Inventory {
+				if !row.NativeSelectable || row.StreamIndex == nil || *row.StreamIndex != file.SubtitleTracks[i].Index || row.ContainerTrackID != file.SubtitleTracks[i].ContainerTrackID || row.URL == "" {
+					t.Fatalf("inventory row %d = %+v, want a native-selectable row with its stream identity and fallback URL", i, row)
+				}
+			}
+
+			spanish := 1
+			request := playback.ReplanRequestV3{
+				ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: start.PlaybackAttemptID,
+				ReplanRequestID: "native-switch-0001", FailedPlanID: before.PlanID, PlanAttemptID: "native-switch-attempt-0001",
+				PlanAttemptKey: before.PlanAttemptKey, AttemptedPlanKeys: []string{before.PlanAttemptKey}, AttemptCount: 1, PositionSeconds: 300,
+				SelectedTracks: playback.SelectedTracksV3{Audio: before.SelectedTracks.Audio, Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "subtitle", spanish), Index: &spanish}},
+				Capabilities:   start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext,
+			}
+			replan(&request)
+			after := postPlaybackReplanV3(t, handler, started.SessionID, request).PlaybackPlan
+			if after == nil {
+				t.Fatal("switch returned no plan")
+			}
+			if after.EffectiveMediaFileID != before.EffectiveMediaFileID || after.Delivery != before.Delivery || after.Stream.URL != before.Stream.URL || !reflect.DeepEqual(after.EffectiveRecipe, before.EffectiveRecipe) || !reflect.DeepEqual(after.SelectedTracks.Audio, before.SelectedTracks.Audio) {
+				t.Fatalf("switch changed the media:\nbefore %+v\nafter  %+v", before, after)
+			}
+			if after.Subtitle.Embedded == nil || after.Subtitle.Embedded.StreamIndex != 3 || after.Subtitle.Embedded.ContainerTrackID != "4" || after.Subtitle.TrackID != playback.TrackIDV3(file.ID, "subtitle", spanish) {
+				t.Fatalf("subtitle = %+v, want native track 4", after.Subtitle)
+			}
+		})
 	}
 }
