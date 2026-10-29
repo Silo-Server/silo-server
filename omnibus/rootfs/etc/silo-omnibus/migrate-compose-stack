@@ -365,8 +365,9 @@ SQL
   fi
   # Meilisearch search keeps its paging sessions in Redis, which the earlier
   # stack always ran. One chosen in the admin UI stays chosen, but this file
-  # starts Redis only when asked.
-  if [[ "${provider,,}" == meilisearch && -z "${REDIS_URL:-}" ]] && ! truthy "${ENABLE_REDIS:-false}" &&
+  # starts Redis only when asked. A provider in .env overrides the stored one,
+  # and init-config starts Redis for SILO_SEARCH_PROVIDER=meilisearch itself.
+  if [[ -z "$env_provider" && "${provider,,}" == meilisearch && -z "${REDIS_URL:-}" ]] && ! truthy "${ENABLE_REDIS:-false}" &&
     ! truthy "${ENABLE_MEILISEARCH:-false}" && ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
     fail "search uses a Meilisearch chosen in the admin UI, whose paging sessions need the Redis the earlier stack always ran. Set ENABLE_REDIS=true in .env and start again; the earlier Compose file still starts meanwhile"
   fi
