@@ -7487,6 +7487,19 @@ const manualIdentityOverrideSource = "manual"
 // scannedGroupStateResolved marks a scanner group whose members agree on identity.
 const scannedGroupStateResolved = "resolved"
 
+// rescannedGroupIDs returns the provider IDs a rescan would store on the
+// file's content group, for scannedGroupIdentityChanged to compare. It reads
+// the path as the scanner does, which also accepts a bare IMDb ID at the end of
+// a folder name, so the comparison flags only what a rescan would change.
+func rescannedGroupIDs(file *models.MediaFile, observedRootPath string, libraryRoots ...string) *naming.FolderIDHints {
+	libraryRoot := naming.ResolvePathContext(file.FilePath, file.BaseType, libraryRoots...).LibraryRootPath
+	ids := naming.GroupProviderIDs(file.FilePath, observedRootPath, libraryRoot)
+	if !hasFolderIDHints(&ids) {
+		return nil
+	}
+	return &ids
+}
+
 func scannedGroupIdentityChanged(group *models.ScannedMediaGroup, file *models.MediaFile, currentIDs *naming.FolderIDHints, libraryRoots ...string) bool {
 	if group == nil || file == nil || strings.EqualFold(strings.TrimSpace(group.OverrideSource), manualIdentityOverrideSource) {
 		return false
@@ -7685,7 +7698,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// subsequent claim relink unrelated files. Let a scan rebuild that grouping
 	// before any catalog writes; operator overrides and explicit IDs establish
 	// identity independently of how the filename currently parses.
-	if groupOverride == nil && scannedGroupIdentityChanged(scannedIdentity, file, effectiveExternalIDs, libraryRoots...) {
+	if groupOverride == nil && scannedGroupIdentityChanged(scannedIdentity, file, rescannedGroupIDs(file, observedRootPath, libraryRoots...), libraryRoots...) {
 		return nil, errors.New("filename identity changed since the last scan; rescan the library to update file grouping")
 	}
 	if effectiveExternalIDs != nil {

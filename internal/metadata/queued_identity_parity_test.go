@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -167,6 +168,7 @@ func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *te
 	for _, tt := range []struct{ name, path, wantTmdb string }{
 		{"same TMDB, different IMDb", libraryRoot + "/Example Movie (2020) {tmdb-335984} {imdb-tt1111111}/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
 		{"different TMDB", libraryRoot + "/Predator (1987) {tmdb-999}/Predator Ultimate Hunter Edition (1987) {tmdb-106}.mkv", "999"},
+		{"bare IMDb ID ending the folder name", libraryRoot + "/Example Movie (2020) {tmdb-335984} tt1111111/Example Movie (2020) {tmdb-335984} {imdb-tt2222222}.mkv", "335984"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, assignments := naming.InferRootAssignments([]string{tt.path}, "movies", 10, nil, libraryRoot)
@@ -191,6 +193,30 @@ func TestQueuedMovieIdentityAcceptsScannerGroupWhenFolderAndFileTagsDiffer(t *te
 				t.Fatalf("scanner group %+v blocked the queued file: skeleton=%+v error=%v", scanned, skeleton, err)
 			}
 		})
+	}
+}
+
+// A rerun refreshes a matched item's own title, even when a path tag names
+// another one.
+func TestQueuedMovieRerunKeepsMatchedItemProviderIDs(t *testing.T) {
+	const libraryRoot = "/movies"
+	path := libraryRoot + "/Predator (1987) {tmdb-999}/Predator (1987) {tmdb-106}.mkv"
+	h := newTestHarness()
+	if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{
+		ContentID: "movie-tmdb-106", Status: "matched", Title: "Predator", Year: 1987, Type: "movie", TmdbID: "106",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed matched item: %v", err)
+	}
+	file := &models.MediaFile{
+		ID: 1, MediaFolderID: 10, FilePath: path, ContentID: "movie-tmdb-106",
+		ObservedRootPath: filepath.Dir(path), CanonicalRootPath: filepath.Dir(path),
+		BaseType: "movie", BaseTitle: "Predator", BaseYear: 1987,
+	}
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+	skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, true, libraryRoot)
+	if err != nil || skeleton == nil || skeleton.ContentID != "movie-tmdb-106" || skeleton.TmdbID != "106" {
+		t.Fatalf("rerun of a matched item left its identity: skeleton=%+v error=%v", skeleton, err)
 	}
 }
 
