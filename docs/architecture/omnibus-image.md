@@ -322,7 +322,8 @@ How it stays safe to repeat and to roll back:
   leaves a root-owned `/config/.compose-migration-checked`. The `silo` service
   sets `REQUIRE_COMPOSE_MIGRATION`, under which `init-postgres` refuses to
   create a cluster in an empty `/config/postgres/data` until that marker
-  exists. The user manual's update command, `docker compose up -d --no-deps
+  exists, and with an external `DATABASE_URL`, where the migration moves only
+  Silo's directories, refuses to start Silo until it exists. The user manual's update command, `docker compose up -d --no-deps
   silo`, skips this step, and on the first update onto this file Silo would
   otherwise come up on a new, empty database in front of the earlier install.
   Instead it exits and asks for one `docker compose up -d` without

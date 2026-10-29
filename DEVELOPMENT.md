@@ -46,6 +46,13 @@ cd ..
 make embed-stub
 ```
 
+`docker-compose.dev.yml` runs as the `silo-dev` Compose project with named
+volumes, so it does not reuse a development database that the earlier
+`docker compose up -d postgres redis` kept under `SILO_DATA_ROOT/postgres`.
+Stop those containers first (`docker compose down` with the earlier file), since
+they hold ports 5432 and 6379, and restore a `pg_dump` of the old database into
+the new one if you need its data.
+
 Run the backend and frontend in separate terminals, backend first:
 
 ```sh

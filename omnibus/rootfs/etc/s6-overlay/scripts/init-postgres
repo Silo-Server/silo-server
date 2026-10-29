@@ -20,6 +20,20 @@ MSG
   exit 1
 fi
 
+# With Silo's database elsewhere no cluster is created below, but the
+# migration still moves Silo's directories, so Silo waits for it the same way
+# under REQUIRE_COMPOSE_MIGRATION.
+if ! enabled postgres && truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
+  cat >&2 <<'MSG'
+The Compose file's postgres service has not yet checked SILO_DATA_ROOT for an
+earlier multi-container install to move here (/config/.compose-migration-checked
+is missing). Silo was likely started on its own, as `docker compose up -d
+--no-deps silo` does. Run `docker compose up -d` once without --no-deps; later
+updates can use --no-deps again.
+MSG
+  exit 1
+fi
+
 enabled postgres || exit 0
 export HOME=/config/postgres
 PGDATA=/config/postgres/data
