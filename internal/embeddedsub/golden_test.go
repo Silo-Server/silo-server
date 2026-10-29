@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -351,11 +352,161 @@ func TestOverrideTagsInFFmpegFile(t *testing.T) {
 		}
 	}
 	// A 6 s window is a handful of reads.
-	res, err := embeddedsub.ReadPackets(ctx, path, idx, 3, 4*time.Second, 10*time.Second, embeddedsub.ReadOptions{})
+	// mov_text samples don't overlap: the cue at 3 s ends when the next
+	// starts at 4 s.
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, 3, 3500*time.Millisecond, 10*time.Second, embeddedsub.ReadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Packets) != 2 || res.Stats.Reads > 4 {
 		t.Fatalf("window: %d packets in %d reads", len(res.Packets), res.Stats.Reads)
+	}
+}
+
+// ffmpegMP4Fixture writes an MP4 or MOV file, by name's extension, with
+// video, audio and two mov_text tracks; extra are further output options.
+func ffmpegMP4Fixture(t *testing.T, ffmpeg, name string, videoOffset float64, extra ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(file, data string) string {
+		p := filepath.Join(dir, file)
+		if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	en, de := write("en.srt", srtEnglish), write("de.srt", srtGerman)
+	out := filepath.Join(dir, name)
+	offset := fmt.Sprint(videoOffset)
+	args := []string{"-hide_banner", "-loglevel", "error", "-y",
+		"-itsoffset", offset, "-f", "lavfi", "-i", "testsrc2=size=64x36:rate=10",
+		"-itsoffset", offset, "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000",
+		"-i", en, "-i", de, "-t", "12",
+		"-map", "0:v", "-map", "1:a", "-map", "2", "-map", "3",
+		"-c:v", "mpeg4", "-c:a", "aac", "-c:s", "mov_text",
+		"-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=ger",
+	}
+	if videoOffset != 0 {
+		args = append(args, "-copyts")
+	}
+	args = append(args, extra...)
+	if b, err := exec.Command(ffmpeg, append(args, out)...).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg can't make the fixture (%v): %s", err, b)
+	}
+	return out
+}
+
+func TestCueReadMatchesFFmpegOnMP4Files(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	files := []struct {
+		name, file string
+		offset     float64
+		extra      []string
+	}{
+		{"MP4", "in.mp4", 0, nil},
+		{"MP4 with the moov first", "in.mp4", 0, []string{"-movflags", "+faststart"}},
+		{"MP4 with video starting at 1.5 s", "in.mp4", 1.5, nil},
+		{"MOV", "in.mov", 0, nil},
+	}
+	for _, f := range files {
+		path := ffmpegMP4Fixture(t, ffmpeg, f.file, f.offset, f.extra...)
+		// Tracks 1 and 2 are video and audio.
+		for _, x := range []extract{
+			{ordinal: 0, number: 3, codec: "mov_text"},
+			{ordinal: 1, number: 4, codec: "mov_text"},
+			{ordinal: 0, number: 3, codec: "mov_text", target: "srt"},
+		} {
+			t.Run(fmt.Sprintf("%s/track %d/%s", f.name, x.number, cmp(x.target, "default")), func(t *testing.T) {
+				compare(t, ffmpeg, path, x)
+			})
+		}
+	}
+}
+
+func TestMP4Index(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	ctx := context.Background()
+	path := ffmpegMP4Fixture(t, ffmpeg, "in.mp4", 0)
+	idx, err := embeddedsub.ReadIndex(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx.Container != embeddedsub.ContainerMP4 || len(idx.Tracks) != 2 {
+		t.Fatalf("index = %+v", idx)
+	}
+	en, _ := idx.Track(3)
+	de, _ := idx.Track(4)
+	if en == nil || de == nil || en.CodecID != "tx3g" || en.Language != "eng" || de.Language != "ger" ||
+		en.Completeness != embeddedsub.CompletenessComplete {
+		t.Fatalf("tracks = %+v, %+v", en, de)
+	}
+	// The moov sits after the media: a few header reads find it.
+	if idx.Stats.Reads > 4 {
+		t.Fatalf("index took %d reads", idx.Stats.Reads)
+	}
+	// mov_text samples don't overlap: the cue at 3 s ends when the next
+	// starts at 4 s.
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, 3, 3500*time.Millisecond, 10*time.Second, embeddedsub.ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, p := range res.Packets {
+		if len(p.Data) > 2 {
+			texts = append(texts, string(p.Data[2:]))
+		}
+	}
+	if len(texts) != 2 || !strings.Contains(texts[0], "Two lines") || !strings.Contains(texts[1], "Overlapping") {
+		t.Fatalf("window texts = %q", texts)
+	}
+}
+
+// A window's packets convert to the same cues, at the same times, as the
+// whole track's: what an HLS segment or a client's window would get. The
+// files start at zero: when a cue starts before the file's start time,
+// FFmpeg's muxer shifts the whole track's output later to keep timestamps
+// from going negative (avoid_negative_ts), today's extraction included, and
+// a window without that cue isn't shifted.
+func TestWindowConversionKeepsTimes(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	ctx := context.Background()
+	for _, f := range []struct{ name, path, codec string }{
+		{"Matroska", ffmpegFixture(t, ffmpeg, "in.mkv", 0), "subrip"},
+		{"MP4", ffmpegMP4Fixture(t, ffmpeg, "in.mp4", 0), "mov_text"},
+	} {
+		t.Run(f.name, func(t *testing.T) {
+			idx, err := embeddedsub.ReadIndex(ctx, f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			track, _ := idx.Track(3)
+			start, err := playback.SubtitleSourceStartTime(ctx, ffmpeg, f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vtt := func(from, to time.Duration) []string {
+				res, err := embeddedsub.ReadPackets(ctx, f.path, idx, 3, from, to, embeddedsub.ReadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, err := fromPackets(ctx, ffmpeg, &playback.SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: start},
+					extract{codec: f.codec})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Cue blocks after the WEBVTT header.
+				return strings.Split(strings.TrimSpace(string(out)), "\n\n")[1:]
+			}
+			whole := vtt(embeddedsub.WholeFrom, embeddedsub.WholeTo)
+			window := vtt(3500*time.Millisecond, 10*time.Second)
+			if len(window) == 0 || len(window) >= len(whole) {
+				t.Fatalf("window has %d of %d cues", len(window), len(whole))
+			}
+			for _, cue := range window {
+				if !slices.Contains(whole, cue) {
+					t.Errorf("window cue %q isn't in the whole track %q", cue, whole)
+				}
+			}
+		})
 	}
 }

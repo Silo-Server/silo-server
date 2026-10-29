@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -161,6 +162,48 @@ func windowPackets(packets []Packet, times []time.Duration, from, to time.Durati
 		}
 		return !overlaps(p.PTS, end, from, to)
 	})
+}
+
+// runJobs calls fn for each of n jobs, up to concurrency at once, and
+// returns the results in job order. It returns as soon as ctx ends; jobs
+// already running finish in the background.
+func runJobs[T any](ctx context.Context, n, concurrency int, fn func(int) T) ([]T, error) {
+	results := make([]T, n)
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(concurrency, n) {
+		wg.Go(func() {
+			for j := range next {
+				if ctx.Err() == nil {
+					results[j] = fn(j)
+				}
+			}
+		})
+	}
+	go func() {
+		defer close(next)
+		for j := range n {
+			select {
+			case next <- j:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // sortPackets orders packets as the file stores them.

@@ -90,7 +90,8 @@ func readMatroskaPackets(ctx context.Context, r *fileReader, idx *Index, t *Trac
 		for _, i := range sel {
 			done[i] = true
 		}
-		results, err := m.run(ctx, m.jobs(sel), concurrency)
+		jobs := m.jobs(sel)
+		results, err := runJobs(ctx, len(jobs), concurrency, func(j int) jobResult { return m.do(jobs[j]) })
 		if err != nil {
 			return nil, err
 		}
@@ -159,47 +160,6 @@ func (m *matroskaRead) jobs(sel []int) []job {
 		jobs = append(jobs, job{cues: []int{i}, scan: true})
 	}
 	return jobs
-}
-
-// run does the jobs with up to concurrency of them at once. It returns as
-// soon as ctx ends.
-func (m *matroskaRead) run(ctx context.Context, jobs []job, concurrency int) ([]jobResult, error) {
-	results := make([]jobResult, len(jobs))
-	next := make(chan int)
-	var wg sync.WaitGroup
-	for range min(concurrency, len(jobs)) {
-		wg.Go(func() {
-			for j := range next {
-				if ctx.Err() == nil {
-					results[j] = m.do(jobs[j])
-				}
-			}
-		})
-	}
-	go func() {
-		defer close(next)
-		for j := range jobs {
-			select {
-			case next <- j:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	finished := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(finished)
-	}()
-	select {
-	case <-finished:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return results, nil
 }
 
 func (m *matroskaRead) do(j job) jobResult {

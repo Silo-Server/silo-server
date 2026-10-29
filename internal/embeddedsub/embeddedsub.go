@@ -147,7 +147,8 @@ type Track struct {
 	// UID is the Matroska TrackUID; 0 for MP4.
 	UID uint64
 	// CodecID is the Matroska CodecID (S_TEXT/UTF8, S_TEXT/ASS,
-	// S_HDMV/PGS...) or, for MP4, the sample entry type (tx3g).
+	// S_HDMV/PGS...) or, for MP4, the sample entry type (tx3g, or text for
+	// QuickTime text).
 	CodecID string
 	// CodecPrivate is the codec's private data, decompressed: the ASS
 	// script header, or the tx3g sample description.
@@ -166,10 +167,14 @@ type Track struct {
 	HearingImpaired bool
 	// DefaultDuration is the track's default packet duration, or 0.
 	DefaultDuration time.Duration
-	// Cues are the track's index entries, in file order.
+	// Cues are a Matroska track's index entries, in file order. An MP4
+	// track's sample table lives unexported in the track.
 	Cues []Cue
-	// FrameCount is the NUMBER_OF_FRAMES statistics tag, or -1.
-	FrameCount   int64
+	// FrameCount is the NUMBER_OF_FRAMES statistics tag, or -1; for MP4
+	// the sample count.
+	FrameCount int64
+	// Completeness rates the cues against FrameCount. An MP4 track's sample
+	// table lists every sample, so it is complete when it has any.
 	Completeness Completeness
 	// Unsupported says why ReadPackets can't read the track's packets
 	// (encryption, a compression the reader lacks...), or is empty.
@@ -181,6 +186,8 @@ type Track struct {
 	// whether every cue has one.
 	maxCueDuration  time.Duration
 	allCueDurations bool
+	// mp4 holds an MP4 track's sample table.
+	mp4 *mp4Track
 }
 
 // Cue is one index entry: where one packet of the track is.
@@ -220,6 +227,10 @@ type Packet struct {
 	// nonKeyframe is set for a block FFmpeg doesn't read as a keyframe:
 	// one with references, or a laced frame after the first.
 	nonKeyframe bool
+	// mp4DTS and mp4Delta are an MP4 sample's decode time and duration in
+	// media ticks, which the MP4 stream WriteStream writes keeps.
+	mp4DTS   int64
+	mp4Delta uint32
 }
 
 // End is when the packet stops displaying, or PTS when its duration is
@@ -249,12 +260,15 @@ const (
 
 // memSize estimates the bytes an Index keeps alive.
 func (idx *Index) memSize() int64 {
-	const cueSize, trackSize = 32, 256
+	const cueSize, trackSize, sampleSize = 32, 256, 24
 	n := int64(128)
 	for i := range idx.Tracks {
 		t := &idx.Tracks[i]
 		n += trackSize + int64(len(t.CodecPrivate)+len(t.Language)+len(t.LanguageBCP47)+len(t.Name)+len(t.CodecID))
 		n += int64(len(t.Cues)) * cueSize
+		if t.mp4 != nil {
+			n += int64(len(t.mp4.samples))*sampleSize + int64(len(t.mp4.stsd)+len(t.mp4.edts)+len(t.mp4.tkhd)+len(t.mp4.mvhd))
+		}
 	}
 	return n
 }
