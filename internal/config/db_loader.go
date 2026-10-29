@@ -519,7 +519,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
 	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
 	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
-	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
+	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-6-luna"))
 	cfg.AI.SpeechProviderID = strings.TrimSpace(m[AISpeechProviderSettingKey])
 	cfg.AI.ASRBaseURL, cfg.AI.ASRAPIKey, _ = aiProviders.Resolve(cfg.AI.SpeechProviderID, AICapabilitySpeech)
 	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")

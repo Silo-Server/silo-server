@@ -331,7 +331,7 @@ function TextModelTile({
           kind="chat"
           value={chatModel}
           onChange={(next) => onChange("ai.chat_model", next)}
-          placeholder="gpt-4o-mini, gemini-2.5-flash, llama3.1"
+          placeholder="gpt-6-luna, gemini-2.5-flash, llama3.1"
         />
       )}
       <AdvancedSection id="ai.text-model" count={1} forceOpen={reasoningAttention}>
@@ -550,7 +550,7 @@ export default function AISettings() {
   const authMode = form.getValue("ai.auth_mode") || "api_key";
   const configuredChatModel =
     form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
-  const currentModel = configuredChatModel || "gpt-4o-mini";
+  const currentModel = configuredChatModel || "gpt-6-luna";
   const capabilityModel = useDebounce(currentModel, 300);
   const capabilities = useAdminAICapabilities(capabilityModel);
   const chatGPTSupported = capabilities.data?.chatgpt_sign_in === true;
@@ -588,7 +588,7 @@ export default function AISettings() {
 
   const providers = providerList.data?.providers ?? [];
   const providerTypes = providerList.data?.types ?? [];
-  const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-4o-mini");
+  const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-6-luna");
   const textProviderID = value("ai.text_provider_id");
   const speechProviderID = value("ai.speech_provider_id");
   const asrModel = value("ai.asr_model", "whisper-1");

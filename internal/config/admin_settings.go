@@ -425,7 +425,7 @@ var adminSettingDefaults = map[string]string{
 
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
-	"ai.chat_model":                       "gpt-4o-mini",
+	"ai.chat_model":                       "gpt-6-luna",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
 	"subtitle_ai.enabled":                 "false",
