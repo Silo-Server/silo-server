@@ -27,6 +27,7 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
+import { AppThemeProvider } from "@/themes/AppThemeProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -423,9 +424,11 @@ function ReactiveAppRoutes() {
 
 function UICustomizedLayout({ children }: { children: ReactNode }) {
   return (
-    <UICustomizationProvider>
-      <Layout>{children}</Layout>
-    </UICustomizationProvider>
+    <AppThemeProvider>
+      <UICustomizationProvider>
+        <Layout>{children}</Layout>
+      </UICustomizationProvider>
+    </AppThemeProvider>
   );
 }
 

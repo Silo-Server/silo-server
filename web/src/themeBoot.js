@@ -6,8 +6,9 @@
  * themeBootScript in vite.config.ts). Without it the shell and the app's first
  * frame would paint with index.html's static attributes until ThemeProvider's
  * effects run, showing anyone on a larger text size, bolder text, or high
- * contrast the wrong look first. The colour theme needs nothing here: Silo has
- * one base theme, fixed by index.html's data-theme.
+ * contrast the wrong look first. The colour theme is read here for the same
+ * reason: index.html's static data-theme names the default, and a device that
+ * chose the other theme would otherwise paint the wrong one first.
  *
  * It reproduces the state ThemeProvider starts from before auth resolves: the
  * namespace of the last identity that wrote the appearance cache (see
@@ -45,4 +46,14 @@
     "data-high-contrast",
     cached("silo-ui-high-contrast") === "true" ? "true" : "false",
   );
+
+  // Not namespaced by identity, unlike the keys above: the theme is the
+  // device's look, and it has to apply on the login screen before anyone is
+  // signed in. Only a value naming a theme this build knows is applied, so a
+  // stale or hand-edited value leaves index.html's static default in place.
+  // Must stay in step with parseTheme in themes/theme.ts.
+  const theme = read("silo-app-theme");
+  if (theme === "weflix" || theme === "midnight-cinema") {
+    root.setAttribute("data-theme", theme);
+  }
 })();

@@ -32,7 +32,6 @@ import {
   buildPersonalCatalogHref,
   buildQueryCatalogHref,
   buildSectionCatalogHref,
-  buildUserCollectionCatalogHref,
   parseCatalogSearchParams,
   sameCatalogDestination,
 } from "@/pages/catalogSearchParams";
@@ -46,9 +45,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Film,
-  Tv,
-  Library,
   Search,
   Heart,
   List,
@@ -67,26 +63,12 @@ import {
   PinOff,
   LayoutGrid,
   Puzzle,
-  BookHeadphones,
   Send,
   Bell,
 } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { menuItemKey } from "@/lib/uiCustomization";
-
-function getLibraryIcon(type: string) {
-  switch (type) {
-    case "movies":
-      return <Film className="h-[18px] w-[18px]" />;
-    case "series":
-      return <Tv className="h-[18px] w-[18px]" />;
-    case "audiobook":
-    case "audiobooks":
-      return <BookHeadphones className="h-[18px] w-[18px]" />;
-    default:
-      return <Library className="h-[18px] w-[18px]" />;
-  }
-}
+import { getLibraryIcon, resolvePrimaryMenuLinks } from "@/components/primaryMenuLinks";
+import type { ResolvedPrimaryMenuLink } from "@/components/primaryMenuLinks";
 
 function getLibraryIdFromPathname(pathname: string): number | null {
   const match = pathname.match(/^\/library\/(\d+)(?:\/|$)/);
@@ -194,13 +176,6 @@ function preloadSettings() {
   void import("@/pages/settings/PlaybackSettings");
 }
 
-interface ResolvedPrimaryMenuLink {
-  key: string;
-  href: string;
-  label: string;
-  icon: ReactNode;
-}
-
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
   const entrance = useSidebarEntrance(swap);
   const location = useLocation();
@@ -248,104 +223,12 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   // Grouped view of the Apps entries (null → keep the flat list under the
   // single "Apps" header). See groupAppNavLinks for the SDK category contract.
   const pluginNavGroups = useMemo(() => groupAppNavLinks(pluginNavLinks), [pluginNavLinks]);
-  const primaryMenuLinks = useMemo<ResolvedPrimaryMenuLink[] | null>(() => {
-    if (!primaryMenu) return null;
-
-    return primaryMenu.items.flatMap((item): ResolvedPrimaryMenuLink[] => {
-      const key = menuItemKey(item);
-      if (item.type === "library") {
-        const library = libraries?.find((candidate) => candidate.id === item.library_id);
-        if (!library) return [];
-        return [
-          {
-            key,
-            href: `/library/${library.id}`,
-            label: item.label || library.name,
-            icon: getLibraryIcon(library.type),
-          },
-        ];
-      }
-      if (item.type === "section") {
-        if (!libraries?.some((candidate) => candidate.id === item.library_id)) return [];
-        return [
-          {
-            key,
-            href: buildSectionCatalogHref({
-              scope: "library",
-              libraryId: item.library_id,
-              sectionId: item.section_id,
-              title: item.label,
-            }),
-            label: item.label,
-            icon: <LayoutGrid className="h-[18px] w-[18px] shrink-0" />,
-          },
-        ];
-      }
-      if (item.type === "collection") {
-        if (
-          item.library_id !== undefined &&
-          !libraries?.some((candidate) => candidate.id === item.library_id)
-        ) {
-          return [];
-        }
-        return [
-          {
-            key,
-            href:
-              item.library_id === undefined
-                ? buildUserCollectionCatalogHref(item.collection_id, item.label)
-                : buildLibraryCollectionCatalogHref(
-                    item.collection_id,
-                    item.label,
-                    item.library_id,
-                  ),
-            label: item.label,
-            icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
-          },
-        ];
-      }
-
-      switch (item.destination) {
-        case "home":
-          return [
-            {
-              key,
-              href: "/",
-              label: "Home",
-              icon: <Home className="h-[18px] w-[18px] shrink-0" />,
-            },
-          ];
-        case "for_you":
-          return [
-            {
-              key,
-              href: "/recommendations",
-              label: "For You",
-              icon: <Sparkles className="h-[18px] w-[18px] shrink-0" />,
-            },
-          ];
-        case "calendar":
-          return [
-            {
-              key,
-              href: "/calendar",
-              label: "Calendar",
-              icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" />,
-            },
-          ];
-        // These contract built-ins identify global media destinations, not a
-        // particular library. Web does not currently have complete global
-        // routes for all four media families (notably music), so omit them
-        // instead of silently changing their meaning to the first matching
-        // library. An explicit `library` menu item remains fully supported.
-        case "movies":
-        case "series":
-        case "music":
-        case "audiobooks":
-          return [];
-      }
-    });
-  }, [libraries, primaryMenu]);
+  // Resolved by the shared function so the WeFlix top bar offers exactly the
+  // same destinations in the same order.
+  const primaryMenuLinks = useMemo<ResolvedPrimaryMenuLink[] | null>(
+    () => resolvePrimaryMenuLinks(primaryMenu, libraries),
+    [libraries, primaryMenu],
+  );
   const showDiscoverNav = primaryMenuLinks === null || showRequestsNav || showNotificationsNav;
 
   const catalogState = useMemo(

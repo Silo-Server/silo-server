@@ -289,6 +289,13 @@ function GlobalSearchPersonRow({
   );
 }
 
+/**
+ * Opens the search from outside it. The WeFlix top bar's search button
+ * dispatches this rather than mounting a second instance of the dialog, which
+ * would leave two listeners both toggling on Ctrl/Cmd+K.
+ */
+export const OPEN_GLOBAL_SEARCH_EVENT = "silo:open-global-search";
+
 export function GlobalSearch({
   defaultOpen = false,
   initialQuery = "",
@@ -383,6 +390,14 @@ export function GlobalSearch({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // The top bar's search button. Opens rather than toggles: a button press is
+  // an unambiguous request to see the search.
+  useEffect(() => {
+    const openFromOutside = () => setOpen(true);
+    document.addEventListener(OPEN_GLOBAL_SEARCH_EVENT, openFromOutside);
+    return () => document.removeEventListener(OPEN_GLOBAL_SEARCH_EVENT, openFromOutside);
   }, []);
 
   const handleSubmit = useCallback(

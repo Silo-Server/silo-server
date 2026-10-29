@@ -17,6 +17,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
+import TopNav from "@/components/TopNav";
+import { useAppTheme } from "@/themes/appThemeContext";
+import { isTopNavTheme } from "@/themes/theme";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { SiloBrand } from "@/components/SiloBrand";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -119,6 +122,11 @@ export default function Layout({ children }: LayoutProps) {
   const isSettingsRoute = /^\/settings(\/|$)/.test(location.pathname);
   const settingsReturnPath = useSettingsReturnPath(isSettingsRoute, "/");
   const sidebarSwap = useSidebarSwap(isSettingsRoute);
+  // The WeFlix theme draws a top bar instead of the left rail. Settings pages
+  // keep the settings sidebar: it is its own navigation surface, and folding it
+  // into the bar would leave its entries unreachable.
+  const { theme } = useAppTheme();
+  const showTopNav = isTopNavTheme(theme) && !isSettingsRoute;
   const itemRouteLocation = `${location.pathname}${location.search}`;
   // Breakpoint changes naturally cause other layout renders; navigation only
   // needs the viewport value at the moment it is attempted.
@@ -162,6 +170,12 @@ export default function Layout({ children }: LayoutProps) {
   // the destination's first frame.
   const isDetailImmersion = isItemRoute || isPersonRoute || isTitleRoute;
   const targetDetailImmersion = isDetailImmersion;
+  // The top bar spans the full width, so the content column does too.
+  const mainOffsetClass = showTopNav
+    ? ""
+    : targetDetailImmersion
+      ? "lg:ml-16"
+      : "lg:ml-[260px]";
   const visualDetailImmersion = useImmediateSidebarCollapse(targetDetailImmersion);
   const {
     itemDetailsReady,
@@ -297,6 +311,13 @@ export default function Layout({ children }: LayoutProps) {
     // gates `--app-sidebar-offset`: the sidebar only exists while this shell is
     // mounted, so out-of-tree chrome must not reserve room for it elsewhere.
     root.dataset.appShell = "true";
+    // Published for as long as the top bar is the shell, so app.css knows no
+    // left rail is reserving space (see the offset block in themes/weflix.css).
+    if (showTopNav) {
+      root.dataset.appTopnav = "true";
+    } else {
+      delete root.dataset.appTopnav;
+    }
     if (isHomePath) {
       root.dataset.homeRoute = "true";
     } else {
@@ -324,6 +345,7 @@ export default function Layout({ children }: LayoutProps) {
     }
     return () => {
       delete root.dataset.appShell;
+      delete root.dataset.appTopnav;
       delete root.dataset.homeRoute;
       delete root.dataset.homeItemEntry;
       delete root.dataset.homeItemReturn;
@@ -334,6 +356,7 @@ export default function Layout({ children }: LayoutProps) {
     animateHomeItemEntry,
     isHomePath,
     returnedHomeFromItem,
+    showTopNav,
     targetDetailImmersion,
     visualDetailImmersion,
   ]);
@@ -395,11 +418,15 @@ export default function Layout({ children }: LayoutProps) {
           Skip to content
         </a>
         <GlobalSearch />
+        {showTopNav ? <TopNav /> : null}
         <div className="from-primary/8 pointer-events-none fixed inset-x-0 top-0 z-0 h-40 bg-gradient-to-b to-transparent blur-3xl" />
         {/* Desktop sidebar — hidden below lg. Its box stays 260px wide in both
           states; `collapsed` only drives the moving frame that hides everything
           past the 64px rail, so entering a detail page never resizes it. */}
-        <div className="hidden lg:block" onTransitionEnd={handleSidebarTransitionEnd}>
+        <div
+          className={showTopNav ? "hidden" : "hidden lg:block"}
+          onTransitionEnd={handleSidebarTransitionEnd}
+        >
           {isSettingsRoute ? (
             // Settings take over the sidebar column rather than adding a
             // second one beside it. The fallback holds the column's place.
@@ -420,9 +447,9 @@ export default function Layout({ children }: LayoutProps) {
         <div
           ref={mobileHeaderRef}
           data-sticky-header
-          className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
-            mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
-          }`}
+          className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out ${
+            showTopNav ? "hidden" : "lg:hidden"
+          } ${mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"}`}
         >
           <div className="flex items-center gap-3">
             <button
@@ -487,9 +514,9 @@ export default function Layout({ children }: LayoutProps) {
           id="main-content"
           data-sidebar-target-collapsed={targetDetailImmersion ? "true" : undefined}
           data-sidebar-visual-collapsed={visualDetailImmersion ? "true" : undefined}
-          className={`sidebar-main-stage relative min-h-screen ${
-            targetDetailImmersion ? "lg:ml-16" : "lg:ml-[260px]"
-          } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
+          className={`sidebar-main-stage relative min-h-screen ${mainOffsetClass} ${
+            hasBackgroundBar ? "pb-32 sm:pb-36" : ""
+          }`}
           style={{ viewTransitionName: "main-content" }}
         >
           {needsNoPadding ? (

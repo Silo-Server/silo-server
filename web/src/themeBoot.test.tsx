@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bootSource from "./themeBoot.js?raw";
 import indexHtml from "../index.html?raw";
 import { storage } from "@/utils/storage";
+import { DEFAULT_THEME, THEME_STORAGE_KEY } from "@/themes/theme";
 
 const mocks = vi.hoisted(() => ({
   useOptionalAuth: vi.fn(),
@@ -125,15 +126,41 @@ describe("themeBoot", () => {
     expect(boot["data-text-scale"]).toBe("default");
   });
 
-  it("leaves the static base theme alone", () => {
+  // The theme is not namespaced by identity, unlike the keys above, so these
+  // seed the bare key. `THEME_STORAGE_KEY` is imported rather than written out
+  // so this fails if themes/theme.ts and themeBoot.js stop agreeing.
+  it("leaves the static base theme alone when this device has chosen none", () => {
     document.documentElement.setAttribute("data-theme", "midnight-cinema");
     seed({ [KEYS.UI_CACHE_OWNER]: "7:p1", "silo-theme:7:p1": "cinema-light" });
     bootAttributes();
     expect(document.documentElement.getAttribute("data-theme")).toBe("midnight-cinema");
   });
+
+  it.each([["weflix"], ["midnight-cinema"]])(
+    "paints the stored %s theme before the app runs",
+    (theme) => {
+      document.documentElement.setAttribute("data-theme", "weflix");
+      seed({ [THEME_STORAGE_KEY]: theme });
+      bootAttributes();
+      expect(document.documentElement.getAttribute("data-theme")).toBe(theme);
+    },
+  );
+
+  it("ignores a stored theme this build does not know", () => {
+    document.documentElement.setAttribute("data-theme", "weflix");
+    seed({ [THEME_STORAGE_KEY]: "cinema-light" });
+    bootAttributes();
+    expect(document.documentElement.getAttribute("data-theme")).toBe("weflix");
+  });
 });
 
 describe("index.html", () => {
+  it("names the default theme in its static data-theme", () => {
+    // themeBoot.js overwrites this only when the device chose a different
+    // theme, so this attribute is what a device that never chose one paints.
+    expect(indexHtml).toContain(`data-theme="${DEFAULT_THEME}"`);
+  });
+
   it("loads nothing from another origin", () => {
     // A cross-origin stylesheet or preconnect in the shell puts a third party on
     // the first-paint path; fonts are self-hosted from fonts.css instead.

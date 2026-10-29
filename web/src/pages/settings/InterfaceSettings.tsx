@@ -26,6 +26,9 @@ import {
   type PrimaryMenuItem,
 } from "@/lib/uiCustomization";
 
+import { useAppTheme } from "@/themes/appThemeContext";
+import { THEME_IDS, THEME_LABELS } from "@/themes/theme";
+
 import { CardOverlaySettings } from "./CardOverlaySettings";
 import { ChoiceButtons } from "./ChoiceButtons";
 import { PosterCardPreview } from "./PosterCardPreview";
@@ -60,6 +63,9 @@ const POSTER_SIZES: readonly { value: PosterSize; label: string }[] = [
   { value: "standard", label: "Standard" },
   { value: "large", label: "Large" },
 ];
+
+/** Ordered as THEME_IDS lists them, so the default is offered first. */
+const THEME_OPTIONS = THEME_IDS.map((id) => ({ value: id, label: THEME_LABELS[id] }));
 
 function menuItemLabel(item: PrimaryMenuItem): string {
   if (item.type === "builtin") return BUILTIN_LABELS[item.destination] ?? item.destination;
@@ -97,6 +103,7 @@ export default function InterfaceSettings() {
           </div>
         </aside>
         <div className="min-w-0">
+          <ThemeSettings />
           <PosterSettings />
           <CardOverlaySettings onShortcutsPicked={flashShortcuts} />
           <MenuSettings />
@@ -158,6 +165,27 @@ function useCustomizationBlocker(): ReactNode {
     );
   }
   return null;
+}
+
+/**
+ * The colour theme. Unlike everything else on this page it is not a server
+ * setting: it is stored on the device, so switching it is instant and works
+ * before sign-in. WeFlix uses the top bar; Midnight Cinema keeps the left rail.
+ */
+function ThemeSettings() {
+  const { theme, setTheme } = useAppTheme();
+
+  return (
+    <SettingsGroup title="Theme" description="How the whole app looks. Saved on this device.">
+      <ChoiceButtons
+        label="Theme"
+        hideLabel
+        value={theme}
+        options={THEME_OPTIONS}
+        onChange={setTheme}
+      />
+    </SettingsGroup>
+  );
 }
 
 /** Poster size, stored for the web client family. */

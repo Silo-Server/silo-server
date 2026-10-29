@@ -47,6 +47,12 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: mocks.profile }),
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => false }));
+// Pinned to the sidebar theme: these cases describe the left-rail shell, which
+// is what Midnight Cinema still draws. The top-bar shell has its own tests in
+// TopNav.test.tsx.
+vi.mock("@/themes/appThemeContext", () => ({
+  useAppTheme: () => ({ theme: "midnight-cinema", setTheme: vi.fn() }),
+}));
 vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ isBackgroundBarVisible: false }),
 }));

@@ -14,9 +14,18 @@ import { describe, expect, it } from "vitest";
  * changed mix percentage or base colour cannot make high contrast worse
  * silently.
  */
-const css = readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8");
+/**
+ * Both stylesheets, concatenated: app.css holds the upstream theme and the
+ * high-contrast block, themes/weflix.css holds the WeFlix theme. Concatenating
+ * lets one lookup serve either theme, so a new theme is measured by the same
+ * maths as the existing one instead of needing its own test.
+ */
+const css = [
+  readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8"),
+  readFileSync(fileURLToPath(new URL("./themes/weflix.css", import.meta.url)), "utf8"),
+].join("\n");
 
-const THEMES = ["midnight-cinema"] as const;
+const THEMES = ["midnight-cinema", "weflix"] as const;
 
 /** WCAG 2.1 AA for normal-size body text. */
 const AA_TEXT = 4.5;

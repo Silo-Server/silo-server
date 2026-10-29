@@ -17,7 +17,15 @@ import { describe, expect, it } from "vitest";
  * `currentColor`, i.e. the pure white this block sets as `--foreground`.
  * High contrast made contrast worse.
  */
-const css = readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8");
+/**
+ * Both stylesheets, concatenated. A theme block may live in either file:
+ * app.css holds the upstream theme, themes/weflix.css holds WeFlix. Every check
+ * below runs over all of them, so a theme cannot skip a guard by moving file.
+ */
+const css = [
+  readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8"),
+  readFileSync(fileURLToPath(new URL("./themes/weflix.css", import.meta.url)), "utf8"),
+].join("\n");
 
 /** The seven tokens high contrast lightens off a theme value. */
 const CONTRAST_TOKENS = [
@@ -68,9 +76,11 @@ describe("high-contrast CSS", () => {
     }
   });
 
-  it("defines every -base input in the base theme", () => {
+  it("defines every -base input in every theme", () => {
     const themes = [...css.matchAll(/\[data-theme="([a-z-]+)"\] \{([\s\S]*?)\n {2}\}/g)];
-    expect(themes).toHaveLength(1);
+    // Both themes, named, so a theme that stops being parsed fails here rather
+    // than passing by absence.
+    expect(themes.map((theme) => theme[1]).sort()).toEqual(["midnight-cinema", "weflix"]);
     for (const theme of themes) {
       const name = theme[1] ?? "";
       const body = theme[2] ?? "";

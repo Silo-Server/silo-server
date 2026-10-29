@@ -1,0 +1,114 @@
+/* ================================================================
+   § WeFlix
+   ================================================================
+   The WeFlix theme's tokens and the few shell rules its top bar
+   needs. Everything lives here rather than in app.css so upstream
+   Silo changes to app.css keep merging cleanly.
+
+   The token block defines the same token set app.css defines for
+   midnight-cinema. That is not duplication for its own sake: a theme
+   sets ALL semantic tokens, and the only place they are defined is
+   inside a theme block, so a theme that omits one leaves it unset
+   rather than inheriting it.
+
+   Values follow the WeFlix artboard: a pure-black page and bar, a
+   #1B1E25 menu panel, and the WeFlix red accent. `--radius` is
+   deliberately left at the upstream 0.75rem: it is the global corner
+   radius for every component, and the artboard's larger panel radius
+   is applied to that one panel at its call site.
+   ================================================================ */
+
+@layer base {
+  /* ── WeFlix ─────────────────────────────────────────────── */
+  [data-theme="weflix"] {
+    --radius: 0.75rem;
+    --font-body: "Plus Jakarta Sans", sans-serif;
+    --font-display: "Plus Jakarta Sans", sans-serif;
+
+    /* Surfaces: pure black page, lifted only where a surface must read
+       as separate from it. */
+    --contrast-boost: #ffffff;
+    --background: #000000;
+    --foreground: #ffffff;
+    --card: #101216;
+    --card-foreground: #ffffff;
+    --popover: #1b1e25;
+    --popover-foreground: #ffffff;
+
+    /* Primary: the WeFlix red, for play buttons, key CTAs and active
+       indicators. */
+    --primary: #e50914;
+    --primary-foreground: #ffffff;
+
+    --secondary: #1b1e25;
+    --secondary-foreground: #e5e5e5;
+    --muted: #101216;
+    /* Same value as the upstream theme: it clears WCAG AAA on black, and the
+       high-contrast contrast test measures it against this theme's page. */
+    --muted-foreground-base: #a4a4ae;
+    --accent-base: #1b1e25;
+    --accent-foreground: #ffffff;
+
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+
+    --border-base: #26262c;
+    --input-base: #101216;
+    --ring: #ffffff;
+
+    /* Charts: the upstream categorical set, which is validated for
+       adjacent-pair separation rather than against a page colour. */
+    --chart-1: #5f74ee;
+    --chart-2: #169e88;
+    --chart-3: #bf7f22;
+    --chart-4: #c2578f;
+    --chart-5: #3f97cf;
+
+    /* Sidebar tokens: the WeFlix shell has no rail, but components that
+       read these (and the admin area, which keeps its own shell) still
+       need them defined. */
+    --sidebar: #000000;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #e50914;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #1b1e25;
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: #26262c;
+    --sidebar-section-divider: #2e2e35;
+    --sidebar-ring: #ffffff;
+
+    --surface-base: #101216;
+    --surface-hover-base: #1b1e25;
+    --surface-raised-base: #1b1e25;
+    --ambient: #ffffff;
+    --ambient-glow-opacity: 0.06;
+  }
+}
+
+/*
+ * The top-bar shell has no left rail, so nothing may reserve room for one.
+ * Layout publishes `data-app-topnav` for exactly as long as it renders the top
+ * bar, and the extra attribute outranks app.css's `:root[data-app-shell]`.
+ * Scoped to the shell rather than the theme so the settings pages, which keep
+ * their own sidebar, still get the offset they need.
+ */
+@media (min-width: 64rem) {
+  :root[data-app-shell][data-app-topnav="true"] {
+    --app-sidebar-offset: 0px;
+  }
+}
+
+/*
+ * A horizontally scrollable nav row: tablet link rows and the phone chip row.
+ * The scrollbar is hidden because the row is a gesture surface, and a visible
+ * bar under a 44px-tall row reads as a broken layout rather than an affordance.
+ * Wheel, trackpad, touch and keyboard scrolling all still work.
+ */
+.weflix-scroll-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.weflix-scroll-row::-webkit-scrollbar {
+  display: none;
+}

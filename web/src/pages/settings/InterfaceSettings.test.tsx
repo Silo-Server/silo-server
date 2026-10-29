@@ -21,6 +21,12 @@ vi.mock("@/hooks/useUICustomization", () => ({
   useUICustomization: (...args: unknown[]) => mocks.useUICustomization(...args),
 }));
 
+// The theme control is device-local and has no server side, so it is mocked
+// like the other hooks here rather than wrapped in a provider.
+vi.mock("@/themes/appThemeContext", () => ({
+  useAppTheme: () => ({ theme: "weflix", setTheme: vi.fn() }),
+}));
+
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: (...args: unknown[]) => mocks.useUserLibraries(...args),
 }));
