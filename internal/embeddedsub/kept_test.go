@@ -189,3 +189,71 @@ func TestEmptyWindowConverts(t *testing.T) {
 		})
 	}
 }
+
+// A demux of the whole source that also copies the track (KeepPath) serves
+// the same bytes as one that doesn't, and its copy, shifted back onto the
+// source's timeline, converts to them again and indexes.
+func TestDemuxCopyStandsInForTheSource(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	ctx := context.Background()
+	type demuxCase struct {
+		name, path, codec, format string
+		ordinal                   int
+	}
+	var cases []demuxCase
+	for _, offset := range []float64{0, 1.5} {
+		path := ffmpegFixture(t, ffmpeg, "in.mkv", offset)
+		cases = append(cases,
+			demuxCase{name: "SubRip", path: path, codec: "subrip", format: "matroska"},
+			demuxCase{name: "ASS", path: path, codec: "ass", format: "matroska", ordinal: 2},
+		)
+	}
+	cases = append(cases, demuxCase{name: "mov_text", path: ffmpegMP4Fixture(t, ffmpeg, "in.mp4", 1.5), codec: "mov_text", format: "mp4"})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			x := extract{ordinal: c.ordinal, codec: c.codec}
+			want, err := fromSource(ctx, ffmpeg, c.path, x)
+			if err != nil {
+				t.Fatal(err)
+			}
+			copyPath := filepath.Join(t.TempDir(), "kept.part-1")
+			if err := os.WriteFile(copyPath, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			start, err := playback.SubtitleSourceStartTime(ctx, ffmpeg, c.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got bytes.Buffer
+			if err := playback.StreamExtractSubtitle(ctx, playback.StreamExtractOpts{
+				InputPath: c.path, TrackIndex: c.ordinal, SourceCodec: c.codec, FFmpegPath: ffmpeg, Writer: &got,
+				KeepPath: copyPath, KeepFormat: c.format, KeepOffset: start,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got.Bytes(), want) {
+				t.Fatalf("demux with a copy serves differently\n%s", firstDifference(want, got.Bytes()))
+			}
+			fromCopy, err := fromPackets(ctx, ffmpeg, &playback.SubtitlePacketInput{
+				Stream: func() (io.ReadCloser, error) { return os.Open(copyPath) }, StreamFormat: c.format, SourceStartTime: start,
+			}, x)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(fromCopy, want) {
+				t.Fatalf("the copy converts differently\n%s", firstDifference(want, fromCopy))
+			}
+			idx, err := embeddedsub.ReadIndex(ctx, copyPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(idx.Tracks) != 1 {
+				t.Fatalf("copy index = %+v", idx.Tracks)
+			}
+			res, err := embeddedsub.ReadPackets(ctx, copyPath, idx, idx.Tracks[0].Number, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
+			if err != nil || len(res.Packets) == 0 {
+				t.Fatalf("copy packets: %d, %v", len(res.Packets), err)
+			}
+		})
+	}
+}

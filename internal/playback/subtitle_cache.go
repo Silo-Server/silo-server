@@ -55,6 +55,12 @@ type SubtitleCache struct {
 	// non-blocking: warms beyond the budget are dropped, not queued; the
 	// next windowed miss for that track re-attempts the warm.
 	warmSem chan struct{}
+
+	// source, when set, reads embedded tracks from kept copies or through
+	// the source's index before the cache demuxes the source
+	// (SetEmbeddedSource). Requests whose options name no track
+	// (StreamExtractOpts.Embedded) skip it.
+	source EmbeddedSubtitleSource
 }
 
 const (
@@ -106,6 +112,13 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 // tracks. Explicit text windows stream without caching; SUP retains its
 // progressive window and background-warming behavior in ServeSUPExtract.
 // Only one request fills the cache; other viewers stream independently.
+//
+// A complete track comes from, in order: the cache; a fill that converts
+// the track kept in blob storage or read through the source's index (the
+// EmbeddedSubtitleSource, when set and opts.Embedded names the track); a
+// fill that demuxes the source, which also keeps the track. A window comes
+// from the kept track or the source's index, else from a demux of the
+// source.
 func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
 	if err := r.Context().Err(); err != nil {
 		return err
@@ -132,7 +145,10 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 
 	w.Header().Set("Cache-Control", "no-store")
 	if full {
-		return c.streamFullTrack(r.Context(), w, opts, format, extract)
+		return c.streamFullTrack(r.Context(), w, opts, format, c.sourced(extract))
+	}
+	if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+		return err
 	}
 	opts.Writer = w
 	return extract(r.Context(), opts)
@@ -183,7 +199,7 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	return c.streamFullTrack(r.Context(), w, opts, subtitleFormatSUP, extract)
+	return c.streamFullTrack(r.Context(), w, opts, subtitleFormatSUP, c.sourced(extract))
 }
 
 // streamFullTrack streams a complete track that was not cached when the
@@ -326,6 +342,11 @@ func (s *skipWriter) Flush() {
 // started so later windows — the client re-fetches on every seek — hit the
 // fast path.
 func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+		return err
+	}
 	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
@@ -335,11 +356,9 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			opts = windowFromCachedSup(opts, firstCue)
 		}
 	} else {
-		c.WarmInBackground(opts, extract)
+		c.WarmInBackground(opts, c.sourced(extract))
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
 	opts.Writer = w
