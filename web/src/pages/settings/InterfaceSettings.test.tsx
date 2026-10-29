@@ -52,7 +52,7 @@ const MOVIES_MENU: PrimaryMenuDocument = { items: [HOME, MOVIES, CALENDAR] };
 
 function customization(overrides: Record<string, unknown> = {}) {
   return {
-    cardPresentation: { poster_size: "large", caption: "title" },
+    cardPresentation: { poster_size: "large" },
     cardPresentationSource: "profile_client",
     primaryMenu: defaultWebPrimaryMenu(),
     primaryMenuSource: "profile_client",
@@ -87,7 +87,7 @@ describe("InterfaceSettings", () => {
   it("offers to clear a browser override instead of editing under it", async () => {
     mocks.useUICustomization.mockReturnValue(
       customization({
-        cardPresentation: { poster_size: "compact", caption: "artwork" },
+        cardPresentation: { poster_size: "compact" },
         cardPresentationSource: "profile_device",
       }),
     );
@@ -102,6 +102,20 @@ describe("InterfaceSettings", () => {
       expect(clearMutateAsync).toHaveBeenCalledWith({
         key: SETTING_KEYS.UI_CARD_PRESENTATION,
         identity: { scope: "profile_device" },
+      }),
+    );
+  });
+
+  it("saves a poster size with the caption the schema still requires", async () => {
+    render(<InterfaceSettings />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
+
+    await waitFor(() =>
+      expect(setMutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        value: { poster_size: "compact", caption: "title_metadata" },
+        identity: { scope: "profile_client" },
       }),
     );
   });

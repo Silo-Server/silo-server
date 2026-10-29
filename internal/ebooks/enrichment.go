@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -1355,9 +1356,23 @@ var ebookEditionNoiseRE = regexp.MustCompile(`(?i)^(?:[\w'&.\s-]*\b)?(?:editions
 // than folded back in.
 var ebookYearOnlyRE = regexp.MustCompile(`^\s*(19|20)\d{2}\s*$`)
 
+// maxEbookSearchTitleBytes bounds the title and author text that
+// cleanEbookSearchTitle works on. Both come from book metadata (an EPUB's OPF
+// may be 8 MiB), and the trailing-group peel and the author-suffix pattern
+// grow superlinearly with length: a 64 KB title took about a minute. Real
+// titles and author names stay well under this.
+const maxEbookSearchTitleBytes = 1024
+
 func cleanEbookSearchTitle(title, author string) string {
+	if len(title) > maxEbookSearchTitleBytes {
+		cut := maxEbookSearchTitleBytes
+		for cut > 0 && !utf8.RuneStart(title[cut]) {
+			cut--
+		}
+		title = title[:cut]
+	}
 	title = strings.ReplaceAll(title, "_", " ")
-	if a := strings.TrimSpace(author); a != "" {
+	if a := strings.TrimSpace(author); a != "" && len(a) <= maxEbookSearchTitleBytes {
 		// Strip the author only when it is a true trailing suffix (optionally
 		// followed by a series/volume parenthetical). Anchoring to the end avoids
 		// truncating valid title text when " - <author>" appears mid-title.

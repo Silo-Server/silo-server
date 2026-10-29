@@ -67,6 +67,137 @@ func TestRequestErrorsLeaveOutTheAPIKey(t *testing.T) {
 	}
 }
 
+// countingLimiter counts the requests that wait on it.
+type countingLimiter struct{ waits atomic.Int32 }
+
+func (l *countingLimiter) Wait(context.Context) error {
+	l.waits.Add(1)
+	return nil
+}
+
+// A shared budget holds only if every request spends from it, so a retry
+// after TMDB throttles waits on the limiter like the first attempt.
+func TestRetryWaitsOnTheLimiter(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	limiter := &countingLimiter{}
+	client := NewClientWithLimiter("test-key", limiter)
+	t.Cleanup(client.Close)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.SearchMedia(t.Context(), "movie", "Alien", 1); err != nil {
+		t.Fatalf("SearchMedia: %v", err)
+	}
+	if got, want := limiter.waits.Load(), requests.Load(); got != want || want != 2 {
+		t.Fatalf("%d requests waited on the limiter %d times, want 2 and 2", want, got)
+	}
+}
+
+// A shared lookup outlives the caller that started it while another caller
+// still waits, so a closed page does not fail a collection sync that joined
+// it; once every caller has given up, the fetch stops too, so it does not
+// keep waiting for the request budget.
+func TestSharedFetchEndsWithItsLastCaller(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	t.Cleanup(client.Close)
+
+	t.Run("a caller giving up leaves the others their result", func(t *testing.T) {
+		started, release := make(chan struct{}), make(chan struct{})
+		fetch := func(ctx context.Context) (any, error) {
+			close(started)
+			select {
+			case <-release:
+				return "ids", nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		first, cancelFirst := context.WithCancel(t.Context())
+		firstDone := make(chan error, 1)
+		go func() {
+			_, err := client.sharedFetch(first, "k1", fetch)
+			firstDone <- err
+		}()
+		<-started
+		secondDone := make(chan any, 1)
+		go func() {
+			v, err := client.sharedFetch(t.Context(), "k1", func(context.Context) (any, error) {
+				t.Error("second caller started its own fetch instead of joining")
+				return nil, nil
+			})
+			if err != nil {
+				t.Errorf("second caller: %v", err)
+			}
+			secondDone <- v
+		}()
+		waitUntilWaiters(t, client, "k1", 2)
+		cancelFirst()
+		if err := <-firstDone; !errors.Is(err, context.Canceled) {
+			t.Fatalf("first caller returned %v, want context.Canceled", err)
+		}
+		close(release)
+		if got := <-secondDone; got != "ids" {
+			t.Fatalf("second caller got %v, want the shared result", got)
+		}
+	})
+
+	t.Run("the fetch stops once every caller has given up", func(t *testing.T) {
+		fetchEnded := make(chan error, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = client.sharedFetch(ctx, "k2", func(fetchCtx context.Context) (any, error) {
+				<-fetchCtx.Done()
+				fetchEnded <- fetchCtx.Err()
+				return nil, fetchCtx.Err()
+			})
+		}()
+		waitUntilWaiters(t, client, "k2", 1)
+		cancel()
+		<-done
+		select {
+		case err := <-fetchEnded:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("fetch ended with %v, want it canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("fetch kept running after its last caller gave up")
+		}
+	})
+}
+
+// waitUntilWaiters waits until n callers are waiting on key's shared fetch.
+func waitUntilWaiters(t *testing.T, c *Client, key string, n int) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		c.flightsMu.Lock()
+		f := c.flights[key]
+		got := 0
+		if f != nil {
+			got = f.waiters
+		}
+		c.flightsMu.Unlock()
+		if got == n {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%d callers waiting on %s, want %d", got, key, n)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	arrived := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +224,7 @@ func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	}
 }
 
-func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
+func TestChartPageCacheKeyIncludesPage(t *testing.T) {
 	var calls atomic.Int32
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -113,13 +244,13 @@ func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
 		}`))
 	})
 
-	first, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
+	first, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 1)
 	if err != nil {
-		t.Fatalf("page 1 DiscoverSection returned error: %v", err)
+		t.Fatalf("page 1 ChartPage returned error: %v", err)
 	}
-	second, err := client.DiscoverSection(context.Background(), "popular_movies", 2)
+	second, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 2)
 	if err != nil {
-		t.Fatalf("page 2 DiscoverSection returned error: %v", err)
+		t.Fatalf("page 2 ChartPage returned error: %v", err)
 	}
 
 	if got := calls.Load(); got != 2 {
@@ -130,7 +261,7 @@ func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
 	}
 }
 
-func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
+func TestChartPageDoesNotCacheClientErrors(t *testing.T) {
 	var calls atomic.Int32
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
@@ -153,12 +284,12 @@ func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
 		}`))
 	})
 
-	if _, err := client.DiscoverSection(context.Background(), "popular_movies", 1); err == nil {
-		t.Fatal("first DiscoverSection expected error")
+	if _, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 1); err == nil {
+		t.Fatal("first ChartPage expected error")
 	}
-	page, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
+	page, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 1)
 	if err != nil {
-		t.Fatalf("second DiscoverSection returned error: %v", err)
+		t.Fatalf("second ChartPage returned error: %v", err)
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("upstream calls = %d, want 2", got)
@@ -168,7 +299,7 @@ func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
 	}
 }
 
-func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
+func TestChartPageReturnsClonedCachedPage(t *testing.T) {
 	var calls atomic.Int32
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -187,15 +318,15 @@ func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
 		}`))
 	})
 
-	first, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
+	first, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 1)
 	if err != nil {
-		t.Fatalf("first DiscoverSection returned error: %v", err)
+		t.Fatalf("first ChartPage returned error: %v", err)
 	}
 	first.Results[0].Title = "mutated by caller"
 
-	second, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
+	second, err := client.ChartPage(context.Background(), ChartParams{Preset: "popular", MediaType: "movie"}, 1)
 	if err != nil {
-		t.Fatalf("second DiscoverSection returned error: %v", err)
+		t.Fatalf("second ChartPage returned error: %v", err)
 	}
 
 	if got := calls.Load(); got != 1 {
@@ -203,6 +334,37 @@ func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
 	}
 	if second.Results[0].Title != "Immutable Movie" {
 		t.Fatalf("cached title = %q, want Immutable Movie", second.Results[0].Title)
+	}
+}
+
+func TestChartPageTrendingAllSkipsPeople(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/trending/all/day" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"page": 1,
+			"total_pages": 3,
+			"total_results": 60,
+			"results": [
+				{"id": 1, "media_type": "movie", "title": "A Movie", "release_date": "2024-05-01"},
+				{"id": 2, "media_type": "person", "name": "Someone"},
+				{"id": 3, "media_type": "tv", "name": "A Show", "first_air_date": "2023-01-01"}
+			]
+		}`))
+	})
+
+	page, err := client.ChartPage(context.Background(), ChartParams{Preset: "trending", MediaType: "all", TimeWindow: "day"}, 1)
+	if err != nil {
+		t.Fatalf("ChartPage: %v", err)
+	}
+	if len(page.Results) != 2 || page.Results[0].MediaType != "movie" || page.Results[1].MediaType != "series" || page.Results[1].Year != 2023 {
+		t.Fatalf("results = %+v, want the movie and the series", page.Results)
+	}
+	if _, err := client.ChartPage(context.Background(), ChartParams{Preset: "upcoming", MediaType: "tv"}, 1); err == nil {
+		t.Fatal("upcoming tv: expected an error")
 	}
 }
 
@@ -371,9 +533,13 @@ func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
 			return
 		}
 		checkQuery(t, r.URL.Query(), map[string]string{
-			"sort_by":        "popularity.desc",
-			"with_companies": "420",
-			"page":           "2",
+			"sort_by":              "popularity.desc",
+			"with_companies":       "420|2",
+			"with_keywords":        "9715|180547",
+			"with_origin_country":  "JP|KR",
+			"with_watch_providers": "8",
+			"watch_region":         "US",
+			"page":                 "2",
 		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -387,8 +553,12 @@ func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
 	})
 
 	page, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{
-		SortBy:        "popularity.desc",
-		WithCompanies: []int{420},
+		SortBy:             "popularity.desc",
+		WithCompanies:      []int{420, 2},
+		WithKeywords:       []int{9715, 180547},
+		WithOriginCountry:  []string{"JP", "KR"},
+		WithWatchProviders: []int{8},
+		WatchRegion:        "US",
 	}, 2)
 	if err != nil {
 		t.Fatalf("DiscoverPage: %v", err)

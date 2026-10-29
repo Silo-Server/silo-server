@@ -4,6 +4,27 @@ import { describe, expect, it } from "vitest";
 
 import { guardRedirectTarget, sanitizeAuthRedirect } from "./authRedirect";
 
+describe("sanitizeAuthRedirect", () => {
+  it.each(["/", "/admin/users/7?tab=devices", "/search?q=a\\b#top", "/item/%2F%2Fx"])(
+    "keeps %s",
+    (path) => {
+      expect(sanitizeAuthRedirect(path)).toBe(path);
+    },
+  );
+
+  it.each([
+    ["another site", "//evil.example"],
+    ["an absolute URL", "https://evil.example/"],
+    ["a backslash", "/\\evil.example"],
+    ["a tab", "/\t/evil.example"],
+    ["a newline", "/\n/evil.example"],
+    ["a relative path", "evil.example"],
+    ["nothing", ""],
+  ])("drops %s", (_name, path) => {
+    expect(sanitizeAuthRedirect(path)).toBeNull();
+  });
+});
+
 describe("guardRedirectTarget", () => {
   it("carries the requested page, query included, as the redirect", () => {
     expect(

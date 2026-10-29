@@ -37,6 +37,17 @@ func TestPostgresMarkWatchedBatch(t *testing.T) {
 	})
 }
 
+// TestPostgresProgressHints runs the version hints sync conformance test
+// against the Postgres backend; the SQLite backend runs it in internal/userdb.
+// Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresProgressHints(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunProgressHints(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-progresshints"))
+	})
+}
+
 // TestPostgresUnmarkKeepsHistory runs the mark-unwatched conformance test
 // against the Postgres backend; the SQLite backend runs it in internal/userdb.
 // Skips unless SILO_TEST_DATABASE_URL is set.

@@ -763,7 +763,7 @@ func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings Cat
 	if err != nil {
 		return err
 	}
-	return client.checkConnection(ctx)
+	return client.checkConnection(ctx, settings.MeilisearchIndex)
 }
 
 func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQuantized bool) map[string]any {

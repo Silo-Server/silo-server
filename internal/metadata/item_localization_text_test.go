@@ -160,7 +160,7 @@ func TestLocalizationRefreshKeepsTranslationsAndLocks(t *testing.T) {
 		manual := buildItemLocalizationRecord(&models.MediaItemLocalization{
 			Overview: "An English overview.", OverviewSource: models.LocalizationSourceManual,
 		}, "series-shared", "fr", "series", &MetadataResult{}, &MetadataResult{Overview: "An English overview."},
-			nil, modeMergeMode(mode), "fr", "", false, true)
+			nil, modeMergeMode(mode), "fr", "", false, true, false)
 		if manual.Overview != "An English overview." {
 			t.Errorf("mode %d: manual overview = %q, want it kept", mode, manual.Overview)
 		}

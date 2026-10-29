@@ -173,28 +173,28 @@ func TestTextConfigPinsAccountAndModelAcrossLaterSwitch(t *testing.T) {
 }
 
 func TestSelectionReceiptUsesCommittedSnapshots(t *testing.T) {
-	s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high", "ai.api_key": "old-secret"})
+	s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high", "ai.text_provider_id": "old-provider"})
 	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
 		// A competing administrator writes while catalog fetching is outside the lock.
 		store.mu.Lock()
-		store.values["ai.api_key"] = "before-secret"
+		store.values["ai.text_provider_id"] = "before-provider"
 		store.mu.Unlock()
 		return response(200, map[string]any{"models": []map[string]string{{"slug": "gpt-4o-mini", "visibility": "list"}}}), nil
 	})
 	s.OnSettingUpdated = func(context.Context, string, string) {
 		// A later writer must not become part of the acknowledged receipt.
 		store.mu.Lock()
-		store.values["ai.api_key"] = "after-secret"
+		store.values["ai.text_provider_id"] = "after-provider"
 		store.mu.Unlock()
 	}
 	receipt, err := s.SelectAccountWithSettings(t.Context(), "b")
 	if err != nil || receipt == nil {
 		t.Fatalf("receipt=%+v, %v", receipt, err)
 	}
-	if receipt.Before["ai.api_key"] != "before-secret" || receipt.After["ai.api_key"] != "before-secret" || receipt.Before["ai.chat_model"] != "a-model" || receipt.After["ai.chat_model"] != "gpt-4o-mini" || receipt.After["ai.reasoning_effort"] != "" {
+	if receipt.Before["ai.text_provider_id"] != "before-provider" || receipt.After["ai.text_provider_id"] != "before-provider" || receipt.Before["ai.chat_model"] != "a-model" || receipt.After["ai.chat_model"] != "gpt-4o-mini" || receipt.After["ai.reasoning_effort"] != "" {
 		t.Fatal("receipt did not capture transaction-owned values")
 	}
-	if store.values["ai.api_key"] != "after-secret" {
+	if store.values["ai.text_provider_id"] != "after-provider" {
 		t.Fatal("later writer was lost")
 	}
 	store.failNext = true

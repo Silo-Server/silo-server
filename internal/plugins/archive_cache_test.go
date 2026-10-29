@@ -47,7 +47,7 @@ func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
 	manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binaryData)
 	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-cached/plugin"}
 	cache := NewArchiveCacheAt(&legacyArchiveStore{}, t.TempDir())
-	path := cache.LocalInstallPath(installation)
+	path := requireLocalInstallPath(t, cache, installation)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestArchiveCacheRepairsCorruptedBinaryOnCacheHit(t *testing.T) {
 			if _, err := cache.Ensure(t.Context(), installation); err != nil {
 				t.Fatalf("populate cache: %v", err)
 			}
-			path := cache.LocalInstallPath(installation)
+			path := requireLocalInstallPath(t, cache, installation)
 			// Keep the file executable and the same size, but change its contents.
 			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 				t.Fatal(err)
@@ -231,10 +231,10 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	first, firstStore := release("0.0.19", "install-aaaa", "#!/bin/sh\nexit 0\n")
 	cache := NewArchiveCacheAt(firstStore, root)
 	wantFirst := filepath.Join(root, "silo.metadb", "0.0.19", "install-aaaa", "plugin")
-	if got := cache.LocalInstallPath(first); got != wantFirst {
+	if got := requireLocalInstallPath(t, cache, first); got != wantFirst {
 		t.Fatalf("LocalInstallPath = %q, want %q", got, wantFirst)
 	}
-	if got := NewArchiveCache(firstStore).LocalInstallPath(first); got != first.InstallPath {
+	if got := requireLocalInstallPath(t, NewArchiveCache(firstStore), first); got != first.InstallPath {
 		t.Fatalf("LocalInstallPath without a root = %q, want the recorded path %q", got, first.InstallPath)
 	}
 
@@ -312,7 +312,7 @@ func TestArchiveCacheSerializesRehydration(t *testing.T) {
 		t.Errorf("archive loads=%d, want 1", got)
 	}
 
-	if _, err := cache.validateInstalledFiles(cache.LocalInstallPath(installation), manifest); err != nil {
+	if _, err := cache.validateInstalledFiles(requireLocalInstallPath(t, cache, installation), manifest); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -334,7 +334,7 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 	store.archives = map[int]*InstallationArchive{42: archive}
 	cache := NewArchiveCache(store)
 	hashed := countHashedBytes(cache)
-	path := cache.LocalInstallPath(installation)
+	path := requireLocalInstallPath(t, cache, installation)
 
 	expectHashed := func(step string, want int64) {
 		t.Helper()
@@ -445,4 +445,13 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectHashed("Manifest of a new release", size)
+}
+
+func requireLocalInstallPath(t *testing.T, cache *ArchiveCache, installation *Installation) string {
+	t.Helper()
+	path, err := cache.LocalInstallPath(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

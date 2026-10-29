@@ -28,7 +28,7 @@ func (s *mixedIDsContent) GetItemDetail(_ context.Context, _ *Session, id string
 	s.details = append(s.details, id)
 	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: map[string]string{"a": "Alpha", "b": "Bravo"}[id]}, nil
 }
-func (s *mixedIDsContent) GetItemDetailsByIDs(ctx context.Context, session *Session, ids []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+func (s *mixedIDsContent) GetItemDetailsByIDs(ctx context.Context, session *Session, ids []string, libraryID *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	out := make(map[string]*upstreamItemDetail, len(ids))
 	for _, id := range ids {
 		out[id], _ = s.GetItemDetail(ctx, session, id, libraryID)
@@ -230,7 +230,7 @@ func batchedDetailsFixture(id string) *upstreamItemDetail {
 	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: id}
 }
 
-func (s *batchedDetailsContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int) (map[string]*upstreamItemDetail, error) {
+func (s *batchedDetailsContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	s.batchCalls = append(s.batchCalls, slices.Clone(ids))
 	if s.batchErr != nil {
 		return nil, s.batchErr

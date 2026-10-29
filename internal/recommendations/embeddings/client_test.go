@@ -293,6 +293,28 @@ func openAITestClient(transport embeddingTransport) *Client {
 	return c
 }
 
+// One provider serves chat and embeddings, so a base URL with a version
+// segment must reach the same /v1/embeddings path as a bare host.
+func TestEmbedAddsTheAPIVersionOnlyWhenMissing(t *testing.T) {
+	for base, want := range map[string]string{
+		"http://embed.test":            "http://embed.test/v1/embeddings",
+		"http://embed.test/v1":         "http://embed.test/v1/embeddings",
+		"https://openrouter.ai/api/v1": "https://openrouter.ai/api/v1/embeddings",
+		// A host or segment that merely starts with v1 is not a version.
+		"http://v1-embed.internal:11434": "http://v1-embed.internal:11434/v1/embeddings",
+	} {
+		var got string
+		c := NewClient(ClientConfig{BaseURL: base, Model: "test-model"})
+		c.httpClient.Transport = embeddingTransport(func(r *http.Request) (*http.Response, error) {
+			got = r.URL.String()
+			return embeddingHTTPResponse(200, `{"data":[{"embedding":[1]}]}`, ""), nil
+		})
+		if _, err := c.Embed(context.Background(), []string{"a"}); err != nil || got != want {
+			t.Fatalf("base %q requested %q (%v), want %q", base, got, err, want)
+		}
+	}
+}
+
 func TestEmbedRejectsMalformedResponses(t *testing.T) {
 	for _, tc := range []struct {
 		name, base, body string

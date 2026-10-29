@@ -148,16 +148,27 @@ func adminCollectionOperation(method, path, id, summary string, guarded bool) Op
 	}
 	return op
 }
+
+// manualMembershipOperation is an adminCollectionOperation on a collection's
+// manual membership, which answers 409 for a collection that is not manual.
+func manualMembershipOperation(method, path, id, summary string, guarded bool) Operation {
+	op := adminCollectionOperation(method, path, id, summary, guarded)
+	op.Errors = append(op.Errors, http.StatusConflict)
+	return op
+}
 func registerAdminCollections(reg *Registry) {
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections", "listAdminCollections", "List administrator collections, including hidden entries.", false), reg.listAdminCollections)
 	Register(reg, adminCollectionOperation(http.MethodPost, "/admin/collections", opCreateAdminCollection, "Create a library collection. Artwork is uploaded separately.", false), reg.createAdminCollection)
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/{id}", "getAdminCollection", "Read the canonical editor and strong validator.", false), reg.getAdminCollection)
 	Register(reg, adminCollectionOperation(http.MethodPatch, "/admin/collections/{id}", "updateAdminCollection", "Update a library collection using its observed validator.", true), reg.updateAdminCollection)
-	Register(reg, adminCollectionOperation(http.MethodDelete, "/admin/collections/{id}", "deleteAdminCollection", "Delete an unused collection using its observed validator.", true), reg.deleteAdminCollection)
+	del := adminCollectionOperation(http.MethodDelete, "/admin/collections/{id}", "deleteAdminCollection", "Delete an unused collection using its observed validator.", true)
+	// A collection a page section still uses is 409.
+	del.Errors = append(del.Errors, http.StatusConflict)
+	Register(reg, del, reg.deleteAdminCollection)
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/order", "getAdminCollectionOrder", "Read complete manual ordering for one library and group.", false), reg.getAdminCollectionOrder)
 	Register(reg, adminCollectionOperation(http.MethodPut, "/admin/collections/order", "reorderAdminCollections", "Replace collection order within a library group.", true), reg.reorderAdminCollections)
-	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/{id}/items/order", "getAdminCollectionItemsOrder", "Read at most 200 manual memberships. A partial window cannot be reordered.", false), reg.getAdminCollectionItemsOrder)
-	Register(reg, adminCollectionOperation(http.MethodPut, "/admin/collections/{id}/items/order", "reorderAdminCollectionItems", "Replace the complete manual membership order.", true), reg.reorderAdminCollectionItems)
+	Register(reg, manualMembershipOperation(http.MethodGet, "/admin/collections/{id}/items/order", "getAdminCollectionItemsOrder", "Read at most 200 manual memberships. A partial window cannot be reordered.", false), reg.getAdminCollectionItemsOrder)
+	Register(reg, manualMembershipOperation(http.MethodPut, "/admin/collections/{id}/items/order", "reorderAdminCollectionItems", "Replace the complete manual membership order.", true), reg.reorderAdminCollectionItems)
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/capabilities", "getAdminCollectionCapabilities", "Read configured administrator collection capabilities.", false), func(ctx context.Context, _ *CapabilityInput) (*AdminCollectionCapabilityOutput, error) {
 		svc, ok := reg.deps.AdminCollections.(interface {
 			AdminCollectionFeatures(context.Context) userstore.CollectionFeatures

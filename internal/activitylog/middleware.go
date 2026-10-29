@@ -159,10 +159,12 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			}
 
 			// Domain rows already persisted atomically; avoid a second success
-			// row for the same operation. Preserve a later HTTP failure separately.
+			// row for the same operation, but still count it as the account's
+			// activity. Preserve a later HTTP failure separately.
 			for _, committed := range lc.Committed {
 				if committed.StatusCode == wrapped.status {
-					return
+					entry.Persisted = true
+					break
 				}
 			}
 			w.Write(entry)

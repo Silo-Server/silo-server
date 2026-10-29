@@ -185,6 +185,8 @@ type DownloadRequest struct {
 	ReleaseName     string
 	Score           float64
 	HearingImpaired bool
+	// Target is the media file's episode, resolved by the server.
+	Target DownloadTarget
 }
 
 // StoreSubtitleRequest contains metadata and content for persisting a subtitle.
@@ -223,7 +225,7 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, req.ProviderName)
 	}
 
-	data, format, err := prov.Download(ctx, req.SubtitleID)
+	data, format, err := prov.Download(ctx, req.SubtitleID, req.Target)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
 	}

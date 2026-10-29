@@ -3,5 +3,5 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "Send download ids or one device, not both.",
-  "instance": "urn:silo:request:0000000000000000000002f3"
+  "instance": "urn:silo:request:0000000000000000000002f4"
 }

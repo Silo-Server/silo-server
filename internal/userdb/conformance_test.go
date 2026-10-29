@@ -25,6 +25,12 @@ func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
 }
 
+// TestSQLiteProgressHints runs the version hints sync conformance test against
+// the SQLite backend; the Postgres backend runs it in internal/userstore/pgstore.
+func TestSQLiteProgressHints(t *testing.T) {
+	storetest.RunProgressHints(t, newConformanceStore)
+}
+
 // TestSQLiteUnmarkKeepsHistory runs the mark-unwatched conformance test
 // against the SQLite backend; the Postgres backend runs it in
 // internal/userstore/pgstore.

@@ -76,13 +76,14 @@ var SensitiveSettingKeys = map[string]bool{
 	"mdblist.api_key": true,
 	"introdb.api_key": true,
 
-	// Shared AI endpoint API keys (+ legacy subtitle_ai alias the loader still
-	// falls back to; the legacy row is never renamed because ciphertext is
-	// GCM-bound to its key).
-	"ai.api_key":           true,
-	chatgpt.CredentialsKey: true,
-	"ai.asr_api_key":       true,
-	"subtitle_ai.api_key":  true,
+	// AI provider registry, API keys included. The endpoint keys it replaced
+	// are no longer read, but rows written by older builds stay encrypted
+	// (ciphertext is GCM-bound to its key, so none is ever renamed).
+	config.AIProvidersSettingKey: true,
+	chatgpt.CredentialsKey:       true,
+	"ai.api_key":                 true,
+	"ai.asr_api_key":             true,
+	"subtitle_ai.api_key":        true,
 
 	// Recommendations embedding auth (+ legacy openai alias at db_loader L409).
 	"recommendations.embedding_auth_token": true,

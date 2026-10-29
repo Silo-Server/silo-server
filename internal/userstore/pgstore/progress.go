@@ -1142,11 +1142,18 @@ func queryEpisodeWatchCounts[K comparable](ctx context.Context, s *PostgresUserS
 	return result, nil
 }
 
+// UpdateProgressHints writes the version hints of an existing progress row.
+// Heartbeats and stops repeat the hints of the file being played, so the
+// update matches only when a hint changed: the stamp trigger restamps
+// synced_seq on every update, which would resend an unchanged row to every
+// offline-sync device.
 func (s *PostgresUserStore) UpdateProgressHints(ctx context.Context, profileID, mediaItemID string, hints userstore.VersionHints) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE user_watch_progress
 		SET last_file_id = $4, last_resolution = $5, last_hdr = $6, last_codec_video = $7, last_edition_key = $8
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+		  AND (last_file_id IS DISTINCT FROM $4 OR last_resolution IS DISTINCT FROM $5 OR last_hdr IS DISTINCT FROM $6
+		       OR last_codec_video IS DISTINCT FROM $7 OR last_edition_key IS DISTINCT FROM $8)`,
 		s.userID, profileID, mediaItemID,
 		hints.FileID, hints.Resolution, hints.HDR, hints.CodecVideo, nilIfEmpty(hints.EditionKey),
 	)

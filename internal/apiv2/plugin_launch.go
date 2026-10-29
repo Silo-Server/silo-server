@@ -12,7 +12,7 @@ import (
 // PluginLaunchService is the slice of *handlers.AuthHandler the v2 plugin
 // launch uses: it mints the same five-minute plugin access token v1 issues.
 type PluginLaunchService interface {
-	PluginLaunchToken(claims *auth.Claims, profileID string) (string, error)
+	PluginLaunchToken(ctx context.Context, claims *auth.Claims, profileID string) (string, error)
 }
 
 // PluginLaunch is the launch receipt: the cookie's lifetime in seconds.
@@ -56,7 +56,7 @@ func registerPluginLaunch(reg *Registry) {
 		if claims == nil || claims.SessionID == "" || claims.TokenType != auth.TokenTypeAccess {
 			return nil, NewProblem(TypePermissionDenied, "A current login session is required to launch a plugin.")
 		}
-		token, err := reg.deps.PluginLaunch.PluginLaunchToken(claims, profileFrom(ctx))
+		token, err := reg.deps.PluginLaunch.PluginLaunchToken(ctx, claims, profileFrom(ctx))
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

@@ -20,6 +20,13 @@ const (
 	posterWidth  = 600
 	posterHeight = 900
 	jpegQuality  = 92
+
+	// maxSourcePixels bounds the raster image.Decode may allocate for one
+	// source. Sources are small poster variants, about 300x450, and even a
+	// full-size poster is about 6 megapixels, but a few-kilobyte file can
+	// declare far more, and the decoder allocates the declared raster before
+	// it reads the pixel data.
+	maxSourcePixels = 16_000_000
 )
 
 // ComposePoster builds a poster collage from raw image bytes.
@@ -32,6 +39,10 @@ const (
 func ComposePoster(images [][]byte) ([]byte, error) {
 	decoded := make([]image.Image, 0, len(images))
 	for _, data := range images {
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil || int64(cfg.Width)*int64(cfg.Height) > maxSourcePixels {
+			continue
+		}
 		img, _, err := image.Decode(bytes.NewReader(data))
 		if err != nil {
 			continue
@@ -78,34 +89,26 @@ func ComposePoster(images [][]byte) ([]byte, error) {
 }
 
 // scaleFill scales src to cover dst completely (crop-to-fill), centering the
-// source image so excess is cropped equally from both sides.
+// source image so excess is cropped equally from both sides. It crops in
+// source coordinates and scales only the kept region: scaling the whole source
+// first would allocate it at cover size, gigabytes for a source one pixel wide.
 func scaleFill(dst *image.NRGBA, src image.Image, rect image.Rectangle) {
 	dstW := rect.Dx()
 	dstH := rect.Dy()
-	srcBounds := src.Bounds()
-	srcW := srcBounds.Dx()
-	srcH := srcBounds.Dy()
+	crop := src.Bounds()
+	srcW := crop.Dx()
+	srcH := crop.Dy()
 
-	// Compute scale factor to cover the destination rectangle.
-	scaleX := float64(dstW) / float64(srcW)
-	scaleY := float64(dstH) / float64(srcH)
-	scale := scaleX
-	if scaleY > scaleX {
-		scale = scaleY
+	// Trim the source to the destination's aspect ratio.
+	if srcW*dstH > srcH*dstW {
+		w := max(srcH*dstW/dstH, 1)
+		crop.Min.X += (srcW - w) / 2
+		crop.Max.X = crop.Min.X + w
+	} else {
+		h := max(srcW*dstH/dstW, 1)
+		crop.Min.Y += (srcH - h) / 2
+		crop.Max.Y = crop.Min.Y + h
 	}
 
-	// Scaled source dimensions.
-	scaledW := int(float64(srcW) * scale)
-	scaledH := int(float64(srcH) * scale)
-
-	// Compute crop offset to center.
-	offsetX := (scaledW - dstW) / 2
-	offsetY := (scaledH - dstH) / 2
-
-	// Scale the full source into a temporary image, then copy the centered region.
-	tmp := image.NewNRGBA(image.Rect(0, 0, scaledW, scaledH))
-	draw.BiLinear.Scale(tmp, tmp.Bounds(), src, srcBounds, draw.Over, nil)
-
-	// Copy the centered crop into the destination rectangle.
-	draw.Copy(dst, rect.Min, tmp, image.Rect(offsetX, offsetY, offsetX+dstW, offsetY+dstH), draw.Over, nil)
+	draw.BiLinear.Scale(dst, rect, src, crop, draw.Over, nil)
 }

@@ -2,6 +2,7 @@ package playback
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"reflect"
 	"strconv"
@@ -25,7 +26,7 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 // /api/v2-only features extend the shared list and never reach /api/v1.
 func TestNativeServerFeaturesV3ExtendTheSharedList(t *testing.T) {
 	shared, native := ServerFeaturesV3(), NativeServerFeaturesV3()
-	for _, feature := range []string{FeatureSubripSidecarV3, FeatureHLSCopyMPEGTSV3} {
+	for _, feature := range []string{FeatureSubripSidecarV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3} {
 		if HasFeatureV3(shared, feature) || !HasFeatureV3(native, feature) {
 			t.Fatalf("%s must be advertised on /api/v2 only: shared=%v native=%v", feature, shared, native)
 		}
@@ -652,6 +653,42 @@ func TestPlanPlaybackV3EvidenceTiersReachTierAppropriateRoutes(t *testing.T) {
 	result = PlanPlaybackV3(PlannerInputV3{Request: declared, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
 		t.Fatalf("declared tier = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// A declared decode entry can only narrow the flat claim. The web sends an
+// 8-bit H.264 entry when the browser refuses High 10, and a 10-bit source
+// must then be encoded on every route instead of being copied.
+func TestPlanPlaybackV3DeclaredDecodeEntryNarrowsFlatClaim(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.CodecVideo = "h264"
+	file.Resolution = "1080p"
+	file.Bitrate = 8_000
+	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High 10", Level: 40, Width: 1920, Height: 1038, FrameRate: "24", Bitrate: 8_000, BitDepth: 10, VideoRange: "SDR", VideoRangeType: "SDR", ColorRange: "tv"}
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.CodecsVideo = []string{"h264"}
+	req.Capabilities.CodecsVideoHardware = []string{"h264"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", BitDepths: []int{8}}}
+	plan := func() PlannerResultV3 {
+		return PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	}
+
+	result := plan()
+	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 || result.Plan.EffectiveRecipe.VideoCodec != transcodeCodecH264 {
+		t.Fatalf("10-bit source = %s", ExplainPlannerResultV3(result))
+	}
+
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High", 8
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("8-bit source = %s", ExplainPlannerResultV3(result))
+	}
+
+	// An entry for another codec says nothing about H.264.
+	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High 10", 10
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", BitDepths: []int{8}}}
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("unrelated entry = %s", ExplainPlannerResultV3(result))
 	}
 }
 
@@ -3592,6 +3629,58 @@ func TestPlanPlaybackV3ZeroChannelCeilingIsUnset(t *testing.T) {
 	})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect {
 		t.Fatalf("zero ceiling result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// A per-codec ceiling caps only its codec: {"aac": 2} keeps an AAC conversion
+// in stereo and refuses to copy multichannel AAC, while E-AC-3 5.1 is copied.
+func TestPlanPlaybackV3CodecChannelCeiling(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		track        models.AudioTrack
+		wantDelivery DeliveryV3
+		wantCodec    string
+		wantChannels int
+	}{
+		{name: "TrueHD 7.1 converts to stereo AAC", track: models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1", Default: true}, wantDelivery: DeliveryRemuxHLSV3, wantCodec: audioCodecAACV3, wantChannels: 2},
+		{name: "AAC 5.1 converts to stereo AAC", track: models.AudioTrack{Codec: "aac", Channels: 6, Layout: "5.1", Default: true}, wantDelivery: DeliveryRemuxHLSV3, wantCodec: audioCodecAACV3, wantChannels: 2},
+		{name: "E-AC-3 5.1 plays as is", track: models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}, wantDelivery: DeliveryOriginalHTTPV3, wantCodec: audioCodecEAC3, wantChannels: 6},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, request := androidMedia3FFmpegFixtureV3("tv", []models.AudioTrack{test.track}, []string{"aac", "eac3"}, 0)
+			for class, delivery := range request.ClientPlaybackContext.Deliveries {
+				delivery.MaxChannelsByCodec = map[string]int{"aac": 2}
+				request.ClientPlaybackContext.Deliveries[class] = delivery
+			}
+			selectAndroidAudioTrackV3(&request, file.ID, 0)
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.Plan.Delivery != test.wantDelivery {
+				t.Fatalf("result = %s, want %s", ExplainPlannerResultV3(result), test.wantDelivery)
+			}
+			recipe := result.Plan.EffectiveRecipe
+			if recipe.AudioCodec != test.wantCodec || recipe.AudioChannels == nil || *recipe.AudioChannels != test.wantChannels {
+				t.Fatalf("audio = %q %v, want %q %d", recipe.AudioCodec, recipe.AudioChannels, test.wantCodec, test.wantChannels)
+			}
+		})
+	}
+}
+
+// Codec spellings of one codec merge to its lowest ceiling, and a ceiling
+// outranks a spelling that leaves it unset.
+func TestStartRequestV3NormalizesCodecChannelCeilings(t *testing.T) {
+	request := validStartRequestV3()
+	hls := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.MaxChannelsByCodec = map[string]int{"aac": 2, "AAC": 0, "E-AC-3": 6, "eac3": 4, "ec-3": -1}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	if _, err := request.NormalizeAndValidate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	got := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3].MaxChannelsByCodec
+	if want := map[string]int{"aac": 2, "eac3": 4}; !maps.Equal(got, want) {
+		t.Fatalf("max_channels_by_codec = %v, want %v", got, want)
 	}
 }
 

@@ -1061,6 +1061,15 @@ export interface SubtitleTrackSignature {
 export interface TimeRange {
   start: number;
   end: number;
+  /**
+   * Where the marked range came from, carried through the v1-shaped view model
+   * the player reads. Absent for a server that does not report provenance, and
+   * absent rather than 0 for a marker nobody rated.
+   */
+  source?: string | null;
+  provider?: string | null;
+  confidence?: number | null;
+  algorithm?: string | null;
 }
 
 /** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */
@@ -2003,7 +2012,20 @@ export interface RequestDiscoverySection extends RequestMediaPage {
   next_page?: number;
 }
 
-export interface RequestDiscoveryResponse {
+/** One row of the Discover layout, in page order. */
+export interface RequestDiscoverRowRef {
+  key: string;
+  /**
+   * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
+   * studios, networks or genres for a brand row. The server may add more.
+   */
+  type: string;
+  title: string;
+}
+
+/** The Discover page: every row in order, and each title row's first page. */
+export interface RequestDiscoverLayout {
+  rows: RequestDiscoverRowRef[];
   sections: RequestDiscoverySection[];
 }
 

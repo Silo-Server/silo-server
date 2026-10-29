@@ -297,18 +297,22 @@ func (a SessionAuthority) Narrow(claims *Claims) {
 	claims.ProfileID = a.BoundProfileID
 }
 
-// ActiveSession reports whether a session is active, as IsValid does, and
-// returns its authority: the current role of the account it belongs to and,
-// for a remote-playback session, the profile it is bound to. All of it comes
-// from one indexed lookup, so the per-request authentication check costs no
-// extra round trip. For an impersonation session the account is the one
-// being viewed as. active is false, with no error, for a missing, revoked or
-// expired session, and for a remote-playback session that names no profile.
-func (r *SessionRepository) ActiveSession(ctx context.Context, id string) (authority SessionAuthority, active bool, err error) {
+// ActiveSession reports whether a session of account userID is active, as
+// IsValid does, and returns its authority: the current role of the account it
+// belongs to and, for a remote-playback session, the profile it is bound to.
+// All of it comes from one indexed lookup, so the per-request authentication
+// check costs no extra round trip. userID is the account the credential
+// names: every token Silo mints names its session's own account, so a token
+// pairing one account with another account's session authenticates nobody.
+// For an impersonation session the account is the one being viewed as.
+// active is false, with no error, for a missing, revoked or expired session,
+// a session of another account, and a remote-playback session that names no
+// profile.
+func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
 	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, '') FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
-	err = r.pool.QueryRow(ctx, query, id).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
+		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
+	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}

@@ -130,8 +130,23 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	case EvidenceDeclaredV3:
 		// Boolean support statements: copy routes are granted on a flat codec
 		// match (container and dynamic range are gated separately by the
-		// planner); there is no stricter validation to run.
-		return flatClaims, false
+		// planner). A declared decode entry can only narrow that claim: the
+		// web names the bit depths its codec probes accepted, so a browser
+		// that refuses H.264 High 10 is not handed a 10-bit copy.
+		if !flatClaims {
+			return false, false
+		}
+		named := false
+		for _, capability := range request.Capabilities.VideoDecode {
+			if !strings.EqualFold(capability.Codec, source.VideoCodec) {
+				continue
+			}
+			named = true
+			if videoDecodeTakesSourceV3(capability, source, false) {
+				return true, false
+			}
+		}
+		return !named, false
 	case EvidenceExactV3, EvidencePlatformAttestedV3:
 		softwareDecodeOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 		matchedCodec := false
@@ -142,21 +157,9 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 			}
 			matchedCodec = true
 			skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3 && capability.Hardware
-			if !skipProfileLevel {
-				if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
-					continue
-				}
-				if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
-					continue
-				}
+			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel) {
+				return true, false
 			}
-			if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
-				continue
-			}
-			if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps {
-				continue
-			}
-			return true, false
 		}
 		// A flat-list claim with no validating decode entry means the tier's
 		// evidence could not confirm the stream, not that the device refused
@@ -165,6 +168,23 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	default:
 		return false, false
 	}
+}
+
+// videoDecodeTakesSourceV3 reports whether one decode entry's bounds admit
+// the source. An omitted bound is unconstrained.
+func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel bool) bool {
+	if !skipProfileLevel {
+		if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
+			return false
+		}
+		if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
+			return false
+		}
+	}
+	if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
+		return false
+	}
+	return !(capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps)
 }
 
 // videoProfileSupportedV3 compares a source profile with the profiles an exact

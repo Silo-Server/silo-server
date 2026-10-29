@@ -414,9 +414,16 @@ func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
 	}
 }
 
-func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
-	for _, supplied := range []string{"0001-01-01T00:00:00Z", "2024-01-02T03:04:05Z"} {
-		t.Run(supplied, func(t *testing.T) {
+func TestUserDataDateBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name, supplied string
+		wantCurrent    bool
+	}{
+		{"zero", "0001-01-01T00:00:00Z", true},
+		{"future", time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339), true},
+		{"historical", "2024-01-02T03:04:05Z", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := compatTestUserStoreProvider{store: store}
 			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
@@ -424,8 +431,8 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 			recorder := httptest.NewRecorder()
-			before := time.Now().UTC()
-			h.HandleUpdateUserData(recorder, viewerRequest("POST", "/", `{"Played":true,"LastPlayedDate":"`+supplied+`"}`, "itemId", codec.EncodeStringID(EncodedIDItem, "movie-1"), session))
+			before := time.Now().UTC().Truncate(time.Millisecond)
+			h.HandleUpdateUserData(recorder, viewerRequest("POST", "/", `{"Played":true,"LastPlayedDate":"`+tc.supplied+`"}`, "itemId", codec.EncodeStringID(EncodedIDItem, "movie-1"), session))
 			after := time.Now().UTC()
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("update: %d %s", recorder.Code, recorder.Body.String())
@@ -438,11 +445,11 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(supplied, "0001") {
+			if tc.wantCurrent {
 				if actual.Before(before) || actual.After(after) {
-					t.Fatalf("zero date was not normalized to current time: %s", actual)
+					t.Fatalf("date was not normalized to current time: %s", actual)
 				}
-			} else if dto.LastPlayedDate != supplied {
+			} else if dto.LastPlayedDate != tc.supplied {
 				t.Fatalf("historical date changed: %s", dto.LastPlayedDate)
 			}
 			history, err := store.ListHistory(t.Context(), "profile-1", 10, 0)

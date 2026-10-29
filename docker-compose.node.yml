@@ -1,0 +1,46 @@
+# A proxy or transcode node on a host of its own, running the omnibus image
+# against the main server's PostgreSQL and Redis. Use this file on its own on
+# the node's host, with that host's .env; layer docker-compose.vaapi.yml or
+# docker-compose.nvidia.yml on it for hardware transcoding. The main server
+# opens its bundled services to nodes with docker-compose.node-access.yml.
+services:
+  silo:
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
+    restart: unless-stopped
+    # On stop a transcode node drains: it takes no new work and lets its
+    # sessions finish for up to SILO_NODE_DRAIN_TIMEOUT (default 10m, 0 turns it
+    # off). The grace period covers the drain plus a minute for the shutdown;
+    # raising SILO_NODE_DRAIN_TIMEOUT means raising this to match.
+    stop_grace_period: 11m
+    environment:
+      MODE: ${MODE:-transcode}
+      PORT: "8080"
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+      # The SAME SECRET_KEY as the main server (shared encrypted data).
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env to the main server's SECRET_KEY}
+      # postgres://silo:<POSTGRES_PASSWORD>@<main host>:5432/silo?sslmode=disable
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env to the main server's PostgreSQL}
+      # redis://:<REDIS_PASSWORD>@<main host>:6379
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env to the main server's Redis}
+      # The URL the main server reaches this node on, such as
+      # http://transcode-01.example:8082. Without it, session keys can collide
+      # across nodes.
+      NODE_URL: ${NODE_URL:?Set NODE_URL in .env to the URL the main server reaches this node on}
+    ports:
+      - "${NODE_PORT:-8082}:8080"
+    volumes:
+      # The node's own state: its plugin copies, rehydrated from the database.
+      - ${SILO_DATA_ROOT:-/opt/silo}/config:/config
+      # The same media at the same container path as on the main server.
+      - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+      - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+      # See the note in docker-compose.yml: a node reports its own CPU, load,
+      # and memory rather than the physical machine's only with these mounted.
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+    env_file:
+      - path: .env
+        required: false
