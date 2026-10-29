@@ -44,6 +44,13 @@ it (see [subtitle sync](subtitle-sync.md#jobs)). Subtitle files next to the
 media (sidecars) are never stored here; their corrections live in
 `external_subtitle_timings` (see [subtitle sync](subtitle-sync.md#sidecar-subtitles)).
 
+Embedded tracks the server has read whole are kept under `subtitles/embedded/`
+in the same store, with rows in `embedded_subtitle_tracks`. They are a cache
+of the media file, not subtitles in their own right: their keys hold a content
+hash, a changed or deleted file retires them, and the blob collector deletes
+their objects. See
+[embedded-subtitle-index.md](embedded-subtitle-index.md#kept-tracks).
+
 Deletion removes the row before attempting object cleanup. A delayed cleanup
 cannot remove a new publication because its object key differs. Successful
 deletion means metadata is absent, not that physical cleanup is durable. Failed
