@@ -1,8 +1,9 @@
-import { act, render, renderHook, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useEffect } from "react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
-import { AdvancedFields } from "./LibraryFormSections";
+import { AdvancedFields, MetadataFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
 
 const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
@@ -141,6 +142,49 @@ describe("saving library processing settings", () => {
       id: 1,
       body: { name: "Films", realtime_monitoring: enabled },
     });
+  });
+});
+
+describe("metadata language picker", () => {
+  beforeAll(() => {
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+
+  it("offers only languages the library contract accepts", () => {
+    // updateLibrary and createLibrary take a bare ISO 639-1 code; a regional
+    // tag such as pt-BR fails with 422 validation_failed (#3209).
+    let picked = "";
+    function Harness() {
+      const form = useLibraryForm({ library: null });
+      useEffect(() => {
+        picked = form.metadataLanguage;
+      });
+      return <MetadataFields form={form} />;
+    }
+    render(<Harness />);
+    const options = () => {
+      fireEvent.pointerDown(screen.getByRole("combobox"), {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      });
+      return screen.getAllByRole("option");
+    };
+
+    const names = options().map((option) => option.textContent ?? "");
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    expect(names.length).toBeGreaterThan(1);
+    const rejected: string[] = [];
+    for (const name of names) {
+      fireEvent.click(options().find((option) => option.textContent === name)!);
+      if (!/^(?:[a-z]{2})?$/.test(picked)) rejected.push(picked);
+    }
+    expect(rejected).toEqual([]);
   });
 });
 
