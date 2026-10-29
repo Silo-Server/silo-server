@@ -599,18 +599,51 @@ export interface UserSettingsNavAccess {
   canManageProfiles: boolean;
   /** Whether the server has requests turned on. */
   requestsEnabled: boolean;
+  /** Whether the signed-in account is acting with admin powers. */
+  actingAdmin: boolean;
 }
+
+/**
+ * Pages only an administrator may open.
+ *
+ * These are the appearance, home-and-discovery and connections pages: they
+ * decide what the app puts in front of everyone and what it is wired to, which
+ * is the server owner's call rather than a viewer's. Playback, Language &
+ * Subtitles, Your Devices and Notifications stay open to every profile — a
+ * person still has to be able to set how things play and how subtitles look.
+ *
+ * Held as one list rather than a flag on each item so the rule is legible in a
+ * single place. `visibleUserSettingsGroups` hides these from the sidebar and
+ * `SettingsLayout` bounces a direct URL, both from this set, so the two cannot
+ * drift apart.
+ */
+export const ADMIN_ONLY_SETTINGS_PATHS: ReadonlySet<string> = new Set([
+  "interface",
+  "title-pages",
+  "accessibility",
+  "home-screen",
+  "libraries",
+  "personalize",
+  "requests",
+  "connect-apps",
+  "watch-providers",
+  "webhook-sync",
+  "history-import",
+]);
 
 /** The groups this profile can open, with empty groups dropped. */
 export function visibleUserSettingsGroups({
   canManageProfiles,
   requestsEnabled,
+  actingAdmin,
 }: UserSettingsNavAccess): UserSettingsNavGroup[] {
   return USER_SETTINGS_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter(
       (item) =>
-        (!item.primaryOrAdmin || canManageProfiles) && (!item.requiresRequests || requestsEnabled),
+        (!item.primaryOrAdmin || canManageProfiles) &&
+        (!item.requiresRequests || requestsEnabled) &&
+        (!ADMIN_ONLY_SETTINGS_PATHS.has(item.path) || actingAdmin),
     ),
   })).filter((group) => group.items.length > 0);
 }

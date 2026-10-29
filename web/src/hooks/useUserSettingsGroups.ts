@@ -13,7 +13,7 @@ export function useUserSettingsGroups(): UserSettingsNavGroup[] {
   const requestsEnabled = useRequestFeatureStatus().data?.requests_enabled === true;
 
   return useMemo(
-    () => visibleUserSettingsGroups({ canManageProfiles, requestsEnabled }),
-    [canManageProfiles, requestsEnabled],
+    () => visibleUserSettingsGroups({ canManageProfiles, requestsEnabled, actingAdmin }),
+    [canManageProfiles, requestsEnabled, actingAdmin],
   );
 }

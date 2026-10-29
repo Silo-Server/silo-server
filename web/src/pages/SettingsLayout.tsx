@@ -15,7 +15,11 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useUserSettingsGroups } from "@/hooks/useUserSettingsGroups";
 import { resolveSettingsDocumentTitle } from "@/lib/documentTitle";
-import { userSettingsHref, type UserSettingsNavGroup } from "@/lib/userSettingsNav";
+import {
+  USER_SETTINGS_GROUPS,
+  userSettingsHref,
+  type UserSettingsNavGroup,
+} from "@/lib/userSettingsNav";
 
 /** Where `Layout` swaps the app sidebar for the settings sidebar. */
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
@@ -25,6 +29,15 @@ const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
  * reading-width cap would squeeze them instead of helping.
  */
 const WIDE_SETTINGS_PAGES = new Set(["devices"]);
+
+/**
+ * Every settings page that exists, allowed or not. Used to tell "this page is
+ * one this profile may not open" apart from "this segment is not a settings
+ * page at all", which is left to the router as before.
+ */
+const ALL_SETTINGS_PATHS = new Set(
+  USER_SETTINGS_GROUPS.flatMap((group) => group.items.map((item) => item.path)),
+);
 
 /**
  * Personal settings. On desktop the settings sidebar (mounted by `Layout` in
@@ -37,8 +50,19 @@ export default function SettingsLayout() {
   const groups = useUserSettingsGroups();
   const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY);
   const activeSegment = location.pathname.split("/")[2] || null;
+  const visiblePaths = useMemo(
+    () => new Set(groups.flatMap((group) => group.items.map((item) => item.path))),
+    [groups],
+  );
 
   useDocumentTitle(resolveSettingsDocumentTitle(location.pathname));
+
+  // A page this profile may not open goes back to the index instead of
+  // rendering. The sidebar already omits it; this covers a typed URL or a
+  // link from elsewhere, so hiding a page is not only cosmetic.
+  if (activeSegment && ALL_SETTINGS_PATHS.has(activeSegment) && !visiblePaths.has(activeSegment)) {
+    return <Navigate to="/settings" replace />;
+  }
 
   if (!activeSegment) {
     const firstPage = groups[0]?.items[0];
