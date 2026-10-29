@@ -491,7 +491,6 @@ func (s *Scanner) processExtraFiles(
 			continue
 		}
 
-		extraID := contentid.ForLocal(candidate.Path)
 		parentID, err := s.resolveExtraParent(ctx, folder.ID, candidate, rootSet,
 			batchByLookupDir[extraParentLookupDir(candidate)])
 		if err != nil {
@@ -505,6 +504,8 @@ func (s *Scanner) processExtraFiles(
 			stats.Skipped++
 			continue
 		}
+		existing := existingByPath[candidate.Path]
+		extraID := extraContentID(candidate.Path, parentID, existing)
 
 		// Upsert the entity before the unchanged check so parent/kind/title
 		// converge on every scan (a rematched parent or reclassified kind
@@ -524,7 +525,6 @@ func (s *Scanner) processExtraFiles(
 		s.syncExtraStill(ctx, extraID, candidate.Path, stillSource, stillDirs)
 
 		fileModifiedAt := normalizeFileModifiedAt(info.ModTime())
-		existing := existingByPath[candidate.Path]
 		if extraFileUnchanged(existing, extraID, info.Size(), fileModifiedAt) {
 			stats.Unchanged++
 			continue
@@ -580,6 +580,23 @@ func (s *Scanner) processExtraFiles(
 		)
 	}
 	return stats
+}
+
+// extraContentID is the content id for an extra backed by path: the id its
+// file row already carries, so rescans converge after the parent's id changes,
+// or contentid.ForLocal(path). A file first scanned as primary content can
+// have given an unmatched local parent that same id (a trailer that was the
+// first file of its show), and the parent wins the watch lookup, so the extra
+// takes an id derived from the path under a separate marker instead.
+func extraContentID(path, parentID string, existing *scanStateFile) string {
+	if existing != nil && existing.ExtraID != "" && existing.ExtraID != parentID {
+		return existing.ExtraID
+	}
+	id := contentid.ForLocal(path)
+	if id == parentID {
+		id = contentid.ForLocal(path + "\x00extra")
+	}
+	return id
 }
 
 // resolveExtraParent finds the content id of the item owning an extra.
