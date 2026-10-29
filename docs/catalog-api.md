@@ -1001,8 +1001,9 @@ Metadata providers supply them as `digital_release_date` and
 `GetMetadata` response. The host ignores the keys on other item types and drops
 a value that is not a calendar date. The TMDB plugin derives them from TMDB's
 type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
-ones included, takes the provider's current dates, because providers revise
-them; locking release dates on an item also locks them.
+ones included, replaces a stored date with the one the provider sends now,
+because providers revise them. A date the provider stops sending is kept.
+Locking release dates on an item also locks them.
 
 ## Advisory age
 
