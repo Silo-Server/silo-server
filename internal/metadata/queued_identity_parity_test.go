@@ -623,25 +623,31 @@ func TestQueuedOverrideFailsWithoutContentFileLister(t *testing.T) {
 
 // A heuristic folder ID is a guess, so on first link the override's forced ID
 // for the same provider wins, as it does when the worker reuses a linked item.
+// That holds when the file name also carries an IMDb tag, which otherwise
+// loses to the folder's bare ID.
 func TestCreateOrFindSkeletonForcedIDBeatsHeuristicFolderID(t *testing.T) {
-	h := newTestHarness()
-	file := &models.MediaFile{
-		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name tt0000111/Old Name.mkv",
-		GroupKeyVersion: 1, ContentGroupKey: "new-group", BaseType: "movie", BaseTitle: "Old Name",
-	}
 	if hints := naming.ParseFolderIDs("Old Name tt0000111"); hints == nil || hints.ImdbID != "tt0000111" {
 		t.Fatalf("fixture folder name does not carry a heuristic IMDb ID: %+v", hints)
 	}
-	h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
-		ForcedType: "movie", ForcedImdbID: "tt0000222",
-	}}
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-	skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
-	if err != nil || reused || skeleton == nil {
-		t.Fatalf("first link failed: skeleton=%+v reused=%t err=%v", skeleton, reused, err)
-	}
-	if skeleton.ImdbID != "tt0000222" {
-		t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
+	for _, name := range []string{"Old Name.mkv", "Old Name {imdb-tt0000222}.mkv"} {
+		t.Run(name, func(t *testing.T) {
+			h := newTestHarness()
+			file := &models.MediaFile{
+				ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name tt0000111/" + name,
+				GroupKeyVersion: 1, ContentGroupKey: "new-group", BaseType: "movie", BaseTitle: "Old Name",
+			}
+			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
+				ForcedType: "movie", ForcedImdbID: "tt0000222",
+			}}
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+			skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
+			if err != nil || reused || skeleton == nil {
+				t.Fatalf("first link failed: skeleton=%+v reused=%t err=%v", skeleton, reused, err)
+			}
+			if skeleton.ImdbID != "tt0000222" {
+				t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
+			}
+		})
 	}
 }
 

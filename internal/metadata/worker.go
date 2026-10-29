@@ -1024,7 +1024,7 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		itemType = currentFile.BaseType
 	}
 
-	refreshedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, rootPath, libraryRoots...)
+	refreshedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, rootPath, nil, libraryRoots...)
 	// This is an unmatched-style skeleton being re-evaluated. Structured path
 	// IDs are current input; IDs that disappeared from the path must not remain
 	// trusted forever merely because an older parser copied them onto the
@@ -1112,7 +1112,7 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 
 	wasAmbiguous := skeleton.ItemStatus == "ambiguous" //nolint:goconst // Item statuses are literals throughout this package.
 	applyGroupOverride(skeleton, override)
-	applyFolderIDHints(skeleton, trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, libraryRoots...))
+	applyFolderIDHints(skeleton, trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, override, libraryRoots...))
 	if wasAmbiguous {
 		// The match merges provider metadata into the stored item, and keeps
 		// the title of an item that is still ambiguous. Store the settled

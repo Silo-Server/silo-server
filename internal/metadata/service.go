@@ -7433,8 +7433,10 @@ func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 //
 // A bare IMDb ID ending the folder name ("Movie (2020) {tmdb-1} tt1234567")
 // is not a structured tag, so on its own it adds no trusted ID. It still beats
-// an IMDb tag in the file name, which the scanner also lets it do.
-func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string, libraryRoots ...string) *naming.FolderIDHints {
+// an IMDb tag in the file name, which the scanner also lets it do, unless the
+// group override forces an IMDb ID: the scanner keeps a forced ID over a bare
+// one, and the file's tag beats a forced ID as before.
+func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath string, override *models.MediaGroupOverride, libraryRoots ...string) *naming.FolderIDHints {
 	observedAnchor := skeletonFolderAnchorName(observedRootPath, libraryRoots)
 	folderIDs := naming.ParseStructuredFolderIDs(observedAnchor)
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
@@ -7442,7 +7444,7 @@ func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath
 	}
 	fileIDs := naming.ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
 	merged := mergeFolderIDHints(fileIDs, folderIDs)
-	if merged != nil && merged.ImdbID != "" {
+	if merged != nil && merged.ImdbID != "" && (override == nil || override.ForcedImdbID == "") {
 		if folder := naming.ParseFolderIDs(observedAnchor); folder != nil && folder.ImdbID != "" {
 			merged.ImdbID = folder.ImdbID
 		}
@@ -7670,7 +7672,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// When present, they override scanner ambiguity and become the authoritative
 	// external IDs used for dedup/link/create. Filename tags take precedence
 	// over folder tags because the file is generally the freshest artifact.
-	trustedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, contentRootPath, libraryRoots...)
+	trustedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, contentRootPath, groupOverride, libraryRoots...)
 	if trustedIDs != nil {
 		applyFolderIDHints(res, trustedIDs)
 		res.ItemStatus = "pending"
