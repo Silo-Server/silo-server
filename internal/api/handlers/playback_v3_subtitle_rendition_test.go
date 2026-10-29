@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -25,23 +26,25 @@ func subtitleRenditionPlanV3(file *models.MediaFile, delivery playback.DeliveryV
 
 func TestAttachSubtitleArtifactKeepsHLSSubtitleRendition(t *testing.T) {
 	file := &models.MediaFile{ID: 42, SubtitleTracks: []models.SubtitleTrack{{Index: 4, Codec: "subrip"}}}
-	plan := subtitleRenditionPlanV3(file, playback.DeliveryTranscodeHLSV3, playback.SubtitleRenderV3)
 	handler := &PlaybackHandler{}
-	if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if plan.Subtitle.HLSRendition == nil || plan.Subtitle.Artifact != nil {
-		t.Fatalf("an in-manifest subtitle publishes no sidecar artifact: %#v", plan.Subtitle)
-	}
-	if plan.Subtitle.Inventory[0].URL == "" {
-		t.Fatal("the inventory keeps its sidecar URL for other selections")
+	for _, delivery := range []playback.DeliveryV3{playback.DeliveryTranscodeHLSV3, playback.DeliveryRemuxHLSV3} {
+		plan := subtitleRenditionPlanV3(file, delivery, playback.SubtitleRenderV3)
+		if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, nil); err != nil {
+			t.Fatalf("%s: %v", delivery, err)
+		}
+		if plan.Subtitle.HLSRendition == nil || plan.Subtitle.Artifact != nil {
+			t.Fatalf("%s: an in-manifest subtitle publishes no sidecar artifact: %#v", delivery, plan.Subtitle)
+		}
+		if plan.Subtitle.Inventory[0].URL == "" {
+			t.Fatalf("%s: the inventory keeps its sidecar URL for other selections", delivery)
+		}
 	}
 }
 
 func TestAttachSubtitleArtifactRejectsOrClearsMisplacedRendition(t *testing.T) {
 	file := &models.MediaFile{ID: 42, SubtitleTracks: []models.SubtitleTrack{{Index: 4, Codec: "subrip"}}}
 	handler := &PlaybackHandler{}
-	for _, delivery := range []playback.DeliveryV3{playback.DeliveryRemuxHLSV3, playback.DeliveryOriginalHTTPV3} {
+	for _, delivery := range []playback.DeliveryV3{playback.DeliveryRemuxProgressiveV3, playback.DeliveryOriginalHTTPV3} {
 		plan := subtitleRenditionPlanV3(file, delivery, playback.SubtitleRenderV3)
 		if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, nil); err == nil {
 			t.Fatalf("%s accepted an HLS subtitle rendition", delivery)
@@ -98,12 +101,14 @@ func TestSidecarOnlyHLSReplanReusesTransportOnlyForAnUnchangedRendition(t *testi
 }
 
 func TestHLSSubtitleRenditionsAreNegotiatedOnlyOnAPIV2(t *testing.T) {
-	if slices.Contains(playback.ServerFeaturesV3(), playback.FeatureHLSSubtitleRenditionsV3) {
-		t.Fatal("the frozen /api/v1 surface must not advertise hls_subtitle_renditions_v1")
-	}
-	if !slices.Contains(playback.NativeServerFeaturesV3(), playback.FeatureHLSSubtitleRenditionsV3) ||
-		!slices.Contains(playback.AttemptStickyFeaturesV3(), playback.FeatureHLSSubtitleRenditionsV3) {
-		t.Fatal("/api/v2 advertises hls_subtitle_renditions_v1 as an attempt-sticky feature")
+	for _, feature := range []string{playback.FeatureHLSSubtitleRenditionsV3, playback.FeatureHLSRemuxSubtitleRenditionsV3} {
+		if slices.Contains(playback.ServerFeaturesV3(), feature) {
+			t.Fatalf("the frozen /api/v1 surface must not advertise %s", feature)
+		}
+		if !slices.Contains(playback.NativeServerFeaturesV3(), feature) ||
+			!slices.Contains(playback.AttemptStickyFeaturesV3(), feature) {
+			t.Fatalf("/api/v2 advertises %s as an attempt-sticky feature", feature)
+		}
 	}
 }
 
@@ -163,5 +168,48 @@ func TestSubtitleRenditionRoutableRequiresOneNodeForTheWholeRecipe(t *testing.T)
 	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{renditionOnly, both}}}
 	if !handler.subtitleRenditionRoutableV3(t.Context(), result, true) {
 		t.Fatal("a node running the whole recipe was not counted")
+	}
+}
+
+// A copy remux's rendition runs under the remux routing policy and needs a
+// node that advertises the remux rendition: a node that only emits a
+// transcode's would attest no rendition for a remux.
+func TestRemuxSubtitleRenditionNeedsTheRemuxTransportFeature(t *testing.T) {
+	node := func(features ...string) string {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{TransportFeatures: features})
+		}))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	transcodeOnly := node(playback.TransportFeatureHLSSubtitleRenditionV1)
+	remux := node(playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1)
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+	result := playback.PlannerResultV3{
+		Plan:              &playback.PlanV3{Delivery: playback.DeliveryRemuxHLSV3},
+		PlayMethod:        playback.PlayRemux,
+		TargetVideoCodec:  "copy",
+		SubtitleRendition: true,
+	}
+
+	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{transcodeOnly}}}
+	if handler.hlsSubtitleRenditionExecutableV3(t.Context(), true, playback.PlayRemux) || handler.subtitleRenditionRoutableV3(t.Context(), result, true) {
+		t.Fatal("a node without the remux rendition was counted for a remux")
+	}
+	if !handler.hlsSubtitleRenditionExecutableV3(t.Context(), true, playback.PlayTranscode) {
+		t.Fatal("the same node still emits a transcode's rendition")
+	}
+	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{transcodeOnly, remux}}}
+	if !handler.hlsSubtitleRenditionExecutableV3(t.Context(), true, playback.PlayRemux) || !handler.subtitleRenditionRoutableV3(t.Context(), result, true) {
+		t.Fatal("a node with the remux rendition was not counted")
+	}
+	eligible := handler.transcodeEligibilityV3(t.Context(), result, nil)
+	if eligible(&nodepool.Node{URL: transcodeOnly}) || !eligible(&nodepool.Node{URL: remux}) {
+		t.Fatal("node selection must admit only nodes with the remux rendition")
 	}
 }

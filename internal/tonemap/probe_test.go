@@ -518,9 +518,11 @@ func TestProbeDevicesCapsTheConfiguredSet(t *testing.T) {
 	}
 }
 
-// TestProbeSmokesDolbyVisionOnlyOnRPUExecutors verifies the Dolby Vision kind
-// is tried and advertised only where the filter can apply an RPU.
-func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
+// TestProbeSmokesOptionalKindsOnlyOnCapableExecutors verifies the Dolby Vision
+// kind is tried and advertised only where the filter can apply an RPU, and the
+// full-range PQ kind only on the software executor, whose filters read each
+// frame's range.
+func TestProbeSmokesOptionalKindsOnlyOnCapableExecutors(t *testing.T) {
 	tests := []struct {
 		name         string
 		backend      string
@@ -552,6 +554,9 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 					t.Fatalf("capabilities = %#v, lost standard kind %q", got, kind)
 				}
 			}
+			if !got.Supports(ModeSoftware, SourcePQFullRange) || got.Supports(ModeHardware, SourcePQFullRange) {
+				t.Fatalf("capabilities = %#v, want full-range PQ on software only", got)
+			}
 			wantSmokes := 0
 			if tt.wantSoftware {
 				wantSmokes++
@@ -563,6 +568,37 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 				t.Fatalf("Dolby Vision smokes = %q, want %d", dolbyVisionSmokes, wantSmokes)
 			}
 		})
+	}
+}
+
+// TestProbeFailedFullRangeSmokeExpires verifies a software inventory missing
+// the full-range PQ kind is incomplete, so a failed smoke is retried after
+// probeNegativeTTL instead of being cached for good.
+func TestProbeFailedFullRangeSmokeExpires(t *testing.T) {
+	resetProbeCache(t)
+	now := time.Unix(100, 0)
+	calls, failures := 0, 1
+	runner := listingRunner(&calls, softwareListing, "libx264", func(args string) ([]byte, error) {
+		if strings.Contains(args, SourceParameters(SourcePQFullRange)) && failures > 0 {
+			failures--
+			return nil, errors.New("exit status 1")
+		}
+		return nil, nil
+	})
+	probe := func() Capabilities {
+		t.Helper()
+		got, err := probeCached(t.Context(), "/ffmpeg-full-range", BackendSoftware, "", runner, func() time.Time { return now })
+		if err != nil {
+			t.Fatalf("probe error = %v", err)
+		}
+		return got
+	}
+	if got := probe(); got.Supports(ModeSoftware, SourcePQFullRange) || !got.Supports(ModeSoftware, SourcePQ) {
+		t.Fatalf("first capabilities = %#v, want PQ without full-range PQ", got)
+	}
+	now = now.Add(probeNegativeTTL + time.Second)
+	if got := probe(); !got.Supports(ModeSoftware, SourcePQFullRange) {
+		t.Fatalf("retried capabilities = %#v, want full-range PQ once the smoke passes", got)
 	}
 }
 

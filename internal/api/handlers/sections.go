@@ -459,6 +459,26 @@ type sectionItemResponse struct {
 	// card only; v1 is frozen.
 	PendingTranslationLanguage string   `json:"-"`
 	MachineTranslatedFields    []string `json:"-"`
+
+	// ParentArtwork, ReleaseDate, LastAirDate and EpisodeRatingTMDB reach
+	// the v2 card only; v1 is frozen. EpisodeRatingTMDB is an episode's TMDB
+	// rating, kept apart from RatingTMDB so v1's rating_tmdb stays as it was.
+	ParentArtwork     EpisodeParentArtworkView `json:"-"`
+	ReleaseDate       *string                  `json:"-"`
+	LastAirDate       *string                  `json:"-"`
+	EpisodeRatingTMDB *float64                 `json:"-"`
+}
+
+// applyEpisodeCardMeta adds what the episode query loaded for the v2 card:
+// the air date as the release date and the TMDB rating.
+func (r *sectionItemResponse) applyEpisodeCardMeta(meta *sections.SectionItemMeta) {
+	if meta == nil {
+		return
+	}
+	if r.ReleaseDate == nil {
+		r.ReleaseDate = meta.EpisodeAirDate
+	}
+	r.EpisodeRatingTMDB = meta.RatingTMDB
 }
 
 type resolvedSectionResponse struct {
@@ -824,6 +844,15 @@ func (h *SectionHandler) listProfileOverrides(ctx context.Context, q SectionOver
 	if overrides == nil {
 		overrides = []userstore.SectionOverride{}
 	}
+	// A row saved before the item_limit cap may hold a larger value. Report
+	// it capped, as the resolver applies it, so a client that sends back
+	// what it read is not refused by saveProfileOverrides.
+	for i := range overrides {
+		if limit := overrides[i].ItemLimit; limit != nil && *limit > sections.MaxItemLimit {
+			capped := sections.MaxItemLimit
+			overrides[i].ItemLimit = &capped
+		}
+	}
 	return overrides, nil
 }
 
@@ -940,6 +969,11 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 				return apiError(http.StatusBadRequest, "duplicate_override", "section override IDs must be unique")
 			}
 			seenIDs[o.ID] = struct{}{}
+		}
+		// The fetchers size their buffers from item_limit, so an unbounded
+		// value lets one profile exhaust server memory on every home load.
+		if o.ItemLimit != nil && *o.ItemLimit > sections.MaxItemLimit {
+			return apiError(http.StatusBadRequest, "invalid_item_limit", fmt.Sprintf("item_limit must be at most %d", sections.MaxItemLimit))
 		}
 		// SectionID is the authoritative shape discriminator used by the resolver
 		// and scheduled-demand scan. Canonicalize IsUserAdded to match it so a
@@ -1344,6 +1378,17 @@ type sectionItemImageURLs struct {
 	posterURL   string
 	backdropURL string
 	logoURL     string
+	parents     episodeParentImageURLs
+}
+
+// episodeParentImageURLs are an episode card's signed season poster and
+// backdrop and series poster and backdrop, each at the size of the card's own
+// slot.
+type episodeParentImageURLs struct {
+	seriesPosterURL   string
+	seriesBackdropURL string
+	seasonPosterURL   string
+	seasonBackdropURL string
 }
 
 // buildSectionsResponse renders resolved sections. libraryID carries the
@@ -1428,6 +1473,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
 
 	wg.Wait()
+	h.resolveFallbackParentArtwork(ctx, withItems, episodeMeta, art, imageURLs)
 
 	resp := homeSectionsResponse{
 		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
@@ -1695,6 +1741,42 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 	return resolveFeaturedArtwork(ctx, h.DetailSvc, cards, art)
 }
 
+// resolveFallbackParentArtwork signs the parent artwork of episode cards from
+// queries that don't load it (custom filters, collections), which
+// listSectionEpisodeItemMeta found alongside their other episode metadata. It
+// runs after that lookup, so these cards pay one more signing batch; episode
+// rows that load their own parent artwork add nothing.
+func (h *SectionHandler) resolveFallbackParentArtwork(ctx context.Context, withItems []sections.SectionWithItems, episodeMeta map[string]sections.SectionItemMeta, art imagesize.Request, imageURLs map[sectionItemImageKey]sectionItemImageURLs) {
+	if h.DetailSvc == nil || imageURLs == nil || len(episodeMeta) == 0 {
+		return
+	}
+	cards := make([]featuredArtworkCard[sectionItemImageKey], 0)
+	for _, section := range withItems {
+		for _, item := range section.Items {
+			if item == nil || item.Type != "episode" || item.ParentArtwork != nil {
+				continue
+			}
+			meta := sectionCardMeta(section, item.ContentID, episodeMeta, nil)
+			if meta == nil || meta.ParentArtwork == nil {
+				continue
+			}
+			cards = append(cards, featuredArtworkCard[sectionItemImageKey]{
+				key:         sectionItemImageKey{sectionID: section.ID, contentID: item.ContentID},
+				item:        &models.MediaItem{ContentID: item.ContentID, Type: item.Type, ParentArtwork: meta.ParentArtwork},
+				sectionType: section.SectionType,
+			})
+		}
+	}
+	if len(cards) == 0 {
+		return
+	}
+	for key, urls := range resolveFeaturedArtwork(ctx, h.DetailSvc, cards, art) {
+		card := imageURLs[key]
+		card.parents = urls.parents
+		imageURLs[key] = card
+	}
+}
+
 // featuredArtworkCard is one card on a featured surface whose artwork is
 // resolved in a batch, keyed however the surface looks it up.
 type featuredArtworkCard[K comparable] struct {
@@ -1719,6 +1801,10 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 		batch.Add(pending[i].posterPath, posterHint)
 		batch.Add(pending[i].backdropPath, backdropHint)
 		batch.Add(pending[i].logoPath, logoHint)
+		batch.Add(pending[i].seriesPosterPath, posterHint)
+		batch.Add(pending[i].seriesBackdropPath, backdropHint)
+		batch.Add(pending[i].seasonPosterPath, posterHint)
+		batch.Add(pending[i].seasonBackdropPath, backdropHint)
 	}
 	resolved := batch.Resolve(ctx, svc, requestVariantHint("featured", art.Size))
 	result := make(map[K]sectionItemImageURLs, len(cards))
@@ -1727,6 +1813,12 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 			posterURL:   resolved.Get(pending[i].posterPath, posterHint).URL,
 			backdropURL: resolved.Get(pending[i].backdropPath, backdropHint).URL,
 			logoURL:     resolved.Get(pending[i].logoPath, logoHint).URL,
+			parents: episodeParentImageURLs{
+				seriesPosterURL:   resolved.Get(pending[i].seriesPosterPath, posterHint).URL,
+				seriesBackdropURL: resolved.Get(pending[i].seriesBackdropPath, backdropHint).URL,
+				seasonPosterURL:   resolved.Get(pending[i].seasonPosterPath, posterHint).URL,
+				seasonBackdropURL: resolved.Get(pending[i].seasonBackdropPath, backdropHint).URL,
+			},
 		}
 	}
 	return result
@@ -1757,6 +1849,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		RatingRTAudience:       item.RatingRTAudience,
 		OriginalLanguage:       item.OriginalLanguage,
 		Overview:               item.Overview,
+		ReleaseDate:            item.ReleaseDate,
+		LastAirDate:            item.LastAirDate,
 		PosterThumbhash:        item.PosterThumbhash,
 		BackdropThumbhash:      item.BackdropThumbhash,
 		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,
@@ -1785,6 +1879,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		resp.DurationSeconds = meta.DurationSeconds
 		resp.ProgressUpdatedAt = meta.ProgressUpdatedAt
 		resp.ItemSource = meta.ItemSource
+		resp.applyEpisodeCardMeta(meta)
 	}
 
 	if resp.Genres == nil {
@@ -1797,8 +1892,41 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	resp.PosterURL = imageURLs.posterURL
 	resp.BackdropURL = imageURLs.backdropURL
 	resp.LogoURL = imageURLs.logoURL
+	parent := item.ParentArtwork
+	if parent == nil && item.Type == "episode" && meta != nil {
+		parent = meta.ParentArtwork
+	}
+	resp.ParentArtwork = episodeParentArtworkView(parent, imageURLs.parents)
 
 	return resp
+}
+
+// EpisodeParentArtworkView is an episode card's signed season and series
+// artwork. Zero on every other card.
+type EpisodeParentArtworkView struct {
+	SeriesPosterURL         string
+	SeriesPosterThumbhash   string
+	SeriesBackdropURL       string
+	SeriesBackdropThumbhash string
+	SeasonPosterURL         string
+	SeasonPosterThumbhash   string
+	SeasonBackdropURL       string
+	SeasonBackdropThumbhash string
+}
+
+// episodeParentArtworkView pairs an episode's parent artwork with its signed
+// URLs. The thumbhashes come from the same row as the paths, so a cached card
+// never pairs one image's URL with another's placeholder.
+func episodeParentArtworkView(p *models.EpisodeParentArtwork, urls episodeParentImageURLs) EpisodeParentArtworkView {
+	if p == nil {
+		return EpisodeParentArtworkView{}
+	}
+	return EpisodeParentArtworkView{
+		SeriesPosterURL: urls.seriesPosterURL, SeriesPosterThumbhash: p.SeriesPosterThumbhash,
+		SeriesBackdropURL: urls.seriesBackdropURL, SeriesBackdropThumbhash: p.SeriesBackdropThumbhash,
+		SeasonPosterURL: urls.seasonPosterURL, SeasonPosterThumbhash: p.SeasonPosterThumbhash,
+		SeasonBackdropURL: urls.seasonBackdropURL, SeasonBackdropThumbhash: p.SeasonBackdropThumbhash,
+	}
 }
 
 // sectionLocalizationAccess scopes a library's rows to that library, so its
@@ -1843,17 +1971,29 @@ type featuredArtworkPaths struct {
 	posterPath   string
 	backdropPath string
 	logoPath     string
+	// An episode's parent artwork, sized like the poster and backdrop slots.
+	seriesPosterPath   string
+	seriesBackdropPath string
+	seasonPosterPath   string
+	seasonBackdropPath string
 }
 
 // featuredItemArtworkPaths sizes an item card's artwork for a featured surface,
 // each slot at the request's size or target width for it. sectionType picks the
 // unsized backdrop default; recommendations pass none.
 func featuredItemArtworkPaths(item *models.MediaItem, sectionType sections.SectionType, art imagesize.Request) featuredArtworkPaths {
-	return featuredArtworkPaths{
+	paths := featuredArtworkPaths{
 		posterPath:   sizedPosterPath(item.PosterPath, art.For(imagesize.SlotPoster)),
 		backdropPath: sizedSectionBackdropPath(sectionType, item.BackdropPath, art.For(imagesize.SlotBackdrop)),
 		logoPath:     sizedFeaturedLogoPath(item.LogoPath, art.For(imagesize.SlotLogo)),
 	}
+	if p := item.ParentArtwork; p != nil {
+		paths.seriesPosterPath = sizedPosterPath(p.SeriesPosterPath, art.For(imagesize.SlotPoster))
+		paths.seriesBackdropPath = sizedSectionBackdropPath(sectionType, p.SeriesBackdropPath, art.For(imagesize.SlotBackdrop))
+		paths.seasonPosterPath = sizedPosterPath(p.SeasonPosterPath, art.For(imagesize.SlotPoster))
+		paths.seasonBackdropPath = sizedSectionBackdropPath(sectionType, p.SeasonBackdropPath, art.For(imagesize.SlotBackdrop))
+	}
+	return paths
 }
 
 // sectionBackdropPath keeps featured-style backdrops for most sections, but

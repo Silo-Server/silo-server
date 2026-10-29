@@ -15,6 +15,7 @@ type CatalogSearchCapabilities struct {
 	PersonPrefetch        bool   `json:"person_prefetch,omitzero" doc:"Person reads accept prefetch=true for speculative reads that do not queue a provider refresh"`
 	VideoWithEpisodes     bool   `json:"video_with_episodes_scope,omitzero" doc:"listCatalogItems and queryCatalogItems accept type=video_with_episodes on the query source (text search over movies, series, and episodes), and listPeople accepts it as media_scope"`
 	ExtendedQueryRules    bool   `json:"extended_query_rules,omitzero" doc:"Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields"`
+	ShowTitleRules        bool   `json:"show_title_rules,omitzero" doc:"Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match"`
 	LetterIndex           bool   `json:"letter_index,omitzero" doc:"queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`
@@ -30,7 +31,10 @@ type CatalogSearchCapabilitiesOutput struct {
 }
 
 func registerCatalogSearchCapabilities(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/search/capabilities", "getCatalogSearchCapabilities", "catalog", "Search continuation provider, result window, and session lifetime."), Class: ClassProfileScoped, ServiceBacked: true},
+	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/search/capabilities", "getCatalogSearchCapabilities", "catalog", "Search continuation provider, result window, and session lifetime."), Class: ClassProfileScoped, ServiceBacked: true}
+	// A search index result window this build cannot page is 501 capability_unsupported.
+	op.Errors = append(op.Errors, http.StatusNotImplemented)
+	Register(reg, op,
 		func(ctx context.Context, _ *CapabilityInput) (*CatalogSearchCapabilitiesOutput, error) {
 			service, ok := reg.deps.CatalogBrowse.(interface {
 				SearchContinuationCapabilities(context.Context) (catalogpkg.SearchContinuationCapabilities, error)
@@ -51,6 +55,7 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 				FacetValueSearch:   true,
 				VideoWithEpisodes:  true,
 				ExtendedQueryRules: true,
+				ShowTitleRules:     true,
 				LetterIndex:        true,
 				ResultWindowLimit:  result.ResultWindowLimit, SessionTTLSeconds: result.SessionTTLSeconds, MaxSessionsPerAccount: result.MaxSessionsPerAccount,
 			}}, nil

@@ -18,7 +18,7 @@ SILO_SSH=${SILO_SSH:-}
 SILO_DIR=${SILO_DIR:-/opt/silo}
 SILO_COMPOSE_FILE=${SILO_COMPOSE_FILE:-docker-compose.yml}
 SILO_SERVICE=${SILO_SERVICE:-silo}
-SILO_POSTGRES_SERVICE=${SILO_POSTGRES_SERVICE:-postgres}
+SILO_POSTGRES_SERVICE=${SILO_POSTGRES_SERVICE:-silo}
 SILO_DB_USER=${SILO_DB_USER:-silo}
 SILO_DB_NAME=${SILO_DB_NAME:-silo}
 
@@ -44,6 +44,17 @@ on_host() {
 
 compose() {
 	on_host "cd $(printf '%q' "$SILO_DIR") && COMPOSE_FILE=$(printf '%q' "$SILO_COMPOSE_FILE") docker compose $*"
+}
+
+# The compose arguments that start psql. The omnibus image runs PostgreSQL in
+# the Silo container, reached over its socket as the silo account; a stack
+# with a PostgreSQL service of its own runs psql there.
+psql_exec() {
+	if [[ "$SILO_POSTGRES_SERVICE" == "$SILO_SERVICE" ]]; then
+		printf 'exec -T -u silo %s psql -h /run/postgresql' "$SILO_SERVICE"
+	else
+		printf 'exec -T %s psql' "$SILO_POSTGRES_SERVICE"
+	fi
 }
 
 # POST /auth/login and print the access token.
@@ -133,11 +144,14 @@ doctor)
 	fi
 
 	printf 'database '
-	if compose "exec -T $SILO_POSTGRES_SERVICE psql -U $SILO_DB_USER -d $SILO_DB_NAME -tAc 'select 1'" >/dev/null 2>&1; then
+	if compose "$(psql_exec) -U $SILO_DB_USER -d $SILO_DB_NAME -tAc 'select 1'" >/dev/null 2>&1; then
 		printf 'ok (%s/%s)\n' "$SILO_DB_USER" "$SILO_DB_NAME"
 	else
-		printf 'FAIL — psql as %s on %s failed; check POSTGRES_USER/POSTGRES_DB in the deployment .env\n' \
+		printf 'FAIL — psql as %s on %s failed; check SILO_POSTGRES_SERVICE, SILO_DB_USER, and SILO_DB_NAME\n' \
 			"$SILO_DB_USER" "$SILO_DB_NAME"
+		if [[ "$SILO_POSTGRES_SERVICE" == postgres ]]; then
+			printf '         the default docker-compose.yml now runs PostgreSQL in the silo service, and its postgres service exits after the migration; set SILO_POSTGRES_SERVICE, SILO_DB_USER, and SILO_DB_NAME to silo in .silo-dev.env\n'
+		fi
 		status=1
 	fi
 
@@ -169,7 +183,7 @@ logs)
 psql)
 	[[ $# -gt 0 ]] || die 'psql needs a SQL statement'
 	sql=$*
-	compose "exec -T $SILO_POSTGRES_SERVICE psql -U $SILO_DB_USER -d $SILO_DB_NAME -P pager=off -c $(printf '%q' "$sql")"
+	compose "$(psql_exec) -U $SILO_DB_USER -d $SILO_DB_NAME -P pager=off -c $(printf '%q' "$sql")"
 	;;
 
 token)

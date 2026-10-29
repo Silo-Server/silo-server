@@ -42,7 +42,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			SectionType: s.SectionType,
 			Title:       s.Title,
 			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
+			ItemLimit:   ClampItemLimit(s.ItemLimit),
 			Config:      s.Config,
 			Position:    s.Position,
 			WebOnly:     s.WebOnly,
@@ -60,7 +60,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 				rs.Featured = *o.Featured
 			}
 			if o.ItemLimit != nil {
-				rs.ItemLimit = *o.ItemLimit
+				rs.ItemLimit = ClampItemLimit(*o.ItemLimit)
 			}
 			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != jsonNullLiteral {
 				rs.Config = o.Config
@@ -113,7 +113,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			SectionType: s.SectionType,
 			Title:       s.Title,
 			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
+			ItemLimit:   ClampItemLimit(s.ItemLimit),
 			Config:      s.Config,
 			Position:    s.Position,
 			WebOnly:     s.WebOnly,
@@ -132,7 +132,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 				rs.Featured = *o.Featured
 			}
 			if o.ItemLimit != nil {
-				rs.ItemLimit = *o.ItemLimit
+				rs.ItemLimit = ClampItemLimit(*o.ItemLimit)
 			}
 			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != jsonNullLiteral {
 				rs.Config = o.Config
@@ -186,7 +186,7 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 	}
 	limit := 20
 	if o.ItemLimit != nil {
-		limit = *o.ItemLimit
+		limit = ClampItemLimit(*o.ItemLimit)
 	}
 	featured := false
 	if o.Featured != nil {

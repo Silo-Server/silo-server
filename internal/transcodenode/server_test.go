@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1081,6 +1082,21 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores requested MPEG-TS packaging would publish fMP4 under a
+// plan that promises MPEG-TS.
+func TestValidateCopyVideoMPEGTSAttestation(t *testing.T) {
+	request := TranscodeStartRequest{CopyVideoMPEGTS: true}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{CopyVideoMPEGTS: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrCopyVideoMPEGTSAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrCopyVideoMPEGTSAttestationMismatch)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("fMP4 request rejected a legacy node response: %v", err)
+	}
+}
+
 // Requests the node cannot execute as written are refused with 400 before
 // anything runs.
 func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
@@ -1088,6 +1104,7 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 		name         string
 		prepare      bool
 		catalogPaths bool
+		artifactDir  string // relative to the transcode root; empty keeps the default
 		body         any
 	}{
 		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
@@ -1098,6 +1115,27 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
 			TargetCodecVideo: "copy",
 		}},
+		{name: "start with session id outside the transcode root", body: TranscodeStartRequest{
+			SessionID: "../sibling", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the transcode root", body: TranscodeStartRequest{
+			SessionID: ".", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store", body: TranscodeStartRequest{
+			SessionID: downloadprepare.ArtifactDirectoryName, InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store in another case", body: TranscodeStartRequest{
+			SessionID: "Download-Artifacts", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming a configured prepared-download store", artifactDir: "prepared/store",
+			body: TranscodeStartRequest{
+				SessionID: "prepared", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+			}},
 		{name: "start with unapproved input path", catalogPaths: true,
 			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
 		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
@@ -1113,6 +1151,9 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			server := newTestServer(t)
 			if test.catalogPaths {
 				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			if test.artifactDir != "" {
+				server.artifactRoot = filepath.Join(server.transcodeDir, test.artifactDir)
 			}
 			post := postStartRequest
 			if test.prepare {
@@ -1151,6 +1192,18 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return response.CopyFMP4RecipeVersion },
 			want:    playback.CopyFMP4RecipeVersion,
+		},
+		{
+			// Without the echo the API refuses the node rather than publish
+			// fMP4 under a plan that promises MPEG-TS.
+			name: "copy MPEG-TS",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-ts", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, CopyVideoMPEGTS: true, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return strconv.FormatBool(response.CopyVideoMPEGTS) },
+			want:    "true",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -2712,6 +2765,26 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 	}
 	if _, ok := s.lastAccess["ghost-1"]; ok {
 		t.Fatal("touch recorded access for an unregistered session")
+	}
+}
+
+func TestSpawnReconstructRejectsSessionIDOutsideTranscodeRoot(t *testing.T) {
+	server := newTestServer(t)
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+logPath+"\nexit 1\n")
+
+	const sessionID = ".."
+	card := *nativeTransportCard(sessionID, sessionID)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if session != nil {
+		_ = session.Close()
+		t.Fatal("reconstruct registered a session outside the transcode root")
+	}
+	if err != nil {
+		t.Fatalf("spawnReconstruct err = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("ffmpeg ran for a rejected session id (stat err %v)", statErr)
 	}
 }
 

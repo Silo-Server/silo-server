@@ -48,3 +48,21 @@ func TestCanonicalizeCompatPathMediaFolders(t *testing.T) {
 		}
 	}
 }
+
+// TestCanonicalizeCompatPathDisplayPreferencesID covers #2990: the
+// {displayPreferencesId} segment is a case-sensitive storage key, so an id that
+// reads like a route word must keep its case.
+func TestCanonicalizeCompatPathDisplayPreferencesID(t *testing.T) {
+	for in, want := range map[string]string{
+		"/displaypreferences/usersettings":  "/DisplayPreferences/usersettings",
+		"/DisplayPreferences/items":         "/DisplayPreferences/items",
+		"/DisplayPreferences/HLS":           "/DisplayPreferences/HLS",
+		"/DisplayPreferences/Stream.Custom": "/DisplayPreferences/Stream.Custom",
+		"/emby/displaypreferences/users":    "/DisplayPreferences/users",
+		"/DisplayPreferences/items/":        "/DisplayPreferences/items/",
+	} {
+		if got := canonicalizeCompatPath(in); got != want {
+			t.Errorf("canonicalizeCompatPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

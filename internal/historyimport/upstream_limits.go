@@ -134,6 +134,22 @@ func retainItems[T retainedSizer](ctx context.Context, items []T) error {
 	return nil
 }
 
+// releaseItems returns the retained-memory charge for items the run charged
+// with retainItems and has since dropped.
+func releaseItems[T retainedSizer](ctx context.Context, items []T) {
+	budget := runBudgetFrom(ctx)
+	if budget == nil {
+		return
+	}
+	var size int64
+	for i := range items {
+		size += items[i].retainedSize()
+	}
+	budget.mu.Lock()
+	budget.retained -= size
+	budget.mu.Unlock()
+}
+
 // mapEntryOverhead approximates a map entry's storage beyond its key and
 // value bytes.
 const mapEntryOverhead = 48

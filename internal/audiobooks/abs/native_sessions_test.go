@@ -135,9 +135,13 @@ func TestHandlePlayStartCreatesNativePlaybackSession(t *testing.T) {
 	}
 }
 
-func TestHandleSessionCloseStopsNativePlaybackSession(t *testing.T) {
+func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 	absSessions := &fakePlaybackSessionStore{}
 	nativeSessions := playback.NewSessionManager(0, 0)
+	var finished []string
+	nativeSessions.AddFinishHook(func(_ context.Context, s *playback.Session) {
+		finished = append(finished, s.ID)
+	})
 	native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
 	if err != nil {
 		t.Fatalf("start native session: %v", err)
@@ -170,6 +174,10 @@ func TestHandleSessionCloseStopsNativePlaybackSession(t *testing.T) {
 	}
 	if _, err := nativeSessions.GetSession(native.ID); err == nil {
 		t.Fatalf("native session still exists after close")
+	}
+	// The finish hook is what records the play in admin playback history.
+	if len(finished) != 1 || finished[0] != native.ID {
+		t.Fatalf("finish hooks ran for %v, want [%s]", finished, native.ID)
 	}
 	if syncer.calls == 0 {
 		t.Fatalf("native session syncer was not called")

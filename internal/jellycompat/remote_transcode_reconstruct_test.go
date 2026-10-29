@@ -353,6 +353,8 @@ func (m *lockedCompatSessionManager) SetTranscodeStreamDetails(
 	transcodeAudio bool,
 	hwAccel string,
 	mode tonemap.Mode,
+	targetResolution string,
+	targetBitrateKbps int,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -361,6 +363,8 @@ func (m *lockedCompatSessionManager) SetTranscodeStreamDetails(
 	m.session.TranscodeAudio = transcodeAudio
 	m.session.TranscodeHWAccel = hwAccel
 	m.session.ToneMapMode = mode
+	m.session.TargetResolution = targetResolution
+	m.session.TargetBitrateKbps = targetBitrateKbps
 	return nil
 }
 

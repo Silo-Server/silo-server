@@ -179,6 +179,19 @@ type WatchChapter struct {
 type WatchMarker struct {
 	StartSeconds float64 `json:"start_seconds" example:"0"`
 	EndSeconds   float64 `json:"end_seconds" example:"90"`
+	// Source is the class of source that produced the range: "scanner" for
+	// local detection, "plugin" or "online" for a marker provider, "manual" for
+	// one a person set. Absent when the file row recorded no source.
+	Source string `json:"source,omitempty" enum:"scanner,online,plugin,s3,manual"`
+	// Provider is the provider that supplied the range — a plugin capability id
+	// such as "introdb", or "built_in" — empty for local detection.
+	Provider string `json:"provider,omitempty"`
+	// Confidence is the source's own rating, 0-1, absent when the marker was
+	// never rated. It is a pointer because an unrated marker is stored as 0, and
+	// a client rendering that as a real "0%" would be inventing a measurement.
+	Confidence *float64 `json:"confidence,omitempty" minimum:"0" maximum:"1"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4" or "introdb:v4".
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
 // WatchPlaybackVariant is one logical watch choice.
@@ -265,14 +278,14 @@ func registerWatch(reg *Registry) {
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
-		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op.")
+		"Mark an item watched for the acting profile; a season or series marks every episode. Marking an already watched item is a no-op, except a movie or episode with a resume position from a rewatch: that records another play and clears the position. A season or series mark leaves such episodes alone.")
 	mark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: mark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, true)
 	})
 
 	unmark := humaOp(http.MethodDelete, Prefix+"/watched/{id}", "unmarkWatched", "watch",
-		"Mark an item unwatched for the acting profile; a season or series clears every episode. The server chooses the history cutoff when this request runs.")
+		"Mark an item unwatched for the acting profile; a season or series clears every episode. Clears the watched state and resume position and keeps watch history. Plays at or before the cutoff the server chooses when this request runs no longer count as watched.")
 	unmark.DefaultStatus = http.StatusNoContent
 	Register(reg, Operation{Operation: unmark, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *WatchedInput) (*struct{}, error) {
 		return reg.setWatched(ctx, in, false)
@@ -335,7 +348,8 @@ func watchTargetProblem(err error, location string) error {
 	return serviceProblem(err)
 }
 
-// setWatched runs the same command as v1 POST/DELETE /watched/{id}.
+// setWatched runs the same command as v1 POST/DELETE /watched/{id}, except
+// that marking a movie or episode watched mid-rewatch records another play.
 func (reg *Registry) setWatched(ctx context.Context, in *WatchedInput, played bool) (*struct{}, error) {
 	if reg.deps.Watch == nil {
 		return nil, unavailable("watch")
@@ -348,7 +362,7 @@ func (reg *Registry) setWatched(ctx context.Context, in *WatchedInput, played bo
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	if _, err := reg.deps.Watch.SetWatchedState(ctx, userID, profileID, string(in.ID), played, filter); err != nil {
+	if _, err := reg.deps.Watch.SetWatchedState(ctx, userID, profileID, string(in.ID), played, played, filter); err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil
@@ -493,7 +507,16 @@ func watchMarkerOf(m *catalogpkg.Marker) *WatchMarker {
 	if m == nil {
 		return nil
 	}
-	return &WatchMarker{StartSeconds: m.Start, EndSeconds: m.End}
+	out := &WatchMarker{
+		StartSeconds: m.Start,
+		EndSeconds:   m.End,
+		Source:       m.Source,
+		Provider:     m.Provider,
+		Algorithm:    m.Algorithm,
+	}
+	// Absent, not zero: an unrated marker must not read as a rated 0.
+	out.Confidence = m.Confidence
+	return out
 }
 
 func watchUserDataOf(u *catalogpkg.SeasonUserData) *WatchUserData {
@@ -527,6 +550,6 @@ func optionalIDOfInt(n int) ID {
 type WatchService interface {
 	ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error)
 	WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error)
-	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
+	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
 	ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) error
 }

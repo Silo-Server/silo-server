@@ -1,9 +1,6 @@
 export type PosterSize = "compact" | "standard" | "large";
-export type CardCaption = "title_metadata" | "title" | "artwork";
-
 export interface CardPresentation {
   poster_size: PosterSize;
-  caption: CardCaption;
 }
 
 export type PrimaryMenuBuiltin =
@@ -51,42 +48,15 @@ export interface ShortcutDocument {
   items: ShortcutTarget[];
 }
 
-export const DEFAULT_CARD_PRESENTATION: CardPresentation = {
-  poster_size: "standard",
-  caption: "title_metadata",
-};
+export const DEFAULT_CARD_PRESENTATION: CardPresentation = { poster_size: "standard" };
 
-export const CARD_PRESENTATION_PRESETS = [
-  {
-    id: "balanced",
-    label: "Balanced",
-    description: "Standard posters with titles and metadata.",
-    value: DEFAULT_CARD_PRESENTATION,
-  },
-  {
-    id: "compact",
-    label: "Compact",
-    description: "More posters on screen with titles only.",
-    value: { poster_size: "compact", caption: "title" },
-  },
-  {
-    id: "cinema",
-    label: "Cinema",
-    description: "Large posters with titles only.",
-    value: { poster_size: "large", caption: "title" },
-  },
-  {
-    id: "artwork",
-    label: "Artwork only",
-    description: "Large artwork without caption rows.",
-    value: { poster_size: "large", caption: "artwork" },
-  },
-] as const satisfies ReadonlyArray<{
-  id: string;
-  label: string;
-  description: string;
-  value: CardPresentation;
-}>;
+/**
+ * The stored ui.card_presentation document. caption is retired and every card
+ * shows its title and details, but the schema still requires the field.
+ */
+export function cardPresentationValue(presentation: CardPresentation) {
+  return { poster_size: presentation.poster_size, caption: "title_metadata" } as const;
+}
 
 const BUILTIN_DESTINATIONS = new Set<PrimaryMenuBuiltin>([
   "home",
@@ -98,7 +68,6 @@ const BUILTIN_DESTINATIONS = new Set<PrimaryMenuBuiltin>([
   "calendar",
 ]);
 const POSTER_SIZES = new Set<PosterSize>(["compact", "standard", "large"]);
-const CARD_CAPTIONS = new Set<CardCaption>(["title_metadata", "title", "artwork"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -170,16 +139,10 @@ function parseMenuItem(value: unknown, allowBuiltin: boolean): PrimaryMenuItem |
 export function parseCardPresentation(value: unknown): CardPresentation {
   if (!isObject(value)) return DEFAULT_CARD_PRESENTATION;
   const posterSize = value.poster_size;
-  const caption = value.caption;
-  if (
-    typeof posterSize !== "string" ||
-    !POSTER_SIZES.has(posterSize as PosterSize) ||
-    typeof caption !== "string" ||
-    !CARD_CAPTIONS.has(caption as CardCaption)
-  ) {
+  if (typeof posterSize !== "string" || !POSTER_SIZES.has(posterSize as PosterSize)) {
     return DEFAULT_CARD_PRESENTATION;
   }
-  return { poster_size: posterSize as PosterSize, caption: caption as CardCaption };
+  return { poster_size: posterSize as PosterSize };
 }
 
 export function menuItemKey(item: PrimaryMenuItem): string {
@@ -315,7 +278,5 @@ export function carouselIntrinsicHeight(size: PosterSize): string {
   }
 }
 
-export function cardTextAreaHeight(caption: CardCaption): number {
-  if (caption === "artwork") return 0;
-  return caption === "title" ? 28 : 44;
-}
+/** Height of the title and details lines under a grid poster. */
+export const CARD_TEXT_AREA_HEIGHT = 44;

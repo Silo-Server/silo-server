@@ -85,6 +85,7 @@ func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 			AllowedLibraryIDs:          []int{2, 4},
 			MaxContentRating:           "PG-13",
 			MaxPlaybackQuality:         "720p",
+			PINRevision:                6,
 		}}},
 		nil,
 	)
@@ -102,6 +103,10 @@ func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 	}
 	if scope.MaxContentRating != "PG-13" || scope.MaxPlaybackQuality != "1080p" {
 		t.Fatalf("unexpected scope ceilings: %+v", scope)
+	}
+	// Credentials bound to the profile's PIN revision compare against this.
+	if scope.ProfilePINRevision != 6 {
+		t.Fatalf("ProfilePINRevision = %d, want 6", scope.ProfilePINRevision)
 	}
 }
 

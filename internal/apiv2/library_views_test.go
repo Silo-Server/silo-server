@@ -120,7 +120,8 @@ func (f *fakeLibraryAdmin) SetLibraryProviders(_ context.Context, id int, levels
 // --- viewer fakes ---
 
 type fakeLibraryViews struct {
-	err        error
+	err error
+	// lastViewer is the viewer LibrarySections last saw.
 	lastViewer handlers.SectionViewer
 }
 

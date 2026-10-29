@@ -118,8 +118,8 @@ without claiming which.
 The orchestrator's stop timeout must outlast the drain, or it kills the node
 mid-drain:
 
-- **Docker Compose** defaults to a 10-second grace before SIGKILL. The example
-  `silo-transcode` service sets `stop_grace_period` to the drain timeout plus a
+- **Docker Compose** defaults to a 10-second grace before SIGKILL.
+  `docker-compose.node.yml` sets `stop_grace_period` to the drain timeout plus a
   minute for the shutdown that follows (`11m` for the default).
 - **Kubernetes** pods need `terminationGracePeriodSeconds` of at least
   `SILO_NODE_DRAIN_TIMEOUT` plus 60 seconds. Keep the liveness and readiness

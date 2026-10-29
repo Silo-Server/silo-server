@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http/httptest"
 	"net/url"
 	"slices"
@@ -289,6 +290,31 @@ func TestConfiguredBrowseWithoutTotalStopsAfterLookahead(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestConfiguredBrowseHugeLimitWithoutTotal pins that a Limit near math.MaxInt
+// still returns the page from Offset. Offset+Limit used to wrap negative and
+// end the scan at the first match, before the page.
+func TestConfiguredBrowseHugeLimitWithoutTotal(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	var items []upstreamListItem
+	for _, id := range []string{"movie-1", "movie-2", "movie-3"} {
+		items = append(items, upstreamListItem{ContentID: id, Type: "movie"})
+		if _, err := store.AddFavorite(t.Context(), "p1", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &directContentService{storeProvider: compatTestUserStoreProvider{store: store}}
+	filters := catalog.BrowseFilters{IsFavorite: true, Offset: 1, Limit: math.MaxInt}
+	result, err := svc.browseConfiguredUserState(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "p1"}, filters, false, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+		return items, false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Items[0].ContentID != "movie-2" || result.Items[1].ContentID != "movie-3" || result.HasMore {
+		t.Fatalf("page: %+v", result)
 	}
 }
 

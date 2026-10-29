@@ -401,6 +401,8 @@ export default function LibraryBrowse({
           <ItemGrid
             gridRef={gridRef}
             totalItems={gridTotalItems}
+            // The letter index's total is exact.
+            knownItems={showLetterBar ? gridTotalItems : catalogQuery.data?.knownItems}
             pages={pages}
             pageSize={limit}
             libraryId={libraryId}

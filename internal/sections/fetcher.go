@@ -40,7 +40,15 @@ type SectionWithItems struct {
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
 type SectionItemMeta struct {
 	// Raw still path, before image sizing or signing; nil means unavailable metadata.
-	EpisodeStillPath  *string
+	EpisodeStillPath *string
+	// ParentArtwork is the episode's season and series artwork, raw paths
+	// before sizing or signing; nil means unavailable metadata.
+	ParentArtwork *models.EpisodeParentArtwork
+	// EpisodeAirDate (YYYY-MM-DD) and RatingTMDB reach the v2 episode card
+	// only. They stay off the item because frozen v1 responses serialize it
+	// (the admin section preview) or its rating_tmdb (section cards).
+	EpisodeAirDate    *string
+	RatingTMDB        *float64
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -1368,7 +1376,7 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 	}
 	switch s.SectionType {
 	case SectionGenre, SectionCustomFilter:
-		return f.fetchFiltered(ctx, s, libraryID, libraryIDs, filter)
+		return f.fetchFiltered(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionRandom:
 		return f.fetchRandom(ctx, s, libraryID, libraryIDs, filter)
 	case SectionCollection:
@@ -1548,7 +1556,7 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 				Config:      cfgBytes,
 				Position:    s.Position,
 			}
-			return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
+			return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, userID, profileID, filter)
 		}
 
 		qd, ok := applySectionLibraryScopeToQuery(qd.Normalize(), libraryID, libraryIDs)
@@ -2877,10 +2885,16 @@ func (f *Fetcher) fetchRecentlyReleased(ctx context.Context, s ResolvedSection, 
 	return items, len(items), err
 }
 
-func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	def, err := ParseQueryDefinition(s.Config)
 	if err != nil {
 		return nil, 0, fmt.Errorf("parsing query definition: %w", err)
+	}
+	// Rules and sorts on the viewer's own state (watched, favorited, progress,
+	// ...) read it for the requesting profile. Such a row is never served from
+	// the shared cache (isCacheableSectionType), so the scope stays per profile.
+	if def.IsPersonalized() {
+		filter.UserID, filter.ProfileID = userID, profileID
 	}
 
 	def, ok := applySectionLibraryScopeToQuery(def, libraryID, libraryIDs)
@@ -3067,6 +3081,15 @@ func markEpisodeStillProvenance(item *models.MediaItem, stillPath string) {
 	item.BackdropIsEpisodeStill = new(stillPath != "" && item.BackdropPath == stillPath)
 }
 
+// episodeAirDate is an episode card's release date: its air date, as in the
+// episode catalog scope.
+func episodeAirDate(airDate *time.Time) *string {
+	if airDate == nil {
+		return nil
+	}
+	return new(airDate.Format(time.DateOnly))
+}
+
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
@@ -3092,6 +3115,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			e.overview,
 			e.runtime,
 			e.rating_imdb,
+			e.rating_tmdb,
 			COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
 			COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
 			e.season_number,
@@ -3104,7 +3128,15 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
 			si.status,
-			COALESCE(e.still_path, '')
+			COALESCE(e.still_path, ''),
+			COALESCE(si.poster_path, ''),
+			COALESCE(si.poster_thumbhash, ''),
+			COALESCE(si.backdrop_path, ''),
+			COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(s.poster_path, ''),
+			COALESCE(s.poster_thumbhash, ''),
+			COALESCE(s.backdrop_path, ''),
+			COALESCE(s.backdrop_thumbhash, '')
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -3126,6 +3158,8 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			seriesTitle   string
 			airDate       *time.Time
 			stillPath     string
+			parent        models.EpisodeParentArtwork
+			ratingTMDB    *float64
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -3135,6 +3169,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.Overview,
 			&item.Runtime,
 			&item.RatingIMDB,
+			&ratingTMDB,
 			&item.PosterPath,
 			&item.PosterThumbhash,
 			&seasonNumber,
@@ -3148,14 +3183,26 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.LogoPath,
 			&item.Status,
 			&stillPath,
+			&parent.SeriesPosterPath,
+			&parent.SeriesPosterThumbhash,
+			&parent.SeriesBackdropPath,
+			&parent.SeriesBackdropThumbhash,
+			&parent.SeasonPosterPath,
+			&parent.SeasonPosterThumbhash,
+			&parent.SeasonBackdropPath,
+			&parent.SeasonBackdropThumbhash,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
 		markEpisodeStillProvenance(&item, stillPath)
+		item.ParentArtwork = &parent
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
 			EpisodeStillPath: new(stillPath),
+			ParentArtwork:    &parent,
+			EpisodeAirDate:   episodeAirDate(airDate),
+			RatingTMDB:       ratingTMDB,
 			SeriesID:         &seriesID,
 			SeriesTitle:      seriesTitle,
 			SeasonNumber:     &seasonNumber,
@@ -3528,6 +3575,7 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
 	args = append(args, scope.interval)
 	argIdx++
+	conditions = append(conditions, catalog.HistoryCountsAsWatchedSQL("uwh"))
 
 	if scope.userID > 0 {
 		conditions = append(conditions, fmt.Sprintf("uwh.user_id = $%d", argIdx))
@@ -4145,6 +4193,7 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			JOIN episodes we ON we.content_id = uwh.media_item_id
 			WHERE uwh.user_id = $1
 			  AND uwh.profile_id = $2
+			  AND `+catalog.HistoryCountsAsWatchedSQL("uwh")+`
 			GROUP BY we.series_id
 		)
 		SELECT %s FROM %s JOIN watched w ON w.series_id = mi.content_id WHERE %s

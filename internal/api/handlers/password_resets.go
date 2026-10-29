@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
@@ -54,7 +55,7 @@ func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input pas
 	if err := auth.CheckOwnerTarget(actor, target); err != nil {
 		return nil, ownerError(err)
 	}
-	if actorIsScopedAPIKey(ctx) && target.Role == roleAdmin {
+	if apimw.IsScopedAPIKey(ctx) && target.Role == roleAdmin {
 		return nil, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
 	}
 	return h.service.Issue(ctx, input)

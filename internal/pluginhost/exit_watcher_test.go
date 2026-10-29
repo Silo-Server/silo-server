@@ -60,10 +60,24 @@ func buildExitingPlugin(t *testing.T) (string, *pluginv1.PluginManifest) {
 	return bin, manifest
 }
 
+// A plugin process gets the plugin environment, not the server's: the fixture
+// exits at startup when it can see SILO_TEST_HOST_ONLY.
+func TestHostStartWithholdsServerEnvironment(t *testing.T) {
+	bin, manifest := buildExitingPlugin(t)
+	t.Setenv("SILO_TEST_HOST_ONLY", "secret")
+
+	host := pluginhost.NewHost(pluginhost.Config{Logger: hclog.NewNullLogger()})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := host.Start(ctx, pluginhost.StartRequest{InstallationID: 6, BinaryPath: bin, Manifest: manifest}); err != nil {
+		t.Fatalf("host.Start with SILO_TEST_HOST_ONLY set on the server: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Stop(6) })
+}
+
 func TestHostExitWatcherReportsCrash(t *testing.T) {
 	bin, manifest := buildExitingPlugin(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	host := pluginhost.NewHost(pluginhost.Config{
 		Logger:            hclog.NewNullLogger(),
@@ -105,8 +119,7 @@ func TestHostExitWatcherReportsCrash(t *testing.T) {
 
 func TestHostExitWatcherIgnoresDeliberateStop(t *testing.T) {
 	bin, manifest := buildExitingPlugin(t)
-	exitFile := filepath.Join(t.TempDir(), "exit-now")
-	t.Setenv("SILO_TEST_PLUGIN_EXIT_FILE", exitFile)
+	exitFile := filepath.Join(filepath.Dir(bin), "exit-now")
 
 	host := pluginhost.NewHost(pluginhost.Config{
 		Logger:            hclog.NewNullLogger(),

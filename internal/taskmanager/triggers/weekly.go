@@ -15,6 +15,7 @@ type WeeklyTrigger struct {
 	hour      int
 	minute    int
 	ch        chan struct{}
+	spread    time.Duration
 	nextRun   time.Time
 	timer     *time.Timer
 	stopCh    chan struct{}
@@ -33,13 +34,20 @@ func NewWeeklyTrigger(cfg taskmanager.TriggerConfig) *WeeklyTrigger {
 	}
 }
 
+// SetStartSpread implements taskmanager.SpreadableTrigger.
+func (w *WeeklyTrigger) SetStartSpread(spread time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.spread = spread
+}
+
 func (w *WeeklyTrigger) calcNextRun(now time.Time) time.Time {
 	daysAhead := (int(w.dayOfWeek) - int(now.Weekday()) + 7) % 7
 	target := time.Date(now.Year(), now.Month(), now.Day()+daysAhead, w.hour, w.minute, 0, 0, now.Location())
 	if daysAhead == 0 && !target.After(now) {
 		target = target.Add(7 * 24 * time.Hour)
 	}
-	return target
+	return spreadStart(target, w.spread)
 }
 
 func (w *WeeklyTrigger) Start(_ *taskmanager.ExecutionResult) {

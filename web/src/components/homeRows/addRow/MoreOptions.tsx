@@ -29,13 +29,14 @@ export function MoreOptions({
   children,
 }: {
   itemLimit: number;
-  hero: boolean;
+  /** Absent where rows have no hero banner (Requests > Discover Page). */
+  hero?: boolean;
   /** The hero banner is kept off the apps. */
   webOnly?: boolean;
   /** What the kind's own options hold, first on the summary line ("Highest rated first"). */
   summary?: string;
   onItemLimitChange: (limit: number) => void;
-  onHeroChange: (hero: boolean) => void;
+  onHeroChange?: (hero: boolean) => void;
   /** With it, a hero row offers "Show in the apps" under Hero banner. */
   onWebOnlyChange?: (webOnly: boolean) => void;
   /** Kind-specific fields, shown above the common ones. */
@@ -64,14 +65,18 @@ export function MoreOptions({
                 </>
               ) : null}
               {titleCount(itemLimit)}
-              <span aria-hidden className="mx-1.5">
-                ·
-              </span>
-              {hero
-                ? webOnly
-                  ? "the hero banner on the web only"
-                  : "the hero banner"
-                : "not the hero banner"}
+              {onHeroChange ? (
+                <>
+                  <span aria-hidden className="mx-1.5">
+                    ·
+                  </span>
+                  {hero
+                    ? webOnly
+                      ? "the hero banner on the web only"
+                      : "the hero banner"
+                    : "not the hero banner"}
+                </>
+              ) : null}
             </span>
           </span>
         </AccordionTrigger>
@@ -101,22 +106,24 @@ export function MoreOptions({
               onBlur={() => setTypedLimit(null)}
             />
           </div>
-          <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
-            <div>
-              <Label htmlFor={`${id}-hero`}>Hero banner</Label>
-              <p className="text-muted-foreground mt-1 text-[13px]">
-                {onWebOnlyChange
-                  ? "The web shows this row as a banner."
-                  : "The web shows this row as a banner. The apps show it as a regular row."}
-              </p>
+          {onHeroChange ? (
+            <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
+              <div>
+                <Label htmlFor={`${id}-hero`}>Hero banner</Label>
+                <p className="text-muted-foreground mt-1 text-[13px]">
+                  {onWebOnlyChange
+                    ? "The web shows this row as a banner."
+                    : "The web shows this row as a banner. The apps show it as a regular row."}
+                </p>
+              </div>
+              <Switch
+                id={`${id}-hero`}
+                checked={hero ?? false}
+                onCheckedChange={(checked) => onHeroChange(checked === true)}
+              />
             </div>
-            <Switch
-              id={`${id}-hero`}
-              checked={hero}
-              onCheckedChange={(checked) => onHeroChange(checked === true)}
-            />
-          </div>
-          {hero && onWebOnlyChange ? (
+          ) : null}
+          {hero && onHeroChange && onWebOnlyChange ? (
             <div className="border-border/70 ml-4 flex items-center justify-between gap-4 border-l-2 pl-4">
               <div>
                 <Label htmlFor={`${id}-apps`}>Show in the apps</Label>

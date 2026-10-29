@@ -3,11 +3,11 @@ package metadata
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
@@ -96,7 +96,7 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 		if folder := probes[folderOf[i]]; !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodePermissionDenied {
 			continue
 		}
-		_, err := os.Lstat(path)
+		_, err := fspath.Lstat(path)
 		visible[i] = err == nil
 	}
 	return visible
@@ -114,7 +114,7 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 // was serving stays as the stand-in, as a cached copy would, so a sidecar
 // whose copy fails never leaves the slot blank. Locked artwork gets no
 // stand-in the admin did not choose.
-func applyLocalArtworkFallback(item, existing *models.MediaItem, images []RemoteImage, preferredLang string) {
+func applyLocalArtworkFallback(item, existing *models.MediaItem, images []RemoteImage, preferredLang, fallbackLang string) {
 	if artworkLocked(item) {
 		return
 	}
@@ -125,7 +125,7 @@ func applyLocalArtworkFallback(item, existing *models.MediaItem, images []Remote
 		}
 		if remote == nil {
 			best := &models.MediaItem{}
-			applyBestImages(best, withoutLocalImages(images), MergeReplaceUnlocked, preferredLang)
+			applyBestImages(best, withoutLocalImages(images), MergeReplaceUnlocked, preferredLang, fallbackLang)
 			remote = itemArtworkFields(best)
 		}
 		fallback := *remote[i].path

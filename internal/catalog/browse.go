@@ -437,6 +437,20 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	if filters.Offset < 0 {
 		filters.Offset = 0
 	}
+	// scopeLibraryIDs restricts which library rows the browse joins. A browse
+	// of one library that also carries the viewer's allowed libraries (as every
+	// Jellyfin library browse does) is still a single-library browse: the
+	// allowed list either contains that library and adds nothing, or leaves
+	// nothing to return. Leaving it out keeps the single-library index walk
+	// below. filters.LibraryIDs itself stays set: the file-level predicates
+	// (audio and subtitle languages) still limit files to allowed libraries.
+	scopeLibraryIDs := filters.LibraryIDs
+	if filters.LibraryID > 0 && filters.LibraryIDs != nil {
+		if !slices.Contains(filters.LibraryIDs, filters.LibraryID) {
+			return browseQueryPlan{}, true, nil
+		}
+		scopeLibraryIDs = nil
+	}
 	if filters.Order == "" {
 		filters.Order = "desc"
 	}
@@ -522,7 +536,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	}
 
 	// Library access control: restrict to user's accessible libraries.
-	needsLibJoin := filters.LibraryID > 0 || filters.LibraryIDs != nil || filters.Sort == browseSortRecentlyAdded
+	needsLibJoin := filters.LibraryID > 0 || scopeLibraryIDs != nil || filters.Sort == browseSortRecentlyAdded
 	needsPersonJoin := filters.PersonID > 0
 	// When filtering by exactly one library and no person join, each
 	// content_id matches at most one mil row, so the GROUP BY usually added
@@ -530,7 +544,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	// mil.first_seen_at exploit idx_item_libraries_folder_seen_content
 	// directly — turning a full-library scan + heapsort into a top-N index
 	// walk.
-	singleLibraryNoDedup := filters.LibraryID > 0 && filters.LibraryIDs == nil && !needsPersonJoin
+	singleLibraryNoDedup := filters.LibraryID > 0 && scopeLibraryIDs == nil && !needsPersonJoin
 
 	if filters.PersonID > 0 {
 		conditions = append(conditions, fmt.Sprintf("ip.person_id = $%d", argIdx))
@@ -544,22 +558,21 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
-	if filters.LibraryIDs != nil {
-		if len(filters.LibraryIDs) == 0 {
+	if scopeLibraryIDs != nil {
+		if len(scopeLibraryIDs) == 0 {
 			// User has empty library access — return no results.
 			return browseQueryPlan{}, true, nil
 		}
 		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, filters.LibraryIDs)
+		args = append(args, scopeLibraryIDs)
 		argIdx++
 	}
 
+	// Without the membership join an item must still belong to some library.
+	if !needsLibJoin {
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if !needsLibJoin {
-			conditions = append(conditions,
-				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-			)
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
 			argIdx,
@@ -644,10 +657,14 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	}, false, nil
 }
 
-// filterWhereClause builds the common WHERE clause and FROM clause used by the
-// ListXxx distinct-value methods.  If the returned earlyEmpty flag is true the
-// caller should return an empty result immediately (e.g. when LibraryIDs is an
-// empty slice).
+// RestrictToLibraryCollection limits a browse to the members of a stored
+// library collection. The membership is joined in SQL rather than passed as a
+// ContentIDs allowlist, so a large collection costs one page, not every ID.
+func (f *BrowseFilters) RestrictToLibraryCollection(collectionID string) {
+	f.contentSourceSQL = "SELECT media_item_id FROM library_collection_items WHERE collection_id = $1"
+	f.contentSourceArgs = []any{collectionID}
+}
+
 func appendBrowseContentSource(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
 	if filters.contentSourceSQL == "" {
 		return
@@ -657,6 +674,10 @@ func appendBrowseContentSource(filters BrowseFilters, conditions *[]string, args
 	*argIdx += len(filters.contentSourceArgs)
 }
 
+// filterWhereClause builds the common WHERE clause and FROM clause used by the
+// ListXxx distinct-value methods.  If the returned earlyEmpty flag is true the
+// caller should return an empty result immediately (e.g. when LibraryIDs is an
+// empty slice).
 func filterWhereClause(filters BrowseFilters) (fromClause, whereClause string, args []any, earlyEmpty bool) {
 	return filterWhereClauseForSource(filters, "media_items mi", "")
 }
@@ -729,15 +750,18 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		))
 	}
 
+	// With no library named, an item must still belong to one (see
+	// InSomeLibraryWhere), so a filter value never comes only from an item the
+	// listing leaves out. The membership table follows the scope here.
+	if len(positiveLibraryConditions) == 0 && (len(filters.DisabledLibraryIDs) > 0 || !isEpisodeCatalogScope(mediaScope)) {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
+			membershipTable,
+			membershipKey,
+			libraryContentExpr,
+		))
+	}
 	if len(filters.DisabledLibraryIDs) > 0 {
-		if len(positiveLibraryConditions) == 0 {
-			conditions = append(conditions, fmt.Sprintf(
-				"EXISTS (SELECT 1 FROM %s mil_scope_any WHERE mil_scope_any.%s = %s)",
-				membershipTable,
-				membershipKey,
-				libraryContentExpr,
-			))
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s mil_scope_out WHERE mil_scope_out.%s = %s AND mil_scope_out.media_folder_id = ANY($%d))",
 			membershipTable,
@@ -1539,7 +1563,7 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 	case "last_air_date":
 		return fmt.Sprintf(
 			"ORDER BY %s %s%s, mi.content_id ASC",
-			effectiveLastAirDateExpr("mi"),
+			latestAvailableAirDateSortExpr("mi"),
 			direction,
 			nullsClause,
 		), nil

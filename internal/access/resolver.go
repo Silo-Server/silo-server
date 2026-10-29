@@ -130,6 +130,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		}
 		scope.ProfileVerified = verified
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
+		scope.ProfilePINRevision = profile.PINRevision
 	}
 
 	scope.PreferencesDegraded = preferences.Degraded

@@ -47,15 +47,25 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 // in $1. Audit 2026-05-01 §2.1 hot path #1: the last-air-date sort reads a
 // column instead of a per-row correlated subquery.
 //
-// Both values depend on the current date, so an episode write is not the only
-// thing that can make them stale: a known future episode airing does too.
+// It also maintains latest_available_episode_air_date_at, the newest aired
+// episode with a file in a library (episode_libraries). The "Latest Episode
+// Air Date" sort and rule read it, so a series ranks by the newest episode a
+// viewer can play, not by one the provider lists but no library has
+// (issue #2741). last_air_date_at keeps naming the show's newest aired
+// episode for the series' last_air_date field. Because the available value
+// depends on files, membership changes recompute it through
+// RecomputeSeriesEpisodeMembershipDenorms.
+//
+// All three values depend on the current date, so an episode write is not the
+// only thing that can make them stale: a known future episode airing does too.
 // Upsert, BulkUpsert, and air-date edits through UpdateMetadata run this for
 // the written series, and RefreshDueSeriesAirDates runs it for series whose
-// next_air_date_at has passed.
+// next_air_date_at has passed. next_air_date_at counts every known episode, so
+// the sweep also revisits a series whose file arrived before its air date.
 //
 // Drive the subquery from UNNEST($1) with a LEFT JOIN so every input
 // series_id produces exactly one row in `sub` — including series without a
-// dated episode, where both aggregates are NULL. Without this, GROUP BY over
+// dated episode, where every aggregate is NULL. Without this, GROUP BY over
 // a filtered `episodes` scan would drop those series and leave stale values
 // from an earlier sync (e.g., a series whose air dates were corrected to NULL
 // would never reset). The IS DISTINCT FROM guards handle NULL vs non-NULL
@@ -68,10 +78,15 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 const refreshSeriesAirDatesSQL = `
 	UPDATE media_items mi
 	SET last_air_date_at = sub.last_aired,
+		latest_available_episode_air_date_at = sub.last_available,
 		next_air_date_at = sub.next_airing
 	FROM (
 		SELECT s.series_id,
 			MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE) AS last_aired,
+			MAX(e.air_date) FILTER (
+				WHERE e.air_date <= CURRENT_DATE
+				  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)
+			) AS last_available,
 			MIN(e.air_date) FILTER (WHERE e.air_date > CURRENT_DATE) AS next_airing
 		FROM unnest($1::text[]) AS s(series_id)
 		LEFT JOIN episodes e
@@ -82,7 +97,38 @@ const refreshSeriesAirDatesSQL = `
 	WHERE mi.content_id = sub.series_id
 	  AND mi.type = 'series'
 	  AND (mi.last_air_date_at IS DISTINCT FROM sub.last_aired
+		   OR mi.latest_available_episode_air_date_at IS DISTINCT FROM sub.last_available
 		   OR mi.next_air_date_at IS DISTINCT FROM sub.next_airing)`
+
+// lockSeriesAirDatesSQL locks the series rows in $1 before
+// refreshSeriesAirDatesSQL runs as its own statement, so the recompute's
+// snapshot includes every episode and membership write that committed for
+// them. A recompute that instead waited on a row a concurrent write held would
+// apply its older aggregate over that write's result, so writers that add
+// episode library memberships recompute through this lock too rather than
+// bumping the column in their insert statement. NO KEY UPDATE is the
+// lock the UPDATE itself takes: FOR UPDATE would conflict with the KEY SHARE
+// lock a transaction's own episode or file inserts hold on the series row,
+// and two imports into one series would deadlock.
+const lockSeriesAirDatesSQL = `
+	SELECT 1 FROM media_items
+	WHERE content_id = ANY($1::text[])
+	  AND type = 'series'
+	ORDER BY content_id
+	FOR NO KEY UPDATE`
+
+// refreshSeriesAirDates locks the series in seriesIDs, then recomputes their
+// air-date columns. Call it inside the transaction that wrote their episodes
+// or episode library memberships.
+func refreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []string) error {
+	if _, err := tx.Exec(ctx, lockSeriesAirDatesSQL, seriesIDs); err != nil {
+		return fmt.Errorf("lock series for air date refresh: %w", err)
+	}
+	if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, seriesIDs); err != nil {
+		return fmt.Errorf("refresh series air dates: %w", err)
+	}
+	return nil
+}
 
 // dueSeriesAirDatesSQL claims up to $1 series whose next known episode has
 // aired since their air-date columns were last computed. It reads the partial
@@ -312,6 +358,11 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 	return episodes, nil
 }
 
+// episodeArtworkAssignments keeps an episode still an admin picked after the
+// writer read the episode; see lockedArtworkAssignments.
+var episodeArtworkAssignments = lockedArtworkAssignments("episodes", seriesImagesLockedSQL("episodes"),
+	"still_path", "still_source_path", "still_thumbhash")
+
 // Upsert inserts a new episode or updates all mutable fields if the
 // (series_id, season_number, episode_number) natural key already exists. The
 // stored content ID is preserved on update and written back to ep.ContentID.
@@ -372,39 +423,52 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
 			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
 			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
-			still_path = EXCLUDED.still_path,
-			still_source_path = EXCLUDED.still_source_path,
-			still_thumbhash = EXCLUDED.still_thumbhash,
+			` + episodeArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING content_id`
+		RETURNING content_id, xmax = 0`
 
 	var storedContentID string
-	err := r.pool.QueryRow(ctx, query,
-		ep.ContentID,
-		ep.SeriesID,
-		seasonID,
-		ep.SeasonNumber,
-		ep.EpisodeNumber,
-		ep.Title,
-		ep.DefaultMetadataLanguage,
-		ep.Overview,
-		ep.AirDate,
-		ep.Runtime,
-		ep.RatingIMDB,
-		ep.RatingTMDB,
-		ep.ImdbID,
-		ep.TmdbID,
-		ep.TvdbID,
-		ep.StillPath,
-		ep.StillSourcePath,
-		ep.StillThumbhash,
-		ep.MetadataS3Path,
-		ep.MetadataEtag,
-		ep.MetadataSource,
-	).Scan(&storedContentID)
+	err := retryArtworkUpsert(func() error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+			SELECT content_id FROM episodes
+			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
+			FOR NO KEY UPDATE`, ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			if err := tx.QueryRow(ctx, query,
+				ep.ContentID,
+				ep.SeriesID,
+				seasonID,
+				ep.SeasonNumber,
+				ep.EpisodeNumber,
+				ep.Title,
+				ep.DefaultMetadataLanguage,
+				ep.Overview,
+				ep.AirDate,
+				ep.Runtime,
+				ep.RatingIMDB,
+				ep.RatingTMDB,
+				ep.ImdbID,
+				ep.TmdbID,
+				ep.TvdbID,
+				ep.StillPath,
+				ep.StillSourcePath,
+				ep.StillThumbhash,
+				ep.MetadataS3Path,
+				ep.MetadataEtag,
+				ep.MetadataSource,
+			).Scan(&storedContentID, &inserted); err != nil {
+				return err
+			}
+			return checkArtworkRowLocked(locked, storedContentID, inserted)
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("upserting episode: %w", err)
 	}
@@ -412,7 +476,9 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if _, err := r.pool.Exec(ctx, refreshSeriesAirDatesSQL, []string{ep.SeriesID}); err != nil {
+	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		return refreshSeriesAirDates(ctx, tx, []string{ep.SeriesID})
+	}); err != nil {
 		return fmt.Errorf("update series air dates: %w", err)
 	}
 
@@ -443,7 +509,14 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		}
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	return retryArtworkUpsert(func() error { return r.bulkUpsertOnce(ctx, seriesID, episodes) })
+}
+
+// bulkUpsertOnce runs one BulkUpsert transaction.
+//
+//nolint:funlen // BulkUpsert's transaction body, moved as is so retryArtworkUpsert can rerun it
+func (r *EpisodeRepository) bulkUpsertOnce(ctx context.Context, seriesID string, episodes []*models.Episode) error {
+	tx, err := r.pool.BeginTx(ctx, artworkUpsertTxOptions)
 	if err != nil {
 		return fmt.Errorf("begin bulk episode upsert: %w", err)
 	}
@@ -472,28 +545,28 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	// before the INSERT (PostgreSQL data-modifying CTEs share the same snapshot).
 	if len(imdbIDs) > 0 {
 		clearQuery := `
-			UPDATE episodes SET
-				imdb_id = CASE WHEN imdb_id <> '' AND imdb_id = ANY($2::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $2::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.imdb_id
-					) THEN '' ELSE imdb_id END,
-				tmdb_id = CASE WHEN tmdb_id <> '' AND tmdb_id = ANY($3::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $3::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tmdb_id
-					) THEN '' ELSE tmdb_id END,
-				tvdb_id = CASE WHEN tvdb_id <> '' AND tvdb_id = ANY($4::text[])
-					AND NOT EXISTS (
-						SELECT 1 FROM UNNEST($5::int[], $6::int[], $4::text[]) AS t(sn, en, eid)
-						WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tvdb_id
-					) THEN '' ELSE tvdb_id END
-			WHERE series_id = $1
-			  AND (
-				(imdb_id <> '' AND imdb_id = ANY($2::text[]))
-				OR (tmdb_id <> '' AND tmdb_id = ANY($3::text[]))
-				OR (tvdb_id <> '' AND tvdb_id = ANY($4::text[]))
-			  )`
+		UPDATE episodes SET
+			imdb_id = CASE WHEN imdb_id <> '' AND imdb_id = ANY($2::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $2::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.imdb_id
+				) THEN '' ELSE imdb_id END,
+			tmdb_id = CASE WHEN tmdb_id <> '' AND tmdb_id = ANY($3::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $3::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tmdb_id
+				) THEN '' ELSE tmdb_id END,
+			tvdb_id = CASE WHEN tvdb_id <> '' AND tvdb_id = ANY($4::text[])
+				AND NOT EXISTS (
+					SELECT 1 FROM UNNEST($5::int[], $6::int[], $4::text[]) AS t(sn, en, eid)
+					WHERE t.sn = episodes.season_number AND t.en = episodes.episode_number AND t.eid = episodes.tvdb_id
+				) THEN '' ELSE tvdb_id END
+		WHERE series_id = $1
+		  AND (
+			(imdb_id <> '' AND imdb_id = ANY($2::text[]))
+			OR (tmdb_id <> '' AND tmdb_id = ANY($3::text[]))
+			OR (tvdb_id <> '' AND tvdb_id = ANY($4::text[]))
+		  )`
 		if _, err := tx.Exec(ctx, clearQuery,
 			seriesID, imdbIDs, tmdbIDs, tvdbIDs, ownerSNs, ownerENs,
 		); err != nil {
@@ -551,43 +624,50 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	}
 
 	query := `
-		INSERT INTO episodes (
-			content_id, series_id, season_id, season_number, episode_number,
-			title, default_metadata_language, overview, air_date, runtime,
-			rating_imdb, rating_tmdb,
-			imdb_id, tmdb_id, tvdb_id,
-			still_path, still_source_path, still_thumbhash,
-			metadata_s3_path, metadata_etag, metadata_source
-		)
-		SELECT * FROM UNNEST(
-			$1::text[], $2::text[], $3::text[], $4::int[], $5::int[],
-			$6::text[], $7::text[], $8::text[], $9::date[], $10::int[],
-			$11::float8[], $12::float8[],
-			$13::text[], $14::text[], $15::text[],
-			$16::text[], $17::text[], $18::text[],
-			$19::text[], $20::text[], $21::text[]
-		)
-		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
-			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
-			runtime = EXCLUDED.runtime,
-			rating_imdb = EXCLUDED.rating_imdb,
-			rating_tmdb = EXCLUDED.rating_tmdb,
-			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
-			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
-			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
-			still_path = EXCLUDED.still_path,
-			still_source_path = EXCLUDED.still_source_path,
-			still_thumbhash = EXCLUDED.still_thumbhash,
-			metadata_s3_path = EXCLUDED.metadata_s3_path,
-			metadata_etag = EXCLUDED.metadata_etag,
-			metadata_source = EXCLUDED.metadata_source,
-			updated_at = NOW()
-		RETURNING content_id, season_number, episode_number`
+	INSERT INTO episodes (
+		content_id, series_id, season_id, season_number, episode_number,
+		title, default_metadata_language, overview, air_date, runtime,
+		rating_imdb, rating_tmdb,
+		imdb_id, tmdb_id, tvdb_id,
+		still_path, still_source_path, still_thumbhash,
+		metadata_s3_path, metadata_etag, metadata_source
+	)
+	SELECT * FROM UNNEST(
+		$1::text[], $2::text[], $3::text[], $4::int[], $5::int[],
+		$6::text[], $7::text[], $8::text[], $9::date[], $10::int[],
+		$11::float8[], $12::float8[],
+		$13::text[], $14::text[], $15::text[],
+		$16::text[], $17::text[], $18::text[],
+		$19::text[], $20::text[], $21::text[]
+	)
+	ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
+		season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
+		title = EXCLUDED.title,
+		default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
+		overview = EXCLUDED.overview,
+		air_date = EXCLUDED.air_date,
+		runtime = EXCLUDED.runtime,
+		rating_imdb = EXCLUDED.rating_imdb,
+		rating_tmdb = EXCLUDED.rating_tmdb,
+		imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
+		tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
+		tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
+		` + episodeArtworkAssignments + `,
+		metadata_s3_path = EXCLUDED.metadata_s3_path,
+		metadata_etag = EXCLUDED.metadata_etag,
+		metadata_source = EXCLUDED.metadata_source,
+		updated_at = NOW()
+	RETURNING content_id, season_number, episode_number, xmax = 0`
 
+	locked, err := lockArtworkRowsForUpsert(ctx, tx, `
+	SELECT episodes.content_id FROM episodes
+	JOIN UNNEST($2::int[], $3::int[]) AS target(season_number, episode_number) USING (season_number, episode_number)
+	WHERE episodes.series_id = $1
+	ORDER BY episodes.content_id
+	FOR NO KEY UPDATE OF episodes`, seriesID, seasonNums, episodeNums)
+	if err != nil {
+		return err
+	}
 	rows, err := tx.Query(ctx, query,
 		contentIDs, epSeriesIDs, seasonIDs, seasonNums, episodeNums,
 		titles, defaultMetadataLanguages, overviews, airDates, runtimes,
@@ -608,9 +688,14 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	for rows.Next() {
 		var cid string
 		var sn, en int32
-		if err := rows.Scan(&cid, &sn, &en); err != nil {
+		var inserted bool
+		if err := rows.Scan(&cid, &sn, &en, &inserted); err != nil {
 			rows.Close()
 			return fmt.Errorf("scanning bulk upsert episode result: %w", err)
+		}
+		if err := checkArtworkRowLocked(locked, cid, inserted); err != nil {
+			rows.Close()
+			return err
 		}
 		returnedIDs[epKey{sn, en}] = cid
 	}
@@ -627,7 +712,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
+	if err := refreshSeriesAirDates(ctx, tx, []string{seriesID}); err != nil {
 		return fmt.Errorf("batch update series air dates: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -722,6 +807,54 @@ func (r *EpisodeRepository) GetByIDs(ctx context.Context, contentIDs []string) (
 	return scanEpisodes(rows)
 }
 
+// EpisodeCardContext is what a listing card needs about an episode beyond its
+// catalog row: its numbers, its own still, its series' title, and its season's
+// and series' artwork.
+type EpisodeCardContext struct {
+	SeriesID      string
+	SeriesTitle   string
+	SeasonNumber  int
+	EpisodeNumber int
+	StillPath     string
+	ParentArtwork models.EpisodeParentArtwork
+}
+
+// ListCardContexts loads the card context of each episode in one query,
+// keyed by episode content ID. Unknown IDs are absent.
+func (r *EpisodeRepository) ListCardContexts(ctx context.Context, contentIDs []string) (map[string]EpisodeCardContext, error) {
+	out := make(map[string]EpisodeCardContext, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, e.series_id, COALESCE(si.title, ''), e.season_number, e.episode_number, COALESCE(e.still_path, ''),
+			COALESCE(si.poster_path, ''), COALESCE(si.poster_thumbhash, ''),
+			COALESCE(si.backdrop_path, ''), COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, '')
+		FROM episodes e
+		LEFT JOIN media_items si ON si.content_id = e.series_id
+		LEFT JOIN seasons s ON s.content_id = e.season_id
+		WHERE e.content_id = ANY($1::text[])`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing episode card contexts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id string
+			c  EpisodeCardContext
+			p  = &c.ParentArtwork
+		)
+		if err := rows.Scan(&id, &c.SeriesID, &c.SeriesTitle, &c.SeasonNumber, &c.EpisodeNumber, &c.StillPath,
+			&p.SeriesPosterPath, &p.SeriesPosterThumbhash, &p.SeriesBackdropPath, &p.SeriesBackdropThumbhash,
+			&p.SeasonPosterPath, &p.SeasonPosterThumbhash); err != nil {
+			return nil, fmt.Errorf("scanning episode card context: %w", err)
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
 // ListBySeriesAndNumbers returns the requested episode rows for one series in a
 // single query. It intentionally does not apply episodeAvailabilityPredicate:
 // metadata persistence must see provider-only episodes before library links
@@ -756,16 +889,16 @@ func (r *EpisodeRepository) ListBySeriesAndNumbers(
 }
 
 // HasFilesByIDs reports which of the given episodes are backed by at least one
-// live (non-missing) media file. Episodes absent from the result map have no
-// file — e.g. provider-metadata-only entries for unaired episodes.
+// live (non-missing) media file, including a multi-episode file spanning them.
+// Episodes absent from the result map have no file — e.g.
+// provider-metadata-only entries for unaired episodes.
 func (r *EpisodeRepository) HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT episode_id FROM media_files
-		WHERE episode_id = ANY($1) AND missing_since IS NULL
-		GROUP BY episode_id`
+	query := `SELECT DISTINCT served.episode_id
+		FROM (` + ServedEpisodeFilesSQL + `) served(episode_id, file_id)`
 	rows, err := r.pool.Query(ctx, query, contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("checking episode file presence: %w", err)
@@ -1169,7 +1302,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 		return fmt.Errorf("updating episode metadata: %w", err)
 	}
 	if upd.AirDate != nil || upd.clears(columnAirDate) {
-		if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
+		if err := refreshSeriesAirDates(ctx, tx, []string{seriesID}); err != nil {
 			return fmt.Errorf("update series air dates: %w", err)
 		}
 	}
@@ -1236,11 +1369,26 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 }
 
 // BrowseEpisodes applies catalog and profile predicates before counting and
-// paging, so a long series only hydrates the selected page.
+// paging, so a long series only hydrates the selected page. An empty seriesID
+// browses the episodes of every series, by default in series sort-title order,
+// and filters.LibraryID narrows it to one library. A zero filters.Limit only
+// counts.
 func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters BrowseFilters, access AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
-	conditions := []string{"e.series_id = $1", "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)"}
-	args := []any{seriesID}
-	index := 2
+	conditions := []string{}
+	args := []any{}
+	index := 1
+	if seriesID != "" {
+		conditions = append(conditions, "e.series_id = $1")
+		args = append(args, seriesID)
+		index++
+	}
+	if filters.LibraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id AND el.media_folder_id=$%d)", index))
+		args = append(args, filters.LibraryID)
+		index++
+	} else {
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
+	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)
 	if seasonID != "" {
@@ -1257,7 +1405,11 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	// Language predicates count only the episode files this viewer may play.
 	filters.LibraryIDs, filters.DisabledLibraryIDs, filters.MaxPlaybackQuality = access.AllowedLibraryIDs, access.DisabledLibraryIDs, access.MaxPlaybackQuality
 	appendCompatBrowsePredicates(filters, &extra, &args, &index)
-	rewrite := strings.NewReplacer("mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
+	// Episode fields stand in for an item's own; studios, genres and ratings
+	// come from the series.
+	rewrite := strings.NewReplacer(premiereDateKeyExpr, "e.air_date::text", sortTitleKeyExpr, "LOWER(e.title)",
+		"mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.studios", "s.studios", "mi.content_rating", "s.content_rating",
+		"mi.rating_imdb", "e.rating_imdb", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
 	for _, condition := range extra {
 		conditions = append(conditions, rewrite.Replace(condition))
 	}
@@ -1280,6 +1432,9 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		conditions = append(conditions, "COALESCE(s.backdrop_path,'') <> ''")
 	}
 	order := "e.season_number, e.episode_number, e.content_id"
+	if seriesID == "" {
+		order = "series_sort, e.series_id, " + order
+	}
 	switch filters.Sort {
 	case BrowseSortTitle:
 		order = "LOWER(e.title), e.content_id"
@@ -1288,9 +1443,14 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		order = "e.air_date, e.season_number, e.episode_number, e.content_id"
 	case BrowseSortCreatedAt:
 		order = "e.created_at, e.content_id"
+	case BrowseSortRatingIMDB:
+		order = "e.rating_imdb, e.season_number, e.episode_number, e.content_id"
+	case BrowseSortYear:
+		order = "EXTRACT(YEAR FROM e.air_date), e.air_date, e.season_number, e.episode_number, e.content_id"
 	}
 	if filters.Order == BrowseOrderDescending {
-		order = strings.ReplaceAll(order, ",", " DESC,") + " DESC"
+		// Unrated and undated episodes stay last, as they do ascending.
+		order = strings.ReplaceAll(order, ",", " DESC NULLS LAST,") + " DESC NULLS LAST"
 	}
 	if startItemID != "" {
 		// StartItemId uses the natural episode queue. Other sorting still orders the
@@ -1306,9 +1466,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 			return nil, 0, err
 		}
 	}
-	args = append(args, min(max(filters.Limit, 0), MaxEpisodePageSize), max(filters.Offset, 0))
+	if filters.Limit <= 0 {
+		return []*models.Episode{}, total, nil
+	}
+	args = append(args, min(filters.Limit, MaxEpisodePageSize), max(filters.Offset, 0))
 	pageOrder := strings.ReplaceAll(order, "e.", "episode_page.")
-	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
+	pageOrder = strings.ReplaceAll(pageOrder, "series_sort", "episode_page.series_sort")
+	query := "SELECT " + episodeColumns + " FROM (SELECT e.*, " + strings.ReplaceAll(sortTitleKeyExpr, "mi.", "s.") + " AS series_sort" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err

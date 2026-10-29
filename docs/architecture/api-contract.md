@@ -916,23 +916,40 @@ fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
-expired on the applicable launch/logout transition where practical and otherwise dies within its
-existing five-minute maximum. It is never broadened to `/`.
+expired on the applicable launch/logout transition where practical and otherwise dies five minutes
+after it was last issued or renewed; a page request through a cookie past half its lifetime renews
+it while the login session could still refresh ([plugin content](plugin-content.md)). It is never broadened to `/`.
 
 ### Discovery and capability detection
 
 `GET /api/v2/system/info` is always registered, unauthenticated, and usable before login or
 profile selection. It exposes at least the server build version, API major, contract digest, and
-links to capability documents. The response is bounded — a small fixed document with no
-per-request, per-account, or deployment-topology detail — and carries an explicit reviewed cache
-policy rather than silently inheriting the structured default. The exact response schema, its
-bound, and its cache directives are part of the foundation contract.
+links to capability documents. The response is bounded — a small document with no per-account or
+deployment-topology detail — and carries an explicit reviewed cache policy rather than silently
+inheriting the structured default. The exact response schema, its bound, and its cache directives
+are part of the foundation contract.
+
+Its one per-request member is `request_origin`: the origin the request reached, serialized and
+derived exactly like the OAuth `iss` (`clientip.RequestOrigin`) — the transport scheme and `Host`,
+replaced by `X-Forwarded-Proto` and `X-Forwarded-Host` only from a configured trusted proxy. A
+client that must not send credentials to an origin it did not configure (the Roku client follows
+redirects silently and re-sends a request body on 307) compares it with its configured origin
+before signing in. Because of that member the response is `Cache-Control: private, no-cache`, so a
+shared cache never serves one origin's value to another.
+
+The same clients rely on authenticated `/api/v2` routes not redirecting them to another origin or
+from HTTPS to HTTP. The transcode manifest and segment relay answers a node's redirect with 502
+instead of relaying it, and plugin content answers a plugin redirect that leaves the request's
+origin with 502. The deliberate exceptions are the 307s to a media proxy on `-proxy` download
+routes and on `getPlaybackBandwidthProbe` with `media_path=true`, which a client opts into, and the
+public browser OAuth and Discord-link handshakes.
 
 Exposing the server build version and contract digest before authentication is a deliberate,
 reviewed decision. An updated client must be able to tell a v2 server from a v1-only alpha server
 before it holds a credential, and version obscurity is not a control Silo relies on. That trade is
-accepted for these fields only; the endpoint carries nothing else an unauthenticated caller should
-not see.
+accepted for these fields only; `request_origin` echoes back only what the caller sent or what its
+own path to the server supplied, and the endpoint carries nothing else an unauthenticated caller
+should not see.
 
 Clients use capability documents to decide whether a feature exists. The server version and
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
@@ -1434,6 +1451,20 @@ no device id because the v2 listener reads no device header. `listWatchlist`,
 outside the library that have since arrived onto this list; see
 [Watchlist titles](#watchlist-titles).
 
+A `404` for an ordinary "not on the list" answer is indistinguishable from probing to reverse-proxy
+security monitoring: a detail screen that checks an item and its episodes produces a burst of
+distinct 404 paths, and CrowdSec's `http-probing` scenario bans the client's address (issue #952).
+`getFavoriteMembership` (`GET /api/v2/favorites/{item_id}/membership`) and
+`getWatchlistMembership` (`GET /api/v2/watchlist/{item_id}/membership`) therefore answer the same
+check as `200` `PersonalListMembership` `{item_id, is_member, added_at?}` for every item the viewer
+may see; `added_at` is present only for a member. They keep `404` for an item that is missing or
+that the viewer may not see, run through the same `GetFavorite`/`GetWatchlistEntry` seams (so the
+watchlist read still promotes arrived titles), and are the reads clients should use.
+`getFavorite` and `getWatchlistEntry` keep their entry-or-`404` contract for already shipped
+clients, as do the v1 `204`/`404` checks. Clients detect the membership reads through
+`getPersonalListCapability` (`GET /api/v2/capabilities/personal-lists`), whose
+`membership_supported` is true when they answer.
+
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
 `verifyProfilePIN`, `uploadProfileAvatar`, `deleteProfileAvatar`, and the home-row overrides
@@ -1588,6 +1619,14 @@ Because v2 rejects unknown query parameters, a client sends `include_items` only
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
 home sections service is not wired.
+`listHomeSections` and `listLibrarySections` take an optional `item_limit` (1 to 100) that caps
+every row: each row's limit becomes the smaller of its own effective limit and `item_limit`, and
+the response's per-row `item_limit` reports the capped value. The cap applies to the resolved rows
+before their items are fetched, so the hide-watched widening and the cross-row duplicate filter
+work from the capped size; `total_count` keeps its meaning. Without the parameter every row keeps
+its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
+only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
+`include_items_max` is.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
@@ -1626,7 +1665,8 @@ played}` echo. All four mutations declare `non_retryable` and are not `If-Match`
 Atomic marking suppresses concurrent duplicate history and provider events, but a delayed
 retry after an intervening unmark can create another watch; a durable client watch identity
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
-hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
+hide an intervening watch (unmark keeps the watch in history but stops it counting as
+watched). Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
@@ -1635,7 +1675,11 @@ nothing to clear), `422` at `path.media_item_id` for a season, series or ebook a
 kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
-`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
+`clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
+v2 `markWatched` on a watched movie or episode with a resume position records another play and
+clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
+no-op. Semantics are in
+[the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
@@ -2010,8 +2054,25 @@ title detail's recommendations) and the title detail carry `in_watchlist`,
 true when the acting profile has the title on its watchlist, in or out of the
 library.
 
+The Discover page follows the admin's layout ([Request Discover rows](request-discover-rows.md)).
+`GET /api/v2/requests/discover` (`listDiscoverSections`) returns, in `items`, the
+enabled title rows that have titles, in layout order, and in the required
+`row_order` every enabled row, brand rows (`studios`, `networks`, `genres`)
+included; a brand row draws the cards of the matching brand list operation, and a
+client skips a row type it does not know. The six built-in rows keep their keys;
+an admin's rows have opaque keys. `GET /api/v2/requests/discover/rows/{row_id}`
+(`getDiscoverRow`) pages any title row. `getDiscoverSection` keeps its six-key enum
+but reads through the layout, so a built-in row the admin turned off or removed
+answers 404. A row page's `next_page` covers rows that leave out titles the
+library has as well as rating backfill, and after a read of several pages reached
+the end it points past `total_pages`. `GET /api/v2/requests/status` advertises
+`discover_rows_supported`. The frozen v1 discovery keeps the six built-in rows
+whatever the layout.
+
 Native Apple and Android request migrations accompany this contract change;
-integrate those client changes before retiring their v1 routes. Jellyfin compatibility does not expose this request
+integrate those client changes before retiring their v1 routes. Shipped apps
+merge only the built-in trending and popular rows, so an admin's rows reach them
+once they read `row_order`. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
 
 ### Watchlist titles
@@ -2331,6 +2392,16 @@ where Standard sends each media type, or why it cannot be used, and switching
 to Standard is refused with a validation problem while it cannot. The `routing`
 field of `getAdminRequestCapabilities` reports whether the server offers both
 the routing rule operations and the routing mode operations.
+
+The Discover layout (`/admin/request-discover`) is v2-only:
+`GET`/`PUT`/`DELETE /admin/request-discover/layout` read, replace and reset the
+whole layout with `If-Match` on its revision (the default layout, with none
+stored, reads as revision zero; a guarded reset answers 204); list rows carry
+the status of their stored copy. `POST /admin/request-discover/preview` shows a
+row's first page before it is saved, fetching a list row's list live, and
+`GET /admin/request-discover/watch-providers` lists the streaming services a
+discover row can filter on in a region. They work while requests are turned off.
+The `discover_layout` field of `getAdminRequestCapabilities` reports them.
 
 Settings, account limits and integrations require `If-Match` for replacement and
 integration deletion. A shared PostgreSQL sequence assigns a new revision on every

@@ -29,7 +29,7 @@ func (v2WiringTokens) ValidateToken(string) (*auth.Claims, error) {
 
 type v2WiringSessions struct{}
 
-func (v2WiringSessions) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+func (v2WiringSessions) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
 	return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeAccount}, true, nil
 }
 

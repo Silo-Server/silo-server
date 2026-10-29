@@ -298,7 +298,7 @@ func TestRegistryPreservesEveryRangeFromWinningProvider(t *testing.T) {
 		{Kind: MarkerKindCredits, Start: 1900 * time.Second, End: 1950 * time.Second},
 		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1850 * time.Second},
 	}}})
-	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second, Confidence: 1}}}})
+	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second}}}})
 	result, ok, err := populateRegistryForTest(t.Context(), registry)
 	if err != nil || !ok || len(result.Markers) != 2 {
 		t.Fatalf("multi-range merge: %+v, %v", result, err)
@@ -325,6 +325,30 @@ func TestPopulationStoredPlaybackToggleDoesNotBlockExplicitRefresh(t *testing.T)
 	}
 	if provider.calls != 1 {
 		t.Fatal("explicit refresh did not fetch")
+	}
+}
+
+// Only stored provider markers tell a manual save what a player was shown; in
+// on_demand mode each replica keeps the answers it showed to itself.
+func TestPopulationShowsStoredMarkers(t *testing.T) {
+	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{}, nil }}
+	for _, tc := range []struct {
+		name    string
+		storage OnlineStorage
+		mode    string
+		want    bool
+	}{
+		{"stored", OnlineStorageStored, "online", true},
+		{"on demand", OnlineStorageOnDemand, "online", false},
+		{"on demand, online lookups off", OnlineStorageOnDemand, "local", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := populationFixture(t, tc.storage, provider)
+			service.opts.Settings.(populationSettings)[SettingMode] = tc.mode
+			if got, err := service.ShowsStoredMarkers(t.Context()); err != nil || got != tc.want {
+				t.Fatalf("ShowsStoredMarkers = %v, %v; want %v", got, err, tc.want)
+			}
+		})
 	}
 }
 

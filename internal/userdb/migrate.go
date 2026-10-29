@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 35
+const schemaVersion = 37
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -372,6 +372,34 @@ WHERE COALESCE(section_id, '') = ''
 			}
 		}
 		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 35"); err != nil {
+			return err
+		}
+	}
+	if version < 36 {
+		// The history-listing cutoff; the Postgres store adds the same column
+		// in 20261024034851_history_removal_cutoff.sql. NULL reads as
+		// hidden_before, so existing rows need no backfill.
+		if err := addHistoryRemovalCutoff(tx); err != nil {
+			return fmt.Errorf("migration v36 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 36"); err != nil {
+			return err
+		}
+	}
+	if version < 37 {
+		// The retired card caption choice; the Postgres store rewrites the
+		// same rows in 20261027002724_retire_card_caption_choice.sql. The
+		// revision moves so a client holding the old row re-reads it, and
+		// updated_at stays because nobody changed the setting.
+		if _, err := tx.ExecContext(context.Background(), `
+UPDATE user_setting_values
+SET value = json_set(value, '$.caption', 'title_metadata'),
+    revision = revision + 1
+WHERE key = 'ui.card_presentation'
+  AND json_extract(value, '$.caption') <> 'title_metadata'`); err != nil {
+			return fmt.Errorf("migration v37 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 37"); err != nil {
 			return err
 		}
 	}
@@ -745,4 +773,12 @@ func migrateToV7(tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+func addHistoryRemovalCutoff(tx *sql.Tx) error {
+	if columnExists(tx, "hidden_history_items", "removed_before") {
+		return nil
+	}
+	_, err := tx.ExecContext(context.Background(), "ALTER TABLE hidden_history_items ADD COLUMN removed_before TEXT")
+	return err
 }

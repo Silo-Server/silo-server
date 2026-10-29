@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -90,6 +91,9 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	if reg.deps.AdminItemMetadata == nil {
 		return nil, unavailable("item metadata")
 	}
+	if problem := rejectMalformedMetadataDates(in.Body); problem != nil {
+		return nil, problem
+	}
 	detail, err := reg.deps.AdminItemMetadata.UpdateCatalogItemMetadata(ctx, in.ID, handlers.UpdateItemMetadataRequest(in.Body), clearedItemMetadataFields(in.RawBody))
 	if err != nil {
 		return nil, collectionProblem(err)
@@ -98,6 +102,44 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	// stored rating back.
 	detail.ViewerCurates = true
 	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail, reg.ratingSelection(ctx))}, nil
+}
+
+// The item metadata members that hold a calendar date.
+const (
+	memberReleaseDate  = "release_date"
+	memberFirstAirDate = "first_air_date"
+	memberLastAirDate  = "last_air_date"
+	memberAirDate      = "air_date"
+)
+
+// rejectMalformedMetadataDates refuses a date member that is not a
+// YYYY-MM-DD calendar date. The repositories write these members as text, so
+// PostgreSQL would otherwise fail the write (release_date and air_date, a
+// 500) or store the value as given (first_air_date and last_air_date). Null
+// decodes to nil and clears the date.
+func rejectMalformedMetadataDates(body AdminItemMetadataUpdate) *Problem {
+	var errs []ProblemError
+	for _, date := range []struct {
+		member string
+		value  *string
+	}{
+		{memberReleaseDate, body.ReleaseDate},
+		{memberFirstAirDate, body.FirstAirDate},
+		{memberLastAirDate, body.LastAirDate},
+		{memberAirDate, body.AirDate},
+	} {
+		if date.value == nil {
+			continue
+		}
+		// PostgreSQL's date type has no year 0.
+		if parsed, err := time.Parse(time.DateOnly, *date.value); err != nil || parsed.Year() < 1 {
+			errs = append(errs, ProblemError{Location: locationBody + "." + date.member, Code: codeInvalid, Detail: "expected a calendar date, YYYY-MM-DD"})
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(errs...)
 }
 
 // clearedItemMetadataFields lists the clearable members the body sets to

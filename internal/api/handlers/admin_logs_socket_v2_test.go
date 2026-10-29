@@ -24,7 +24,7 @@ func adminLogsSocketFixture(t *testing.T) (*AdminLogsSocketV2, *logstream.Hub, *
 	t.Helper()
 	hub := logstream.NewHub("admin-logs-fixture", nil)
 	invalid, demoted := new(atomic.Bool), new(atomic.Bool)
-	h := &AdminLogsSocketV2{Logs: NewAdminLogsHandler(nil, nil, hub), Tickets: evt.NewSocketTicketStore(nil), checkInterval: 10 * time.Millisecond}
+	h := &AdminLogsSocketV2{Logs: NewAdminLogsHandler(nil, nil, hub), Tickets: evt.NewSocketTicketStore(nil, evt.SocketAudienceAdminLogs), checkInterval: 10 * time.Millisecond}
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		if invalid.Load() {
 			return ctx, nil, evt.ErrSocketTicket
@@ -227,7 +227,7 @@ func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *
 	decide := apimw.NewActingAdminDecider(
 		func(context.Context, int, string) (bool, bool, error) { return true, true, nil },
 		func(context.Context, int) (bool, error) { return requiresProfile.Load(), nil })
-	h := NewAdminLogsSocketV2(NewAdminLogsHandler(nil, nil, logstream.NewHub("admin-logs-household", nil)), evt.NewSocketTicketStore(nil), sessions, users, viewer, decide, "")
+	h := NewAdminLogsSocketV2(NewAdminLogsHandler(nil, nil, logstream.NewHub("admin-logs-household", nil)), evt.NewSocketTicketStore(nil, evt.SocketAudienceAdminLogs), sessions, users, viewer, decide, "")
 	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", AccessExpiresAt: time.Now().Add(time.Minute)}
 	stale, err := h.Mint(t.Context(), identity)
 	if err != nil {

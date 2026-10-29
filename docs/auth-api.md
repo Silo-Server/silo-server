@@ -473,8 +473,17 @@ budget using the existing 429 response and `Retry-After`.
 Requests without an authenticated account do not spend an account allowance.
 Pre-authentication display-token lookup and public sign-in/device operations retain
 their source and global checks. With the memory backend, counters are per process;
-Redis shares them across instances, with the existing fail-open behavior when Redis
-is unavailable. Disabling rate limiting disables the account allowance too.
+Redis shares them across instances. When Redis is unavailable each process counts
+its checks in its own memory, in the same second and minute windows Redis uses, so
+the limits keep holding per process instead of switching off. A check that fails, or
+gets no answer within a second, is counted locally, and that process then stops
+waiting on Redis: its checks count locally at once, and every five seconds one
+request is also counted in Redis in the background to find out whether Redis answers
+again. The failure that stops the waiting and each failed background count are
+logged. Checks that start before the first failure is noticed, up to a second after
+Redis stops answering, each wait up to a second. A check that fails only because its
+own request ended early does not count as Redis failing. Disabling rate limiting
+disables the account allowance too.
 
 ## Profile PINs
 
@@ -534,7 +543,7 @@ authenticates.
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting
 is enabled. Only a server without Redis keeps it in process memory, which is correct
-for a single node. Like the request limiter, a Redis error fails open and is logged;
+for a single node. A Redis error fails open and is logged;
 a request whose own context was canceled is refused instead, so dropping the
 connection does not buy an uncounted guess. Clients show the lockout from
 `Retry-After`, for example "Too many incorrect PINs. Try again in 5 minutes.",
@@ -844,9 +853,12 @@ broadened to `/`. The body is `{"expires_in": 300}`. A credential without a logi
 session, such as an API key, is refused with 403 `permission_denied`; an unknown
 declared profile is 404 and a PIN-locked one without its token is 403
 `profile_verification_required`. Repeating the request reissues an equivalent
-cookie. The bundled web client launches pages under
+cookie. A page request through a cookie past half its lifetime gets a fresh one
+while the login session could still refresh ([plugin content](architecture/plugin-content.md)).
+The bundled web client launches pages under
 `/api/v2/plugin-content/plugins/{installation_id}/`. The v2 launch does not expire
-the separate legacy cookie; that cookie expires within five minutes. Compatibility
+the separate legacy cookie; that cookie expires five minutes after it was last
+issued or renewed. Compatibility
 of the reissued cookie against a served auth-provider plugin is not yet proven
 and is a follow-up.
 

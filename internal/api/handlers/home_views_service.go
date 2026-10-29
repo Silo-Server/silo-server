@@ -24,7 +24,8 @@ import (
 // handler writes verbatim and, on failure, an *APIError.
 
 // HomeSections answers every section of the home page with its items for
-// the profile on the context.
+// the profile on the context, each row capped at viewer.ItemLimitCap items
+// when it is set.
 func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer) (SectionsView, error) {
 	start := time.Now()
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
@@ -34,7 +35,7 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	resolved = sections.ForClient(resolved, viewer.Web)
 	resolvedAt := time.Now()
 	userID := apimw.GetUserID(ctx)
-	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
+	resolved = capSectionItemLimits(h.maybeInjectNextUp(ctx, resolved, userID), viewer.ItemLimitCap)
 	nextUpAt := time.Now()
 	hideWatched := h.homeHidesWatchedItems(ctx)
 	withItems := h.fetcher.FetchAll(ctx, homeSectionsForFetch(resolved, hideWatched), nil, libraryIDs, userID, profileID, accessFilter)

@@ -173,10 +173,11 @@ func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (stri
 	return seek, args, nil
 }
 
-// PreviewCursorPage uses a SQL keyset, including the identity tie breaker. It
-// intentionally uses the general episode relation until optimized projections
-// expose exactly the same typed tuple. Page rows and optional count share one
-// database snapshot; later pages observe live updates, not a retained snapshot.
+// PreviewCursorPage uses a SQL keyset, including the identity tie breaker. Its
+// rows intentionally use the general episode relation until optimized
+// projections expose exactly the same typed tuple; its total is Count's. Page
+// rows and optional count share one database snapshot; later pages observe
+// live updates, not a retained snapshot.
 func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefinition, access AccessFilter, limit int, after *QueryCursor, includeTotal bool) (QueryCursorPage, error) {
 	if e == nil || e.Pool == nil {
 		return QueryCursorPage{}, fmt.Errorf("query executor requires a database pool")
@@ -240,10 +241,10 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 		}
 	}
 	if includeTotal {
-		if def.Limit != nil && !e.GroupByWork {
-			plan.maxResults = *def.Limit
+		countSQL, countArgs, err := e.buildCountQuery(def, access)
+		if err != nil {
+			return QueryCursorPage{}, err
 		}
-		countSQL, countArgs := plan.countSQL()
 		if err := tx.QueryRow(ctx, countSQL, countArgs...).Scan(&result.Total); err != nil {
 			return QueryCursorPage{}, fmt.Errorf("counting cursor page: %w", err)
 		}
@@ -342,9 +343,13 @@ func (e *QueryExecutor) SeekCursor(ctx context.Context, def QueryDefinition, acc
 	if err != nil {
 		return nil, err
 	}
-	key, anchored, err := e.anchoredSeek(ctx, plan, index-1)
-	if !anchored {
-		key, err = e.queryTuple(ctx, plan, nil, index-1)
+	key, ok, err := e.episodeCatalogSeek(ctx, def, access, plan, index-1)
+	if !ok {
+		var anchored bool
+		key, anchored, err = e.anchoredSeek(ctx, plan, index-1)
+		if !anchored {
+			key, err = e.queryTuple(ctx, plan, nil, index-1)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("seeking cursor: %w", err)
@@ -360,6 +365,30 @@ func (e *QueryExecutor) queryTuple(ctx context.Context, plan previewPagePlan, af
 	if err != nil {
 		return nil, err
 	}
+	args = append(args, offset)
+	return e.scanTuple(ctx, plan, fmt.Sprintf("%s %s LIMIT 1 OFFSET $%d", where, plan.orderBy, len(args)), args)
+}
+
+// queryTupleFor reads the sort tuple of the row with contentID, when the plan
+// matches it.
+func (e *QueryExecutor) queryTupleFor(ctx context.Context, plan previewPagePlan, contentID string) (*QueryCursor, error) {
+	where, args, err := plan.whereAfter(nil)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, contentID)
+	match := fmt.Sprintf("%s = $%d", cursorContentIDExpression, len(args))
+	if where == "" {
+		where = "WHERE " + match
+	} else {
+		where += " AND " + match
+	}
+	return e.scanTuple(ctx, plan, where+" LIMIT 1", args)
+}
+
+// scanTuple selects the plan's sort tuple from its paged relation, filtered
+// and bounded by tail.
+func (e *QueryExecutor) scanTuple(ctx context.Context, plan previewPagePlan, tail string, args []any) (*QueryCursor, error) {
 	columns := make([]string, len(plan.cursorTerms))
 	key := &QueryCursor{Keys: make([]QueryCursorValue, len(plan.cursorTerms))}
 	dest := make([]any, len(columns))
@@ -368,8 +397,7 @@ func (e *QueryExecutor) queryTuple(ctx context.Context, plan previewPagePlan, af
 		key.Keys[i].Kind = term.kind
 		dest[i] = &key.Keys[i].Value
 	}
-	args = append(args, offset)
-	sql := fmt.Sprintf("%sSELECT %s %s %s %s LIMIT 1 OFFSET $%d", plan.withClause(), strings.Join(columns, ", "), plan.fromClausePaged, where, plan.orderBy, len(args))
+	sql := fmt.Sprintf("%sSELECT %s %s %s", plan.withClause(), strings.Join(columns, ", "), plan.fromClausePaged, tail)
 	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(dest...); err != nil {
 		return nil, err
 	}

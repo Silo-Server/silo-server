@@ -514,7 +514,6 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				import_watched_enabled
 				OR import_progress_enabled
 				OR export_watched_enabled
-				OR export_unwatched_enabled
 				OR import_favorites_enabled
 				OR export_favorites_enabled
 				OR sync_favorite_removals_enabled
@@ -739,8 +738,6 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 	switch kind {
 	case LocalWatchEventMarkedWatched:
 		predicate = "export_watched_enabled = true"
-	case LocalWatchEventMarkedUnwatched:
-		predicate = "export_unwatched_enabled = true"
 	default:
 		return nil, nil
 	}

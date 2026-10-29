@@ -123,9 +123,9 @@ func TestPopulationRegistryReturnsLastProviderErrorAsMiss(t *testing.T) {
 	}
 }
 
-// With fetch priorities configured, the lowest priority that answers wins,
-// a failing preferred provider falls back with its error reported, and equal
-// priorities break the tie by marker quality.
+// Confidence picks the winner across providers; equal confidence falls back to
+// the lower fetch_priority, then submission count, and a failing provider
+// falls back to the next with its error reported.
 func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 	intro := func(id string, end time.Duration, confidence float64, submissions int) *fakeProvider {
 		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
@@ -137,6 +137,13 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 			{Kind: MarkerKindCredits, Start: start, End: end, Confidence: 0.9},
 		}}}
 	}
+	absent := func(id string, confidence float64) *fakeProvider {
+		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
+			{Kind: MarkerKindIntro, Absent: true, Confidence: confidence},
+		}}}
+	}
+	both := absent("both", 0.9)
+	both.result.Markers = append(both.result.Markers, Marker{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.5})
 	for _, tc := range []struct {
 		name       string
 		providers  []*fakeProvider
@@ -146,9 +153,39 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 		wantEnd    time.Duration // zero: not checked
 	}{
 		{
-			name:       "lower fetch_priority wins",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 500), intro("b", 25*time.Second, 0.6, 1)},
+			name:       "an absent answer competes like a marker",
+			providers:  []*fakeProvider{absent("a", 0.9), intro("b", 25*time.Second, 0.6, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a",
+		},
+		{
+			name:       "a marker beats a weaker absent answer",
+			providers:  []*fakeProvider{intro("a", 25*time.Second, 0.9, 1), absent("b", 0.6)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a provider's range outweighs its own absent answer",
+			providers:  []*fakeProvider{both},
+			priorities: map[string]int{"both": 10},
+			winner:     "both", wantEnd: 30 * time.Second,
+		},
+		{
+			name:       "higher confidence beats a better priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.6, 500)},
 			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "a", wantEnd: 30 * time.Second,
+		},
+		{
+			name:       "equal confidence falls back to lower fetch_priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.8, 500), intro("b", 25*time.Second, 0.8, 1)},
+			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "b", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a marker without confidence loses to a rated one",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0, 500), intro("b", 25*time.Second, 0.1, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
 			winner:     "b", wantEnd: 25 * time.Second,
 		},
 		{
@@ -165,8 +202,8 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 			winner:     "late", wantEnd: 2000 * time.Second,
 		},
 		{
-			name:       "same priority tie-breaks by submission count",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.7, 1), intro("b", 25*time.Second, 0.9, 2)},
+			name:       "same confidence and priority tie-breaks by submission count",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.9, 2)},
 			priorities: map[string]int{"a": 10, "b": 10},
 			winner:     "b",
 		},
@@ -292,6 +329,20 @@ func TestDetectionToggleEnabled(t *testing.T) {
 	} {
 		if got := DetectionToggleEnabled(raw); got != want {
 			t.Errorf("DetectionToggleEnabled(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestShareByDefaultEnabled(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"":        false,
+		"true":    true,
+		" TRUE ":  true,
+		"false":   false,
+		" False ": false,
+	} {
+		if got := ShareByDefaultEnabled(raw); got != want {
+			t.Errorf("ShareByDefaultEnabled(%q) = %v, want %v", raw, got, want)
 		}
 	}
 }

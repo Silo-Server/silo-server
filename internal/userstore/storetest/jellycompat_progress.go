@@ -10,6 +10,7 @@ import (
 
 // RunAtomicJellycompatProgress requires the fixture to reject position 321 at
 // the database boundary, after the history insert/removal has already executed.
+// A played edit adds history only when the leaf is not already completed.
 func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 	t.Helper()
 	ctx := t.Context()
@@ -50,50 +51,58 @@ func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 		}
 	}
 	check(true, 123, 1, date)
-	for _, clear := range []bool{false, true} {
-		failed := edit
-		failed.PositionSeconds = 321
-		failed.ClearHistory = clear
-		failed.Completed = !clear
-		if clear {
-			failed.History = nil
-		}
-		if err := writer.ApplyJellycompatProgress(ctx, profile, failed); err == nil {
-			t.Fatal("database failure was ignored")
-		}
-		check(true, 123, 1, date)
+	failed := edit
+	failed.PositionSeconds = 321
+	failed.ClearWatched = true
+	failed.Completed = false
+	failed.History = nil
+	if err := writer.ApplyJellycompatProgress(ctx, profile, failed); err == nil {
+		t.Fatal("database failure was ignored")
 	}
-	// Retry after the failed played request adds exactly one history entry.
+	check(true, 123, 1, date)
+	// Repeating the played edit on a completed leaf adds no history.
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(true, 123, 2, date)
+	check(true, 123, 1, date)
 	// A date-only edit must not create history or change the position/played state.
 	edit.History = nil
 	edit.EventAt = date.Add(-time.Hour)
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
 		t.Fatal(err)
 	}
-	check(true, 123, 2, edit.EventAt)
-	// Explicit unplayed clears history and retains the requested resume position.
-	edit.ClearHistory = true
-	edit.Completed = false
-	edit.PositionSeconds = 77
-	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
+	check(true, 123, 1, edit.EventAt)
+	// Explicit unplayed keeps history and retains the requested resume position.
+	unplayed := edit
+	unplayed.ClearWatched = true
+	unplayed.Completed = false
+	unplayed.PositionSeconds = 77
+	if err := writer.ApplyJellycompatProgress(ctx, profile, unplayed); err != nil {
 		t.Fatal(err)
 	}
-	check(false, 77, 0, edit.EventAt)
-	// History failure leaves the prior progress/date intact too.
-	edit.ClearHistory = false
-	edit.Completed = true
+	check(false, 77, 1, edit.EventAt)
+	// A played edit that fails after its history insert rolls the insert back.
+	failed = edit
+	failed.PositionSeconds = 321
+	failed.History = &userstore.WatchHistoryEntry{WatchedAt: date.Format(time.RFC3339), Completed: true}
+	if err := writer.ApplyJellycompatProgress(ctx, profile, failed); err == nil {
+		t.Fatal("database failure was ignored")
+	}
+	check(false, 77, 1, edit.EventAt)
+	// After an unmark, the next played edit records a new play.
 	edit.PositionSeconds = 88
 	edit.History = &userstore.WatchHistoryEntry{ID: "00000000-0000-0000-0000-000000000002", WatchedAt: date.Format(time.RFC3339), Completed: true}
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
+		t.Fatal(err)
+	}
+	check(true, 88, 2, edit.EventAt)
+	// History failure leaves the prior progress/date intact too.
+	if err := writer.ApplyJellycompatProgress(ctx, profile, unplayed); err != nil {
 		t.Fatal(err)
 	}
 	edit.PositionSeconds = 99
 	if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err == nil {
 		t.Fatal("duplicate history key accepted")
 	}
-	check(true, 88, 1, edit.EventAt)
+	check(false, 77, 2, edit.EventAt)
 }
