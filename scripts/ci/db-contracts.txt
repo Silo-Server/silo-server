@@ -354,6 +354,9 @@
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
+# Recorded last activity only moves forward and skips deleted accounts.
+./internal/activitylog TestRecordLastActivityKeepsNewestDB
+
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
 

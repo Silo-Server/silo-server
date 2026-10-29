@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +51,43 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
 				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
 		},
 	}.Run(ctx, ch)
+}
+
+// recordLastActivity moves each account's user_last_activity row forward to
+// its newest entry in the batch. Accounts are written in id order so batches
+// from different nodes lock the same rows in the same order and cannot
+// deadlock; an older timestamp never overwrites a newer one.
+func recordLastActivity(ctx context.Context, pool *pgxpool.Pool, entries []LogEntry) error {
+	latest := map[int]time.Time{}
+	for _, e := range entries {
+		if e.UserID == nil {
+			continue
+		}
+		if ts, ok := latest[*e.UserID]; !ok || e.Timestamp.After(ts) {
+			latest[*e.UserID] = e.Timestamp
+		}
+	}
+	if len(latest) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(maps.Keys(latest))
+	times := make([]time.Time, len(ids))
+	for i, id := range ids {
+		times[i] = latest[id]
+	}
+	// The join skips accounts deleted since the request was logged.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO user_last_activity (user_id, last_active_at)
+		SELECT v.user_id, v.ts
+		FROM unnest($1::integer[], $2::timestamptz[]) WITH ORDINALITY AS v(user_id, ts, n)
+		JOIN users u ON u.id = v.user_id
+		ORDER BY v.n
+		ON CONFLICT (user_id) DO UPDATE SET last_active_at = EXCLUDED.last_active_at
+		WHERE user_last_activity.last_active_at < EXCLUDED.last_active_at`, ids, times)
+	if err != nil {
+		return fmt.Errorf("recording last activity: %w", err)
+	}
+	return nil
 }
 
 // insertBatch performs a bulk INSERT into the activity_log table.
@@ -108,6 +147,13 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate inserted activity log rows: %w", err)
+	}
+	rows.Close()
+
+	// The rows are stored; a failure here only leaves last activity stale
+	// until the account's next batch, so it must not retry the insert.
+	if err := recordLastActivity(ctx, c.pool, entries); err != nil {
+		slog.WarnContext(ctx, "activitylog: failed to record last activity", "component", "activitylog", "error", err)
 	}
 
 	if failed, err := logstream.PublishAppends(c.streamHub, logstream.StreamAudit, inserted); failed > 0 {

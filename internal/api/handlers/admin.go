@@ -709,10 +709,9 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT user_id, MAX("timestamp") AS last_active_at
-		FROM activity_log
-		WHERE user_id = ANY($1::bigint[])
-		GROUP BY user_id`, userIDs)
+		SELECT user_id, last_active_at
+		FROM user_last_activity
+		WHERE user_id = ANY($1::integer[])`, userIDs)
 	if err != nil {
 		return lastActive, fmt.Errorf("loading user last activity: %w", err)
 	}
