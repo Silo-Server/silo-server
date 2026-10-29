@@ -170,6 +170,18 @@ func ExtractSubtitlePacketsWithFormat(ctx context.Context, in *SubtitlePacketInp
 	return runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, in, 0)
 }
 
+// ExtractSubtitlePacketsWebVTT converts in's packets to WebVTT with the
+// output options of an HLS stream's subtitle rendition output
+// (appendSubtitleRenditionOutputArgs), so a window read through the index
+// carries the cues that output would have written.
+func ExtractSubtitlePacketsWebVTT(ctx context.Context, in *SubtitlePacketInput, ffmpegPath ...string) ([]byte, error) {
+	if err := in.validate(); err != nil {
+		return nil, err
+	}
+	args := append(in.inputArgs(), "-map", "0:s:0", "-c:s", "webvtt", "-f", "webvtt", "pipe:1")
+	return runSubtitleExtract(ctx, firstFFmpegPath(ffmpegPath), args, in, 0)
+}
+
 // startSubtitleCommand starts cmd, writing in's stream to its stdin when in
 // is set. wait waits for the command and then for the writer, which ends
 // once the command has exited because Wait closes its stdin.

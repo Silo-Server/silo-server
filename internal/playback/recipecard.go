@@ -3,6 +3,7 @@ package playback
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -140,6 +141,11 @@ type RecipeCard struct {
 	FastStart                  bool                   `json:"fast_start,omitempty"`
 	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
 
+	// SubtitleRenditionTracks are the on-demand renditions
+	// (TranscodeOpts.SubtitleRenditionTracks). A stream token carries only
+	// their track numbers and the default (ToClaims).
+	SubtitleRenditionTracks []SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+
 	// HLSVariableSubstitution mirrors TranscodeOpts.HLSVariableSubstitution so
 	// a reconstructed session, and the API relaying a node's playlist, keep
 	// the playlist form the client negotiated.
@@ -273,6 +279,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
 		SubtitleCodec:              opts.SubtitleCodec,
 		SubtitleRendition:          opts.SubtitleRendition,
+		SubtitleRenditionTracks:    slices.Clone(opts.SubtitleRenditionTracks),
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
@@ -380,6 +387,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
 		SubtitleRendition:          c.SubtitleRendition,
+		SubtitleRenditionTracks:    slices.Clone(c.SubtitleRenditionTracks),
 		AudioTrackIndex:            c.AudioTrackIndex,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
@@ -487,6 +495,8 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
 		SubtitleRendition:          c.SubtitleRendition,
+		SubtitleRenditionTracks:    subtitleRenditionTrackNumbers(c.SubtitleRenditionTracks),
+		SubtitleRenditionDefault:   subtitleRenditionDefault(c.SubtitleRenditionTracks),
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
@@ -497,6 +507,45 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
 		HLSVariableSubstitution:    c.HLSVariableSubstitution,
 	}
+}
+
+// subtitleRenditionTrackNumbers keeps on-demand renditions in a stream token
+// as their track numbers in order, with subtitleRenditionDefault, so the
+// token stays small enough for every segment URL. Names, languages and
+// FORCED don't change what the stream serves.
+func subtitleRenditionTrackNumbers(tracks []SubtitleRenditionTrack) []uint64 {
+	if len(tracks) == 0 {
+		return nil
+	}
+	numbers := make([]uint64, len(tracks))
+	for i, track := range tracks {
+		numbers[i] = track.TrackNumber
+	}
+	return numbers
+}
+
+// subtitleRenditionDefault is the default rendition's track number, or 0.
+func subtitleRenditionDefault(tracks []SubtitleRenditionTrack) uint64 {
+	for _, track := range tracks {
+		if track.Default {
+			return track.TrackNumber
+		}
+	}
+	return 0
+}
+
+// subtitleRenditionTracksFromClaims rebuilds the tracks a stream token
+// carries. They are known by number alone, which the multivariant playlist
+// names them by.
+func subtitleRenditionTracksFromClaims(numbers []uint64, defaultNumber uint64) []SubtitleRenditionTrack {
+	if len(numbers) == 0 {
+		return nil
+	}
+	tracks := make([]SubtitleRenditionTrack, len(numbers))
+	for i, number := range numbers {
+		tracks[i] = SubtitleRenditionTrack{TrackNumber: number, StreamIndex: -1, Default: number == defaultNumber && number != 0}
+	}
+	return tracks
 }
 
 // RecipeCardFromClaims rebuilds the reconstruction recipe from verified
@@ -584,6 +633,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		SubtitleBurnIn:                c.SubtitleBurnIn,
 		SubtitleCodec:                 c.SubtitleCodec,
 		SubtitleRendition:             c.SubtitleRendition,
+		SubtitleRenditionTracks:       subtitleRenditionTracksFromClaims(c.SubtitleRenditionTracks, c.SubtitleRenditionDefault),
 		AudioTrackIndex:               c.AudioTrackIndex,
 		TargetBitrateKbps:             c.TargetBitrateKbps,
 		TotalDuration:                 c.TotalDuration,

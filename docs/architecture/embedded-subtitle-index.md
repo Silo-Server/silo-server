@@ -94,6 +94,12 @@ small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
 data by default (`ErrTooLarge`), and refuses a file whose size or
 modification time changed since it was indexed (`ErrFileChanged`).
 
+HLS streams read their on-demand subtitle renditions through it
+(`playback/subtitle_rendition_tracks.go`): one window per segment, from a
+process-wide `Cache`, converted by `playback.ExtractSubtitlePacketsWebVTT`
+with the options of the stream's own cue output. The planner checks with
+`playback.CueIndexedSubtitleTracks` which tracks qualify before it lists them.
+
 Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
 `ErrNoCues`, `ErrIncompleteCues`, `ErrUnsupported` and `ErrTooLarge` describe
 the file: fall back to FFmpeg. `ErrFileChanged` means index the file again. A

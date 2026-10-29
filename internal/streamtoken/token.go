@@ -155,6 +155,12 @@ type Claims struct {
 	TargetAudioChannels    int     `json:"tac,omitempty"`
 	TargetAudioBitrateKbps int     `json:"tabr,omitempty"`
 
+	// SubtitleRenditionTracks lists the on-demand subtitle renditions by
+	// container track number, in order, and SubtitleRenditionDefault names
+	// the default one (0 for none).
+	SubtitleRenditionTracks  []uint64 `json:"srt,omitempty"`
+	SubtitleRenditionDefault uint64   `json:"srd,omitempty"`
+
 	// HLSVariableSubstitution records the client's hls_variable_substitution_v1
 	// delivery feature, so the relay and a reconstruct keep the playlist form
 	// the client negotiated. Absent in older tokens: the literal form.

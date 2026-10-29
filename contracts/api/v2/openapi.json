@@ -32441,6 +32441,12 @@
           "group_id": {
             "type": "string"
           },
+          "index": {
+            "description": "1-based position of the rendition in its SUBTITLES group, set when the group lists every embedded text track (hls_subtitle_renditions_all_v1); equal to the selected inventory row's hls_rendition.index",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "mime_type": {
             "type": "string"
           },
@@ -48951,6 +48957,31 @@
         ],
         "type": "object"
       },
+      "SubtitleInventoryHLSRenditionV3": {
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "description": "The rendition's EXT-X-MEDIA GROUP-ID",
+            "type": "string"
+          },
+          "index": {
+            "description": "1-based position of the rendition in its group, in inventory order",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The rendition's EXT-X-MEDIA NAME, unique in the group",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id",
+          "name",
+          "index"
+        ],
+        "type": "object"
+      },
       "SubtitleInventoryItemV3": {
         "additionalProperties": false,
         "properties": {
@@ -48980,6 +49011,10 @@
           },
           "hearing_impaired": {
             "type": "boolean"
+          },
+          "hls_rendition": {
+            "$ref": "#/components/schemas/SubtitleInventoryHLSRenditionV3",
+            "description": "Embedded text tracks of an HLS plan under hls_subtitle_renditions_all_v1: the track's WebVTT rendition in the stream's SUBTITLES group. The client may select it in its player and report the change with a subtitle_track_changed replan, which keeps the stream; url stays the fallback."
           },
           "label": {
             "type": "string"
@@ -189768,6 +189803,15 @@
             }
           },
           {
+            "description": "Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer.",
+            "in": "query",
+            "name": "silo_track",
+            "schema": {
+              "pattern": "^[1-9][0-9]{0,19}$",
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
@@ -189961,7 +190005,7 @@
             }
           },
           {
-            "description": "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document.",
+            "description": "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. sub_\u003ctrack\u003e_NNNNN.vtt names a segment of the on-demand rendition of container track \u003ctrack\u003e (hls_subtitle_renditions_all_v1), read from the source when it is requested.",
             "in": "path",
             "name": "name",
             "required": true,
@@ -233539,6 +233583,38 @@
         ],
         "type": "object"
       },
+      "playback_SubtitleRenditionTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": "boolean"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "stream_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "track_number": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stream_index",
+          "track_number",
+          "name"
+        ],
+        "type": "object"
+      },
       "playback_TransformationV3": {
         "additionalProperties": false,
         "properties": {
@@ -233814,6 +233890,12 @@
           "subtitle_rendition": {
             "type": "boolean"
           },
+          "subtitle_rendition_tracks": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/playback_SubtitleRenditionTrack"
+            },
+            "type": "array"
+          },
           "subtitle_track_index": {
             "format": "int64",
             "type": "integer"
@@ -233925,6 +234007,10 @@
           },
           "subtitle_rendition": {
             "type": "boolean"
+          },
+          "subtitle_rendition_tracks": {
+            "format": "int64",
+            "type": "integer"
           },
           "throttle_seconds": {
             "format": "int64",

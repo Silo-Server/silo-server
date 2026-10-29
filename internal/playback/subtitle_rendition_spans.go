@@ -176,9 +176,12 @@ const subtitleSpanRecordName = "subtitle_spans.json"
 
 // subtitleSpanRecord is the content of subtitleSpanRecordName. Track and
 // SegmentDuration tie it to the recipe whose grid its segment numbers use.
+// OnDemand marks the spans of on-demand renditions, which wrote no cue files
+// and serve every track, so Track does not bind them.
 type subtitleSpanRecord struct {
 	Track           int                     `json:"track"`
 	SegmentDuration int                     `json:"segment_duration"`
+	OnDemand        bool                    `json:"on_demand,omitempty"`
 	Spans           []subtitleSpanRecordRow `json:"spans"`
 }
 
@@ -239,7 +242,7 @@ func (s *TranscodeSession) saveSubtitleSpans() {
 		return
 	}
 	opts := s.opts
-	record := subtitleSpanRecord{Track: opts.SubtitleTrackIndex, SegmentDuration: renditionSegmentDuration(opts)}
+	record := subtitleSpanRecord{Track: opts.SubtitleTrackIndex, SegmentDuration: renditionSegmentDuration(opts), OnDemand: subtitleRenditionsOnDemand(opts)}
 	for _, span := range s.subtitleSpans {
 		startTime := span.startTime
 		row := subtitleSpanRecordRow{File: span.file, Start: span.start, End: span.end, StartTime: &startTime, Durations: span.durations, Final: span.final}
@@ -296,10 +299,11 @@ func writeFileAtomic(dir, name string, data []byte) error {
 // directory this recipe reuses, and the first generation number whose cue file
 // name none of them used. It runs before the new process starts, while the
 // playlist on disk is still the earlier process's. A span is kept only while
-// it can serve its cues: its cue file exists and, for the generation that was
-// live when the earlier session went away, its own playlist on disk shows how
-// far it got. On FFmpeg's own playlist a span also needs its segments'
-// durations. plan is the session's keyframe plan, if any.
+// it can serve its cues: its cue file exists (on-demand renditions have none)
+// and, for the generation that was live when the earlier session went away,
+// its own playlist on disk shows how far it got. On FFmpeg's own playlist a
+// span also needs its segments' durations. plan is the session's keyframe
+// plan, if any.
 func loadSubtitleSpans(opts TranscodeOpts, plan *copySegmentPlan) ([]subtitleCueSpan, uint64) {
 	root, err := os.OpenRoot(opts.OutputDir)
 	if err != nil {
@@ -317,16 +321,18 @@ func loadSubtitleSpans(opts TranscodeOpts, plan *copySegmentPlan) ([]subtitleCue
 	var spans []subtitleCueSpan
 	next := uint64(0)
 	followsFFmpeg := followsFFmpegPlaylist(opts, plan)
+	onDemand := subtitleRenditionsOnDemand(opts)
 	for i, row := range record.Spans {
 		generation, ok := subtitleCueFileGeneration(row.File)
 		if !ok {
 			continue
 		}
 		next = max(next, generation+1)
-		if record.Track != opts.SubtitleTrackIndex || record.SegmentDuration != renditionSegmentDuration(opts) || row.Start < 0 {
+		if record.OnDemand != onDemand || !onDemand && record.Track != opts.SubtitleTrackIndex ||
+			record.SegmentDuration != renditionSegmentDuration(opts) || row.Start < 0 {
 			continue
 		}
-		if _, err := root.Stat(row.File); err != nil {
+		if _, err := root.Stat(row.File); err != nil && !onDemand {
 			continue
 		}
 		span := subtitleCueSpan{file: row.File, start: row.Start, end: row.End, durations: row.Durations, final: row.Final}

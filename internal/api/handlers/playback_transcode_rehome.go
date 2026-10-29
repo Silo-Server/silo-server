@@ -312,7 +312,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 // recorded plan (the protocol store is absent or lost it) has no plan, which
 // applies no other capability filter, as at that session's own start.
 func (h *PlaybackHandler) rehomePlanV3(ctx context.Context, session *playback.Session, card *playback.RecipeCard) playback.PlannerResultV3 {
-	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind, SubtitleRendition: card.SubtitleRendition, TargetVideoCodec: card.TargetCodecVideo}
+	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind, SubtitleRendition: card.SubtitleRendition, SubtitleRenditionTracks: card.SubtitleRenditionTracks, TargetVideoCodec: card.TargetCodecVideo}
 	if h.PlanStoreV3 == nil {
 		return result
 	}
@@ -586,6 +586,7 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 		ThrottleSeconds:            card.ThrottleSeconds,
 		RequireReady:               true,
 	}
+	req.SubtitleRenditionTracks = card.SubtitleRenditionTracks
 	if segment, seekSeconds, ok := playback.ReconstructResumePoint(card, requestedSegment); ok {
 		req.StartSegmentNumber = segment
 		req.SeekSeconds = seekSeconds

@@ -145,6 +145,11 @@ type TranscodeOpts struct {
 	// the WebVTT subtitle rendition of its HLS playlist, for a transcode or
 	// an HLS copy remux. See subtitle_rendition.go.
 	SubtitleRendition bool
+	// SubtitleRenditionTracks, with SubtitleRendition, lists every embedded
+	// text track as a rendition of its own, read on demand through the
+	// source's index instead of by this ffmpeg process; SubtitleTrackIndex then
+	// only names the selected one. See subtitle_rendition_tracks.go.
+	SubtitleRenditionTracks []SubtitleRenditionTrack
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
 	subtitleCueFile string

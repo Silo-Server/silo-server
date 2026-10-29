@@ -88,3 +88,17 @@ no longer than its video segment would; for a keyframe-planned copy, one
 FFmpeg has still not reached answers `404`, as its video segment does. It is
 never acknowledged, pruned, or used to restart FFmpeg. The protocol is described in
 [playback protocol v3](architecture/playback-protocol-v3.md#8-track-identity-and-the-subtitle-ordinal-space).
+
+A node that also advertises `hls_on_demand_subtitle_renditions_v1` accepts
+`subtitle_rendition_tracks` beside `subtitle_rendition: true`: every embedded
+text track to list as a rendition of its own, each with `stream_index`,
+`track_number` (the Matroska TrackNumber or MP4 track ID), `name`, and
+optional `language`, `forced` and `default`. The node's FFmpeg then writes no
+cues. `master.m3u8` lists one `EXT-X-MEDIA` per track,
+`silo_rendition=subtitles&silo_track=<track_number>` selects a track's playlist, and `GET /transcode/{id}/segment/sub_<track_number>_NNNNN.vtt`
+reads the segment's cues from the source's own index whenever it is asked
+for. A track the request did not list answers `404`. The start response
+attests `subtitle_rendition_tracks` with the number of tracks the node serves,
+and the API stops a node whose count differs. Recipe cards carry the whole
+list; signed reconstruction claims carry only the track numbers and the
+default, so a session rebuilt from a token names its renditions `Track <n>`.
