@@ -10,11 +10,10 @@
 # section of .env.example.
 #
 # An install of the earlier multi-container layout keeps it by selecting
-# docker-compose.split.yml in .env before it updates. This file does not look
-# for one: started on its SILO_DATA_ROOT, it comes up on a new, empty
-# database, and the earlier containers keep running with their data untouched.
-# Moving such an install into this file is a separate step; see "Moving from
-# the multi-container stack" in docs/architecture/omnibus-image.md.
+# docker-compose.split.yml in .env before it updates. Started on such an
+# install, this file's Silo refuses to create a database and says how to keep
+# the layout or move it; see "Moving from the multi-container stack" in
+# docs/architecture/omnibus-image.md.
 
 services:
   silo:
@@ -57,6 +56,8 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
+      # Host paths in startup messages, and the root the move works in.
+      SILO_DATA_ROOT: ${SILO_DATA_ROOT:-/opt/silo}
       # Master key for at-rest credential encryption. The server refuses to
       # start without it. Generate one with: openssl rand -base64 48
       # Back it up apart from your database dumps; without it, encrypted
@@ -93,6 +94,12 @@ services:
       # applies until you set one ("Default storage budget per location",
       # download.artifact_max_bytes, in Settings > Downloads).
       - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
+      - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
+      # The whole data root. Before creating a database, startup looks here for
+      # an earlier multi-container install and refuses to start beside it,
+      # since an empty server would open first-run setup on the published
+      # ports. Moving such an install into this container also works here.
+      - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
       # These three matter only when the Docker host is itself an LXC container.
       # There the files describe the physical machine, and the LXC's own limit
       # sits on a cgroup this container cannot see. lxcfs rewrites them to the

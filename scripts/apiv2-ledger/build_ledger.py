@@ -177,7 +177,7 @@ S = "server"
 def go(file, line): return (S, file, line, [])
 internal = {
     # api listener
-    "api GET /api/v1/health": [go("Dockerfile", 90), go("dev/compose.yml", 133)],
+    "api GET /api/v1/health": [go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "api POST /api/v1/autoscan/webhooks/{token}": [go("internal/api/handlers/autoscan.go", 389)],
     "api POST /api/v1/plex-sync/webhooks/{secret}": [go("internal/api/handlers/webhook_sync.go", 569)],
     "api POST /api/v1/webhook-sync/webhooks/{secret}": [go("internal/api/handlers/webhook_sync.go", 568), go("internal/webhooksync/types.go", 11)],
@@ -201,7 +201,7 @@ internal = {
     # The same image (ENTRYPOINT silo, mode flag in cmd/silo/main.go) runs in
     # proxy and transcode mode, so the container HEALTHCHECK sites apply to
     # the node listeners as well as to the API row.
-    "proxy GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 133)],
+    "proxy GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "proxy GET /stream/direct/{token}": [go("internal/api/handlers/playback_v3.go", 3245), go("internal/jellycompat/handlers_playback.go", 1285)],
     "proxy HEAD /stream/direct/{token}": [go("internal/api/handlers/playback_v3.go", 3245), go("internal/jellycompat/handlers_playback.go", 1285)],
     "proxy GET /stream/remux/{token}": [go("internal/api/handlers/playback_v3.go", 3243), go("internal/jellycompat/handlers_playback.go", 1287)],
@@ -223,7 +223,7 @@ internal = {
     "proxy POST /admin/force-reload": [go("internal/api/handlers/nodes.go", 532), go("internal/api/handlers/nodes.go", 581)],
     "proxy POST /admin/reprobe-capabilities": [go("internal/api/handlers/nodes.go", 807)],
     # transcode node listener
-    "transcode_node GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 133)],
+    "transcode_node GET /api/v1/health": [go("internal/nodepool/health.go", 61), go("Dockerfile", 90), go("dev/compose.yml", 142)],
     "transcode_node POST /transcode/start": [go("internal/api/handlers/playback_transport.go", 40), go("internal/jellycompat/handlers_playback.go", 1538)],
     "transcode_node DELETE /transcode/{session_id}": [go("internal/playback/transcode_manager.go", 1058)],
     "transcode_node GET /transcode/{session_id}/master.m3u8": [go("internal/api/handlers/playback.go", 1636), go("internal/proxy/server.go", 895), go("internal/proxy/mediagrant.go", 181), go("internal/jellycompat/streams.go", 1227)],

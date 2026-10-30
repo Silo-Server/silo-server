@@ -113,13 +113,12 @@ lines you need.
 
 An install that runs Silo, PostgreSQL, and Redis in separate containers keeps
 that layout when its `.env` sets `COMPOSE_FILE=docker-compose.split.yml`; set
-it before updating. Otherwise Silo comes up on a new, empty database, with
-the setup wizard open; the earlier containers keep running and its data is
-untouched, and setting `COMPOSE_FILE` then running `docker compose up -d`
-brings it back. Moving into the single container is a separate step. The
-separate GPU and node Compose
-files are gone, so a `COMPOSE_FILE` that names one fails until it names only
-the main file. See [Moving from the multi-container
+it before updating. Otherwise Silo refuses to start, creates nothing, and
+says how to keep the layout or move it; the earlier containers keep running
+with their data untouched. Moving into the single container is a separate
+step. The separate GPU and node Compose files are gone, so a `COMPOSE_FILE`
+that names one fails until it names only the deployment file you use, with
+the matching lines in it uncommented. See [Moving from the multi-container
 stack](docs/architecture/omnibus-image.md#moving-from-the-multi-container-stack).
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with

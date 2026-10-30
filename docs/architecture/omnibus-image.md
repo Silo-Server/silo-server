@@ -181,8 +181,9 @@ working.
 ## Nodes
 
 The same image runs a proxy or transcode node. With `MODE=proxy` or
-`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`, starts
-none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
+`MODE=transcode`, `init-config` requires `DATABASE_URL`, `REDIS_URL`, and
+`NODE_URL` (without it Silo guesses a URL from its listen port, and two nodes
+would share session keys), starts none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
 and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
 `POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
 changes the shared database's schema or settings. `/config` holds the node's
@@ -223,28 +224,31 @@ state in `plugins`, `artwork`, and `compat`. That file is now
 `docker-compose.split.yml`, and an install of that layout keeps it by
 selecting it in `COMPOSE_FILE`.
 
-`docker-compose.yml` does not look for such an install. Started on its
-`SILO_DATA_ROOT`, it replaces the earlier `silo` container and creates a new,
-empty bundled database; the earlier `postgres`, `redis`, and `meilisearch`
-containers keep running as orphans of the Compose project, their data
-untouched. Selecting `docker-compose.split.yml` and running `docker compose up
--d` again brings the install back.
+`docker-compose.yml` mounts `SILO_DATA_ROOT` at `/silo-data`. Before
+`init-postgres` creates a database, it looks there for the earlier stack's
+cluster (`postgres/*/docker` or `postgres/data`) or Silo directories, and when
+it finds them it refuses to start and names both choices. An empty server
+would open first-run setup on the published ports, while the earlier
+`postgres` container, still running as an orphan of the Compose project, and
+the `.env` credentials for it stay within reach of Silo's plugins. The check
+runs only while the container has no database, so an install that was moved
+or started fresh never sees it. Selecting `docker-compose.split.yml` and
+running `docker compose up -d` again brings the earlier install back.
 
 Moving an install into the single container is a separate step that an
 administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
-earlier stack stopped and `SILO_DATA_ROOT` mounted at `/silo-data`. With
-`.env` still holding the earlier stack's settings, and `COMPOSE_FILE` removed
-from it once the stack is down:
+earlier stack stopped. With `.env` still holding the earlier stack's
+settings, and `COMPOSE_FILE` removed from it once the stack is down:
 
 ```sh
 docker compose -f docker-compose.split.yml down
-docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
-  --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
+docker compose run --rm --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
 docker compose up -d
 ```
 
-`docker compose run` reads the `silo` service's `.env` and `PUID`, and the
-script works within the one mount so it can hard-link:
+`docker compose run` gives the script the `silo` service's `.env`, `PUID`, and
+`/silo-data` mount, and the script works within that one mount so it can
+hard-link:
 
 - Silo's three directories are hard-linked into `config/silo`, or copied when
   hard links fail across file systems. This happens with an external
@@ -349,10 +353,9 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- A move run on a `SILO_DATA_ROOT` where `docker-compose.yml` already made
-  an empty install removes the empty Silo directories `init-config` made
-  instead of setting them aside; its database has to be moved aside by hand
-  (above).
+- Silo directories that `init-config` made, empty, on a start the check
+  refused are removed instead of set aside. A database an earlier image
+  created beside the old install has to be moved aside by hand (above).
 
 A `docker-compose.override.yml` that still changes the old `postgres`,
 `redis`, or `meilisearch` services makes Compose reject `docker-compose.yml`,
