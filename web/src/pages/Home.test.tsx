@@ -513,28 +513,7 @@ describe("Home", () => {
   });
 
   it("drops what an earlier row shows from avoid-duplicates rows, whatever order rows load in", async () => {
-    mockFetchRecipeCatalog.mockResolvedValue({
-      categories: {
-        personalized: [
-          {
-            type: "recommended_for_you",
-            category: "personalized",
-            presets: [],
-            avoid_duplicates: true,
-            supports_rotation: false,
-            admin_only: false,
-          },
-          {
-            type: "taste_match",
-            category: "personalized",
-            presets: [],
-            avoid_duplicates: true,
-            supports_rotation: false,
-            admin_only: false,
-          },
-        ],
-      },
-    });
+    avoidDuplicatesFor("recommended_for_you", "taste_match");
     const layout = [
       { ...homeLayout("for-you"), section_type: "recommended_for_you" },
       { ...homeLayout("top-picks"), section_type: "taste_match" },
@@ -550,17 +529,7 @@ describe("Home", () => {
     const respond = (sectionId: string) => {
       const request = requests.find((candidate) => candidate.sectionId === sectionId)!;
       const entry = layout.find((candidate) => candidate.id === sectionId)!;
-      request.respond({
-        section: {
-          ...entry,
-          total_count: rows[sectionId]!.length,
-          items: rows[sectionId]!.map((title) => ({
-            ...homeSection(sectionId).section.items[0],
-            content_id: title,
-            title,
-          })),
-        },
-      });
+      request.respond(sectionWith(entry, rows[sectionId]!));
     };
 
     await renderHome(new QueryClient());
@@ -579,6 +548,50 @@ describe("Home", () => {
       "top-picks": "Top Pick Only",
       recent: "Shared",
     });
+  });
+
+  it("reads the rest of a partial row whose first cards another row already shows", async () => {
+    avoidDuplicatesFor("recommended_for_you");
+    const layout = [
+      homeLayout("recent"),
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+    ];
+    showLayout(layout);
+    mockFetchHomeSectionItems.mockImplementation(
+      async (sectionId: string, options: { itemLimit?: number }) => {
+        if (sectionId === "recent") return sectionWith(layout[0]!, ["Shared"]);
+        return options.itemLimit === undefined
+          ? sectionWith(layout[1]!, ["Shared", "For You Only"])
+          : { ...sectionWith(layout[1]!, ["Shared"]), partial: true };
+      },
+    );
+
+    await renderHome(new QueryClient());
+
+    await waitForRenderedFirstItems({ recent: "Shared", "for-you": "For You Only" });
+  });
+
+  it("filters a cached completed row's later cards after every row's first cards", async () => {
+    avoidDuplicatesFor("recommended_for_you", "taste_match");
+    const layout = [
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+      { ...homeLayout("top-picks"), section_type: "taste_match" },
+    ];
+    showLayout(layout);
+    const queryClient = new QueryClient();
+    // For You showed one card, then loaded Shared with the rest of its row.
+    queryClient.setQueryData(sectionKeys.homeItems("for-you"), {
+      ...sectionWith(layout[0]!, ["For You Only", "Shared"]),
+      shown: 1,
+    });
+    queryClient.setQueryData(
+      sectionKeys.homeItems("top-picks"),
+      sectionWith(layout[1]!, ["For You Only", "Shared", "Top Pick Only"]),
+    );
+
+    await renderHome(queryClient);
+
+    await waitForRenderedFirstItems({ "for-you": "For You Only", "top-picks": "Shared" });
   });
 
   // Renders Home and lets one microtask run, optionally inside the sidebar's main stage.
@@ -682,6 +695,36 @@ function cachedClient(layout: Array<{ id: string }>) {
     queryClient.setQueryData(sectionKeys.homeItems(section.id), homeSection(section.id));
   });
   return queryClient;
+}
+
+function avoidDuplicatesFor(...types: string[]) {
+  mockFetchRecipeCatalog.mockResolvedValue({
+    categories: {
+      personalized: types.map((type) => ({
+        type,
+        category: "personalized",
+        presets: [],
+        avoid_duplicates: true,
+        supports_rotation: false,
+        admin_only: false,
+      })),
+    },
+  });
+}
+
+// A row answering one card per title, each title its content id.
+function sectionWith(entry: ReturnType<typeof homeLayout>, titles: string[]) {
+  return {
+    section: {
+      ...entry,
+      total_count: titles.length,
+      items: titles.map((title) => ({
+        ...homeSection(entry.id).section.items[0],
+        content_id: title,
+        title,
+      })),
+    },
+  };
 }
 
 function stubMatchMedia(matching: string) {

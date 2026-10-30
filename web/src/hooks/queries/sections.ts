@@ -100,8 +100,9 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
         const row = homeRowResponse(sectionFromV2(section), itemLimit);
         if (row.partial && section.featured) continue;
         const queryKey = sectionKeys.homeItems(section.id);
-        // A row the viewer has already read whole past the cap keeps that
-        // entry, left stale, so Home rereads it whole instead of shrinking it.
+        // A row the viewer has already completed or read whole past the cap
+        // keeps that entry, left stale, so Home rereads it whole instead of
+        // shrinking it.
         const cached = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
         if (!section.featured && homeRowItemLimit(false, cached) === undefined) continue;
         // setQueryData alone would create the entry with the client's default

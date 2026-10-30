@@ -4559,6 +4559,11 @@ export interface HomeSectionItemsResponse {
    * cards than `section.items` (see homeRowLimit).
    */
   partial?: boolean;
+  /**
+   * The row was completed after showing this many of its first cards (see
+   * homeRowLimit's completeHomeRow).
+   */
+  shown?: number;
 }
 
 export interface CollectionSectionConfig {

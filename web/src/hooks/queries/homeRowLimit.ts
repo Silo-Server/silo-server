@@ -37,15 +37,20 @@ export function homeRowResponse(
 
 /**
  * The item_limit to read a Home row with. A featured row is read whole: the
- * hero counts and cycles through every card. So is a row already read whole
- * past the cap, so a refresh never shrinks a row the viewer has scrolled.
+ * hero counts and cycles through every card. So is a row already completed or
+ * read whole past the cap, so a refresh never shrinks a row the viewer has
+ * scrolled.
  */
 export function homeRowItemLimit(
   featured: boolean,
   cached: HomeSectionItemsResponse | undefined,
 ): number | undefined {
   if (featured) return undefined;
-  if (cached && !cached.partial && cached.section.items.length > HOME_ROW_ITEM_LIMIT) {
+  if (
+    cached &&
+    !cached.partial &&
+    (cached.shown !== undefined || cached.section.items.length > HOME_ROW_ITEM_LIMIT)
+  ) {
     return undefined;
   }
   return HOME_ROW_ITEM_LIMIT;
@@ -67,5 +72,21 @@ export function completeHomeRow(
   const length = Math.max(whole.section.item_limit, whole.section.items.length);
   return {
     section: { ...whole.section, items: [...shown.section.items, ...rest].slice(0, length) },
+    shown: shown.section.items.length,
   };
+}
+
+/**
+ * How many of a row's first cards Home's duplicate filter compares before
+ * any row's later cards (see dropCrossSectionDuplicates), or undefined for
+ * all of them. A completed row keeps the count it showed before; any other
+ * row read whole past the cap counts its first read's worth.
+ */
+export function homeRowShownCount(
+  featured: boolean,
+  row: HomeSectionItemsResponse | undefined,
+): number | undefined {
+  if (featured || !row) return undefined;
+  if (row.shown !== undefined) return row.shown;
+  return homeRowItemLimit(false, row) === undefined ? HOME_ROW_ITEM_LIMIT : undefined;
 }

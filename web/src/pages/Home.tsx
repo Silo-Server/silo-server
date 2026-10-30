@@ -17,11 +17,7 @@ import {
   HOME_SECTION_STALE_TIME,
   useHomeLayout,
 } from "@/hooks/queries/sections";
-import {
-  completeHomeRow,
-  HOME_ROW_ITEM_LIMIT,
-  homeRowItemLimit,
-} from "@/hooks/queries/homeRowLimit";
+import { completeHomeRow, homeRowItemLimit, homeRowShownCount } from "@/hooks/queries/homeRowLimit";
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
@@ -75,8 +71,11 @@ export default function Home() {
     freshCachedHomeSectionIds(queryClient, layout),
   );
   // Rows that loaded the rest of their cards, in the order they did, each with
-  // how many cards it showed before (see dropCrossSectionDuplicates).
-  const [shownCounts, setShownCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
+  // how many cards it showed before (see dropCrossSectionDuplicates). Cached
+  // rows bring theirs back, so a return to Home filters as it did before.
+  const [shownCounts, setShownCounts] = useState<ReadonlyMap<string, number>>(() =>
+    cachedShownCounts(queryClient, layout),
+  );
   // Every reset below starts a new load generation. A request only reports
   // back into the generation that started it.
   const loadGenerationRef = useRef(0);
@@ -124,6 +123,12 @@ export default function Home() {
     setLoadedSections((current) =>
       mapsHaveSameEntries(current, cachedSections) ? current : cachedSections,
     );
+    const cachedCounts = cachedShownCounts(queryClient, layout);
+    setShownCounts((current) => {
+      let next = current;
+      for (const [sectionId, shown] of cachedCounts) next = withShownCount(next, sectionId, shown);
+      return next;
+    });
     setFailedIds((current) => (current.size === 0 ? current : new Set()));
     setInFlightIds((current) => (current.size === 0 ? current : new Set()));
     const nextCompletedIds = cacheReset
@@ -172,14 +177,18 @@ export default function Home() {
       void queryClient
         .fetchQuery<HomeSectionItemsResponse>({
           queryKey,
-          queryFn: ({ signal }) =>
-            fetchHomeSectionItems(sectionId, {
+          queryFn: async ({ signal }) => {
+            const cached = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
+            const response = await fetchHomeSectionItems(sectionId, {
               signal,
-              itemLimit: homeRowItemLimit(
-                featured,
-                queryClient.getQueryData<HomeSectionItemsResponse>(queryKey),
-              ),
-            }),
+              itemLimit: homeRowItemLimit(featured, cached),
+            });
+            // A row the viewer extended comes back whole; the duplicate
+            // filter keeps comparing the cards it showed before.
+            return cached?.shown === undefined || response.partial
+              ? response
+              : { ...response, shown: cached.shown };
+          },
           staleTime: HOME_SECTION_STALE_TIME,
           gcTime: HOME_SECTION_GC_TIME,
         })
@@ -191,22 +200,8 @@ export default function Home() {
             next.set(sectionId, response.section);
             return next;
           });
-          setShownCounts((prev) => {
-            // A row the viewer extended past the cap comes back whole; the
-            // duplicate filter keeps comparing its first cards, as it did
-            // when the row was completed.
-            if (
-              !featured &&
-              !response.partial &&
-              response.section.items.length > HOME_ROW_ITEM_LIMIT
-            ) {
-              return prev.has(sectionId) ? prev : new Map(prev).set(sectionId, HOME_ROW_ITEM_LIMIT);
-            }
-            if (!prev.has(sectionId)) return prev;
-            const next = new Map(prev);
-            next.delete(sectionId);
-            return next;
-          });
+          const shown = homeRowShownCount(featured, response);
+          setShownCounts((prev) => withShownCount(prev, sectionId, shown));
           setFailedIds((prev) => {
             if (!prev.has(sectionId)) return prev;
             const next = new Set(prev);
@@ -303,15 +298,22 @@ export default function Home() {
         .then((response) => {
           if (loadGenerationRef.current !== generation) return;
           setLoadedSections((prev) => new Map(prev).set(sectionId, response.section));
-          setShownCounts((prev) =>
-            prev.has(sectionId) ? prev : new Map(prev).set(sectionId, shown.section.items.length),
-          );
+          setShownCounts((prev) => withShownCount(prev, sectionId, shown.section.items.length));
         })
         .catch(() => undefined)
         .finally(() => completingIdsRef.current.delete(sectionId));
     },
     [layout, queryClient],
   );
+
+  // A row loaded in part that shows no cards, because hide-watched or the
+  // duplicate filter took every one, is hidden and has no carousel to report
+  // its end; it reads the rest at once, which may hold cards to show.
+  useEffect(() => {
+    for (const [sectionId, section] of visibleSections) {
+      if (section.items.length === 0) completeSection(sectionId);
+    }
+  }, [completeSection, visibleSections]);
 
   const retrySection = (sectionId: string) => {
     queryClient.removeQueries({ queryKey: sectionKeys.homeItems(sectionId) });
@@ -545,6 +547,37 @@ function freshCachedHomeSectionIds(
       })
       .map((section) => section.id),
   );
+}
+
+// The cached rows' shownCounts entries, in the order they were read.
+function cachedShownCounts(
+  queryClient: QueryClient,
+  layout: ResolvedSectionLayout[],
+): Map<string, number> {
+  const rows = layout.flatMap((section) => {
+    const state = queryClient.getQueryState<HomeSectionItemsResponse>(
+      sectionKeys.homeItems(section.id),
+    );
+    const shown = homeRowShownCount(section.featured, state?.data);
+    return state && shown !== undefined ? [{ id: section.id, shown, at: state.dataUpdatedAt }] : [];
+  });
+  return new Map(rows.sort((a, b) => a.at - b.at).map((row) => [row.id, row.shown]));
+}
+
+// counts with an entry for sectionId added at the end, or removed when shown
+// is undefined. An entry it already has keeps its count and place.
+function withShownCount(
+  counts: ReadonlyMap<string, number>,
+  sectionId: string,
+  shown: number | undefined,
+): ReadonlyMap<string, number> {
+  if (shown !== undefined) {
+    return counts.has(sectionId) ? counts : new Map(counts).set(sectionId, shown);
+  }
+  if (!counts.has(sectionId)) return counts;
+  const next = new Map(counts);
+  next.delete(sectionId);
+  return next;
 }
 
 function mapsHaveSameEntries<K, V>(left: Map<K, V>, right: Map<K, V>): boolean {

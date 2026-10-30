@@ -178,6 +178,7 @@ describe("home row limit", () => {
     const completed = completeHomeRow(shown, whole);
 
     expect(completed.partial).toBeUndefined();
+    expect(completed.shown).toBe(3);
     expect(completed.section.item_limit).toBe(100);
     expect(completed.section.items.map((item) => item.content_id)).toEqual([
       "a",
