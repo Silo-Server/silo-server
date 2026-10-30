@@ -1,6 +1,9 @@
 package naming
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExplicitEpisodeMarkersSupportLargeSeasonNumbers(t *testing.T) {
 	for _, tt := range []struct {
@@ -304,6 +307,8 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example Show/Season 1/Example Show [16x10] - 02.mkv", 1, 2, true},
 		{"/tv/Example Show/Season 1/Example Show - 03 - Title (2x14).mkv", 1, 3, true},
 		{"/tv/Example Show/Season 1/Example Show - E03 - Title [2x14].mkv", 1, 3, true},
+		// Each bracketed code must not re-parse the text before it.
+		{"/tv/Example Show/Season 1/Example Show - 05" + strings.Repeat(" (11x11)", 30) + ".mkv", 1, 5, true},
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
 		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},

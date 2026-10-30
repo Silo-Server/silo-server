@@ -50,6 +50,7 @@ type episodeToken struct {
 // rootRelative reports that directories start directly in a configured library
 // folder, so the first one may be the show itself.
 func parseEpisodeToken(name string, directories []string, rootRelative, allowNumericSeason bool, allowUnseasoned ...bool) (episodeToken, bool) {
+	bracketWeighed := false
 	for _, pattern := range []*regexp.Regexp{labeledEpisodeRe, xEpisodeRe} {
 		for _, match := range pattern.FindAllStringSubmatchIndex(name, -1) {
 			season, _ := strconv.Atoi(name[match[2]:match[3]])
@@ -64,6 +65,13 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 			closed := -1
 			if pattern == xEpisodeRe {
 				if open, end, ok := bracketedCoordinate(name, match[2], match[5]); ok {
+					// Only the first bracketed code is weighed: a later one has
+					// the same earlier text before it. Weighing each would
+					// re-parse every prefix once per bracket in the name.
+					if bracketWeighed {
+						continue
+					}
+					bracketWeighed = true
 					// A bracketed code after an episode number belongs to the
 					// episode title: Show - 03 - Title (2x14).
 					if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 {
