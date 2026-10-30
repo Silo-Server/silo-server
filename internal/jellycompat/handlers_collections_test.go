@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -362,10 +363,12 @@ func TestHandleItems_BoxSetChildrenCountOnly(t *testing.T) {
 			if paged := performItemsRequest(t, h, target+"&Limit=50"); paged.TotalRecordCount != tc.total {
 				t.Fatalf("paged total = %d, want %d", paged.TotalRecordCount, tc.total)
 			}
-			counted := performItemsRequest(t, h, target+"&StartIndex=1&Limit=0")
-			if counted.Items == nil || len(counted.Items) != 0 || counted.TotalRecordCount != tc.total || counted.StartIndex != 1 {
-				t.Fatalf("Limit=0 returned %v (total %d, StartIndex %d), want [] (total %d, StartIndex 1)",
-					itemNames(counted.Items), counted.TotalRecordCount, counted.StartIndex, tc.total)
+			for _, startIndex := range []int{0, 1} {
+				counted := performItemsRequest(t, h, fmt.Sprintf("%s&StartIndex=%d&Limit=0", target, startIndex))
+				if counted.Items == nil || len(counted.Items) != 0 || counted.TotalRecordCount != tc.total || counted.StartIndex != startIndex {
+					t.Fatalf("Limit=0 at %d returned %v (total %d, StartIndex %d), want [] (total %d)",
+						startIndex, itemNames(counted.Items), counted.TotalRecordCount, counted.StartIndex, tc.total)
+				}
 			}
 		})
 	}
