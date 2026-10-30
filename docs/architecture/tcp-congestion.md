@@ -164,8 +164,8 @@ produce a warning; they do not establish containment.
 
 If the initial capability read fails, the constructor records `inspect_failed`
 and `children_inherit=true`. It starts no helper, attempts the bounding and
-ambient drops that need no capability read, and skips rewriting unknown
-capability sets. Builds without the Linux cgo constructor report
+ambient drops that need no capability read, sets `no_new_privs`, and skips
+rewriting unknown capability sets. Builds without the Linux cgo constructor report
 `unsupported_platform` and have no helper.
 
 When NET_ADMIN is absent from the effective set at constructor entry, the helper

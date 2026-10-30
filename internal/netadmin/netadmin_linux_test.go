@@ -277,6 +277,9 @@ func TestInspectFailureReportsUnprovenContainment(t *testing.T) {
 	if !state.ChildrenInherit {
 		t.Errorf("ChildrenInherit = false, want true for unproven containment; Current() = %+v", state)
 	}
+	if !state.NoNewPrivs {
+		t.Errorf("NoNewPrivs = false, want true after a failed inspection; Current() = %+v", state)
+	}
 	if state.Errno != "EPERM" {
 		t.Errorf("Errno = %q, want EPERM; Current() = %+v", state.Errno, state)
 	}

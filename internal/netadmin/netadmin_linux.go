@@ -234,6 +234,8 @@ __attribute__((constructor)) static void silo_netadmin_init(void) {
         silo_state.helper = SILO_NA_INSPECT_FAILED;
         silo_state.children_inherit = 1;
         silo_drop_bounding_and_ambient();
+        // Unknown sets cannot be rewritten; still stop children gaining privileges.
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) silo_record_error(errno);
         int nnp = prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0);
         if (nnp < 0) silo_record_error(errno);
         silo_state.no_new_privs = nnp == 1;
