@@ -295,6 +295,12 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example 5/Example.5.1x01.Title.mkv", 1, 1, true},
 		{"/tv/Example SG-1/Example.SG-1.2x05.mkv", 2, 5, true},
 		{"/tv/Example Show/Season 1/[Group] Example Show - 02 [16x9 1080p].mkv", 1, 2, true},
+		{"/tv/Example Show/Example Show - [1x02] - Second.mkv", 1, 2, true},
+		{"/tv/Example Show/Example Show (1x02).mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - [ 1x03 ].mkv", 1, 3, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 [4x3].mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 (16x9).mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 [1920x1080].mkv", 1, 2, true},
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
 		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},
@@ -322,6 +328,9 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/4x4.2019.1080p.mkv",
 		"/mixed/10x10 - 2018.mkv",
 		"/mixed/Example.Movie.176x144.3gp",
+		"/mixed/Example Movie [16x9].mkv",
+		"/mixed/Example Movie (4x3).mkv",
+		"/mixed/Example Movie [1920x1080].mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {

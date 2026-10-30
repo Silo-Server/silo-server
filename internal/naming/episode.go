@@ -61,8 +61,15 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(name, directories, rootRelative, allowNumericSeason, allowUnseasoned...) {
 				continue
 			}
-			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
-			return finishEpisodeToken(name, token), true
+			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]})
+			// The closing bracket of Show - [1x02] - Title belongs to the
+			// coordinate, not to the episode title after it.
+			if pattern == xEpisodeRe {
+				if closed := bracketedCoordinateEnd(name, match[2], match[5]); closed >= 0 {
+					token.end = closed
+				}
+			}
+			return token, true
 		}
 	}
 
@@ -310,6 +317,20 @@ func insideReleaseTag(name string, index int) bool {
 	return strings.LastIndex(prefix, "[") > strings.LastIndex(prefix, "]") || strings.LastIndex(prefix, "(") > strings.LastIndex(prefix, ")")
 }
 
+// bracketedCoordinateEnd returns the index after the bracket or parenthesis
+// that holds only the text from start to end, as in [1x02] or ( 1x02 ), or -1.
+func bracketedCoordinateEnd(name string, start, end int) int {
+	before := strings.TrimRight(name[:start], " ")
+	after := strings.TrimLeft(name[end:], " ")
+	if before == "" || after == "" {
+		return -1
+	}
+	if open, closing := before[len(before)-1], after[0]; (open == '[' && closing == ']') || (open == '(' && closing == ')') {
+		return len(name) - len(after) + 1
+	}
+	return -1
+}
+
 func validXEpisodeCoordinate(name string, match []int) bool {
 	// The x form can describe audio layouts (AAC 2.0x2, DD5.1x264) and
 	// dimensions (2048x1080). Explicit S/E markers have no such ambiguity and
@@ -318,8 +339,14 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	episode := name[match[4]:match[5]]
 	number, _ := strconv.Atoi(episode)
 	// Release tags and aspect ratios before release details describe the
-	// video: [16x9 1080p], Movie.4x3.DVDRip.
-	if insideReleaseTag(name, start) {
+	// video: [16x9 1080p], Movie.4x3.DVDRip. A tag holding only the
+	// coordinate labels the episode ([1x02], (1x02)) unless it is an aspect
+	// ratio ([4x3]); the picture size checks below still apply ([1920x1080]).
+	if bracketedCoordinateEnd(name, start, match[5]) >= 0 {
+		if aspectRatioRe.MatchString(name[start:match[5]]) {
+			return false
+		}
+	} else if insideReleaseTag(name, start) {
 		return false
 	}
 	if aspectRatioRe.MatchString(name[start:match[5]]) {
