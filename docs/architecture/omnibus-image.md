@@ -224,15 +224,18 @@ state in `plugins`, `artwork`, and `compat`. That file is now
 `docker-compose.split.yml`, and an install of that layout keeps it by
 selecting it in `COMPOSE_FILE`.
 
-`docker-compose.yml` mounts `SILO_DATA_ROOT` at `/silo-data`. Before
-`init-postgres` creates a database, it looks there for the earlier stack's
-cluster (`postgres/*/docker` or `postgres/data`) or Silo directories, and when
-it finds them it refuses to start and names both choices. An empty server
-would open first-run setup on the published ports, while the earlier
-`postgres` container, still running as an orphan of the Compose project, and
-the `.env` credentials for it stay within reach of Silo's plugins. The check
-runs only while the container has no database, so an install that was moved
-or started fresh never sees it. Selecting `docker-compose.split.yml` and
+`docker-compose.yml` mounts `SILO_DATA_ROOT` at `/silo-data`. Before Silo
+starts in a primary mode (`integrated` or `api`), `init-postgres` looks there
+for the earlier stack's cluster (`postgres/*/docker` or `postgres/data`) or
+Silo directories, and when it finds them it refuses to start and names both
+choices. That holds with the bundled database and with a `DATABASE_URL` in
+`.env`, which the earlier Compose file overrode and this one passes through:
+either way Silo could open first-run setup on the published ports, while the
+earlier `postgres` container, still running as an orphan of the Compose
+project, and the `.env` credentials for it stay within reach of Silo's
+plugins. The check skips an install with a finished move (the done marker
+below) or a bundled database of its own, and proxy and transcode nodes, which
+serve no setup. Selecting `docker-compose.split.yml` and
 running `docker compose up -d` again brings the earlier install back.
 
 Moving an install into the single container is a separate step that an

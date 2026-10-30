@@ -11,8 +11,8 @@
 #
 # An install of the earlier multi-container layout keeps it by selecting
 # docker-compose.split.yml in .env before it updates. Started on such an
-# install, this file's Silo refuses to create a database and says how to keep
-# the layout or move it; see "Moving from the multi-container stack" in
+# install, this file's Silo refuses to start and says how to keep the layout
+# or move it; see "Moving from the multi-container stack" in
 # docs/architecture/omnibus-image.md.
 
 services:
@@ -95,10 +95,11 @@ services:
       # download.artifact_max_bytes, in Settings > Downloads).
       - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
-      # The whole data root. Before creating a database, startup looks here for
-      # an earlier multi-container install and refuses to start beside it,
-      # since an empty server would open first-run setup on the published
-      # ports. Moving such an install into this container also works here.
+      # The whole data root. Until this container has a database of its own or
+      # a finished move, startup looks here for an earlier multi-container
+      # install and refuses to start beside it, since Silo would open first-run
+      # setup on the published ports. Moving such an install into this
+      # container also works here.
       - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
       # These three matter only when the Docker host is itself an LXC container.
       # There the files describe the physical machine, and the LXC's own limit

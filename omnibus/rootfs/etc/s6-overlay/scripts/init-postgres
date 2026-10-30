@@ -21,6 +21,41 @@ MSG
   exit 1
 fi
 
+# docker-compose.yml mounts SILO_DATA_ROOT at /silo-data. An install of the
+# multi-container stack there that was never moved into this container has a
+# database of its own. Starting beside it would open first-run setup on the
+# published ports, on a new bundled database or on a DATABASE_URL in .env that
+# the earlier Compose file overrode, while the earlier containers and their
+# credentials stay reachable on the Compose network. So the primary modes,
+# which serve setup, refuse until the administrator keeps that layout or moves
+# it. A finished move, or a database of this container's own, skips the check.
+mode="${MODE:-integrated}"
+if [[ "$mode" == integrated || "$mode" == api ]] &&
+  [[ ! -e /config/.compose-cluster-copied && ! -e /config/postgres/data/PG_VERSION ]]; then
+  earlier=()
+  for dir in /silo-data/postgres/*/docker /silo-data/postgres/data; do
+    if [[ -e "$dir/PG_VERSION" ]]; then
+      earlier+=(postgres)
+      break
+    fi
+  done
+  for name in plugins artwork compat; do
+    [[ -e "/silo-data/$name" || -L "/silo-data/$name" ]] && earlier+=("$name")
+  done
+  if (( ${#earlier[@]} > 0 )); then
+    cat >&2 <<MSG
+${SILO_DATA_ROOT:-SILO_DATA_ROOT} holds an install of the multi-container Compose
+stack (${earlier[*]}) that was never moved into this container. Silo does not
+start beside it. To keep running that install, set
+COMPOSE_FILE=docker-compose.split.yml in .env and run docker compose up -d. To
+move it into this container, see "Moving from the multi-container stack" in
+docs/architecture/omnibus-image.md. To start fresh instead, move those
+directories out of SILO_DATA_ROOT.
+MSG
+    exit 1
+  fi
+fi
+
 enabled postgres || exit 0
 export HOME=/config/postgres
 PGDATA=/config/postgres/data
@@ -62,34 +97,6 @@ MSG
   own_tree postgres postgres "$PGDATA"
   s6-setuidgid postgres chmod 0700 "$PGDATA"
 else
-  # docker-compose.yml mounts SILO_DATA_ROOT at /silo-data. An install of the
-  # multi-container stack there, never moved into this container, has its own
-  # database. A new, empty one here would open first-run setup on the
-  # published ports, while the earlier containers and their credentials stay
-  # reachable on the Compose network, so refuse until the administrator keeps
-  # that layout or moves it.
-  earlier=()
-  for dir in /silo-data/postgres/*/docker /silo-data/postgres/data; do
-    if [[ -e "$dir/PG_VERSION" ]]; then
-      earlier+=(postgres)
-      break
-    fi
-  done
-  for name in plugins artwork compat; do
-    [[ -e "/silo-data/$name" || -L "/silo-data/$name" ]] && earlier+=("$name")
-  done
-  if (( ${#earlier[@]} > 0 )); then
-    cat >&2 <<MSG
-${SILO_DATA_ROOT:-SILO_DATA_ROOT} holds an install of the multi-container Compose
-stack (${earlier[*]}) that was never moved into this container, and this
-container has no database yet. Silo does not start an empty server beside it.
-To keep running that install, set COMPOSE_FILE=docker-compose.split.yml in .env
-and run docker compose up -d. To move it into this container, see "Moving from
-the multi-container stack" in docs/architecture/omnibus-image.md. To start
-fresh instead, move those directories out of SILO_DATA_ROOT.
-MSG
-    exit 1
-  fi
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
   # The directory can already exist, empty: a bind mount, or a directory
   # created ahead of the first start.
