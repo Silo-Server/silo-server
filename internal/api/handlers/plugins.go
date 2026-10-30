@@ -1176,6 +1176,13 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
 			continue
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			// Its files are missing, for example because a damaged stored
+			// archive couldn't restore them. It has no settings to read and
+			// must not hide the other plugins either.
+			slog.WarnContext(ctx, "skipping plugin with no installed manifest", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1406,9 +1413,15 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		// A row admitted before the identity check never loads; list it
-		// without its manifest so the admin can still uninstall it.
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+		// A row admitted before the identity check, or one whose stored
+		// archive is damaged, never loads. List it without its manifest so
+		// one broken plugin doesn't fail the whole list and the admin can
+		// still turn it off or uninstall it.
+		switch {
+		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
+		case errors.Is(err, plugins.ErrArchiveUnreadable):
+			slog.WarnContext(ctx, "listing plugin without its manifest", "component", "api", "installation_id", installation.ID, "plugin_id", installation.PluginID, "error", err)
+		default:
 			return PluginInstallationView{}, err
 		}
 	}

@@ -175,8 +175,38 @@ func TestArchiveCacheEnsureRecoversLegacyBinaryArchive(t *testing.T) {
 	}
 }
 
+// Only a failure of the stored archive's own contents is
+// ErrArchiveUnreadable. A store failure is not, so a caller that tolerates one
+// damaged plugin still fails on a database fault.
+func TestArchiveCacheEnsureMarksOnlyDamagedArchivesUnreadable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store *legacyArchiveStore
+		want  bool
+	}{
+		{name: "archive is not a zip", want: true, store: &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 42, ManifestJSON: []byte("{}"), Checksum: "0", Bytes: []byte("not a zip"),
+		}}},
+		{name: "store fails", store: &legacyArchiveStore{getErr: errors.New("db unavailable")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installation := &Installation{ID: 42, PluginID: "silo.metadb", Version: "0.0.19",
+				InstallPath: filepath.Join(t.TempDir(), "plugin")}
+
+			_, err := NewArchiveCache(tc.store).Ensure(t.Context(), installation)
+			if err == nil {
+				t.Fatal("Ensure() succeeded without a usable archive")
+			}
+			if got := errors.Is(err, ErrArchiveUnreadable); got != tc.want {
+				t.Fatalf("errors.Is(%v, ErrArchiveUnreadable) = %v, want %v", err, got, tc.want)
+			}
+		})
+	}
+}
+
 type legacyArchiveStore struct {
 	archive             *InstallationArchive
+	getErr              error
 	saveErr             error
 	savedInstallationID int
 	savedManifestJSON   []byte
@@ -185,7 +215,7 @@ type legacyArchiveStore struct {
 }
 
 func (s *legacyArchiveStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
-	return s.archive, nil
+	return s.archive, s.getErr
 }
 
 func (s *legacyArchiveStore) SaveArchive(

@@ -15,6 +15,12 @@ import (
 
 var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
+
+// ErrArchiveUnreadable marks a stored plugin archive that cannot be opened or
+// does not match the installation it is stored for. Only that plugin is
+// affected: it cannot load until it is reinstalled.
+var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
+
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate

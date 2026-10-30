@@ -401,6 +401,10 @@
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
 
+# An enabled plugin whose stored archive won't open stays in the installation
+# list and leaves the user settings list working, and turning it off answers 200.
+./internal/api/handlers TestPluginListsKeepWorkingWithAnUnreadableArchiveDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
