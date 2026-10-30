@@ -7,6 +7,11 @@ The catalog schema requires these fields; the loader checks the operation,
 method and path against the committed OpenAPI document. No URL prefix substitution
 or inherited v1 response expectation supplies the v2 contract.
 
+The sections below call the catalogs in `contracts/api/v2/scenarios/api/` the
+frozen 598-scenario oracle. They have held 599 since
+`keys_create.member_forbidden` was added when v1 API-key creation became
+admin-only; the name keeps the earlier count.
+
 `kind` identifies semantic equivalence or an intentional difference. An intentional
 difference requires a summary. `recorded_in` points to the existing repository
 contract or test reference supporting the recorded behavior; it is not evidence
@@ -15,8 +20,9 @@ that a new external review or approval occurred.
 The executor runs both exchanges through the real router and reports stable IDs
 such as `profiles_list.shape/v1` and `profiles_list.shape/v2`. Paired transports
 start from reseeded fixture state. V1 follow-up steps remain attached to the v1
-exchange; the explicit v2 exchange asserts its own response. The current pilot
-covers reads, not mutation-effect equivalence.
+exchange; the explicit v2 exchange asserts its own response. The profile pilot
+below covers reads only; later targets, such as
+[device mutation effects](#device-mutation-effects), assert mutation effects.
 
 The required pilot consists of ten cases for `GET /api/v1/profiles/` paired with
 `listProfiles` at `GET /api/v2/profiles`. They cover list meaning, shape, ordering,
@@ -47,6 +53,16 @@ treats those v2 exchanges, and any v2 follow-up step on such an operation, as
 database-gated and skips them offline, exactly as it already skips v1 rows the
 offline wiring does not register. Their 401 oracles are proven only on the live
 router by the required targeted packets.
+
+Three required acceptance tests in `internal/scenariocatalog/executor` have no
+`make` target or section here. Each skips unless `SILO_SCENARIO_REQUIRED=1` is
+set, and its own document gives the rest of its requirements:
+`TestRequiredSetupFamilyAcceptance`
+([setup family](../../internal/scenariocatalog/executor/testdata/setup_family.md)),
+`TestRequiredHouseholdAuthorityAcceptance`
+([household authority](household-authority-acceptance.md)) and
+`TestRequiredKeyAuthorityUsageAcceptance`
+([API-key authority and usage](api-key-authority-acceptance.md)).
 
 ## Device-list checkpoint
 
@@ -524,21 +540,25 @@ in-flight credential drain or native/browser behavior is claimed.
 
 ### Frozen API-key list pairs
 
-`make test-scenario-api-key-lists` requires four original cases:
-`keys_list.ok`, `keys_list.sorted`, `keys_list.empty` and `keys_list.no_token`.
+`make test-scenario-api-key-lists` requires six original cases:
+`keys_list.ok`, `keys_list.sorted`, `keys_list.empty`, `keys_list.no_token`,
+`keys_list.meaning` and `keys_list.shape`.
 Original v1 expectations remain unchanged; v2 records collection envelopes,
 string IDs, metadata without reusable secrets, and Problem Details explicitly.
-The real router/provider runs eight transport requests with reseeding before
-and after each transport and 16 complete API-key-table snapshots. Every row must
+The real router/provider runs twelve transport requests with reseeding before
+and after each transport and 24 complete API-key-table snapshots. Every row must
 remain byte-identical. Required DSN and the pre-setup occupancy guard prevent
 silent skips or destructive execution against non-fixture keys. The API-key-auth
 usage timestamp case remains outside this cohort; no asynchronous metadata
 exception, pagination traversal or concurrent snapshot behavior is claimed.
-These are four pairs from the frozen 598, separate from NEW scenarios.
+These are six cases from the frozen 598, separate from NEW scenarios.
 
-The original `keys_list.meaning` and `keys_list.shape` remain unpaired: their
-frozen v1 oracle requires reusable secrets and the old exact field set, while
-the current bridge returns metadata with `key_prefix` and `revision`. Their
+The catalog rows for `keys_list.meaning` and `keys_list.shape` remain unpaired:
+their frozen v1 oracle requires reusable secrets and the old exact field set,
+while the current bridge returns metadata with `key_prefix` and `revision`, so
+their v1 exchanges in this target cannot pass against it. Only this target's
+selector gives them a metadata-only v2 expectation with the reusable secret
+absent, after checking their digest-pinned originals. Their catalog
 expectations remain unchanged pending resolution by the contract owner.
 
 ### Frozen API-key scope discovery pairs
@@ -1764,7 +1784,7 @@ unknown-code refusal and request 31 the real per-second refusal, measured agains
 actual 500 ms refill. Every request has one-statement before/after snapshots of 26
 tables. A collecting poll must add exactly one login session and move exactly one
 fixture request from approved to consumed, bound to that session; the two-poll
-`consumed.r1` sequence verifies the first collection and the credential-free second
+`device_poll.consumed.r1` sequence verifies the first collection and the credential-free second
 poll separately. Remote approval must carry the member's unlocked primary profile, a
 profile token bound to account, session, profile and PIN revision (and carrying the account's
 policy revision for older nodes), and a stored
@@ -1800,9 +1820,9 @@ request window with an empty 204; the repeated bearer is refused with v1
 
 The eleven pairs produce 26 HTTP exchanges and 52 eight-table snapshots.
 Each transport starts and ends with a reseed; required DSN and pre-constructor
-scratch/API-key guards remain mandatory. The four hw-accel successes stay
-unpaired on this branch, which carries no v2 hardware operation; nothing was
-substituted. The packet does not prove sampled resource output, concurrent
+scratch/API-key guards remain mandatory. The four remaining hw-accel cases are
+paired by `make test-scenario-hardware-inventory`, not this packet. The packet
+does not prove sampled resource output, concurrent
 approvals, or any hardware probe.
 
 ## Plugin launch checkpoint
