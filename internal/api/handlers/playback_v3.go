@@ -7709,7 +7709,12 @@ func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionR
 	plan.Subtitle.Inventory = slices.Clone(plan.Subtitle.Inventory)
 	for i := range plan.Subtitle.Inventory {
 		item := &plan.Subtitle.Inventory[i]
-		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable = nil, "", false
+		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable, item.HLSRendition = nil, "", false, nil
+	}
+	if rendition := plan.Subtitle.HLSRendition; rendition != nil && rendition.Index != 0 {
+		frozen := *rendition
+		frozen.Index = 0
+		plan.Subtitle.HLSRendition = &frozen
 	}
 	response.PlaybackPlan = &plan
 	return response
