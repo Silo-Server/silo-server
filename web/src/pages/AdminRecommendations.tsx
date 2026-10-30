@@ -34,7 +34,8 @@ import {
   type RecFieldDef,
 } from "@/pages/admin-settings/recommendationsSettings";
 import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
-import { EmbeddingProviderField, ModelField } from "@/pages/admin-settings/AIProviders";
+import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
+import { ModelField } from "@/pages/admin-settings/AIModelField";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 

@@ -26,7 +26,8 @@ import { cn } from "@/lib/utils";
 import { SaveBar } from "@/components/SaveBar";
 
 import { providerOptions } from "@/lib/aiProviders";
-import { AIProvidersList, ModelField } from "./AIProviders";
+import { AIProvidersList } from "./AIProviders";
+import { ModelField } from "./AIModelField";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import {
