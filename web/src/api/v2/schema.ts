@@ -13253,6 +13253,8 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       chatgpt_sign_in: boolean;
+      /** @description Service-tier choices for OpenAI API-key text providers. Default omits the upstream parameter; availability and pricing depend on the OpenAI model and account. */
+      openai_service_tiers?: string[];
       reasoning_levels: string[];
       /** @description Opaque revision of this document */
       revision: string;

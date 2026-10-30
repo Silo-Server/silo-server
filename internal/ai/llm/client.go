@@ -31,6 +31,7 @@ import (
 type Config struct {
 	AuthMode             string
 	ReasoningEffort      string
+	ServiceTier          string
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
 	ChatGPTPlanRejected  func(context.Context, string) error
@@ -112,6 +113,7 @@ type chatCompletionRequest struct {
 	Messages        []Message           `json:"messages"`
 	Temperature     *float32            `json:"temperature,omitempty"`
 	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+	ServiceTier     string              `json:"service_tier,omitempty"`
 	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -145,6 +147,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		Model:           cfg.ChatModel,
 		Messages:        messages,
 		ReasoningEffort: cfg.ReasoningEffort,
+		ServiceTier:     cfg.ServiceTier,
 	}
 	if !reasoning.OmitTemperature(cfg.ChatModel, cfg.ReasoningEffort) {
 		reqBody.Temperature = new(float32(0.2))

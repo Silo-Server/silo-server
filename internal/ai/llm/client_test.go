@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,30 @@ func TestChatSuccessSendsAuthAndModel(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"model":"test-model"`) || !strings.Contains(gotBody, `"json_object"`) {
 		t.Errorf("request body missing model/response_format: %s", gotBody)
+	}
+}
+
+func TestChatSendsExplicitServiceTier(t *testing.T) {
+	for _, tier := range []string{"", "priority", "ultrafast"} {
+		t.Run("tier="+tier, func(t *testing.T) {
+			cfg := chatConfig("https://api.openai.com")
+			cfg.ServiceTier = tier
+			client := NewClient(cfg)
+			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				got, present := body["service_tier"]
+				if tier == "" && present || tier != "" && got != tier {
+					t.Fatalf("service_tier = %v (present: %v); want %q", got, present, tier)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(chatOK))}, nil
+			})
+			if _, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, false); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

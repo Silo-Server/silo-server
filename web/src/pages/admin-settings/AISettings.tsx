@@ -45,6 +45,7 @@ const TEXT_AI_KEYS = [
   "ai.chat_model",
   "ai.auth_mode",
   "ai.reasoning_effort",
+  "ai.service_tier",
 ] as const;
 const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
 /** Shown here, chosen on Recommendations next to the embedding lock. */
@@ -222,6 +223,9 @@ function TextModelTile({
   reasoningEffort,
   reasoningLevels,
   reasoningAttention,
+  serviceTier,
+  serviceTiers,
+  serviceTierDirty,
   chatGPTSupported,
   chatModel,
   ready,
@@ -249,6 +253,9 @@ function TextModelTile({
    * use; either holds the tile's Advanced section open.
    */
   reasoningAttention: boolean;
+  serviceTier: string;
+  serviceTiers: string[];
+  serviceTierDirty: boolean;
   chatGPTSupported: boolean;
   chatModel: string;
   ready: boolean;
@@ -277,6 +284,7 @@ function TextModelTile({
   const chatGPT = authMode === CHATGPT_PROVIDER;
   const provider = providers.find((candidate) => candidate.id === providerID);
   const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
+  const supportsServiceTier = !chatGPT && provider?.type === "openai" && serviceTiers.length > 0;
 
   return (
     <ProviderTile
@@ -334,7 +342,11 @@ function TextModelTile({
           placeholder="gpt-6-luna, gemini-2.5-flash, llama3.1"
         />
       )}
-      <AdvancedSection id="ai.text-model" count={1} forceOpen={reasoningAttention}>
+      <AdvancedSection
+        id="ai.text-model"
+        count={supportsServiceTier ? 2 : 1}
+        forceOpen={reasoningAttention || (supportsServiceTier && serviceTierDirty)}
+      >
         <SettingField
           label="Reasoning level"
           type="select"
@@ -364,6 +376,26 @@ function TextModelTile({
               : []),
           ]}
         />
+        {supportsServiceTier && (
+          <SettingField
+            label="Service tier"
+            type="select"
+            value={serviceTier || "default"}
+            description="Default uses your OpenAI project's setting. Fast and Ultrafast cost more and require model support."
+            onChange={(next) => onChange("ai.service_tier", next === "default" ? "" : next)}
+            options={serviceTiers.map((tier) => ({
+              value: tier,
+              label:
+                (
+                  {
+                    default: "Default",
+                    priority: "Fast/Priority",
+                    ultrafast: "Ultrafast",
+                  } as Record<string, string>
+                )[tier] ?? tier,
+            }))}
+          />
+        )}
       </AdvancedSection>
       <ModelPanelActions
         testLabel="Test text model"
@@ -804,6 +836,9 @@ export default function AISettings() {
               reasoningEffort={reasoningEffort}
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
               reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
+              serviceTier={value("ai.service_tier")}
+              serviceTiers={capabilities.data?.openai_service_tiers ?? []}
+              serviceTierDirty={form.isDirty("ai.service_tier")}
               chatGPTSupported={chatGPTSupported}
               chatModel={chatModel}
               ready={textReady}

@@ -5209,6 +5209,7 @@ func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
 		AuthMode:        cfg.AI.AuthMode,
 		ReasoningEffort: cfg.AI.ReasoningEffort,
+		ServiceTier:     cfg.AI.ServiceTier,
 		BaseURL:         cfg.AI.BaseURL,
 		APIKey:          cfg.AI.APIKey,
 		ChatModel:       cfg.AI.ChatModel,

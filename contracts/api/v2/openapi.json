@@ -495,6 +495,13 @@
           "chatgpt_sign_in": {
             "type": "boolean"
           },
+          "openai_service_tiers": {
+            "description": "Service-tier choices for OpenAI API-key text providers. Default omits the upstream parameter; availability and pricing depend on the OpenAI model and account.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "reasoning_levels": {
             "items": {
               "type": "string"
