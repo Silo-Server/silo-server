@@ -384,11 +384,12 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	// video: [16x9 1080p], Movie.4x3.DVDRip. A tag holding only a coordinate
 	// with a two-digit episode labels the episode ([1x02], (1x02)); a shorter
 	// one is more often a ratio or part of a title ([2x1], (4x4)). Aspect
-	// ratios stay rejected ([16x10]), and the picture size checks below still
-	// apply ([1920x1080]).
-	_, closed, bracketed := bracketedCoordinate(name, start, match[5])
+	// ratios stay rejected ([16x10]), as does a tag inside another one
+	// ([WEB-DL (1x02)]), and the picture size checks below still apply
+	// ([1920x1080]).
+	open, closed, bracketed := bracketedCoordinate(name, start, match[5])
 	if bracketed {
-		if len(episode) < 2 || aspectRatioRe.MatchString(strings.ToLower(name[start:match[5]])) {
+		if len(episode) < 2 || aspectRatioRe.MatchString(strings.ToLower(name[start:match[5]])) || insideReleaseTag(name, open) {
 			return false
 		}
 	} else if insideReleaseTag(name, start) {
@@ -412,12 +413,13 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		return false
 	}
 	// A leading NxM followed by a release year is a title: 10x10 (2018),
-	// 4x4.2019, 10x10 - 2018, [10x10] (2018).
+	// 4x4.2019, 10x10 - 2018, [10x10] (2018). After a bracketed code the year
+	// has to come next: [1x02] - Arrival (2018) is an episode.
 	title, rest := strings.Trim(name[:start], " ._-"), name[match[5]:]
 	if bracketed {
 		title, rest = strings.Trim(name[:start], " ._-[("), name[closed:]
 	}
-	if title == "" && titleYearAfterRe.MatchString(rest) {
+	if year := titleYearAfterRe.FindStringIndex(rest); title == "" && year != nil && (!bracketed || strings.Trim(rest[:year[0]], " ._-") == "") {
 		return false
 	}
 	season, _ := strconv.Atoi(name[start:match[3]])
