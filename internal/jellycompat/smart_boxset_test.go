@@ -12,7 +12,8 @@ import (
 // fakeSmartExecutor is a smartCollectionQueryExecutor double returning a fixed
 // member list. Preview mimics catalog.QueryExecutor.Preview's two-call contract
 // (limit=1 probe, then limit=total) for the explicit-sort allowlist path;
-// PreviewPage mimics OFFSET/LIMIT SQL paging for the default browse path.
+// PreviewPage mimics OFFSET/LIMIT SQL paging for the default browse path,
+// including the executor's default page for a zero limit.
 type fakeSmartExecutor struct {
 	items            []*models.MediaItem
 	previewCalls     int
@@ -37,6 +38,9 @@ func (f *fakeSmartExecutor) PreviewPage(_ context.Context, def catalog.QueryDefi
 	f.gotDef = def
 	f.gotPageOffset = offset
 	f.gotPageLimit = limit
+	if limit <= 0 {
+		limit = 20
+	}
 	total := len(f.items)
 	if offset >= total {
 		return nil, total, true, nil

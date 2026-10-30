@@ -207,7 +207,8 @@ collection's playable leaves for Play all and Shuffle: movies and episodes, with
 member series expanded to the episodes that have a live file in a library the
 profile may access. Regular seasons come first, then specials. `SortBy=Random`
 shuffles the leaves; other sorts keep collection order. Other recursive
-requests list the members.
+requests list the members. For members and leaves alike, `Limit=0` returns no
+`Items`, only `TotalRecordCount`.
 
 `EnableImages=false`, `EnableImageTypes`, `ImageTypeLimit`, and
 `EnableUserData=false` control item response presentation. Fields requiring

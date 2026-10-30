@@ -609,6 +609,12 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
+	// Limit=0 asks only for TotalRecordCount. The paths below read a zero
+	// limit as no cap or as a default page, so read one row for the total;
+	// writeListItemsPage drops it.
+	if query.countOnly {
+		query.limit = 1
+	}
 	leafType, membersAreLeaves := smartCollectionLeafType(collection)
 
 	// Play all / Shuffle asks for the collection's playable leaves. A smart
@@ -1170,8 +1176,13 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 // Detail-level Fields (MediaSources, Path, ...) upgrade each child to its
 // detail DTO, as the library-parent browse path does; Infuse treats children
 // without them as unplayable. Episode members also get their season and
-// series context from episodeTargets.
+// series context from episodeTargets. A count-only request (Limit=0) gets
+// only the total.
 func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, listItems []upstreamListItem, episodeTargets map[string]compatEpisodeTarget, total int) {
+	if query.countOnly {
+		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: total, StartIndex: query.startIndex})
+		return
+	}
 	h.rememberListImages(listItems)
 	contentIDs := contentIDsFromListItems(listItems)
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)
