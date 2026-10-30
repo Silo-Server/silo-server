@@ -344,10 +344,20 @@ func (s *skipWriter) Flush() {
 func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
-		return err
+	cachedPath, _, cached := c.cachedEntryPath(opts.InputPath, opts.TrackIndex)
+	// A window open to the end is most of the track: the cached .sup answers
+	// it at once, where the source would be read whole first.
+	if !cached || opts.DurationSeconds > 0 {
+		if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+			if !cached {
+				// As after a demuxed window: keep the track and cache its .sup
+				// for the windows to come.
+				c.WarmInBackground(opts, c.sourced(extract))
+			}
+			return err
+		}
 	}
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
+	if cached {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath

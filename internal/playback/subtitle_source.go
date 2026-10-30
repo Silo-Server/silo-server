@@ -111,6 +111,11 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 		if opts.Embedded == nil || opts.Packets != nil {
 			return extract(ctx, opts)
 		}
+		if _, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat); format == subtitleMuxerWebVTT {
+			keepalive := newPrefixKeepalive(opts.Writer, webVTTPrefix, keepaliveDelay, keepaliveInterval)
+			defer keepalive.stop()
+			opts.Writer = keepalive
+		}
 		in, err := c.source.WholeTrack(ctx, opts.InputPath, *opts.Embedded)
 		if err == nil {
 			wrote, convErr := convertPackets(ctx, opts.Writer, opts, in, extract)
@@ -185,7 +190,26 @@ func convertPackets(ctx context.Context, w io.Writer, opts StreamExtractOpts, in
 	if err := extract(ctx, opts); err != nil {
 		return sw.spilled, err
 	}
+	if _, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat); in.ExpectCues && !sw.spilled && !hasCue(format, sw.buf.Bytes()) {
+		return false, errNoCueConverted
+	}
 	return true, sw.finish()
+}
+
+// errNoCueConverted is a conversion of a track with packets that yielded no
+// cue: FFmpeg failed to read its input, though it exited cleanly.
+var errNoCueConverted = errors.New("subtitle conversion yielded no cue from a track with packets")
+
+// hasCue reports whether converted output in format holds a cue: a timing
+// line for WebVTT and SubRip, an event line for ASS, any byte for SUP.
+func hasCue(format string, data []byte) bool {
+	switch format {
+	case subtitleMuxerWebVTT, SubtitleFormatVTTV3, subtitleFormatSRT:
+		return bytes.Contains(data, []byte("-->"))
+	case subtitleFormatASS:
+		return bytes.Contains(data, []byte("\nDialogue:")) //nolint:misspell // the ASS event keyword
+	}
+	return len(data) > 0
 }
 
 // spillWriter holds writes until limit bytes, then passes everything on.
@@ -328,6 +352,9 @@ func (c *SubtitleCache) ExtractSourcedText(ctx context.Context, inputPath string
 			return nil, errors.Join(errNoSourcedTrack, err)
 		}
 		data, err := ExtractSubtitlePacketsWithFormat(ctx, in, format, ffmpegPath)
+		if err == nil && in.ExpectCues && !hasCue(format, data) {
+			err = errNoCueConverted
+		}
 		if err != nil {
 			return nil, errors.Join(errNoSourcedTrack, err)
 		}
@@ -349,7 +376,8 @@ var errNoSourcedTrack = errors.New("embedded subtitle source can't read the trac
 // WarmEmbeddedTextTracks is WarmTextTracks for a file whose tracks ref
 // names: each rendition comes from a kept copy or a read through the
 // file's index when it can, and only the rest from one batch demux of the
-// source. Like WarmTextTracks it takes a warm slot without blocking.
+// source, in the same warm slot. Like WarmTextTracks it takes the slot
+// without blocking.
 func (c *SubtitleCache) WarmEmbeddedTextTracks(inputPath string, tracks []TextSubtitleTrack, ref func(ordinal int) *EmbeddedSubtitleRef, batch TextSubtitleBatchFunc, ffmpegPath string) {
 	if c == nil || c.source == nil || ref == nil {
 		c.WarmTextTracks(inputPath, tracks, batch)
@@ -362,6 +390,7 @@ func (c *SubtitleCache) WarmEmbeddedTextTracks(inputPath string, tracks []TextSu
 		return
 	}
 	go func() {
+		defer func() { <-c.warmSem }()
 		ctx, cancel := context.WithTimeout(context.Background(), subtitleCacheWarmTimeout)
 		defer cancel()
 		var demux []TextSubtitleTrack
@@ -370,7 +399,10 @@ func (c *SubtitleCache) WarmEmbeddedTextTracks(inputPath string, tracks []TextSu
 				demux = append(demux, track)
 			}
 		}
-		<-c.warmSem
-		c.WarmTextTracks(inputPath, demux, batch)
+		if fills := c.beginTextFills(inputPath, demux); len(fills) > 0 && batch != nil {
+			c.runTextWarm(inputPath, fills, batch)
+		} else {
+			discardTextFills(fills)
+		}
 	}()
 }

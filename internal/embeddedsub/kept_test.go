@@ -3,9 +3,12 @@ package embeddedsub_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,7 +211,22 @@ func TestDemuxCopyStandsInForTheSource(t *testing.T) {
 			demuxCase{name: "ASS", path: path, codec: "ass", format: "matroska", ordinal: 2},
 		)
 	}
-	cases = append(cases, demuxCase{name: "mov_text", path: ffmpegMP4Fixture(t, ffmpeg, "in.mp4", 1.5), codec: "mov_text", format: "mp4"})
+	cases = append(cases,
+		demuxCase{name: "mov_text", path: ffmpegMP4Fixture(t, ffmpeg, "in.mp4", 1.5), codec: "mov_text", format: "mp4"},
+		// Past a few dozen kilobytes, an MP4 copy with its moov after the
+		// samples converts from a pipe to nothing.
+		demuxCase{name: "mov_text with 1,500 cues", path: manyCuesMP4(t, ffmpeg, 1500), codec: "mov_text", format: "mp4"},
+	)
+	for _, f := range embeddedsub.GoldenFixtures(t) {
+		if f.Codec != "hdmv_pgs_subtitle" {
+			continue
+		}
+		path := filepath.Join(t.TempDir(), "in.mkv")
+		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cases = append(cases, demuxCase{name: f.Name, path: path, codec: f.Codec, format: "matroska", ordinal: f.Ordinal})
+	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			x := extract{ordinal: c.ordinal, codec: c.codec}
@@ -254,6 +272,41 @@ func TestDemuxCopyStandsInForTheSource(t *testing.T) {
 			if err != nil || len(res.Packets) == 0 {
 				t.Fatalf("copy packets: %d, %v", len(res.Packets), err)
 			}
+			// The index counts the copy's packets without reading them: a cue
+			// per Matroska block, a sample per MP4 packet.
+			counted := len(idx.Tracks[0].Cues)
+			if idx.Container == embeddedsub.ContainerMP4 {
+				counted = int(idx.Tracks[0].FrameCount)
+			}
+			if counted != len(res.Packets) {
+				t.Fatalf("the index counts %d packets, the copy holds %d", counted, len(res.Packets))
+			}
 		})
 	}
+}
+
+// manyCuesMP4 writes an MP4 file whose only track is a mov_text track of n
+// two-second cues.
+func manyCuesMP4(t *testing.T, ffmpeg string, n int) string {
+	t.Helper()
+	dir := t.TempDir()
+	var srt strings.Builder
+	for i := range n {
+		start := time.Duration(i) * 2 * time.Second
+		fmt.Fprintf(&srt, "%d\n%s --> %s\nCue number %d, a line of ordinary length\n\n", i+1, srtTime(start), srtTime(start+1500*time.Millisecond), i+1)
+	}
+	in, out := filepath.Join(dir, "many.srt"), filepath.Join(dir, "many.mp4")
+	if err := os.WriteFile(in, []byte(srt.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", in, "-c:s", "mov_text",
+		"-metadata:s:s:0", "language=eng", out).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg can't make the fixture (%v): %s", err, b)
+	}
+	return out
+}
+
+func srtTime(d time.Duration) string {
+	ms := d.Milliseconds()
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", ms/3_600_000, ms/60_000%60, ms/1000%60, ms%1000)
 }

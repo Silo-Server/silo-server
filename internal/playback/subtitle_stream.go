@@ -165,6 +165,9 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	return nil
 }
 
+// keepFormatMP4 is the KeepFormat of MP4 copies.
+const keepFormatMP4 = "mp4"
+
 // cachedSupSeekSlack is how far before a window's start an extract from a
 // cached .sup seeks, so a display set at the start is read whole. Its
 // segments are separate packets, and in a cache made from a Blu-ray transport
@@ -309,7 +312,14 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		// the copy on the source's timeline, where no timestamp is negative,
 		// so the muxer has nothing to shift.
 		args = append(args, "-map", fmt.Sprintf("0:s:%d", trackIndex), "-c:s", "copy",
-			"-output_ts_offset", formatMicroseconds(opts.KeepOffset), "-f", opts.KeepFormat, "file:"+opts.KeepPath)
+			"-output_ts_offset", formatMicroseconds(opts.KeepOffset))
+		if opts.KeepFormat == keepFormatMP4 {
+			// The copy is converted from a pipe later, and FFmpeg's MP4
+			// demuxer can't seek back on one: past the first few dozen
+			// kilobytes of samples, a moov after the mdat is never read.
+			args = append(args, "-movflags", "+faststart")
+		}
+		args = append(args, "-f", opts.KeepFormat, "file:"+opts.KeepPath)
 	}
 	return args
 }

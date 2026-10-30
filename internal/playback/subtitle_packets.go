@@ -31,6 +31,11 @@ type SubtitlePacketInput struct {
 	// instead of Index, Track and Packets.
 	Stream       func() (io.ReadCloser, error)
 	StreamFormat string
+	// ExpectCues marks a whole track known to hold packets, so a conversion
+	// that yields no cue failed to read it, however FFmpeg exited; the
+	// caller then demuxes the source instead of serving or caching an empty
+	// track. A window can hold no packets and leaves it unset.
+	ExpectCues bool
 	// SourceStartTime is the source file's start time as FFmpeg reports it
 	// (SubtitleSourceStartTime). FFmpeg subtracts it from every timestamp
 	// when it demuxes the source; the packets keep the source's timestamps
