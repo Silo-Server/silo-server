@@ -220,13 +220,16 @@ export default function ItemDetail() {
       return (
         <SeriesContent
           item={item as ItemDetail & { type: "series" }}
+          libraryId={libraryId}
           showAdvisoryAge={showAdvisoryAge}
         />
       );
     case "season":
-      return <SeasonContent item={item as ItemDetail & { type: "season" }} />;
+      return <SeasonContent item={item as ItemDetail & { type: "season" }} libraryId={libraryId} />;
     case "episode":
-      return <EpisodeContent item={item as ItemDetail & { type: "episode" }} />;
+      return (
+        <EpisodeContent item={item as ItemDetail & { type: "episode" }} libraryId={libraryId} />
+      );
     case "audiobook":
       return (
         <AudiobookContent item={item as ItemDetail & { type: "audiobook" }} libraryId={libraryId} />
