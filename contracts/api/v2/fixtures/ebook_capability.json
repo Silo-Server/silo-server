@@ -1,8 +1,9 @@
 {
-  "revision": "72b97f9f308e640e5c580c89edd7df6d9a75aac8263cb28b0f5a7b47c9f87889",
+  "revision": "c12af8cde7c8cb53ad48bb231adecb07280106e7cf4983cb3d515704f96844d2",
   "state": "available",
   "allowed": true,
   "guarded_annotations": false,
+  "text_pages": false,
   "reader_files": false,
   "guarded_config": false,
   "ordered_progress": true,

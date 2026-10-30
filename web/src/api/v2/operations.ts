@@ -374,6 +374,7 @@ export const v2Operations = {
   "GET /api/v2/downloads/{id}/subtitles/{ref}": "getDownloadSubtitle",
   "GET /api/v2/ebooks/{content_id}/annotations": "listEbookAnnotations",
   "GET /api/v2/ebooks/{content_id}/files/{file_id}/read": "readEbookFile",
+  "GET /api/v2/ebooks/{content_id}/files/{file_id}/text-pages/{page_index}": "getEbookTextPage",
   "GET /api/v2/ebooks/{content_id}/progress": "getEbookProgress",
   "GET /api/v2/ebooks/{content_id}/reader-config": "getEbookReaderConfig",
   "GET /api/v2/events/capabilities": "getEventsCapabilities",

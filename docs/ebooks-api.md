@@ -111,3 +111,33 @@ clears the client-owned object. The merged annotation must still have a valid
 kind and a CFI range or location. Create and edit requests are capped at 256 KiB.
 All operations check current item access before reaching scoped annotation storage.
 The frozen v1 routes retain their existing shapes and unguarded semantics.
+
+### Bounded native text pages (v2 beta)
+
+`GET /api/v2/ebooks/{content_id}/files/{file_id}/text-pages/{page_index}`
+requires authentication and an acting profile. Each request resolves library and
+file access again. Only local regular-file EPUB sources in the supported DRM-free reflowable
+subset are admitted; conversion is not attempted. The zero-based page index
+selects a chunk of at most 2,048 Unicode scalar values in spine order, rather
+than a measured visual page.
+
+The response contains `revision`, `location`, `text`, `page_index`, `total_pages`,
+`previous_page` and `next_page`. Neighbor indexes are null at boundaries.
+`revision` identifies the archive bytes. `location` is an opaque, extraction-versioned
+`silo-text-v1` normalized-text offset, not EPUB CFI. This endpoint never writes
+progress and its locations must not replace browser-reader CFI progress.
+`GET /api/v2/capabilities/ebooks` exposes `text_pages` for feature detection.
+Existing byte delivery and browser reader clients are unchanged.
+
+Responses use `Cache-Control: private, no-store`; extraction results are not
+cached. Admission limits include 32 MiB compressed, 1,024 archive entries,
+4 MiB per expanded entry, 32 MiB expanded total, and 10,000 chunks. At most two
+requests extract text concurrently per server process, with a five-second parser
+deadline. Saturation returns 503 without queuing. Unsupported formats/subsets
+return 415, malformed EPUBs return 422, size limits return 413, and inaccessible
+files or out-of-range page indexes return 404. Local I/O unavailability returns
+503; extraction deadlines return 408.
+
+This beta addition is opt-in for native clients. Apple and Android continue using
+the existing byte endpoint; adopting the text representation requires a separate
+client change. Jellyfin byte delivery does not need an equivalent text endpoint.
