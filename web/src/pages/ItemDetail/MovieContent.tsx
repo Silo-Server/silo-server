@@ -408,14 +408,6 @@ export default function MovieContent({
         </>
       }
     >
-      {canCurateMetadata && (
-        <MediaLocations
-          title="Media locations"
-          versions={item.versions}
-          onShowMediaInfo={openMediaInfo}
-        />
-      )}
-
       {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
@@ -433,6 +425,16 @@ export default function MovieContent({
       ) : (
         similarData?.items &&
         similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
+      )}
+
+      {/* Media locations are reference, not story: they sit last, after
+          everything a viewer came to the page for. */}
+      {canCurateMetadata && (
+        <MediaLocations
+          title="Media locations"
+          versions={item.versions}
+          onShowMediaInfo={openMediaInfo}
+        />
       )}
     </DetailLayout>
   );

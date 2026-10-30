@@ -438,14 +438,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       </div>
 
       <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
-        {canCurateMetadata && (
-          <MediaLocations
-            title="Media locations"
-            versions={item.versions}
-            onShowMediaInfo={openMediaInfo}
-          />
-        )}
-
         {item.cast && item.cast.length > 0 && (
           <div>
             <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>
@@ -454,6 +446,16 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         )}
 
         {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
+
+        {/* Media locations are reference, not story: they sit last, after
+            everything a viewer came to the page for. */}
+        {canCurateMetadata && (
+          <MediaLocations
+            title="Media locations"
+            versions={item.versions}
+            onShowMediaInfo={openMediaInfo}
+          />
+        )}
       </div>
       {canCurateMetadata && (
         <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
