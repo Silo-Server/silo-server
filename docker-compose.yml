@@ -10,21 +10,11 @@
 # section of .env.example.
 #
 # An install of the earlier multi-container layout keeps it by selecting
-# docker-compose.split.yml in .env. This file moves such an install only with
-# MIGRATE_COMPOSE_STACK=true; otherwise it stops before Silo starts.
-
-# The services that keep the names of the multi-container stack's PostgreSQL,
-# Redis, and Meilisearch; see the note under services.
-x-bridge: &bridge
-  image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server:aio}
-  entrypoint: ["true"]
-  restart: "no"
-  network_mode: none
-  healthcheck:
-    disable: true
-  # The image declares /config a volume; this keeps Docker from creating an
-  # empty one for each of these containers.
-  tmpfs: /config
+# docker-compose.split.yml in .env before it updates. This file does not look
+# for one: started on its SILO_DATA_ROOT, it comes up on a new, empty
+# database, and the earlier containers keep running with their data untouched.
+# Moving such an install into this file is a separate step; see "Moving from
+# the multi-container stack" in docs/architecture/omnibus-image.md.
 
 services:
   silo:
@@ -38,26 +28,28 @@ services:
     # SILO_STOP_GRACE_PERIOD=11m.
     stop_grace_period: ${SILO_STOP_GRACE_PERIOD:-2m}
     # NET_ADMIN lets Silo use kernel BBR congestion control on its client
-    # connections even when the host does not allow bbr, and force a larger
-    # TCP send buffer on its listeners when the kernel's limit would cap
-    # remote clients on long, fast links (near 160 Mbit/s at 1 Gbit/s,
-    # 100 ms and 1% loss). Silo gives up NET_ADMIN before its own code runs:
-    # a small helper process holds it only until the listeners are configured,
-    # then exits. Silo, ffmpeg, ffprobe and plugins never keep it; the start
-    # log says if dropping it fails. The container's root processes (the s6
-    # supervisor, disabled-service placeholders, docker exec shells) keep it
-    # while the container runs. NET_ADMIN can change this container's
-    # interfaces, routes and firewall rules and reaches more kernel code
-    # (nf_tables); with network_mode: host, the host's. A proxy node uses it
-    # the same way; a transcode node drops it at startup and uses nothing
-    # from it.
-    # Undo: remove this line. Silo then logs the TCP limits it cannot
-    # change and how to raise them. SILO_NET_TCP_CONGESTION=off in .env turns
-    # BBR off; SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
+    # connections even where the host does not allow bbr. It also lets Silo
+    # force a larger TCP send buffer when the kernel's limit would cap remote
+    # clients on long, fast links (near 160 Mbit/s at 1 Gbit/s, 100 ms and 1%
+    # loss). A proxy node uses it the same way. A transcode node drops it at
+    # startup and uses none of it.
+    #
+    # Before its own code runs, Silo starts a small helper that holds
+    # NET_ADMIN until the listeners are configured and then exits. Silo,
+    # ffmpeg, ffprobe and plugins never keep it, and the start log says if
+    # dropping it fails. The container's root processes (the s6 supervisor,
+    # placeholders for disabled services, docker exec shells) keep it while
+    # the container runs. Whatever holds NET_ADMIN can change this container's
+    # interfaces, routes and firewall rules and reach more kernel code
+    # (nf_tables), or the host's own with network_mode: host.
+    #
+    # To undo, remove this line; Silo then logs the TCP limits it cannot change
+    # and how to raise them. In .env, SILO_NET_TCP_CONGESTION=off turns BBR off
+    # and SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
     cap_add: [NET_ADMIN]
     environment:
-      # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
-      # are host-side published-port overrides.
+      # The container always listens on these ports. PORT, JF_PORT and ABS_PORT
+      # in .env change only the ports published on the host.
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
@@ -65,21 +57,18 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      # Master key for at-rest credential encryption. Required — the server
-      # refuses to start without it. Generate with: openssl rand -base64 48
-      # Back it up SEPARATELY from your database dumps; losing it makes encrypted
-      # secrets unrecoverable. See docs/architecture/secret-encryption.md.
+      # Master key for at-rest credential encryption. The server refuses to
+      # start without it. Generate one with: openssl rand -base64 48
+      # Back it up apart from your database dumps; without it, encrypted
+      # secrets cannot be recovered. See docs/architecture/secret-encryption.md.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-      # Watch Party rooms need Redis, and the multi-container stack always
-      # ran it, so it is on here unless .env sets ENABLE_REDIS=false or a
-      # REDIS_URL of its own. The image itself leaves it off, for nodes.
+      # On unless .env sets ENABLE_REDIS=false or its own REDIS_URL. Watch
+      # Party rooms need Redis, and the multi-container stack always ran it.
+      # The image's own default is off: nodes ignore the setting and warn when
+      # it is on.
       ENABLE_REDIS: ${ENABLE_REDIS:-true}
       # Off by default. Set to "true" to start the bundled Meilisearch.
       ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
-      # Until the postgres service below has run once, Silo creates no empty
-      # database, so `up --no-deps silo` cannot start a new install in front
-      # of an earlier one the migration has yet to move.
-      REQUIRE_COMPOSE_MIGRATION: "true"
     ports:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
@@ -96,33 +85,25 @@ services:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       # Transcode segments, kept out of /config so a backup of it stays small.
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
-      # Prepared downloads. With "Prepared file directory" (download.artifact_dir)
-      # blank, Silo keeps them beside the transcode directory, not inside it, so
-      # they need their own mount to survive image updates. This path assumes the
-      # default playback.transcode_dir; with another one, mount the
-      # silo-download-artifacts directory beside it instead. No storage
-      # budget applies until one is set ("Default storage budget per location",
+      # Prepared downloads. While "Prepared file directory" (download.artifact_dir)
+      # is blank, Silo keeps them beside the transcode directory rather than in
+      # it, so they need their own mount to survive image updates. This path
+      # assumes the default playback.transcode_dir; with another one, mount the
+      # silo-download-artifacts directory beside that instead. No storage budget
+      # applies until you set one ("Default storage budget per location",
       # download.artifact_max_bytes, in Settings > Downloads).
       - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
-      - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
-      # Only load-bearing when the Docker host is itself an LXC container, where
-      # these three files describe the physical machine and the LXC's own cap
-      # sits on a cgroup this container cannot see. lxcfs virtualizes them to the
-      # LXC's limits, so passing that view in is what makes CPU, load, and memory
-      # report this container's share instead of the whole machine's. Harmless
-      # everywhere else: on bare metal or a VM they are the same files Silo would
-      # read anyway. Each is used independently, so dropping one only reverts
-      # that reading. See docs/architecture/observability.md#node-resource-sampling.
+      # These three matter only when the Docker host is itself an LXC container.
+      # There the files describe the physical machine, and the LXC's own limit
+      # sits on a cgroup this container cannot see. lxcfs rewrites them to the
+      # LXC's limits, so mounting them makes CPU, load, and memory report this
+      # container's share instead of the whole machine's. On bare metal or a VM
+      # they are the same files Silo reads anyway, so they do no harm. Silo uses
+      # each one separately; removing one only reverts that reading. See
+      # docs/architecture/observability.md#node-resource-sampling.
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro
-    depends_on:
-      postgres:
-        condition: service_completed_successfully
-      redis:
-        condition: service_completed_successfully
-      meilisearch:
-        condition: service_completed_successfully
     env_file:
       - path: .env
         required: false
@@ -139,41 +120,3 @@ services:
     #         - driver: nvidia
     #           count: ${NVIDIA_GPU_COUNT:-1}
     #           capabilities: [gpu, compute, utility, video]
-
-  # Earlier versions of this file ran PostgreSQL, Redis, and Meilisearch as
-  # services of their own. These three keep those names, so `docker compose up`
-  # replaces the old containers, which stops them, before Silo starts. Each
-  # exits at once. The postgres service first checks for an earlier install:
-  # it stops with instructions unless MIGRATE_COMPOSE_STACK=true, and then
-  # copies it into the layout above, leaving the old directories as they were;
-  # see "Moving from the multi-container stack" in
-  # docs/architecture/omnibus-image.md.
-  postgres:
-    <<: *bridge
-    entrypoint: ["/etc/silo-omnibus/migrate-compose-stack"]
-    environment:
-      SILO_DATA_ROOT: ${SILO_DATA_ROOT:-/opt/silo}
-      # Set to "true" in .env to move an earlier install into this container.
-      MIGRATE_COMPOSE_STACK: ${MIGRATE_COMPOSE_STACK:-false}
-      PUID: ${PUID:-1000}
-      # The names the earlier stack created its database and superuser with.
-      POSTGRES_USER: ${POSTGRES_USER:-silo}
-      POSTGRES_DB: ${POSTGRES_DB:-silo}
-      # Settings from .env that meant something else to the earlier stack.
-      # The migration refuses ones that would now point Silo at a removed
-      # service, a different image, or an empty database.
-      DATABASE_URL: ${DATABASE_URL:-}
-      REDIS_URL: ${REDIS_URL:-}
-      SILO_SEARCH_PROVIDER: ${SILO_SEARCH_PROVIDER:-}
-      SILO_MEILISEARCH_URL: ${SILO_MEILISEARCH_URL:-}
-      SILO_IMAGE: ${SILO_IMAGE:-}
-      SILO_OMNIBUS_IMAGE: ${SILO_OMNIBUS_IMAGE:-}
-      POSTGRES_PASSWORD_SET: ${POSTGRES_PASSWORD:+set}
-      ENABLE_MEILISEARCH: ${ENABLE_MEILISEARCH:-false}
-      ENABLE_REDIS: ${ENABLE_REDIS:-true}
-      # With node access on, the move accepts a server with registered nodes.
-      ENABLE_NODE_ACCESS: ${ENABLE_NODE_ACCESS:-false}
-    volumes:
-      - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
-  redis: *bridge
-  meilisearch: *bridge

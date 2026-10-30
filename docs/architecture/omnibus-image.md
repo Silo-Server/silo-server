@@ -219,24 +219,32 @@ until their `DATABASE_URL` names `silo`. Their `REDIS_URL` gains the password.
 Before the omnibus image, `docker-compose.yml` ran PostgreSQL
 (`pgvector/pgvector:pg18`), Redis, and Meilisearch as services of their own,
 with data in `SILO_DATA_ROOT/postgres`, `redis`, and `meilisearch`, and Silo's
-state in `plugins`, `artwork`, and `compat`. The current file keeps services
-named `postgres`, `redis`, and `meilisearch`, so `docker compose up` replaces the
-old containers, which stops them, and Silo waits for all three to exit
-successfully. `redis` and `meilisearch` exit at once. `postgres` runs
-`/etc/silo-omnibus/migrate-compose-stack` with `SILO_DATA_ROOT` mounted at
-`/silo-data`.
+state in `plugins`, `artwork`, and `compat`. That file is now
+`docker-compose.split.yml`, and an install of that layout keeps it by
+selecting it in `COMPOSE_FILE`.
 
-The move is opt-in. When the script finds an earlier install it has not
-moved, beside no omnibus database of its own, it stops unless
-`MIGRATE_COMPOSE_STACK=true`, and its message offers both choices: keep the
-layout by selecting `docker-compose.split.yml` in `COMPOSE_FILE`, which is the
-earlier file with the same service names and mounts, or set the variable to
-move. Until a run succeeds, `REQUIRE_COMPOSE_MIGRATION` keeps Silo from
-creating an empty database (see below), so an install updated without either
-choice stays down rather than coming up empty. Installs the script already
-moved, and omnibus installs of their own, never reach this check.
+`docker-compose.yml` does not look for such an install. Started on its
+`SILO_DATA_ROOT`, it replaces the earlier `silo` container and creates a new,
+empty bundled database; the earlier `postgres`, `redis`, and `meilisearch`
+containers keep running as orphans of the Compose project, their data
+untouched. Selecting `docker-compose.split.yml` and running `docker compose up
+-d` again brings the install back.
 
-With the variable set, it works within the one mount so it can hard-link:
+Moving an install into the single container is a separate step that an
+administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
+earlier stack stopped and `SILO_DATA_ROOT` mounted at `/silo-data`. With
+`.env` still holding the earlier stack's settings, and `COMPOSE_FILE` removed
+from it once the stack is down:
+
+```sh
+docker compose -f docker-compose.split.yml down
+docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
+  --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
+docker compose up -d
+```
+
+`docker compose run` reads the `silo` service's `.env` and `PUID`, and the
+script works within the one mount so it can hard-link:
 
 - Silo's three directories are hard-linked into `config/silo`, or copied when
   hard links fail across file systems. This happens with an external
@@ -262,19 +270,18 @@ With the variable set, it works within the one mount so it can hard-link:
   `postgres` in the copy, unless `ENABLE_MEILISEARCH` is on, in which case
   `init-config` hands Silo the bundled instance.
 
-It does nothing when the omnibus install already has a database of its own
-and none of the earlier stack is here, and refuses, before anything is moved
-into place, when:
+It reports nothing to move when the install was already moved, or when an
+omnibus install has a database of its own and none of the earlier stack is
+here. It refuses, before anything is moved into place, when:
 
-- An earlier install is here, unmoved, and `MIGRATE_COMPOSE_STACK` is not
-  set (above). This check comes before the others, so an install that keeps
-  its layout never sees advice about moving it.
+- No earlier install is in `SILO_DATA_ROOT`: its data may be in named volumes
+  or other paths, which have to move there first.
 - A pinned `SILO_IMAGE` (other than `latest` or `aio`) is set
   without `SILO_OMNIBUS_IMAGE`: this file would otherwise follow
   `aio` past the pin.
 - The omnibus install has a database of its own, no migration finished, and
   the earlier stack's cluster or Silo directories are here: Silo created that
-  database first, most likely when started with `--no-deps` before this step.
+  database first, most likely when `docker-compose.yml` started before the move.
   Copying over it would drop what it holds, and going on would leave the
   earlier install behind unannounced. The message says to move
   `config/postgres/data` aside and start again if it holds nothing needed, or
@@ -290,10 +297,6 @@ into place, when:
 - `plugins`, `artwork`, or `compat` in `SILO_DATA_ROOT` is a symbolic link,
   which the earlier stack's bind mount followed but this mount cannot, or is
   not a directory.
-- None of the earlier stack's data is here but `.env` sets `POSTGRES_PASSWORD`
-  (without node access) or `SILO_IMAGE`, which only it used: its data is in
-  named volumes or other paths, and starting would make an empty server
-  beside it.
 - The earlier install's directories exist without a cluster and `DATABASE_URL`
   is unset, or `.env` sets a `DATABASE_URL` beside the earlier stack's cluster:
   the earlier file set `DATABASE_URL` for Silo itself, so that cluster is the
@@ -346,27 +349,14 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- Every run that succeeds, including one that finds nothing to move, then
-  leaves a root-owned `/config/.compose-migration-checked`. The `silo` service
-  sets `REQUIRE_COMPOSE_MIGRATION`, under which `init-postgres` refuses to
-  create a cluster in an empty `/config/postgres/data` until that marker
-  exists, and with an external `DATABASE_URL`, where the migration moves only
-  Silo's directories, refuses to start Silo until it exists. The user manual's update command, `docker compose up -d --no-deps
-  silo`, skips this step, and on the first update onto this file Silo would
-  otherwise come up on a new, empty database in front of the earlier install.
-  Instead it exits and asks for one `docker compose up -d` without
-  `--no-deps`; later updates can skip the step again. The migration removes the
-  empty Silo directories `init-config` made on that refused start instead of
-  setting them aside. Without the variable, as
-  under `docker run`, `init-postgres` creates the cluster as before.
-- A run with nothing to move prints nothing.
+- A move run on a `SILO_DATA_ROOT` where `docker-compose.yml` already made
+  an empty install removes the empty Silo directories `init-config` made
+  instead of setting them aside; its database has to be moved aside by hand
+  (above).
 
-Overrides of the old `postgres`, `redis`, or `meilisearch` services in a
-`docker-compose.override.yml` merge into these one-shot services and can break
-them (an `image` there has no migration script). Compose cannot check that
-before replacing the old containers, so the failure is loud: the `postgres`
-service exits non-zero and Silo does not start. Such overrides have to go
-before the update.
+A `docker-compose.override.yml` that still changes the old `postgres`,
+`redis`, or `meilisearch` services makes Compose reject `docker-compose.yml`,
+which no longer has them. Such overrides have to go before the update.
 
-Remove the three bridge services, and this script, once installs of the
-multi-container stack no longer need an upgrade path.
+Remove this script once installs of the multi-container stack no longer move
+to the single container.

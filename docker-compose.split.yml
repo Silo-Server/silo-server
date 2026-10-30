@@ -84,15 +84,15 @@ services:
     cap_add: [NET_ADMIN]
     environment:
       MODE: integrated
-      # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
-      # are host-side published-port overrides.
+      # The container always listens on these ports. PORT, JF_PORT and ABS_PORT
+      # in .env change only the ports published on the host.
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
-      # Master key for at-rest credential encryption. Required — the server
-      # refuses to start without it. Generate with: openssl rand -base64 48
-      # Back it up SEPARATELY from your database dumps; losing it makes encrypted
-      # secrets unrecoverable. See docs/architecture/secret-encryption.md.
+      # Master key for at-rest credential encryption. The server refuses to
+      # start without it. Generate one with: openssl rand -base64 48
+      # Back it up apart from your database dumps; without it, encrypted
+      # secrets cannot be recovered. See docs/architecture/secret-encryption.md.
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
       DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -108,23 +108,23 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
-      # Prepared downloads. With "Prepared file directory" (download.artifact_dir)
-      # blank, Silo keeps them beside the transcode directory, not inside it, so
-      # they need their own mount to survive image updates. This path assumes the
-      # default playback.transcode_dir; with another one, mount the
-      # silo-download-artifacts directory beside it instead. No storage
-      # budget applies until one is set ("Default storage budget per location",
+      # Prepared downloads. While "Prepared file directory" (download.artifact_dir)
+      # is blank, Silo keeps them beside the transcode directory rather than in
+      # it, so they need their own mount to survive image updates. This path
+      # assumes the default playback.transcode_dir; with another one, mount the
+      # silo-download-artifacts directory beside that instead. No storage budget
+      # applies until you set one ("Default storage budget per location",
       # download.artifact_max_bytes, in Settings > Downloads).
       - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
-      # Only load-bearing when the Docker host is itself an LXC container, where
-      # these three files describe the physical machine and the LXC's own cap
-      # sits on a cgroup this container cannot see. lxcfs virtualizes them to the
-      # LXC's limits, so passing that view in is what makes CPU, load, and memory
-      # report this container's share instead of the whole machine's. Harmless
-      # everywhere else: on bare metal or a VM they are the same files Silo would
-      # read anyway. Each is used independently, so dropping one only reverts
-      # that reading. See docs/architecture/observability.md#node-resource-sampling.
+      # These three matter only when the Docker host is itself an LXC container.
+      # There the files describe the physical machine, and the LXC's own limit
+      # sits on a cgroup this container cannot see. lxcfs rewrites them to the
+      # LXC's limits, so mounting them makes CPU, load, and memory report this
+      # container's share instead of the whole machine's. On bare metal or a VM
+      # they are the same files Silo reads anyway, so they do no harm. Silo uses
+      # each one separately; removing one only reverts that reading. See
+      # docs/architecture/observability.md#node-resource-sampling.
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro
