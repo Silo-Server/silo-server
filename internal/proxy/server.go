@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,6 +35,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -1203,6 +1205,9 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
+			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "proxy", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(claims.TranscodeNode), "playback_session_id", claims.SessionID)
+		}
 		return
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
