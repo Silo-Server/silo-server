@@ -34,10 +34,11 @@ export async function fetchCatalogItemDetail(
   id: string,
   libraryId?: number,
   options?: ReadOptions,
+  surface: Extract<ArtworkSurface, "detail" | "onDeck"> = "detail",
 ): Promise<ItemDetail> {
   const detail = await v2("GET /api/v2/catalog/items/{id}", {
     path: { id },
-    query: { ...libraryQuery(libraryId), ...artworkQuery("detail") },
+    query: { ...libraryQuery(libraryId), ...artworkQuery(surface) },
     signal: signalOf(options),
   });
   return catalogItemDetailFromV2(detail);

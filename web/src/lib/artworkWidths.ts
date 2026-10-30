@@ -120,6 +120,7 @@ export function artworkWidthQuery(
  * - `seasons`: a series' season poster carousel.
  * - `episodes`: a season's episode cards.
  * - `upNext`: the player's Up Next still.
+ * - `onDeck`: the player's On Deck cards below Up Next.
  */
 export type ArtworkSurface =
   | "row"
@@ -129,18 +130,20 @@ export type ArtworkSurface =
   | "detail"
   | "seasons"
   | "episodes"
-  | "upNext";
+  | "upNext"
+  | "onDeck";
 
 export interface ArtworkViewport {
   width: number;
   height: number;
 }
 
-/** Tailwind's sm, md, lg and xl breakpoints. */
+/** Tailwind's sm, md, lg, xl and 2xl breakpoints. */
 const SM = 640;
 const MD = 768;
 const LG = 1024;
 const XL = 1280;
+const XXL = 1536;
 
 /** Layout's `--page-gutter` on each side of the main column. */
 function pageGutter(viewportWidth: number): number {
@@ -180,6 +183,23 @@ function episodeCardWidth(viewportWidth: number): number {
   const column = Math.min(viewportWidth - rail, 1520) - 2 * pageGutter(viewportWidth);
   const columns = viewportWidth >= LG ? 5 : viewportWidth >= MD ? 4 : viewportWidth >= SM ? 3 : 2;
   return Math.max(240, (column - 16 * (columns - 1)) / columns);
+}
+
+/** On Deck cards per row from each breakpoint up; two below sm. */
+const ON_DECK_COLUMNS: ReadonlyArray<[minWidth: number, columns: number]> = [
+  [XXL, 7],
+  [XL, 6],
+  [LG, 5],
+  [MD, 4],
+  [SM, 3],
+];
+
+/** PlayingNextScreen's On Deck card: a share of the full-width row, less its padding. */
+function onDeckCardWidth(viewportWidth: number): number {
+  const padding = viewportWidth >= MD ? 32 : viewportWidth >= SM ? 24 : 16;
+  const gap = viewportWidth >= SM ? 12 : 8;
+  const columns = ON_DECK_COLUMNS.find(([minWidth]) => viewportWidth >= minWidth)?.[1] ?? 2;
+  return (viewportWidth - 2 * padding + gap) / columns - gap;
 }
 
 /** The CSS width each slot of `surface` is drawn at. */
@@ -226,6 +246,11 @@ export function surfaceWidths(
       return {
         still: Math.min(vw - 2 * pageGutter(vw), (Math.min(viewport.height * 0.38, 400) * 16) / 9),
       };
+    case "onDeck": {
+      // A 16:9 card that covers itself with the backdrop, else the poster.
+      const card = onDeckCardWidth(vw);
+      return { backdrop: card, poster: card };
+    }
   }
 }
 
