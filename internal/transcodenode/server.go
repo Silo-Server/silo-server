@@ -82,6 +82,7 @@ type TranscodeStartRequest struct {
 	SegmentDuration            int                    `json:"segment_duration"`
 	HWAccel                    string                 `json:"hw_accel"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
+	RequireAudioTrack          bool                   `json:"require_audio_track,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
@@ -114,6 +115,8 @@ type TranscodeStartResponse struct {
 	// understood. An old node omits it, allowing current callers to stop the job
 	// before publishing bytes from a silently ignored SourceAudioChannels field.
 	AudioRecipeVersion string `json:"audio_recipe_version,omitempty"`
+	// RequireAudioTrack confirms that the executor made the selected audio mandatory.
+	RequireAudioTrack bool `json:"require_audio_track,omitempty"`
 	// CopyFMP4RecipeVersion attests the copy-video HLS timestamp and bitstream
 	// recipe. Old nodes omit it and are rejected before their bytes are exposed.
 	CopyFMP4RecipeVersion string `json:"copy_fmp4_recipe_version,omitempty"`
@@ -162,10 +165,12 @@ func validateAudioRecipeRequest(req TranscodeStartRequest) error {
 	return nil
 }
 
-// ValidateAudioRecipeAttestation checks the start response only when the
-// request carries the v2 stereo-downmix recipe. Ordinary legacy starts keep
-// accepting the empty responses returned by older nodes.
+// ValidateAudioRecipeAttestation requires confirmation of mandatory audio and
+// the v2 stereo-downmix recipe. Optional legacy starts accept empty responses.
 func ValidateAudioRecipeAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.RequireAudioTrack && !response.RequireAudioTrack {
+		return fmt.Errorf("%w: required audio track was not confirmed", ErrAudioRecipeAttestationMismatch)
+	}
 	if err := validateAudioRecipeRequest(req); err != nil {
 		return err
 	}
@@ -1806,6 +1811,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		// and reconstructed sessions balance identically.
 		HWDevice:           cfg.Playback.HWDevice,
 		AudioTrackIndex:    req.AudioTrackIndex,
+		RequireAudioTrack:  req.RequireAudioTrack,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
 		SubtitleCodec:      req.SubtitleCodec,
@@ -1967,6 +1973,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		EncoderHWAccel:        encoderHWAccel,
 		ToneMapMode:           session.Opts().ToneMapMode,
 		AudioRecipeVersion:    req.AudioRecipeVersion,
+		RequireAudioTrack:     session.Opts().RequireAudioTrack,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,

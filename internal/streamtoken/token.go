@@ -65,6 +65,7 @@ type Claims struct {
 	AudioCodec             string  `json:"ac,omitempty"`
 	AudioChannels          int     `json:"ach,omitempty"`
 	AudioTrackIndex        int     `json:"ati,omitempty"`
+	RequireAudioTrack      bool    `json:"rat,omitempty"`
 	AudioOnly              bool    `json:"ao,omitempty"`
 	// CopyAudioCodec is the codec of the source audio track a remux copies.
 	// The remux adds aac_adtstoasc for a copied AAC track. Absent in older

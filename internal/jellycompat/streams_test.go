@@ -614,9 +614,10 @@ func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {
 	encoded := testRemoteTranscodeSource()
 	encoded.KeyframePlaylist = true
 	recipe := playback.NewRecipeCard(7, "profile", encoded.FileID, "", playback.TranscodeOpts{
-		TargetCodecVideo: compatTargetVideoCodec,
-		TargetCodecAudio: compatTargetAudioCodec,
-		AudioTrackIndex:  compatAudioTrackIndexOrDefault(encoded),
+		TargetCodecVideo:  compatTargetVideoCodec,
+		TargetCodecAudio:  compatTargetAudioCodec,
+		AudioTrackIndex:   compatAudioTrackIndexOrDefault(encoded),
+		RequireAudioTrack: true,
 	})
 	if !compatRecipeMatchesSource(&recipe, encoded) {
 		t.Fatal("encoded source rejected its recipe over the keyframe playlist flag")

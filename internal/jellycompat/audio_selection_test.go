@@ -506,7 +506,7 @@ func TestHandlePlaybackReportRollsBackRemoteAttestationFailureAndRetries(t *test
 			}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
 			starts++
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{Status: "started"})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{Status: "started", RequireAudioTrack: true})
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -629,7 +629,7 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 	const nodeURL = "http://transcode-node"
 	recipe := playback.NewRecipeCard(7, "profile-1", version.FileID, nodeURL, playback.TranscodeOpts{
 		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		AudioTrackIndex: 1, SegmentDuration: 2,
+		AudioTrackIndex: 1, RequireAudioTrack: true, SegmentDuration: 2,
 	})
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
@@ -791,7 +791,7 @@ func TestEnsureTranscodeSessionReplacesRecipeForDifferentSelectedSourceFacts(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = transcodeSession.Close() })
-	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 1 || opts.SourceAudioChannels != 6 {
+	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 1 || opts.SourceAudioChannels != 6 || !opts.RequireAudioTrack {
 		t.Fatalf("fresh opts = track %d channels %d, want track 1 channels 6", opts.AudioTrackIndex, opts.SourceAudioChannels)
 	}
 	persisted, ok := store.Get("play-1")
@@ -821,7 +821,7 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&remoteReq); err != nil {
 			t.Fatalf("decode remote request: %v", err)
 		}
-		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{AudioRecipeVersion: remoteReq.AudioRecipeVersion})
+		writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{AudioRecipeVersion: remoteReq.AudioRecipeVersion, RequireAudioTrack: remoteReq.RequireAudioTrack})
 	}))
 	defer server.Close()
 
@@ -847,6 +847,9 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		t.Fatalf("startRemoteTranscode: %v", err)
 	}
 
+	if !remoteReq.RequireAudioTrack {
+		t.Fatal("remote request omitted negotiated audio requirement")
+	}
 	if got := remoteReq.AudioTrackIndex; got != 1 {
 		t.Fatalf("remote AudioTrackIndex = %d, want 1", got)
 	}
@@ -863,7 +866,7 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		t.Fatalf("remote AudioRecipeVersion = %q, want %q", got, playback.TransformationAudioToAACRecipeVersionV3)
 	}
 	persisted, ok := playbackStore.Get("play-1")
-	if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 6 {
+	if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 6 || !persisted.Recipe.RequireAudioTrack {
 		t.Fatalf("persisted remote recipe = %#v, want six source channels", persisted)
 	}
 }
@@ -882,7 +885,7 @@ func TestStartRemoteTranscodeRejectsOldNodeAfterStaleAudioCapabilityProbe(t *tes
 		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
 			// Simulate a pre-v2 replacement: it accepts the unknown request fields
 			// but cannot return the audio recipe receipt.
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{Status: "started"})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{Status: "started", RequireAudioTrack: true})
 		case r.Method == http.MethodDelete:
 			deleted <- r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
@@ -945,8 +948,7 @@ func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
 				var request transcodenode.TranscodeStartRequest
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						// An older node can encode ordinary mono AAC without the optional
-						// surround-to-stereo boost transformation.
+						// Mono AAC does not need the optional surround-to-stereo boost transformation.
 						writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
 						return
 					}
@@ -955,7 +957,7 @@ func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
-					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{})
+					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{RequireAudioTrack: request.RequireAudioTrack})
 				}))
 				defer server.Close()
 				if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, server.URL); err != nil {
