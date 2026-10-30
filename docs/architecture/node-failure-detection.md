@@ -71,8 +71,10 @@ it. The native relay then moves the transcode (see
 [restart-resilient playback](restart-resilient-playback.md#transcode-node-lost-under-the-api-relay)).
 The proxy answers `502` at once, and the client replans. A Jellyfin client
 receives `502` if its segment request fails before headers. After headers, a
-hung body read fails with `nodepool.ErrNodeNotAnswering` and ends the partial
-response; the response cannot move to another executor. All three relays warn
+hung body read fails with `nodepool.ErrNodeNotAnswering`. The relay aborts the
+partial response, as it does for any body copy error while the viewer's request
+is live, so a chunked client sees a short body rather than a clean end. The
+response cannot move to another executor. All three relays warn
 with the node and playback session unless the viewer's request is canceled.
 The next native API request finds the remembered hung node through the header
 watch and can move the transcode through the same recovery path. A proxy-origin

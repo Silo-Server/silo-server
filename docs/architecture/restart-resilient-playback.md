@@ -848,8 +848,9 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
 - **Body failure.** If the node hangs after headers, the same liveness watch
   runs only while a body read is pending. It ends that read after two missed
   health probes, or one if the node is already remembered as hung. The relay
-  logs the node and playback session and ends the partial response. It cannot
-  move a response already sent to the client.
+  logs the node and playback session and aborts the partial response, so a
+  chunked client does not mistake it for a complete one. It cannot move a
+  response already sent to the client.
   On the client's next request, the header watch probes the remembered hung
   node at once; one missed probe triggers the move described here.
 - **Recipe.** The same recipe the restart paths use: the client's `?st` token

@@ -19,6 +19,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
+// hungNodePartialBody outgrows the API server's response buffer, so the client
+// receives headers and bytes before the node stalls, as with a real segment.
+var hungNodePartialBody = strings.Repeat("p", 8<<10)
+
 // hungNode is a transcode node that serves segments until it is frozen, then
 // behaves like a process stopped with SIGSTOP: connections still open and
 // requests are still delivered, but nothing is answered, health included.
@@ -52,8 +56,9 @@ func newHungNode(t *testing.T, freezeAt string) *hungNode {
 		node.mu.Unlock()
 		if frozen {
 			if freezeNow && node.freezeDuringBody {
-				w.Header().Set("Content-Length", "1024")
-				_, _ = io.WriteString(w, "partial")
+				// No Content-Length: on a chunked body only an aborted
+				// relay tells the client the body is short.
+				_, _ = io.WriteString(w, hungNodePartialBody)
 				w.(http.Flusher).Flush()
 			}
 			select {
@@ -126,8 +131,8 @@ func serveRehomeFixture(t *testing.T, f *rehomeFixture) *httptest.Server {
 
 // fetchSegment requests a segment the way a player does, giving up after the
 // hls.js load timeout. It returns the status (0 when the client gave up), the
-// body, and how long the answer took.
-func fetchSegment(t *testing.T, api *httptest.Server, f *rehomeFixture, name string) (int, string, time.Duration) {
+// body, how long the answer took, and the error that ended the body read.
+func fetchSegment(t *testing.T, api *httptest.Server, f *rehomeFixture, name string) (int, string, time.Duration, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -139,11 +144,11 @@ func fetchSegment(t *testing.T, api *httptest.Server, f *rehomeFixture, name str
 	started := time.Now()
 	resp, err := api.Client().Do(req)
 	if err != nil {
-		return 0, err.Error(), time.Since(started)
+		return 0, err.Error(), time.Since(started), err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(body), time.Since(started)
+	body, readErr := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body), time.Since(started), readErr
 }
 
 // TestRelayMovesTranscodeOffHungNode covers issue #2296 end to end with the
@@ -166,7 +171,7 @@ func TestRelayMovesTranscodeOffHungNode(t *testing.T) {
 			api := serveRehomeFixture(t, f)
 
 			for _, name := range []string{"seg_00000.ts", "seg_00001.ts", "seg_00002.ts"} {
-				if status, body, _ := fetchSegment(t, api, f, name); status != http.StatusOK || body != "hung-node:"+name {
+				if status, body, _, _ := fetchSegment(t, api, f, name); status != http.StatusOK || body != "hung-node:"+name {
 					t.Fatalf("%s before the hang: status = %d, body = %q", name, status, body)
 				}
 			}
@@ -174,15 +179,18 @@ func TestRelayMovesTranscodeOffHungNode(t *testing.T) {
 			if phase == "body" {
 				// Real production probe timings take about six seconds. The partial
 				// response cannot move; the client's retry must recover the same URL.
-				status, body, took := fetchSegment(t, api, f, "seg_00003.ts")
-				if status != http.StatusOK || body != "partial" || took > 10*time.Second {
-					t.Fatalf("mid-body failure: status = %d, body = %q after %v, want the partial response within 10s", status, body, took)
+				status, body, took, readErr := fetchSegment(t, api, f, "seg_00003.ts")
+				if status != http.StatusOK || body != hungNodePartialBody || took > 10*time.Second {
+					t.Fatalf("mid-body failure: status = %d, body length = %d after %v, want the %d-byte partial response within 10s", status, len(body), took, len(hungNodePartialBody))
+				}
+				if readErr == nil {
+					t.Fatal("mid-body failure ended with a clean EOF; the client would accept the partial body as complete")
 				}
 				if got := healthy.starts.Load(); got != 0 {
 					t.Fatalf("replacement starts before the client retries = %d, want 0", got)
 				}
 			}
-			status, body, took := fetchSegment(t, api, f, "seg_00003.ts")
+			status, body, took, _ := fetchSegment(t, api, f, "seg_00003.ts")
 			if status != http.StatusOK || body != "moved:seg_00003.ts" {
 				t.Fatalf("segment after the hang: status = %d, body = %q after %v; want it served by the healthy node", status, body, took)
 			}
@@ -207,7 +215,7 @@ func TestRelayMovesTranscodeOffHungNode(t *testing.T) {
 			}
 			hung.waitForRequest(t, http.MethodDelete, "/transcode/"+rehomeTestTransport)
 
-			if status, body, _ := fetchSegment(t, api, f, "seg_00004.ts"); status != http.StatusOK || body != "moved:seg_00004.ts" {
+			if status, body, _, _ := fetchSegment(t, api, f, "seg_00004.ts"); status != http.StatusOK || body != "moved:seg_00004.ts" {
 				t.Fatalf("next segment: status = %d, body = %q", status, body)
 			}
 			if got := healthy.starts.Load(); got != 1 {
@@ -233,7 +241,7 @@ func TestRelayFailsPromptlyWhenNoNodeReplacesHungNode(t *testing.T) {
 	}
 	api := serveRehomeFixture(t, f)
 
-	status, body, took := fetchSegment(t, api, f, "seg_00003.ts")
+	status, body, took, _ := fetchSegment(t, api, f, "seg_00003.ts")
 	if status != http.StatusBadGateway {
 		t.Fatalf("status = %d, body = %q after %v; want 502", status, body, took)
 	}
@@ -276,7 +284,7 @@ func TestRelayWaitsOnSlowLiveNode(t *testing.T) {
 	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, slow.URL), pooledNode(2, spare.server.URL)}, "ffmpeg")
 	api := serveRehomeFixture(t, f)
 
-	status, body, _ := fetchSegment(t, api, f, "seg_00003.ts")
+	status, body, _, _ := fetchSegment(t, api, f, "seg_00003.ts")
 	if status != http.StatusOK || body != "slow:seg_00003.ts" {
 		t.Fatalf("status = %d, body = %q; want the slow node's answer", status, body)
 	}

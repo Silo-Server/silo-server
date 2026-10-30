@@ -21,7 +21,8 @@ import (
 )
 
 // TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation catches a relay
-// that watches headers but leaves a stalled segment body waiting for the viewer.
+// that watches headers but leaves a stalled segment body waiting for the viewer,
+// and one that ends the stalled body cleanly instead of aborting it.
 func TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation(t *testing.T) {
 	transport, ok := transcodeproxy.NodeClient().Transport.(*http.Transport)
 	if !ok {
@@ -41,7 +42,7 @@ func TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation(t *testing.T) {
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				Header:        http.Header{transcodeproxy.GenerationHeader: []string{"7"}},
-				ContentLength: 100,
+				ContentLength: -1,
 				Body:          reader,
 			}, nil
 		}))
@@ -52,12 +53,19 @@ func TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation(t *testing.T) {
 		rr := httptest.NewRecorder()
 		handler := &PlaybackHandler{JWTSecret: "compat-relay-secret"}
 		started := time.Now()
-		handler.proxyRemoteCompatSegment(rr, req, scheme+"://hung-node.test", "remote-session", "seg_00007.ts")
+		var recovered any
+		func() {
+			defer func() { recovered = recover() }()
+			handler.proxyRemoteCompatSegment(rr, req, scheme+"://hung-node.test", "remote-session", "seg_00007.ts")
+		}()
 		if ctx.Err() != nil {
 			t.Fatalf("segment relay waits for viewer cancellation: elapsed = %v, request error = %v", time.Since(started), ctx.Err())
 		}
 		if rr.Code != http.StatusOK || rr.Body.String() != "partial" {
 			t.Fatalf("relay response = %d %q, want 200 with partial body", rr.Code, rr.Body.String())
+		}
+		if recovered != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+			t.Fatalf("relay ended with %v, want panic(http.ErrAbortHandler) so the viewer sees a short body", recovered)
 		}
 	})
 }
