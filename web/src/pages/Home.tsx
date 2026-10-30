@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- section state resets when the layout or cache changes, and the reveal gates follow sidebar transitions */
-import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
@@ -17,6 +17,11 @@ import {
   HOME_SECTION_STALE_TIME,
   useHomeLayout,
 } from "@/hooks/queries/sections";
+import {
+  completeHomeRow,
+  HOME_ROW_ITEM_LIMIT,
+  homeRowItemLimit,
+} from "@/hooks/queries/homeRowLimit";
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
@@ -69,6 +74,9 @@ export default function Home() {
   const [completedIds, setCompletedIds] = useState<Set<string>>(() =>
     freshCachedHomeSectionIds(queryClient, layout),
   );
+  // Rows that loaded the rest of their cards, in the order they did, each with
+  // how many cards it showed before (see dropCrossSectionDuplicates).
+  const [shownCounts, setShownCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
   // Every reset below starts a new load generation. A request only reports
   // back into the generation that started it.
   const loadGenerationRef = useRef(0);
@@ -155,11 +163,23 @@ export default function Home() {
       return next;
     });
 
+    const featuredIds = new Set(
+      layout.filter((section) => section.featured).map((section) => section.id),
+    );
     nextIds.forEach((sectionId) => {
+      const queryKey = sectionKeys.homeItems(sectionId);
+      const featured = featuredIds.has(sectionId);
       void queryClient
         .fetchQuery<HomeSectionItemsResponse>({
-          queryKey: sectionKeys.homeItems(sectionId),
-          queryFn: ({ signal }) => fetchHomeSectionItems(sectionId, { signal }),
+          queryKey,
+          queryFn: ({ signal }) =>
+            fetchHomeSectionItems(sectionId, {
+              signal,
+              itemLimit: homeRowItemLimit(
+                featured,
+                queryClient.getQueryData<HomeSectionItemsResponse>(queryKey),
+              ),
+            }),
           staleTime: HOME_SECTION_STALE_TIME,
           gcTime: HOME_SECTION_GC_TIME,
         })
@@ -169,6 +189,22 @@ export default function Home() {
           setLoadedSections((prev) => {
             const next = new Map(prev);
             next.set(sectionId, response.section);
+            return next;
+          });
+          setShownCounts((prev) => {
+            // A row the viewer extended past the cap comes back whole; the
+            // duplicate filter keeps comparing its first cards, as it did
+            // when the row was completed.
+            if (
+              !featured &&
+              !response.partial &&
+              response.section.items.length > HOME_ROW_ITEM_LIMIT
+            ) {
+              return prev.has(sectionId) ? prev : new Map(prev).set(sectionId, HOME_ROW_ITEM_LIMIT);
+            }
+            if (!prev.has(sectionId)) return prev;
+            const next = new Map(prev);
+            next.delete(sectionId);
             return next;
           });
           setFailedIds((prev) => {
@@ -217,7 +253,7 @@ export default function Home() {
     if (hasFirstContent) markCriticalContentLoaded();
   }, [hasFirstContent]);
 
-  const visibleSections = useDedupedSections(layout, loadedSections);
+  const visibleSections = useDedupedSections(layout, loadedSections, shownCounts);
 
   const viewModel = buildHomeSectionViewModel({
     layout,
@@ -240,6 +276,42 @@ export default function Home() {
         }),
       );
   };
+
+  // Reads the whole of a row loaded in part once its carousel nears the last
+  // card, keeping the cards it shows in place. On failure the row keeps what
+  // it has, and scrolling near its end again retries.
+  const completingIdsRef = useRef(new Set<string>());
+  const completeSection = useCallback(
+    (sectionId: string) => {
+      const queryKey = sectionKeys.homeItems(sectionId);
+      const shown = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
+      const ownLimit = layout.find((section) => section.id === sectionId)?.item_limit ?? 0;
+      if (!shown?.partial || ownLimit <= shown.section.items.length) return;
+      if (completingIdsRef.current.has(sectionId)) return;
+      completingIdsRef.current.add(sectionId);
+      const generation = loadGenerationRef.current;
+      void queryClient
+        .fetchQuery<HomeSectionItemsResponse>({
+          queryKey,
+          queryFn: ({ signal }) =>
+            fetchHomeSectionItems(sectionId, { signal }).then((whole) =>
+              completeHomeRow(shown, whole),
+            ),
+          staleTime: 0,
+          gcTime: HOME_SECTION_GC_TIME,
+        })
+        .then((response) => {
+          if (loadGenerationRef.current !== generation) return;
+          setLoadedSections((prev) => new Map(prev).set(sectionId, response.section));
+          setShownCounts((prev) =>
+            prev.has(sectionId) ? prev : new Map(prev).set(sectionId, shown.section.items.length),
+          );
+        })
+        .catch(() => undefined)
+        .finally(() => completingIdsRef.current.delete(sectionId));
+    },
+    [layout, queryClient],
+  );
 
   const retrySection = (sectionId: string) => {
     queryClient.removeQueries({ queryKey: sectionKeys.homeItems(sectionId) });
@@ -308,6 +380,7 @@ export default function Home() {
                 eager={rowIndex < EAGER_HOME_ROW_COUNT}
                 deferFirstCommit={initialCachedSections.has(slot.layout.id)}
                 priority={rowIndex === 0 && !hasHeroSlot}
+                onNearEnd={completeSection}
                 restorationReady={rowRestorationReady}
                 placeholderHeight={rowPlaceholderHeight}
                 restoreDelayMs={Math.min(
@@ -354,6 +427,7 @@ const DeferredHomeSection = memo(function DeferredHomeSection({
   eager,
   deferFirstCommit,
   priority,
+  onNearEnd,
   restorationReady,
   placeholderHeight,
   restoreDelayMs,
@@ -364,6 +438,8 @@ const DeferredHomeSection = memo(function DeferredHomeSection({
   deferFirstCommit: boolean;
   /** The first row, on screen at first paint. */
   priority: boolean;
+  /** Loads the rest of a row loaded in part. */
+  onNearEnd: (sectionId: string) => void;
   restorationReady: boolean;
   placeholderHeight: string;
   restoreDelayMs: number;
@@ -422,7 +498,7 @@ const DeferredHomeSection = memo(function DeferredHomeSection({
     };
   }, [eager, rendered, restorationReady, restoreDelayMs]);
 
-  if (rendered) return <SectionRow section={section} priority={priority} />;
+  if (rendered) return <SectionRow section={section} priority={priority} onNearEnd={onNearEnd} />;
 
   return (
     <div

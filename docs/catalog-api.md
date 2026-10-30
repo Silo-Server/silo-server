@@ -37,8 +37,16 @@ in the row and open the full list here. To download only the cards a row shows,
 `listHomeSections` and `listLibrarySections` accept `item_limit` (1 to 100),
 which caps every row's item limit for that request. Send it only when
 `getHomeCapabilities` reports `section_item_limit_max`; an older server rejects
-the parameter. See the home section of
+the parameter. `getHomeSectionItems` and `getHomeLayout` (for the rows it
+includes) accept the same `item_limit`; send it only when `getHomeCapabilities`
+reports `row_item_limit_max`. See the home section of
 [the native API contract](architecture/api-contract.md) for the details.
+
+This listing is not a continuation of a capped row. Query-backed rows page their
+source here, so a Home row that hides watched items lists them here, and a random
+row is drawn again. A client that shows a capped row and wants the rest of it in
+place reads the row again at its own limit (`getHomeSectionItems` without
+`item_limit`) and keeps the cards it already shows.
 
 ## People search
 

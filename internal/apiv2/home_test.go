@@ -275,9 +275,9 @@ func TestListHomeSections(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/sections", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
-// TestSectionsItemLimit pins item_limit on both aggregate section reads: a
-// value in range reaches the seam as the viewer's cap, absent leaves the cap
-// unset, and a value outside 1..100 is a validation failure naming it.
+// TestSectionsItemLimit pins item_limit on every section read that takes it:
+// a value in range reaches the seam as the viewer's cap, absent leaves the
+// cap unset, and a value outside 1..100 is a validation failure naming it.
 func TestSectionsItemLimit(t *testing.T) {
 	deps, home := homeDeps(t)
 	library := deps.LibrarySections.(*fakeLibraryViews)
@@ -287,6 +287,8 @@ func TestSectionsItemLimit(t *testing.T) {
 		seen func() handlers.SectionViewer
 	}{
 		{"/api/v2/home/sections", func() handlers.SectionViewer { return home.lastViewer }},
+		{"/api/v2/home/sections/continue_watching/items", func() handlers.SectionViewer { return home.lastViewer }},
+		{"/api/v2/home/layout", func() handlers.SectionViewer { return home.lastViewer }},
 		{"/api/v2/library/1/sections", func() handlers.SectionViewer { return library.lastViewer }},
 	} {
 		for query, want := range map[string]int{"?item_limit=20": 20, "?item_limit=100": 100, "": 0} {
@@ -359,7 +361,7 @@ func TestListSectionRecipeCandidates(t *testing.T) {
 }
 
 // TestHomeCapabilities pins the home capability document: available with
-// include_items_max and section_item_limit_max where the home sections
+// include_items_max and the item_limit maxima where the home sections
 // service is wired, revalidated by its ETag, not_configured without them, and
 // each advertised bound equal to the maximum its parameter validates.
 func TestHomeCapabilities(t *testing.T) {
@@ -374,7 +376,8 @@ func TestHomeCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusOK || out.State != StateAvailable || out.Allowed == nil || !*out.Allowed || out.Revision == "" ||
-		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections || out.SectionItemLimitMax != handlers.MaxSectionItemLimitCap {
+		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections || out.SectionItemLimitMax != handlers.MaxSectionItemLimitCap ||
+		out.RowItemLimitMax != handlers.MaxSectionItemLimitCap {
 		t.Fatalf("capabilities: %d %s", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get("Cache-Control"); got != cachePrivateNoCache {
@@ -387,7 +390,7 @@ func TestHomeCapabilities(t *testing.T) {
 
 	deps.HomeSections = nil
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders())
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") || strings.Contains(rec.Body.String(), "section_item_limit_max") {
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") || strings.Contains(rec.Body.String(), "item_limit_max") {
 		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
 	}
 	out = HomeCapabilities{}
@@ -424,7 +427,7 @@ func TestHomeCapabilities(t *testing.T) {
 	if maximum := paramMaximum(Prefix+"/home/layout", "include_items"); maximum == nil || int(*maximum) != handlers.MaxHomeLayoutIncludedSections {
 		t.Fatalf("getHomeLayout include_items maximum = %v, want %d", maximum, handlers.MaxHomeLayoutIncludedSections)
 	}
-	for _, path := range []string{Prefix + "/home/sections", Prefix + "/library/{id}/sections"} {
+	for _, path := range []string{Prefix + "/home/sections", Prefix + "/library/{id}/sections", Prefix + "/home/sections/{id}/items", Prefix + "/home/layout"} {
 		if maximum := paramMaximum(path, "item_limit"); maximum == nil || int(*maximum) != handlers.MaxSectionItemLimitCap {
 			t.Fatalf("%s item_limit maximum = %v, want %d", path, maximum, handlers.MaxSectionItemLimitCap)
 		}

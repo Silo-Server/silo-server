@@ -1627,6 +1627,15 @@ work from the capped size; `total_count` keeps its meaning. Without the paramete
 its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
 only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
 `include_items_max` is.
+`getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
+one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
+`getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
+row's own `item_limit`, so a client can tell a capped row from a complete one. Neither read runs
+the cross-row duplicate filter. A client sends `item_limit` to these two reads only when
+`getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
+parameter on them does not send. A capped row is the first `item_limit` cards of the row built at
+that size: rows that draw a subset of a pool sized by their limit (hidden gems, random picks) may
+draw a different subset than the uncapped row.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond

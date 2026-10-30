@@ -4554,6 +4554,11 @@ export interface LibraryLayoutResponse {
 
 export interface HomeSectionItemsResponse {
   section: ResolvedSection;
+  /**
+   * The row was read with an item_limit below its own and may hold more
+   * cards than `section.items` (see homeRowLimit).
+   */
+  partial?: boolean;
 }
 
 export interface CollectionSectionConfig {

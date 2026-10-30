@@ -69,8 +69,9 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	return response, nil
 }
 
-// HomeSectionItems answers one section of the home page with its items, or an
-// error when its items cannot be fetched.
+// HomeSectionItems answers one section of the home page with its items,
+// capped at viewer.ItemLimitCap items when it is set, or an error when its
+// items cannot be fetched.
 func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer) (SectionView, error) {
 	return h.homeSectionItems(ctx, sectionID, viewer, false)
 }
@@ -84,7 +85,7 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
 	userID := apimw.GetUserID(ctx)
-	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
+	resolved = capSectionItemLimits(h.maybeInjectNextUp(ctx, resolved, userID), viewer.ItemLimitCap)
 	hideWatched := h.homeHidesWatchedItems(ctx)
 	for _, s := range resolved {
 		if s.ID != sectionID {
@@ -165,9 +166,11 @@ type HomeLayoutView struct {
 
 // HomeLayoutWithItems answers the home layout for the profile on the
 // context and, when includeItems is positive, the cards of its first
-// includeItems rows (at most MaxHomeLayoutIncludedSections). The layout is
-// resolved once and the rows are built in parallel; rows that error or
-// take longer than the budget are omitted rather than failing the layout.
+// includeItems rows (at most MaxHomeLayoutIncludedSections), each capped at
+// viewer.ItemLimitCap items when it is set. The layout entries keep each
+// row's own item limit. The layout is resolved once and the rows are built
+// in parallel; rows that error or take longer than the budget are omitted
+// rather than failing the layout.
 func (h *SectionHandler) HomeLayoutWithItems(ctx context.Context, viewer SectionViewer, includeItems int) (HomeLayoutView, error) {
 	return h.homeLayoutWithItems(ctx, viewer, includeItems, homeLayoutIncludedRowsBudget)
 }
@@ -184,7 +187,7 @@ func (h *SectionHandler) homeLayoutWithItems(ctx context.Context, viewer Section
 	if n <= 0 || h.fetcher == nil {
 		return view, nil
 	}
-	view.IncludedSections = h.includedHomeRows(ctx, resolved[:n], h.homeHidesWatchedItems(ctx), viewer, budget,
+	view.IncludedSections = h.includedHomeRows(ctx, capSectionItemLimits(resolved[:n], viewer.ItemLimitCap), h.homeHidesWatchedItems(ctx), viewer, budget,
 		func(ctx context.Context, s sections.ResolvedSection) (sections.SectionWithItems, error) {
 			return h.fetcher.FetchOne(ctx, s, nil, libraryIDs, userID, profileID, accessFilter)
 		})
