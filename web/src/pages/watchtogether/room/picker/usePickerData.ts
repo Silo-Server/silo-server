@@ -193,7 +193,7 @@ export function useHomeShelfSections(enabled: boolean) {
     queries: wanted.map((section) => ({
       queryKey: sectionKeys.homeItems(section.id),
       queryFn: ({ signal }: { signal?: AbortSignal }) =>
-        fetchHomeSectionItems(section.id, { signal }),
+        fetchHomeSectionItems(section.id, { signal, featured: section.featured }),
       staleTime: HOME_SECTION_STALE_TIME,
       gcTime: HOME_SECTION_GC_TIME,
       enabled,

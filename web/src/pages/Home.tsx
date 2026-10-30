@@ -156,10 +156,11 @@ export default function Home() {
     });
 
     nextIds.forEach((sectionId) => {
+      const featured = layout.some((section) => section.id === sectionId && section.featured);
       void queryClient
         .fetchQuery<HomeSectionItemsResponse>({
           queryKey: sectionKeys.homeItems(sectionId),
-          queryFn: ({ signal }) => fetchHomeSectionItems(sectionId, { signal }),
+          queryFn: ({ signal }) => fetchHomeSectionItems(sectionId, { signal, featured }),
           staleTime: HOME_SECTION_STALE_TIME,
           gcTime: HOME_SECTION_GC_TIME,
         })

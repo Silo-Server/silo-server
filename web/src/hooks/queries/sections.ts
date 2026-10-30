@@ -29,6 +29,7 @@ import type { components } from "@/api/v2/schema";
 import { v2, type V2Query } from "@/api/v2/request";
 import { sectionKeys } from "./keys";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
+import { artworkQuery, rowDrawsBackdrops, type ArtworkWidthQuery } from "@/lib/artworkWidths";
 import { runBulkDelete, type BulkDeleteProgress } from "./bulkDelete";
 
 /**
@@ -92,8 +93,18 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
   return queryOptions({
     queryKey: sectionKeys.homeLayout(),
     queryFn: async ({ signal }): Promise<HomeLayoutResponse> => {
-      const layout = await fetchHomeLayout(signal);
+      const artwork = artworkQuery("homeLayout");
+      const layout = await fetchHomeLayout(artwork, signal);
       for (const section of layout.included_sections) {
+        // The layout's backdrops are hero-sized. A row of wide cards loads
+        // its own at card size rather than drawing those.
+        if (
+          artwork.backdrop_width &&
+          !section.featured &&
+          rowDrawsBackdrops(section.section_type)
+        ) {
+          continue;
+        }
         const queryKey = sectionKeys.homeItems(section.id);
         // setQueryData alone would create the entry with the client's default
         // gcTime, and Home never fetches a fresh row to raise it.
@@ -113,11 +124,12 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
  * Reads the home layout with its first rows' items. A server that predates
  * include_items (an older node during a rolling upgrade) or allows fewer rows
  * answers 422; the layout is then read alone and Home loads every row itself.
+ * The layout alone carries no artwork, so that read sends no widths either.
  */
-async function fetchHomeLayout(signal?: AbortSignal) {
+async function fetchHomeLayout(artwork: ArtworkWidthQuery, signal?: AbortSignal) {
   try {
     return await v2("GET /api/v2/home/layout", {
-      query: { include_items: HOME_LAYOUT_INCLUDED_ROWS },
+      query: { include_items: HOME_LAYOUT_INCLUDED_ROWS, ...artwork },
       signal,
     });
   } catch (error) {
@@ -132,6 +144,12 @@ export function useHomeLayout(enabled = true) {
   return useQuery({ ...homeLayoutQueryOptions(queryClient), enabled });
 }
 
+interface SectionItemsOptions {
+  signal?: AbortSignal;
+  /** The section draws as the hero, so its backdrops load at hero size. */
+  featured?: boolean;
+}
+
 /**
  * Fetches one home section with its items. Answers in the same `{ section }`
  * shape as the library section fetch so the section caches and refresh
@@ -139,10 +157,11 @@ export function useHomeLayout(enabled = true) {
  */
 export function fetchHomeSectionItems(
   sectionId: string,
-  options?: { signal?: AbortSignal },
+  options?: SectionItemsOptions,
 ): Promise<HomeSectionItemsResponse> {
   return v2("GET /api/v2/home/sections/{id}/items", {
     path: { id: sectionId },
+    query: artworkQuery(options?.featured ? "hero" : "row"),
     signal: options?.signal,
   }).then((section) => ({ section: sectionFromV2(section) }));
 }
@@ -155,10 +174,11 @@ export function fetchHomeSectionItems(
 export function fetchLibrarySectionItems(
   libraryId: number,
   sectionId: string,
-  options?: { signal?: AbortSignal },
+  options?: SectionItemsOptions,
 ): Promise<HomeSectionItemsResponse> {
   return v2("GET /api/v2/library/{id}/sections/{section_id}/items", {
     path: { id: String(libraryId), section_id: sectionId },
+    query: artworkQuery(options?.featured ? "hero" : "row"),
     signal: options?.signal,
   }).then((section) => ({ section: sectionFromV2(section) }));
 }

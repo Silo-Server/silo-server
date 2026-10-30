@@ -6,6 +6,7 @@ import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2, type V2Body, type V2Query, type V2Result } from "@/api/v2/request";
 import type { CatalogParams } from "@/hooks/queries/keys";
 import { catalogKeys } from "@/hooks/queries/keys";
+import { artworkQuery } from "@/lib/artworkWidths";
 import { createEmptyQueryDefinition, type CatalogSource } from "@/api/types";
 import {
   buildCatalogApiSearchParams,
@@ -104,6 +105,7 @@ export async function fetchCatalogPage(
   };
   const result = await v2("POST /api/v2/catalog/query", {
     body,
+    query: artworkQuery("grid"),
     signal: options?.signal ?? undefined,
   });
   return {

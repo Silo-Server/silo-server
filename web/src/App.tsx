@@ -57,6 +57,8 @@ import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { guardRedirectTarget } from "@/lib/authRedirect";
 import { toast } from "sonner";
 import { prefetchRouteChunks, type RouteChunkImport } from "@/lib/routeChunkPrefetch";
+import { loadImageCapabilities } from "@/lib/artworkWidths";
+import { useCriticalContentLoaded } from "@/lib/startupPriority";
 import { importCatalog } from "@/pages/catalogRoute";
 
 // Hot routes keep their import factory in a named binding so the idle warm-up
@@ -802,6 +804,24 @@ export function BandwidthProbePrewarmer() {
   return null;
 }
 
+/**
+ * Reads which artwork widths the server takes once the first screen has its
+ * content, so the read never queues ahead of it. The answer is kept for the
+ * next visit, which sizes its first screen from it at once.
+ */
+function ArtworkCapabilityReader() {
+  const { user } = useAuth();
+  const isAuthenticated = Boolean(user);
+  const contentLoaded = useCriticalContentLoaded();
+  useEffect(() => {
+    if (!isAuthenticated || !contentLoaded) return;
+    const controller = new AbortController();
+    void loadImageCapabilities(controller.signal);
+    return () => controller.abort();
+  }, [isAuthenticated, contentLoaded]);
+  return null;
+}
+
 /** Warms the hot route chunks once the first screen has settled. */
 function RouteChunkPrewarmer() {
   const { user } = useAuth();
@@ -842,6 +862,7 @@ function AppShell() {
                       <PlaybackCapabilityPrewarmer />
                       <RouteChunkPrewarmer />
                       <BandwidthProbePrewarmer />
+                      <ArtworkCapabilityReader />
                       <RealtimeEventChannels />
                       <ScrollRestorationManager />
                       <NavigationDirectionManager />

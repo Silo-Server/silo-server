@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 
 import "./detailLayout.css";
@@ -101,6 +102,10 @@ export default function DetailHero({
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
   const isViewportBounded = variant === "episode" || variant === "series" || variant === "season";
+  // Below lg a viewport-bounded hero hides its poster (detailLayout.css), so
+  // it is not rendered there and its image is never downloaded.
+  const wideViewport = useMediaQuery("(min-width: 64rem)", true);
+  const showPoster = !hidePoster && (!isViewportBounded || wideViewport);
 
   const posterSizeClass = (() => {
     switch (posterOrientation) {
@@ -193,7 +198,7 @@ export default function DetailHero({
             className={`detail-hero-primary-content flex flex-col gap-6 ${!hidePoster ? "lg:flex-row lg:items-end" : ""}`}
           >
             {/* Poster */}
-            {!hidePoster && (
+            {showPoster && (
               <div
                 className={`media-card-image border-border/20 relative border shadow-[var(--shadow-md)] ${posterSizeClass}`}
               >
