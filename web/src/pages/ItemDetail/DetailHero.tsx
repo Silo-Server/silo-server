@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -52,12 +52,6 @@ interface DetailHeroProps {
    * inside the viewport, for pages whose hero leads into a grid of titles.
    */
   shortHero?: boolean;
-  /**
-   * Pixels of the content under the hero that should still fit on the first
-   * screen of a large display, such as a row of titles. The hero gives up only
-   * that much of its usual height, and never shrinks below its own content.
-   */
-  fitBelow?: number;
   topNav?: ReactNode;
 }
 
@@ -90,7 +84,6 @@ export default function DetailHero({
   crewLine,
   variant = "full",
   shortHero = false,
-  fitBelow,
   topNav,
 }: DetailHeroProps) {
   const {
@@ -201,13 +194,8 @@ export default function DetailHero({
               "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
             : shortHero
               ? "min-h-[50dvh] pt-24 lg:min-h-[54dvh]"
-              : fitBelow
-                ? "min-h-[60dvh] pt-28 lg:min-h-[min(72dvh,calc(100dvh-var(--detail-hero-fit-below)))]"
-                : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
+              : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
-        style={
-          fitBelow ? ({ "--detail-hero-fit-below": `${fitBelow}px` } as CSSProperties) : undefined
-        }
       >
         <div
           className={`grid gap-8 ${
