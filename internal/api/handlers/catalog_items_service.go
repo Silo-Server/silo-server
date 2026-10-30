@@ -654,6 +654,38 @@ func (h *CatalogResourceHandler) SeasonEpisodes(ctx context.Context, v ItemViewe
 	return h.items.buildEpisodeResponses(ctx, v, episodes), nil
 }
 
+// SeriesWatchCounts answers the viewer's episode rollup of each series among
+// ids, keyed by series ID, for unwatched-episode badges on series cards. An id
+// the viewer may not see, one that is not a series, and a series without
+// available episodes are all absent, so the answer never tells a viewer about
+// a title it cannot see.
+func (h *CatalogResourceHandler) SeriesWatchCounts(ctx context.Context, v ItemViewer, ids []string) (map[string]*catalog.SeasonUserData, error) {
+	const failed = "Failed to count watched episodes"
+	accessible, err := h.items.itemRepo.EnsureAccessibleIDs(ctx, ids, v.Access)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
+	}
+	// Movies and other items pass the access check too; they have no
+	// episodes, so the rollup leaves them out.
+	visible := make([]string, 0, len(accessible))
+	for _, id := range ids {
+		if accessible[id] {
+			visible = append(visible, id)
+		}
+	}
+	counts, err := h.items.seriesWatchCounts(ctx, v, visible)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
+	}
+	return counts, nil
+}
+
 func (h *CatalogHandler) SearchContinuationCapabilities(ctx context.Context) (catalog.SearchContinuationCapabilities, error) {
 	if h == nil || h.resolver == nil {
 		return catalog.SearchContinuationCapabilities{}, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Catalog is not configured")

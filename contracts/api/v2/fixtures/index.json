@@ -13531,6 +13531,71 @@
       "body_file": "query_catalog_letters_ok.json"
     },
     {
+      "name": "query_catalog_watch_counts_empty",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "A request that names no series is refused.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "query_catalog_watch_counts_empty.json"
+    },
+    {
+      "name": "query_catalog_watch_counts_ok",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "Episode watch counts for the series on a page of cards; the movie ID has none and is left out.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:severance\",\"movie:heat-1995\",\"series:the-office\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogWatchCountCollection",
+      "body_file": "query_catalog_watch_counts_ok.json"
+    },
+    {
+      "name": "query_catalog_watch_counts_profile_header_required",
+      "operation_id": "queryCatalogWatchCounts",
+      "scenario": "Watch counts without X-Profile-Id.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/watch-counts",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"series_ids\":[\"series:severance\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "query_catalog_watch_counts_profile_header_required.json"
+    },
+    {
       "name": "rate_limited",
       "operation_id": null,
       "scenario": "The authenticated-route limiter refused the request; Retry-After is the only rate-limit header on v2.",

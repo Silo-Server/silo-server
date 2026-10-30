@@ -78,4 +78,13 @@ func TestSeriesUserDataUsesEpisodeRollup(t *testing.T) {
 	if !reflect.DeepEqual(userData, wantUserData) {
 		t.Fatalf("season user_data = %+v, want %+v", userData, wantUserData)
 	}
+
+	// The batched card counts read the same rollup for every series at once.
+	counts, err := h.seriesWatchCounts(ctx, viewer, []string{"series-1", "series-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]*catalog.SeasonUserData{"series-1": {WatchedCount: 2, UnplayedCount: 3, InProgressCount: 1}}; !reflect.DeepEqual(counts, want) {
+		t.Fatalf("series counts = %+v, want %+v", counts, want)
+	}
 }

@@ -7107,6 +7107,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/catalog/watch-counts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** The acting profile's episode watch counts for up to 250 series, in request order, for unwatched-episode badges on series cards. An ID that is not a series, that the viewer may not see, or whose series has no available episodes is left out rather than answered with zero counts. */
+    post: operations["queryCatalogWatchCounts"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/catalog/works/{work_id}": {
     parameters: {
       query?: never;
@@ -22543,6 +22560,8 @@ export interface components {
       state: "available" | "disabled" | "not_configured" | "unsupported";
       /** @description listCatalogItems and queryCatalogItems accept type=video_with_episodes on the query source (text search over movies, series, and episodes), and listPeople accepts it as media_scope */
       video_with_episodes_scope?: boolean;
+      /** @description queryCatalogWatchCounts answers the acting profile's watched, unwatched, and in-progress episode counts for up to 250 series at once, for unwatched-episode badges on series cards */
+      watch_counts?: boolean;
     };
     CatalogSearchDiagnostics: {
       fallback_reason?: string;
@@ -22575,6 +22594,25 @@ export interface components {
       resolutions: string[];
       /** @description Distinct subtitle languages in scope as BCP 47 tags; a stored value that is not a recognizable language passes through */
       subtitle_languages: string[];
+    };
+    CatalogWatchCount: {
+      /**
+       * @description The series
+       * @example series:severance
+       */
+      series_id: string;
+      /** @description The viewer's progress over the series' available episodes, as item detail reports it: watched_count, unplayed_count (in-progress episodes included), in_progress_count and played */
+      user_data: components["schemas"]["WatchRollup"];
+    };
+    CatalogWatchCountCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["CatalogWatchCount"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CatalogWatchCountsQuery: {
+      /** @description Series to count, by catalog identifier; a repeated ID counts once */
+      series_ids: string[];
     };
     CatalogWorkFormat: {
       /** @example audiobook:dune */
@@ -96817,6 +96855,143 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  queryCatalogWatchCounts: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CatalogWatchCountsQuery"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogWatchCountCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

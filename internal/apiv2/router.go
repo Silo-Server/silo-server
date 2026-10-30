@@ -1137,6 +1137,7 @@ type CatalogItemService interface {
 	SeriesSeasons(ctx context.Context, v handlers.ItemViewer, id string, includeArtwork bool) ([]handlers.SeasonView, error)
 	SeriesSeason(ctx context.Context, v handlers.ItemViewer, id string, num int) (handlers.SeasonView, error)
 	SeasonEpisodes(ctx context.Context, v handlers.ItemViewer, id string, num int) ([]handlers.EpisodeView, error)
+	SeriesWatchCounts(ctx context.Context, v handlers.ItemViewer, ids []string) (map[string]*mediacatalog.SeasonUserData, error)
 }
 
 // CatalogTrailerService is the slice of *handlers.ItemsHandler the trailer

@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "series_id": "series:severance",
+      "user_data": {
+        "watched_count": 1,
+        "unplayed_count": 8,
+        "in_progress_count": 1,
+        "played": false
+      }
+    },
+    {
+      "series_id": "series:the-office",
+      "user_data": {
+        "watched_count": 201,
+        "unplayed_count": 0,
+        "in_progress_count": 0,
+        "played": true
+      }
+    }
+  ]
+}
