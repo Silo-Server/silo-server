@@ -752,8 +752,10 @@ describe("HeroBanner hero trailer", () => {
     const { container } = render(
       hero({ items: [clipSlide(), movieSlide({ content_id: "movie-2", title: "Second" })] }),
     );
-    const video = container.querySelector("video")!;
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected the clip element");
     const [sound] = screen.getAllByRole("button", { name: "Unmute trailer" });
+    if (!sound) throw new Error("expected an unmute control");
 
     expect(video.muted).toBe(true);
 

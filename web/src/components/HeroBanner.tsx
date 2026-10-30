@@ -271,8 +271,6 @@ export default function HeroBanner({
    */
   const showTitleArt = useShowTitleArt();
   const [logoFailed, setLogoFailed] = useState(false);
-  const logoUrl = showTitleArt && current.logo_url && !logoFailed ? current.logo_url : undefined;
-  const holdTitle = showTitleArt === undefined && Boolean(current.logo_url) && !logoFailed;
   /* ── Hero trailer ─────────────────────────────────────────────────────────
    * The active slide's clip, when it has one: the still holds, fades out to
    * black, and the muted clip plays at its own length, handing the carousel on
@@ -481,6 +479,13 @@ export default function HeroBanner({
   useAmbientColor(current?.backdrop_thumbhash);
   if (slides.length === 0) return null;
   if (!current) return null;
+  /*
+   * The logo is resolved here, past the guard above, because it reads the slide:
+   * the art when the profile's `ui.title_art` allows it, the box held while that
+   * answer is still unknown, and the text when the art is off or failed to load.
+   */
+  const logoUrl = showTitleArt && current.logo_url && !logoFailed ? current.logo_url : undefined;
+  const holdTitle = showTitleArt === undefined && Boolean(current.logo_url) && !logoFailed;
   const overviewShown =
     Boolean(current.overview) &&
     !(
