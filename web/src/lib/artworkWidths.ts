@@ -17,7 +17,9 @@
  * parameters, so an older node must not see them.
  *
  * Widths are read when a request is built and are not part of any query key.
- * A resize keeps cached artwork until its query next refetches.
+ * A resize keeps cached artwork until its query next refetches. The server
+ * binds widths into pagination cursors, so a paged read sends its first
+ * page's widths for every page after it.
  */
 import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError } from "@/api/v2/request";
