@@ -30,6 +30,20 @@ services:
     # down after it. Docker kills a container 10s after asking it to stop,
     # which would cut that short.
     stop_grace_period: 2m
+    # NET_ADMIN lets Silo use kernel BBR congestion control on its client
+    # connections even when the host does not allow bbr, and force a larger
+    # TCP send buffer on its listeners when the kernel's limit would cap
+    # remote clients on long, fast links (near 160 Mbit/s at 1 Gbit/s,
+    # 100 ms and 1% loss). Silo gives up NET_ADMIN before its own code runs:
+    # a small helper process holds it only until the listeners are configured,
+    # then exits. Silo, ffmpeg, ffprobe and plugins never keep it; the start
+    # log says if dropping it fails. While the helper holds it, NET_ADMIN can
+    # change this container's interfaces, routes and firewall rules and
+    # reaches more kernel code (nf_tables); with network_mode: host, the
+    # host's. Undo: remove this line. Silo then logs the TCP limits it cannot
+    # change and how to raise them. SILO_NET_TCP_CONGESTION=off in .env turns
+    # BBR off; SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
+    cap_add: [NET_ADMIN]
     environment:
       # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
       # are host-side published-port overrides.

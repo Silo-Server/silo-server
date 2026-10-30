@@ -155,10 +155,10 @@ Canonical component values (first path segment under `internal/`; `app` for `cmd
 
 `access`, `activitylog`, `adminjob`, `ai`, `api`, `app`, `audiobooks`, `auth`, `autoscan`,
 `catalog`, `chapterthumbs`, `diagnostics`, `downloads`, `ebooks`, `historyimport`,
-`jellycompat`, `libraryingest`, `manga`, `metadata`, `nodeconfig`, `nodepool`, `noderecipe`,
+`jellycompat`, `libraryingest`, `manga`, `metadata`, `netadmin`, `nodeconfig`, `nodepool`, `noderecipe`,
 `nodesessions`, `notifications`, `opslog`, `playback`, `plugins`, `policy`, `proxy`, `ratelimit`,
-`recommendations`, `requests`, `scanner`, `scanqueue`, `sections`, `taskmanager`,
-`telemetry`, `transcodenode`, `watchlist`, `watchsync`, `webhooksync`, `worker`.
+`recommendations`, `requests`, `scanner`, `scanqueue`, `sections`, `taskmanager`, `tcpcongestion`,
+`telemetry`, `transcodenode`, `tuning`, `watchlist`, `watchsync`, `webhooksync`, `worker`.
 
 Two API-handler surfaces predate this rule and log a domain component instead of `api`:
 `settings` (`internal/api/handlers/settings_values.go`) and `webhook_sync`

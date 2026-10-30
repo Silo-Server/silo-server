@@ -12,6 +12,16 @@ services:
     # off). The grace period covers the drain plus a minute for the shutdown;
     # raising SILO_NODE_DRAIN_TIMEOUT means raising this to match.
     stop_grace_period: 11m
+    # Proxy nodes serve clients directly and use NET_ADMIN for kernel BBR and
+    # larger TCP send buffers. On transcode nodes Silo drops it at startup
+    # and uses nothing from it; the container's root processes keep it.
+    # A small helper exits after listener setup; Silo and its children never
+    # keep it, and the startup log reports a failed drop.
+    # While held, it can change interfaces, routes and firewall rules and
+    # reaches nf_tables; with network_mode: host, this includes the host.
+    # Undo: remove this line. SILO_NET_TCP_CONGESTION=off turns BBR off.
+    # SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
+    cap_add: [NET_ADMIN]
     environment:
       MODE: ${MODE:-transcode}
       PORT: "8080"
