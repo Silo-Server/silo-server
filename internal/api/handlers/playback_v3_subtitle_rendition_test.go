@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
@@ -360,12 +361,11 @@ func writeOnDemandRenditionSource(t *testing.T) (string, []uint64) {
 	return path, numbers
 }
 
-// TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream
-// starts an HLS copy remux that lists both of a file's embedded text tracks,
-// then switches between them with track_change replans: the stream, its URL
-// and its generation stay, and only the selection moves.
-func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *testing.T) {
-	media, numbers := writeOnDemandRenditionSource(t)
+// onDemandRenditionStartV3 starts, on /api/v2, an HLS copy remux of media,
+// whose two SubRip tracks have container track numbers, for a client with
+// every rendition feature, with the first track selected.
+func onDemandRenditionStartV3(t *testing.T, media string, numbers []uint64) (*PlaybackHandler, playback.StartRequestV3, playback.DecisionResponseV3) {
+	t.Helper()
 	file := v3HandlerFixtureFile(t)
 	file.Container, file.FilePath = "mkv", media
 	file.SubtitleTracks = []models.SubtitleTrack{
@@ -386,7 +386,7 @@ func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *t
 		playback.DeliveryClassHLSV3: {Enabled: true, SupportedOnDevice: true,
 			Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true, EmbeddedText: true}},
 	}
-	english, spanish := 0, 1
+	english := 0
 	request.SubtitleTrackID, request.SubtitleTrackIndex = playback.TrackIDV3(file.ID, "subtitle", english), &english
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).
@@ -396,6 +396,17 @@ func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *t
 		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	return handler, request, started
+}
+
+// TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream
+// starts an HLS copy remux that lists both of a file's embedded text tracks,
+// then switches between them with track_change replans: the stream, its URL
+// and its generation stay, and only the selection moves.
+func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *testing.T) {
+	media, numbers := writeOnDemandRenditionSource(t)
+	handler, request, started := onDemandRenditionStartV3(t, media, numbers)
+	english, spanish := 0, 1
 	plan := started.PlaybackPlan
 	if plan.Delivery != playback.DeliveryRemuxHLSV3 || plan.Subtitle.HLSRendition == nil || plan.Subtitle.HLSRendition.Index != 1 ||
 		plan.Subtitle.HLSRendition.Name != "English" || !slices.Contains(started.ServerFeatures, playback.FeatureHLSSubtitleRenditionsAllV3) {
@@ -411,13 +422,13 @@ func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *t
 		t.Fatalf("stream lists no on-demand renditions: %#v", before)
 	}
 	master, err := before.BuildPlaybackManifest("segment/", "")
-	if err != nil || strings.Count(string(master), "#EXT-X-MEDIA:TYPE=SUBTITLES") != 2 || !strings.Contains(string(master), `NAME="English",LANGUAGE="eng",DEFAULT=YES`) {
+	if err != nil || strings.Count(string(master), "#EXT-X-MEDIA:TYPE=SUBTITLES") != 2 || !strings.Contains(string(master), `NAME="English",LANGUAGE="en",DEFAULT=YES`) {
 		t.Fatalf("multivariant playlist (%v):\n%s", err, master)
 	}
 	beforeOpts := before.Opts()
 
 	for i, selected := range []int{spanish, english} {
-		next := switchOnDemandRenditionV3(t, handler, request, started.SessionID, plan, i, selected)
+		next := switchOnDemandRenditionV3(t, handler, request, started.SessionID, plan, i, &selected, false)
 		if next.Stream.URL != started.PlaybackPlan.Stream.URL || next.Subtitle.HLSRendition == nil || next.Subtitle.HLSRendition.Index != selected+1 {
 			t.Fatalf("switch to %d: plan = %#v", selected, next)
 		}
@@ -440,18 +451,26 @@ func TestHandleReplanPlaybackV3SwitchesOnDemandRenditionsOnTheRunningStream(t *t
 }
 
 // switchOnDemandRenditionV3 reports the client's switch to subtitle ordinal
-// selected with the n-th track_change replan on /api/v2 and returns the plan.
-func switchOnDemandRenditionV3(t *testing.T, handler *PlaybackHandler, request playback.StartRequestV3, sessionID string, plan *playback.PlanV3, n, selected int) *playback.PlanV3 {
+// selected, or Off when it is nil, with the n-th replan on /api/v2 and
+// returns the plan. The replan is a track_change, or a failure_recovery
+// classified subtitle_track_changed when recovery is set.
+func switchOnDemandRenditionV3(t *testing.T, handler *PlaybackHandler, request playback.StartRequestV3, sessionID string, plan *playback.PlanV3, n int, selected *int, recovery bool) *playback.PlanV3 {
 	t.Helper()
-	replanned := servePlaybackReplanNativeV3(handler, sessionID, mustMarshalJSON(t, playback.ReplanRequestV3{
+	replan := playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
 		PlaybackAttemptID: request.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("rendition-switch-%04d", n),
 		FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("rendition-plan-attempt-%04d", n), PlanAttemptKey: plan.PlanAttemptKey,
 		AttemptCount: 1, PositionSeconds: 30,
-		SelectedTracks: playback.SelectedTracksV3{Audio: plan.SelectedTracks.Audio,
-			Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(request.FileID, "subtitle", selected), Index: &selected}},
-		Capabilities: request.Capabilities, ClientPlaybackContext: request.ClientPlaybackContext,
-	}))
+		SelectedTracks: playback.SelectedTracksV3{Audio: plan.SelectedTracks.Audio},
+		Capabilities:   request.Capabilities, ClientPlaybackContext: request.ClientPlaybackContext,
+	}
+	if selected != nil {
+		replan.SelectedTracks.Subtitle = &playback.TrackIdentityV3{ID: playback.TrackIDV3(request.FileID, "subtitle", *selected), Index: selected}
+	}
+	if recovery {
+		replan.Operation, replan.Failure = playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "subtitle_track_changed"}
+	}
+	replanned := servePlaybackReplanNativeV3(handler, sessionID, mustMarshalJSON(t, replan))
 	var response playback.DecisionResponseV3
 	if replanned.Code != http.StatusOK || json.Unmarshal(replanned.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
 		t.Fatalf("replan status = %d, body = %s", replanned.Code, replanned.Body.String())
@@ -466,4 +485,98 @@ func mustMarshalJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// A client may report its own switch among on-demand renditions as a
+// subtitle_track_changed recovery. It moves the selection as a track_change
+// does, on the same stream, and naming no track turns subtitles off.
+func TestHandleReplanPlaybackV3SubtitleTrackChangedRecoveryKeepsOnDemandRenditions(t *testing.T) {
+	media, numbers := writeOnDemandRenditionSource(t)
+	handler, request, started := onDemandRenditionStartV3(t, media, numbers)
+	before := handler.tm.GetTranscodeSession(started.SessionID)
+	spanish := 1
+	plan := switchOnDemandRenditionV3(t, handler, request, started.SessionID, started.PlaybackPlan, 0, &spanish, true)
+	if plan.Stream.URL != started.PlaybackPlan.Stream.URL || plan.EffectiveMediaFileID != started.PlaybackPlan.EffectiveMediaFileID ||
+		plan.Subtitle.HLSRendition == nil || plan.Subtitle.HLSRendition.Index != 2 {
+		t.Fatalf("recovery to the second rendition: plan = %#v", plan)
+	}
+	off := switchOnDemandRenditionV3(t, handler, request, started.SessionID, plan, 1, nil, true)
+	if off.Stream.URL != started.PlaybackPlan.Stream.URL || off.Subtitle.Mode != playback.SubtitleOffV3 || off.Subtitle.HLSRendition != nil ||
+		off.SelectedTracks.Subtitle != nil {
+		t.Fatalf("recovery naming no track: plan = %#v", off)
+	}
+	for i, item := range off.Subtitle.Inventory {
+		if item.HLSRendition == nil || item.HLSRendition.Index != i+1 {
+			t.Fatalf("subtitles off dropped row %d's rendition: %+v", i, item.HLSRendition)
+		}
+	}
+	if after := handler.tm.GetTranscodeSession(started.SessionID); after != before || !after.IsRunning() {
+		t.Fatalf("recoveries replaced the stream: before=%p after=%p", before, after)
+	}
+}
+
+// A stream that started on the single pipeline rendition, here because the
+// index couldn't be read then, keeps running when subtitles are turned off,
+// even though the index can be read by now and a fresh plan would list
+// on-demand renditions.
+func TestHandleReplanPlaybackV3TurnsOffThePipelineRenditionOnTheRunningStream(t *testing.T) {
+	media, numbers := writeOnDemandRenditionSource(t)
+	unread := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(unread, []byte("not yet readable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler, request, started := onDemandRenditionStartV3(t, unread, numbers)
+	if started.PlaybackPlan.Subtitle.HLSRendition == nil || started.PlaybackPlan.Subtitle.HLSRendition.Index != 0 {
+		t.Fatalf("start plan = %#v, want the pipeline rendition", started.PlaybackPlan.Subtitle)
+	}
+	data, err := os.ReadFile(media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unread, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := handler.tm.GetTranscodeSession(started.SessionID)
+	off := switchOnDemandRenditionV3(t, handler, request, started.SessionID, started.PlaybackPlan, 0, nil, false)
+	if off.Stream.URL != started.PlaybackPlan.Stream.URL || off.Subtitle.Mode != playback.SubtitleOffV3 {
+		t.Fatalf("subtitles off: plan = %#v", off)
+	}
+	if after := handler.tm.GetTranscodeSession(started.SessionID); after != before || !after.IsRunning() {
+		t.Fatalf("turning the pipeline rendition off replaced the stream: before=%p after=%p", before, after)
+	}
+}
+
+// A card rebuilt from a stream token knows its on-demand renditions by
+// number. Moving the transport gets their names, languages and FORCED back
+// from the attempt's frozen recipe; a token for other tracks keeps numbers.
+func TestRehomeRestoresOnDemandRenditionNamesFromTheRecord(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	source := playback.SubtitleRenditionSource{Size: 4096, ModTimeUnixNano: 1_800_000_000_000_000_000}
+	frozen := []playback.SubtitleRenditionTrack{
+		{StreamIndex: 2, TrackNumber: 3, Name: "English", Language: "eng"},
+		{StreamIndex: 3, TrackNumber: 4, Name: "English (2)", Language: "eng", Forced: true, Default: true},
+	}
+	if err := handler.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: "attempt-rehome", SessionID: "session-rehome", ExpiresAt: time.Now().Add(time.Hour),
+		FrozenRecipe: playback.ExecutableRecipeV3{SubtitleRendition: true, SubtitleRenditionTracks: frozen, SubtitleRenditionSource: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := &playback.Session{ID: "session-rehome", UserID: 7}
+	tokenCard := func(tracks []playback.SubtitleRenditionTrack) *playback.RecipeCard {
+		opts := playback.TranscodeOpts{SessionID: session.ID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", SegmentDuration: 2,
+			SubtitleRendition: true, SubtitleTrackIndex: -1, SubtitleRenditionTracks: tracks, SubtitleRenditionSource: source}
+		claims := playback.NewRecipeCard(session.UserID, "profile", 42, "", opts).ToClaims()
+		card := playback.RecipeCardFromClaims(&claims)
+		return &card
+	}
+	card, stored := handler.rehomeRecipeCardV3(t.Context(), session, session.ID, tokenCard(frozen))
+	if card == nil || stored || !slices.Equal(card.SubtitleRenditionTracks, frozen) {
+		t.Fatalf("rehomed renditions = %+v", card)
+	}
+	other := []playback.SubtitleRenditionTrack{{TrackNumber: 3}, {TrackNumber: 5}}
+	card, _ = handler.rehomeRecipeCardV3(t.Context(), session, session.ID, tokenCard(other))
+	if card == nil || card.SubtitleRenditionTracks[0].Name != "" || card.SubtitleRenditionTracks[1].TrackNumber != 5 {
+		t.Fatalf("renditions of another plan = %+v", card)
+	}
 }

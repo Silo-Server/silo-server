@@ -47,7 +47,9 @@ func goldenHLSSubtitleRenditionsAllDecisionResponse() playback.DecisionResponseV
 	response := goldenDecisionForSourceWith(file, request, nil, func(input *playback.PlannerInputV3) {
 		input.SubtitleRenditionExecutable = func() bool { return true }
 		input.OnDemandSubtitleRenditionsExecutable = func() bool { return true }
-		input.CueIndexedSubtitleTracks = func() map[uint64]bool { return map[uint64]bool{4: true, 5: true} }
+		input.CueIndexedSubtitleTracks = func() *playback.CueIndexedSubtitles {
+			return &playback.CueIndexedSubtitles{Tracks: map[uint64]bool{4: true, 5: true}, Source: playback.SubtitleRenditionSource{Size: 1 << 30, ModTimeUnixNano: 1_800_000_000_000_000_000}}
+		}
 	})
 	if plan := response.PlaybackPlan; plan.Delivery != playback.DeliveryTranscodeHLSV3 || plan.Subtitle.HLSRendition == nil || plan.Subtitle.HLSRendition.Index != 2 {
 		failf("golden on-demand rendition plan is %s without the selected rendition", plan.Delivery)

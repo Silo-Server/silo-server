@@ -721,7 +721,8 @@ func proxyRemuxPlayMethodV3(method string) bool {
 func proxyTranscodePlayMethodV3(method string) bool {
 	switch method {
 	case "", string(playback.PlayTranscode), streamtoken.PlayMethodToneMapTranscode,
-		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode:
+		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode,
+		streamtoken.PlayMethodSubtitleRenditionsTranscode, streamtoken.PlayMethodSubtitleRenditionsCopyFMP4:
 		return true
 	default:
 		return false

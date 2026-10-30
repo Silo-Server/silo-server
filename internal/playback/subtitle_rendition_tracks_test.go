@@ -5,22 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // onDemandTestTracks are three on-demand renditions, the second selected.
 func onDemandTestTracks() []SubtitleRenditionTrack {
 	return []SubtitleRenditionTrack{
-		{StreamIndex: 2, TrackNumber: 3, Name: "English", Language: "en"},
+		{StreamIndex: 2, TrackNumber: 3, Name: "English", Language: "eng"},
 		{StreamIndex: 3, TrackNumber: 4, Name: "English (Forced)", Language: "en", Forced: true, Default: true},
 		{StreamIndex: 4, TrackNumber: 7, Name: "Track \"7\""},
 	}
@@ -189,19 +193,39 @@ func TestOnDemandSubtitleRenditionSpansNeedNoCueFile(t *testing.T) {
 
 func TestRecipeCardCarriesOnDemandSubtitleRenditions(t *testing.T) {
 	opts := subtitleRenditionTestOpts(t.TempDir())
-	opts.SubtitleRenditionTracks = onDemandTestTracks()
+	opts.SubtitleRenditionTracks, opts.SubtitleRenditionSource = onDemandTestTracks(), testRenditionSource
 	card := NewRecipeCard(1, "profile", 42, "", opts)
-	if got := card.TranscodeOpts(opts.OutputDir, "", nil).SubtitleRenditionTracks; !slices.Equal(got, opts.SubtitleRenditionTracks) {
-		t.Fatalf("card lost the tracks: %+v", got)
+	if got := card.TranscodeOpts(opts.OutputDir, "", nil); !slices.Equal(got.SubtitleRenditionTracks, opts.SubtitleRenditionTracks) ||
+		got.SubtitleRenditionSource != testRenditionSource {
+		t.Fatalf("card lost the renditions: %+v %+v", got.SubtitleRenditionTracks, got.SubtitleRenditionSource)
 	}
 	claims := card.ToClaims()
-	if !slices.Equal(claims.SubtitleRenditionTracks, []uint64{3, 4, 7}) || claims.SubtitleRenditionDefault != 4 {
-		t.Fatalf("token tracks = %v, default %d", claims.SubtitleRenditionTracks, claims.SubtitleRenditionDefault)
+	if !slices.Equal(claims.SubtitleRenditionTracks, []uint64{3, 4, 7}) || claims.SubtitleRenditionDefault != 4 ||
+		claims.SubtitleRenditionSourceSize != testRenditionSource.Size || claims.SubtitleRenditionSourceModTime != testRenditionSource.ModTimeUnixNano {
+		t.Fatalf("token renditions = %v, default %d, source %d/%d", claims.SubtitleRenditionTracks, claims.SubtitleRenditionDefault,
+			claims.SubtitleRenditionSourceSize, claims.SubtitleRenditionSourceModTime)
 	}
-	rebuilt := RecipeCardFromClaims(&claims).TranscodeOpts(opts.OutputDir, "", nil)
+	// Binaries that predate on-demand renditions refuse the token rather
+	// than rebuild the stream with one rendition.
+	if claims.PlayMethod != streamtoken.PlayMethodSubtitleRenditionsTranscode {
+		t.Fatalf("token method = %q", claims.PlayMethod)
+	}
+	fromClaims := RecipeCardFromClaims(&claims)
+	if fromClaims.PlayMethod != PlayTranscode || !fromClaims.IsTranscodeRecipe() {
+		t.Fatalf("method from the token = %q", fromClaims.PlayMethod)
+	}
+	rebuilt := fromClaims.TranscodeOpts(opts.OutputDir, "", nil)
 	want := []SubtitleRenditionTrack{{StreamIndex: -1, TrackNumber: 3}, {StreamIndex: -1, TrackNumber: 4, Default: true}, {StreamIndex: -1, TrackNumber: 7}}
-	if !slices.Equal(rebuilt.SubtitleRenditionTracks, want) || !subtitleRenditionsOnDemand(rebuilt) {
-		t.Fatalf("tracks from the token = %+v", rebuilt.SubtitleRenditionTracks)
+	if !slices.Equal(rebuilt.SubtitleRenditionTracks, want) || !subtitleRenditionsOnDemand(rebuilt) || rebuilt.SubtitleRenditionSource != testRenditionSource {
+		t.Fatalf("renditions from the token = %+v %+v", rebuilt.SubtitleRenditionTracks, rebuilt.SubtitleRenditionSource)
+	}
+	copyOpts := opts
+	copyOpts.TargetCodecVideo = "copy"
+	copyClaims := NewRecipeCard(1, "profile", 42, "", copyOpts).ToClaims()
+	copyCard := RecipeCardFromClaims(&copyClaims)
+	if copyClaims.PlayMethod != streamtoken.PlayMethodSubtitleRenditionsCopyFMP4 || copyCard.PlayMethod != playMethodCopyFMP4V1 ||
+		ValidateCopyFMP4RecipeCard(copyCard) != nil {
+		t.Fatalf("copy token method = %q, card method %q", copyClaims.PlayMethod, copyCard.PlayMethod)
 	}
 	// A session rebuilt from the token names its renditions by number.
 	master := string(subtitleRenditionMultivariantPlaylist(rebuilt, ""))
@@ -455,8 +479,10 @@ func TestCueIndexedSubtitleTracksFallsBackWithoutCues(t *testing.T) {
 	base, _ := onDemandRealSources(ctx, t, ffmpeg)
 	numbers := subtitleTrackNumbers(t, base)
 	readable, err := CueIndexedSubtitleTracks(ctx, base)
-	if err != nil || !readable[numbers[0]] || !readable[numbers[1]] {
-		t.Fatalf("cued file: %v, %v", readable, err)
+	info, statErr := os.Stat(base)
+	if err != nil || statErr != nil || !readable.Tracks[numbers[0]] || !readable.Tracks[numbers[1]] ||
+		readable.Source != (SubtitleRenditionSource{Size: info.Size(), ModTimeUnixNano: info.ModTime().UnixNano()}) {
+		t.Fatalf("cued file: %+v, %v", readable, err)
 	}
 
 	piped := filepath.Join(t.TempDir(), "piped.mkv")
@@ -472,7 +498,7 @@ func TestCueIndexedSubtitleTracksFallsBackWithoutCues(t *testing.T) {
 	}
 	_ = out.Close()
 	readable, err = CueIndexedSubtitleTracks(ctx, piped)
-	if err != nil || len(readable) != 0 {
+	if err != nil || len(readable.Tracks) != 0 {
 		t.Fatalf("file without cues: %v, %v", readable, err)
 	}
 
@@ -486,6 +512,21 @@ func TestCueIndexedSubtitleTracksFallsBackWithoutCues(t *testing.T) {
 	}}
 	if body, err := session.subtitleTrackSegmentVTT(ctx, numbers[0], 0); err != nil || strings.Contains(string(body), " --> ") || !strings.HasPrefix(string(body), "WEBVTT\n") {
 		t.Fatalf("segment without cues = %q, %v", body, err)
+	}
+}
+
+// testRenditionSource is the source version planner tests' indexes describe.
+var testRenditionSource = SubtitleRenditionSource{Size: 1 << 30, ModTimeUnixNano: 1_800_000_000_000_000_000}
+
+// indexedV3 answers PlannerInputV3.CueIndexedSubtitleTracks with tracks
+// readable in testRenditionSource.
+func indexedV3(tracks ...uint64) func() *CueIndexedSubtitles {
+	readable := map[uint64]bool{}
+	for _, track := range tracks {
+		readable[track] = true
+	}
+	return func() *CueIndexedSubtitles {
+		return &CueIndexedSubtitles{Tracks: readable, Source: testRenditionSource}
 	}
 }
 
@@ -509,7 +550,7 @@ func onDemandPlannerInputV3(t *testing.T) PlannerInputV3 {
 	input.Request.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", index)
 	input.Request.ClientFeatures = append(input.Request.ClientFeatures, FeatureHLSSubtitleRenditionsAllV3)
 	input.OnDemandSubtitleRenditionsExecutable = func() bool { return true }
-	input.CueIndexedSubtitleTracks = func() map[uint64]bool { return map[uint64]bool{3: true, 4: true, 5: true, 6: true} }
+	input.CueIndexedSubtitleTracks = indexedV3(3, 4, 5, 6)
 	return input
 }
 
@@ -524,8 +565,8 @@ func TestPlanPlaybackV3ListsEveryEmbeddedTextTrackAsARendition(t *testing.T) {
 		{StreamIndex: 3, TrackNumber: 4, Name: "English (2)", Language: "eng", Forced: true, Default: true},
 		{StreamIndex: 5, TrackNumber: 6, Name: "Signs", Language: "jpn"},
 	}
-	if !result.SubtitleRendition || !slices.Equal(result.SubtitleRenditionTracks, wantTracks) {
-		t.Fatalf("rendition tracks = %+v (rendition %v)", result.SubtitleRenditionTracks, result.SubtitleRendition)
+	if !result.SubtitleRendition || !slices.Equal(result.SubtitleRenditionTracks, wantTracks) || result.SubtitleRenditionSource != testRenditionSource {
+		t.Fatalf("rendition tracks = %+v from %+v (rendition %v)", result.SubtitleRenditionTracks, result.SubtitleRenditionSource, result.SubtitleRendition)
 	}
 	wantRows := map[int]*SubtitleInventoryHLSRenditionV3{
 		1: {GroupID: "subs", Name: "English", Index: 1},
@@ -544,8 +585,8 @@ func TestPlanPlaybackV3ListsEveryEmbeddedTextTrackAsARendition(t *testing.T) {
 		t.Fatalf("subtitle decision = %#v", subtitle)
 	}
 	recipe := FreezeExecutableRecipeV3(result)
-	if recipe.Version != executableRecipeVersionRenditionTracksV3 || !recipe.ValidFor(*result.Plan) ||
-		!slices.Equal(recipe.PlannerResult(result.Plan).SubtitleRenditionTracks, wantTracks) {
+	if restored := recipe.PlannerResult(result.Plan); recipe.Version != executableRecipeVersionRenditionTracksV3 || !recipe.ValidFor(*result.Plan) ||
+		!slices.Equal(restored.SubtitleRenditionTracks, wantTracks) || restored.SubtitleRenditionSource != testRenditionSource {
 		t.Fatalf("frozen recipe = %#v", recipe)
 	}
 	older := recipe
@@ -553,9 +594,17 @@ func TestPlanPlaybackV3ListsEveryEmbeddedTextTrackAsARendition(t *testing.T) {
 	if older.Valid() {
 		t.Fatal("a version 5 recipe must not carry on-demand renditions")
 	}
+}
 
-	// Subtitles off keeps the same renditions, none of them the default, on
-	// a plan of its own.
+// Subtitles off keeps the same renditions, none of them the default, on a
+// plan of its own, and a failed on-demand plan falls back to the selected
+// track's pipeline rendition.
+func TestPlanPlaybackV3OnDemandRenditionsWhenOffAndAfterAFailure(t *testing.T) {
+	input := onDemandPlannerInputV3(t)
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || len(result.SubtitleRenditionTracks) != 3 {
+		t.Fatalf("want on-demand renditions, got %s", ExplainPlannerResultV3(result))
+	}
 	off := onDemandPlannerInputV3(t)
 	off.Request.SubtitleTrackIndex, off.Request.SubtitleTrackID = nil, ""
 	offResult := PlanPlaybackV3(off)
@@ -568,8 +617,6 @@ func TestPlanPlaybackV3ListsEveryEmbeddedTextTrackAsARendition(t *testing.T) {
 		t.Fatal("subtitles off must be a plan of its own")
 	}
 
-	// A failed on-demand plan falls back to the selected track's pipeline
-	// rendition.
 	retry := input
 	retry.AttemptedKeys = []string{result.Plan.PlanAttemptKey}
 	fallback := PlanPlaybackV3(retry)
@@ -597,10 +644,10 @@ func TestPlanPlaybackV3KeepsThePipelineRenditionWithoutOnDemandRenditions(t *tes
 			in.OnDemandSubtitleRenditionsExecutable = func() bool { return false }
 		}, false},
 		{"index unreadable", func(in *PlannerInputV3) {
-			in.CueIndexedSubtitleTracks = func() map[uint64]bool { return nil }
+			in.CueIndexedSubtitleTracks = func() *CueIndexedSubtitles { return nil }
 		}, false},
 		{"selected track without cues", func(in *PlannerInputV3) {
-			in.CueIndexedSubtitleTracks = func() map[uint64]bool { return map[uint64]bool{3: true, 6: true} }
+			in.CueIndexedSubtitleTracks = indexedV3(3, 6)
 		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -632,7 +679,7 @@ func TestPlanPlaybackV3ListsRemuxRenditionsOnDemand(t *testing.T) {
 	input.Request.ClientFeatures = append(input.Request.ClientFeatures, FeatureHLSSubtitleRenditionsAllV3)
 	input.OnDemandSubtitleRenditionsExecutable = func() bool { return true }
 	input.RemuxOnDemandSubtitleRenditionsExecutable = func() bool { return true }
-	input.CueIndexedSubtitleTracks = func() map[uint64]bool { return map[uint64]bool{4: true, 5: true} }
+	input.CueIndexedSubtitleTracks = indexedV3(4, 5)
 	result := PlanPlaybackV3(input)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || len(result.SubtitleRenditionTracks) != 2 ||
 		result.Plan.Subtitle.HLSRendition == nil || result.Plan.Subtitle.HLSRendition.Index != 1 {
@@ -658,5 +705,104 @@ func TestPlanPlaybackV3ListsRemuxRenditionsOnDemand(t *testing.T) {
 		if got := PlanPlaybackV3(other); got.Plan == nil || got.SubtitleRenditionTracks != nil {
 			t.Fatalf("remux without on-demand renditions = %s", ExplainPlannerResultV3(got))
 		}
+	}
+}
+
+// A malformed file that repeats a container track number lists the number
+// once, under its first track, so the recipe stays valid.
+func TestPlanPlaybackV3ListsARepeatedTrackNumberOnce(t *testing.T) {
+	input := onDemandPlannerInputV3(t)
+	input.EffectiveFile.SubtitleTracks[3].ContainerTrackID = "3"
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || len(result.SubtitleRenditionTracks) != 2 || result.SubtitleRenditionTracks[0].StreamIndex != 2 ||
+		result.SubtitleRenditionTracks[1].StreamIndex != 3 ||
+		!FreezeExecutableRecipeV3(result).ValidFor(*result.Plan) {
+		t.Fatalf("renditions = %+v", result.SubtitleRenditionTracks)
+	}
+}
+
+func TestTicks90kDurationDoesNotOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		ticks int64
+		want  time.Duration
+	}{
+		{90_000, time.Second},
+		{-45_000, -500 * time.Millisecond},
+		// 30 hours, past where ticks * time.Second overflows.
+		{30 * 3600 * 90_000, 30 * time.Hour},
+		{math.MaxInt64, time.Duration(math.MaxInt64)},
+		{math.MinInt64, time.Duration(math.MinInt64)},
+	} {
+		if got := ticks90kDuration(tc.ticks); got != tc.want {
+			t.Errorf("ticks90kDuration(%d) = %v, want %v", tc.ticks, got, tc.want)
+		}
+	}
+}
+
+// Like its video segment, a planned copy's segment that no generation
+// reaches in the wait answers 404, which the player retries, not an empty
+// document it would keep.
+func TestPlannedCopyOnDemandSegmentNoGenerationReachesIsNotFound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		opts := copyRemuxRenditionOpts(t.TempDir(), false)
+		opts.SubtitleTrackIndex, opts.SubtitleRenditionTracks = -1, onDemandTestTracks()
+		opts.StartSegmentNumber, opts.subtitleCueFile = 3, subtitleCueFileName(0)
+		session := &TranscodeSession{outputDir: opts.OutputDir, opts: opts, copyPlan: &copySegmentPlan{durations: []float64{2, 2, 2, 2, 2, 2}}, running: true}
+		session.startSubtitleSpanLocked(opts)
+		started := time.Now()
+		if body, err := session.subtitleTrackSegmentVTT(t.Context(), 3, 1); !errors.Is(err, ErrSegmentNotFound) || body != nil ||
+			time.Since(started) < subtitleSegmentProductionWait {
+			t.Fatalf("segment before the generation = %q, %v after %v", body, err, time.Since(started))
+		}
+	})
+}
+
+// A read that fails for want of time or resources answers 404 for the player
+// to retry. A track or file the read can never give, here a source replaced
+// since the plan read it, answers an empty segment so the player plays on.
+func TestOnDemandSegmentFailures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	base, _ := onDemandRealSources(ctx, t, ffmpeg)
+	numbers := subtitleTrackNumbers(t, base)
+	info, err := os.Stat(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := func(ffmpegPath string, source SubtitleRenditionSource) *TranscodeSession {
+		opts := TranscodeOpts{
+			InputPath: base, OutputDir: t.TempDir(), FFmpegPath: ffmpegPath, TargetCodecVideo: transcodeCodecH264,
+			SegmentDuration: 2, TotalDuration: 30, SubtitleRendition: true, SubtitleTrackIndex: -1,
+			SubtitleRenditionTracks: []SubtitleRenditionTrack{{TrackNumber: numbers[0], Name: "A"}}, SubtitleRenditionSource: source,
+		}
+		return &TranscodeSession{outputDir: opts.OutputDir, opts: opts, subtitleSpans: []subtitleCueSpan{
+			{file: subtitleCueFileName(0), start: 0, end: 14, originKnown: true},
+		}}
+	}
+	planned := SubtitleRenditionSource{Size: info.Size(), ModTimeUnixNano: info.ModTime().UnixNano()}
+
+	// Segment 0 holds "Early A"; the converter can't run.
+	rr := httptest.NewRecorder()
+	session(filepath.Join(t.TempDir(), "missing-ffmpeg"), planned).ServeSubtitleSegment(rr,
+		httptest.NewRequest(http.MethodGet, "/segment/sub_0.vtt", nil), fmt.Sprintf("sub_%d_00000.vtt", numbers[0]))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("failed conversion = %d %q, want 404", rr.Code, rr.Body.String())
+	}
+
+	replaced := planned
+	replaced.ModTimeUnixNano++
+	body, err := session(ffmpeg, replaced).subtitleTrackSegmentVTT(ctx, numbers[0], 0)
+	if err != nil || strings.Contains(string(body), " --> ") || !strings.HasPrefix(string(body), "WEBVTT\n") {
+		t.Fatalf("segment of a replaced source = %q, %v", body, err)
+	}
+	if body, err := session(ffmpeg, planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0); err != nil || !strings.Contains(string(body), "Early A") {
+		t.Fatalf("segment of the planned source = %q, %v", body, err)
 	}
 }

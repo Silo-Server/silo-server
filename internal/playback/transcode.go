@@ -150,6 +150,9 @@ type TranscodeOpts struct {
 	// source's index instead of by this ffmpeg process; SubtitleTrackIndex then
 	// only names the selected one. See subtitle_rendition_tracks.go.
 	SubtitleRenditionTracks []SubtitleRenditionTrack
+	// SubtitleRenditionSource is the source version the on-demand renditions
+	// were planned from; segments are read from that version only.
+	SubtitleRenditionSource SubtitleRenditionSource
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
 	subtitleCueFile string

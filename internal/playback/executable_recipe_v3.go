@@ -68,6 +68,9 @@ type ExecutableRecipeV3 struct {
 	// version 6 so a binary that predates it rejects the recipe instead of
 	// reopening the transport with the selected track alone.
 	SubtitleRenditionTracks []SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+	// SubtitleRenditionSource is the source version the tracks were chosen
+	// from, which their segments are read from (version 6).
+	SubtitleRenditionSource SubtitleRenditionSource `json:"subtitle_rendition_source,omitzero"`
 	// CopyVideoMPEGTS mirrors the plan's MPEG-TS segment container. It needs
 	// version 5 so a binary that predates it rejects the recipe instead of
 	// reopening the transport as fMP4.
@@ -130,6 +133,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		DownloadedSubtitleID:          result.DownloadedSubtitleID,
 		SubtitleRendition:             result.SubtitleRendition,
 		SubtitleRenditionTracks:       slices.Clone(result.SubtitleRenditionTracks),
+		SubtitleRenditionSource:       result.SubtitleRenditionSource,
 		CopyVideoMPEGTS:               copyVideoMPEGTS,
 	}
 	if recipe.hasVersion2Fields() {
@@ -176,7 +180,7 @@ func (r ExecutableRecipeV3) hasVersion5Fields() bool {
 }
 
 func (r ExecutableRecipeV3) hasVersion6Fields() bool {
-	return len(r.SubtitleRenditionTracks) > 0
+	return len(r.SubtitleRenditionTracks) > 0 || !r.SubtitleRenditionSource.IsZero()
 }
 
 // Valid reports whether an executable recipe is complete and internally consistent.
@@ -263,6 +267,7 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		SubtitleCodec:               r.SubtitleCodec,
 		SubtitleRendition:           r.SubtitleRendition,
 		SubtitleRenditionTracks:     slices.Clone(r.SubtitleRenditionTracks),
+		SubtitleRenditionSource:     r.SubtitleRenditionSource,
 		DownloadedSubtitleID:        r.DownloadedSubtitleID,
 	}
 }

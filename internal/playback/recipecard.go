@@ -145,6 +145,7 @@ type RecipeCard struct {
 	// (TranscodeOpts.SubtitleRenditionTracks). A stream token carries only
 	// their track numbers and the default (ToClaims).
 	SubtitleRenditionTracks []SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+	SubtitleRenditionSource SubtitleRenditionSource  `json:"subtitle_rendition_source,omitzero"`
 
 	// HLSVariableSubstitution mirrors TranscodeOpts.HLSVariableSubstitution so
 	// a reconstructed session, and the API relaying a node's playlist, keep
@@ -280,6 +281,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SubtitleCodec:              opts.SubtitleCodec,
 		SubtitleRendition:          opts.SubtitleRendition,
 		SubtitleRenditionTracks:    slices.Clone(opts.SubtitleRenditionTracks),
+		SubtitleRenditionSource:    opts.SubtitleRenditionSource,
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
@@ -388,6 +390,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SubtitleCodec:              c.SubtitleCodec,
 		SubtitleRendition:          c.SubtitleRendition,
 		SubtitleRenditionTracks:    slices.Clone(c.SubtitleRenditionTracks),
+		SubtitleRenditionSource:    c.SubtitleRenditionSource,
 		AudioTrackIndex:            c.AudioTrackIndex,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
@@ -434,7 +437,19 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		// output without the required recipe.
 		playMethod = streamtoken.PlayMethodToneMapTranscode
 	}
-	return streamtoken.Claims{
+	if len(c.SubtitleRenditionTracks) > 0 {
+		// Nor do they understand on-demand renditions, and would rebuild the
+		// stream with one rendition for every silo_track. The downmix and
+		// tone-map facts travel in their own claims, which every binary that
+		// knows this method reads.
+		switch c.PlayMethod {
+		case PlayTranscode:
+			playMethod = streamtoken.PlayMethodSubtitleRenditionsTranscode
+		case playMethodCopyFMP4V1:
+			playMethod = streamtoken.PlayMethodSubtitleRenditionsCopyFMP4
+		}
+	}
+	claims := streamtoken.Claims{
 		SessionID:                     c.SessionID,
 		MediaPath:                     c.InputPath,
 		OutputSubdir:                  c.OutputSubdir,
@@ -507,6 +522,9 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TargetAudioBitrateKbps:     c.TargetAudioBitrateKbps,
 		HLSVariableSubstitution:    c.HLSVariableSubstitution,
 	}
+	claims.SubtitleRenditionSourceSize = c.SubtitleRenditionSource.Size
+	claims.SubtitleRenditionSourceModTime = c.SubtitleRenditionSource.ModTimeUnixNano
+	return claims
 }
 
 // subtitleRenditionTrackNumbers keeps on-demand renditions in a stream token
@@ -563,8 +581,10 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		method = PlayTranscode
 	case streamtoken.PlayMethodAudioDownmixRemux:
 		method = PlayRemux
-	case streamtoken.PlayMethodCopyFMP4Transcode:
+	case streamtoken.PlayMethodCopyFMP4Transcode, streamtoken.PlayMethodSubtitleRenditionsCopyFMP4:
 		method = playMethodCopyFMP4V1
+	case streamtoken.PlayMethodSubtitleRenditionsTranscode:
+		method = PlayTranscode
 	}
 	if method == "" {
 		method = PlayTranscode
@@ -634,6 +654,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		SubtitleCodec:                 c.SubtitleCodec,
 		SubtitleRendition:             c.SubtitleRendition,
 		SubtitleRenditionTracks:       subtitleRenditionTracksFromClaims(c.SubtitleRenditionTracks, c.SubtitleRenditionDefault),
+		SubtitleRenditionSource:       SubtitleRenditionSource{Size: c.SubtitleRenditionSourceSize, ModTimeUnixNano: c.SubtitleRenditionSourceModTime},
 		AudioTrackIndex:               c.AudioTrackIndex,
 		TargetBitrateKbps:             c.TargetBitrateKbps,
 		TotalDuration:                 c.TotalDuration,

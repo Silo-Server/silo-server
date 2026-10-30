@@ -96,6 +96,9 @@ type TranscodeStartRequest struct {
 	// on-demand rendition. Only nodes advertising
 	// playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1 receive it.
 	SubtitleRenditionTracks []playback.SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+	// SubtitleRenditionSource is the source version the tracks were planned
+	// from; segments are read from it only.
+	SubtitleRenditionSource playback.SubtitleRenditionSource `json:"subtitle_rendition_source,omitzero"`
 	// AutoFallbackReady asks the node to wait for the first manifest only when
 	// its own hw_accel=auto fallback is enabled for this start, so an early
 	// hardware failure can move to a safer path. The node decides from its
@@ -1825,7 +1828,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ExecutionMode:      "transcode_node",
 		FFmpegLogSink:      s.ffmpegSink,
 	}
-	opts.SubtitleRenditionTracks = req.SubtitleRenditionTracks
+	opts.SubtitleRenditionTracks, opts.SubtitleRenditionSource = req.SubtitleRenditionTracks, req.SubtitleRenditionSource
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel

@@ -1814,28 +1814,41 @@ could carry whose `container_track_id` is known and whose packets the
 source's own index finds: every Matroska track with Cues that the muxer's
 `NUMBER_OF_FRAMES` tag confirms or that has no such tag, and every MP4 text
 track (see [the index reader](embedded-subtitle-index.md)). The server reads
-the index when the attempt starts, for at most 3 s; a replan that stays on
-the playing file lists the tracks its stream already serves without reading
-it again. A file whose index can't be read, or whose selected text track it
-can't find, keeps the single rendition (and its fallback to the sidecar); a
-failed plan with on-demand renditions falls back the same way. Tracks that
-aren't listed keep their sidecar.
+the index when the attempt starts; every planning pass of one start or
+replan, alternate versions included, shares one 3 s bound and reads each
+file once. A replan that stays on the playing HLS stream's file lists the
+tracks the stream already serves, none for a stream serving none, without
+reading the index again, except that one selecting an embedded text track on
+a stream without on-demand renditions, which restarts anyway, reads it. A
+file whose index can't be read, or whose selected text track it can't find,
+keeps the single rendition (and its fallback to the sidecar); a failed plan
+with on-demand renditions falls back the same way. Tracks that aren't listed
+keep their sidecar. The plan records the file version (size and modification
+time) whose index it read; segments are read from that version only, so a
+file replaced while it plays answers empty segments rather than another
+file's cues.
 
 The multivariant playlist lists the tracks in inventory order in one group,
 `DEFAULT=YES` only on the selected one (none when subtitles are off or come
 from a sidecar):
 
 ```
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="eng",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="master.m3u8?silo_rendition=subtitles&silo_track=3&..."
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English (2)",LANGUAGE="eng",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,URI="master.m3u8?silo_rendition=subtitles&silo_track=4&..."
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="master.m3u8?silo_rendition=subtitles&silo_track=3&..."
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English (2)",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,URI="master.m3u8?silo_rendition=subtitles&silo_track=4&..."
 #EXT-X-STREAM-INF:BANDWIDTH=8192000,SUBTITLES="subs"
 master.m3u8?silo_rendition=video&...
 ```
 
 `NAME` is the inventory row's `label` (its language, or `Subtitles`, when it
 has none), with `"` replaced by `'`, control characters dropped and ` (2)`,
-` (3)`... added to repeats; `LANGUAGE` is the row's language unless it is
-empty or `und`. Each listed inventory row carries `hls_rendition: {"group_id":
+` (3)`... added to repeats; `LANGUAGE` is the row's language as a canonical
+BCP 47 tag (`eng` becomes `en`), left out when it is empty, `und` or not a
+language tag. With subtitles off every rendition is `DEFAULT=NO` but still
+`AUTOSELECT=YES`, so a player that follows the system's caption or language
+preferences may turn one on by itself: a client playing with subtitles off
+must disable subtitle selection in its player explicitly (AVPlayer: select
+no option in the legible group; Media3: disable the text track type; Roku:
+turn captions off). Each listed inventory row carries `hls_rendition: {"group_id":
 "subs", "name": "English (2)", "index": 2}`, `index` being its 1-based place
 in the group: Roku names the rendition `webvtt/<index>`, Media3 matches
 `group_id` and `name`, AVPlayer reads the same names from its media-selection
@@ -1857,27 +1870,40 @@ segment exactly as above: the same window, generation origins, spans and
 rendition's. A segment ahead of the stream's FFmpeg is answered at once with
 its cues; a segment waits only for its generation's origin, which the
 generation's first video segment shows, or, when no generation covers it, for
-the seek restart its video request starts, then answers empty as above. A copy
-remux on FFmpeg's own playlist can list, and so serve, only what FFmpeg has
-produced. The stream's FFmpeg writes no cues; a copy generation still records
-its first video packet for the mux shift. Indexes, start times and converted
-windows are kept per process and shared by every session on a file version,
-and at most eight conversions run at once. A track whose packets can't be read
-answers empty segments. A window finds a cue that started before it only
+the seek restart its video request starts, then answers empty as above, or,
+for a keyframe-planned copy, `404`, as its video segment does. A copy remux on
+FFmpeg's own playlist can list, and so serve, only what FFmpeg has produced.
+The stream's FFmpeg writes no cues; a copy generation still records its first
+video packet for the mux shift. Indexes, start times and converted windows
+are kept per process and shared by every session on a file version; at most
+eight windows are read and converted at once, and a read gets 30 s. A read
+that fails or runs out of time answers `404`, which the player retries, never
+an empty segment it would keep; a track the file can't give (no Cues, a
+replaced or missing file, a codec the reader can't decode) answers empty
+segments, so the player plays on. A window finds a cue that started before it only
 within the index reader's lookback (see its Windows section), so a cue without
 `CueDuration` that shows for minutes can be missing from later segments.
 
 Switching is the player's own media selection, reported with a `track_change`
-replan or a `failure_recovery` classified `subtitle_track_changed`. When the
-new plan lists the same renditions, the server keeps the running stream, its
-URL and its generation; the plan changes only its `subtitle` decision, and
-the recipe it records only which track is the default. The multivariant
-playlist keeps the `DEFAULT` it was started with, so a client that loads it
-again selects the plan's rendition itself. A plan with another set, or one
-that moves to or from the single rendition, starts a new generation. The
-feature is attempt-sticky. A stream token carries only the tracks' numbers and
-the default, so a session a node rebuilds from one names its renditions
-`Track <n>`; recipe cards keep the whole list.
+replan or a `failure_recovery` classified `subtitle_track_changed`. On a
+stream serving on-demand renditions the server takes that recovery as a
+`track_change`: it stays on the file playing, selects the track named, and
+turns subtitles off when none is named. When the new plan lists the same
+renditions, the server keeps the running stream, its URL and its generation;
+the plan changes only its `subtitle` decision, and the recipe it records only
+which track is the default. The multivariant playlist keeps the `DEFAULT` it
+was started with, so a client that loads it again selects the plan's
+rendition itself. A plan with another set, or one that moves to the single
+rendition, starts a new generation. The feature is attempt-sticky.
+
+A stream token carries only the tracks' numbers, the default and the source
+version, under the `transcode_subtitle_renditions_v1` or
+`transcode_copy_fmp4_subtitle_renditions_v1` method, which binaries that
+predate on-demand renditions refuse instead of rebuilding the stream with one
+rendition. When this server rebuilds or moves a transport from a token, it
+takes the renditions' names, languages and `FORCED` from the attempt's frozen
+recipe if that lists the same tracks; a node that rebuilds a session from a
+token alone names them `Track <n>`. Recipe cards keep the whole list.
 
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`

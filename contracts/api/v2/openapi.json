@@ -233583,6 +233583,24 @@
         ],
         "type": "object"
       },
+      "playback_SubtitleRenditionSource": {
+        "additionalProperties": false,
+        "properties": {
+          "mtime_ns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size",
+          "mtime_ns"
+        ],
+        "type": "object"
+      },
       "playback_SubtitleRenditionTrack": {
         "additionalProperties": false,
         "properties": {
@@ -233889,6 +233907,9 @@
           },
           "subtitle_rendition": {
             "type": "boolean"
+          },
+          "subtitle_rendition_source": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_SubtitleRenditionSource"
           },
           "subtitle_rendition_tracks": {
             "items": {
