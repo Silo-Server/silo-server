@@ -138,6 +138,7 @@ func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 		{"", []string{"Title G", "Title F", "Title D", "Title B", "Title A"}},
 		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=0&Limit=3", []string{"Title A", "Title B", "Title D"}},
 		{"&SortBy=SortName&SortOrder=Ascending&StartIndex=3&Limit=3", []string{"Title F", "Title G"}},
+		{"&SortBy=SortName&SortOrder=Ascending&Limit=0", []string{}},
 	} {
 		names, total := page(tc.query)
 		if !slices.Equal(names, tc.want) || total != 5 {
