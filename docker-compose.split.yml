@@ -73,6 +73,15 @@ services:
     # 10s after asking it to stop, which would cut that short. A single server
     # with no load balancer in front can set SILO_SHUTDOWN_DELAY=0.
     stop_grace_period: 2m
+    # NET_ADMIN lets Silo use kernel BBR congestion control on its client
+    # connections and force a larger TCP send buffer for remote clients on
+    # long, fast links. A small startup helper holds it until the listeners are
+    # configured, then exits; Silo and its child processes never keep it.
+    # NET_ADMIN can change this container's interfaces, routes and firewall
+    # rules; see docs/architecture/tcp-congestion.md. Undo: remove this line.
+    # SILO_NET_TCP_CONGESTION=off and SILO_NET_TCP_SEND_BUFFER=off in .env turn
+    # each part off.
+    cap_add: [NET_ADMIN]
     environment:
       MODE: integrated
       # Keep the container listeners fixed. PORT, JF_PORT and ABS_PORT in .env
