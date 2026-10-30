@@ -72,6 +72,7 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "player.subtitle_sync_ms": "subtitles",
   "player.sleep_timer_default_minutes": "episodes",
   "ui.title_art": "appearance",
+  "hero.trailers_enabled": "appearance",
 };
 
 /**
