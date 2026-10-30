@@ -205,6 +205,32 @@ var resolverPlayMethodCases = []struct {
 		},
 		want: playback.PlayTranscode,
 	},
+	{
+		// Playback lets an exact 4K30 decoder copy 1080p50, but a download
+		// plays offline with no replan to recover, so its rate stays absolute.
+		name: "a download keeps an exact decoder's frame rate absolute",
+		file: &models.MediaFile{
+			CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
+			Resolution: "1080p", Bitrate: 3_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080,
+				FrameRate: "50/1", Bitrate: 3_000, BitDepth: 8,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidenceExactV3,
+			CodecsVideo:   []string{"h264"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			MaxResolution: "2160p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8},
+				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30, MaxBitrateKbps: 300_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayTranscode,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {

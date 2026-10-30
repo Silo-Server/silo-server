@@ -120,7 +120,17 @@ const h264BaselineProfileV3 = "baseline"
 // result reports that the route was blocked by insufficient evidence for the
 // tier — the client claims the codec in its flat lists but the tier's
 // validation could not confirm the stream — rather than by device facts.
+// An exact decoder's frame rate may trade against its size (see
+// decoderTakesFrameV3): a failed copy is never offered again, so playback
+// recovers from an optimistic admission.
 func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, bool) {
+	return videoEligibleRateV3(source, request, true)
+}
+
+// videoEligibleRateV3 is videoEligibleV3 with the frame-rate trade optional:
+// tradeRate false keeps every reported rate absolute, for a download that
+// plays offline with no replan to fall back on.
+func videoEligibleRateV3(source SourceDescriptorV3, request StartRequestV3, tradeRate bool) (bool, bool) {
 	if !routeVideoMetadataCompleteV3(source) {
 		return false, false
 	}
@@ -142,7 +152,7 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 				continue
 			}
 			named = true
-			if videoDecodeTakesSourceV3(capability, source, false) {
+			if videoDecodeTakesSourceV3(capability, source, false, false) {
 				return true, false
 			}
 		}
@@ -157,7 +167,10 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 			}
 			matchedCodec = true
 			skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3 && capability.Hardware
-			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel) {
+			// Only an exact entry reports a rate measured at its largest size;
+			// a platform-attested entry is a fixed, tested envelope.
+			rateAtMaxSize := tradeRate && request.Capabilities.VideoEvidence == EvidenceExactV3
+			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel, rateAtMaxSize) {
 				return true, false
 			}
 		}
@@ -171,8 +184,10 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 }
 
 // videoDecodeTakesSourceV3 reports whether one decode entry's bounds admit
-// the source. An omitted bound is unconstrained.
-func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel bool) bool {
+// the source. An omitted bound is unconstrained. rateAtMaxSize lets the
+// source trade frame rate against size as decoderTakesFrameV3 describes;
+// otherwise the entry's rate is absolute.
+func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceDescriptorV3, skipProfileLevel, rateAtMaxSize bool) bool {
 	if !skipProfileLevel {
 		if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
 			return false
@@ -184,7 +199,37 @@ func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceD
 	if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
 		return false
 	}
-	return !(capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps)
+	return decoderTakesFrameV3(capability, source.Width, source.Height, source.FrameRate, rateAtMaxSize) &&
+		(capability.MaxBitrateKbps <= 0 || source.BitrateKbps <= capability.MaxBitrateKbps)
+}
+
+// decoderTakesFrameRateV3 reports whether a decoder takes a frame rate at its
+// largest size; an unknown rate or limit always passes.
+func decoderTakesFrameRateV3(decoder VideoDecodeCapabilityV3, frameRate float64) bool {
+	return decoder.MaxFrameRate <= 0 || frameRate <= decoder.MaxFrameRate+0.01
+}
+
+// decoderTakesFrameV3 reports whether a decoder takes width x height video at
+// frameRate. The maximum width and height always bind. With rateAtMaxSize the
+// reported rate holds at the decoder's largest size (Android derives it
+// there), so a smaller frame may run faster within the same macroblock rate,
+// counted in 16x16 macroblocks as Android's performance points are: a 4K30
+// decoder takes 1080p60 but not 1080p120, and a 1080p30 one takes 720p60 but
+// not 1080p60. Otherwise, or without both sizes, the rate is absolute.
+func decoderTakesFrameV3(decoder VideoDecodeCapabilityV3, width, height int, frameRate float64, rateAtMaxSize bool) bool {
+	if (decoder.MaxWidth > 0 && width > decoder.MaxWidth) || (decoder.MaxHeight > 0 && height > decoder.MaxHeight) {
+		return false
+	}
+	if decoderTakesFrameRateV3(decoder, frameRate) {
+		return true
+	}
+	return rateAtMaxSize && decoder.MaxWidth > 0 && decoder.MaxHeight > 0 && width > 0 && height > 0 &&
+		float64(macroblocksV3(width, height))*frameRate <= float64(macroblocksV3(decoder.MaxWidth, decoder.MaxHeight))*(decoder.MaxFrameRate+0.01)
+}
+
+// macroblocksV3 counts the 16x16 macroblocks that cover a frame.
+func macroblocksV3(width, height int) int {
+	return ((width + 15) / 16) * ((height + 15) / 16)
 }
 
 // videoProfileSupportedV3 compares a source profile with the profiles an exact
