@@ -12,6 +12,7 @@ import type { HomeSectionItemsResponse } from "@/api/types";
 import { completeHomeRow } from "@/hooks/queries/homeRowLimit";
 import { sectionKeys } from "@/hooks/queries/keys";
 import { removeItemFromHomeSectionCaches } from "@/hooks/queries/mediaSurfaceRefresh";
+import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -201,6 +202,36 @@ describe("Home duplicate filtering", () => {
     await renderHome(queryClient);
 
     await waitForRenderedFirstItems({ "for-you": "X", "top-picks": "Shared" });
+  });
+
+  it("keeps a completed row's later cards after other rows' first cards when it loses a first card", async () => {
+    avoidDuplicatesFor("recommended_for_you", "taste_match");
+    const layout = [
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+      { ...homeLayout("top-picks"), section_type: "taste_match" },
+    ];
+    showLayout(layout);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(sectionKeys.homeItems("for-you"), {
+      ...sectionWith(layout[0]!, ["Dismissed", "Shared"]),
+      shown: 1,
+    });
+    queryClient.setQueryData(
+      sectionKeys.homeItems("top-picks"),
+      sectionWith(layout[1]!, ["Shared"]),
+    );
+
+    await renderHome(queryClient);
+    await waitForRenderedFirstItems({ "for-you": "Dismissed", "top-picks": "Shared" });
+
+    // Not interested on For You's only shown card leaves it nothing to show;
+    // Shared stays a later card and Top Picks keeps it.
+    await act(async () => {
+      removeItemFromHomeSectionCaches(queryClient, "Dismissed");
+      bumpHomeRefreshSignal(queryClient);
+    });
+
+    await waitForRenderedFirstItems({ "top-picks": "Shared" });
   });
 
   async function renderHome(queryClient: QueryClient) {

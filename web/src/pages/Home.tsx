@@ -567,15 +567,17 @@ function cachedShownCounts(
   return new Map(rows.sort((a, b) => a.at - b.at).map((row) => [row.id, row.shown]));
 }
 
-// counts with an entry for sectionId added at the end, or removed when shown
-// is undefined. An entry it already has keeps its count and place.
+// counts with sectionId's entry set to shown, or removed when shown is
+// undefined. A new entry goes at the end; one it already has keeps its place,
+// so a cache edit that removes shown cards moves the count without
+// reordering the rows.
 function withShownCount(
   counts: ReadonlyMap<string, number>,
   sectionId: string,
   shown: number | undefined,
 ): ReadonlyMap<string, number> {
   if (shown !== undefined) {
-    return counts.has(sectionId) ? counts : new Map(counts).set(sectionId, shown);
+    return counts.get(sectionId) === shown ? counts : new Map(counts).set(sectionId, shown);
   }
   if (!counts.has(sectionId)) return counts;
   const next = new Map(counts);
