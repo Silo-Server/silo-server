@@ -51,8 +51,6 @@ interface MediaCarouselProps {
   viewAllHref?: string;
   /** Replaces "Explore all" on the view-all link or button. */
   viewAllLabel?: string;
-  /** Shown under the title, such as a count or progress line. */
-  subtitle?: ReactNode;
   /**
    * The slide to show, such as the item the page is about. The carousel jumps
    * to it again whenever it changes, as when the page moves to another item.
@@ -219,7 +217,6 @@ export default function MediaCarousel({
   onViewAll,
   viewAllHref,
   viewAllLabel = "Explore all",
-  subtitle,
   startSlide,
   headerActions,
   edgePadding = true,
@@ -281,24 +278,21 @@ export default function MediaCarousel({
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex min-w-0 items-center gap-2">
-          <div className="min-w-0">
-            {titleHref ? (
-              <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-                <h2 className={titleClass}>
-                  {title}
-                  {/* "Explore all" already names the destination. */}
-                  {viewAllHref || onViewAll ? null : (
-                    <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
-                      View
-                    </span>
-                  )}
-                </h2>
-              </Link>
-            ) : (
-              <h2 className={titleClass}>{title}</h2>
-            )}
-            {subtitle ? <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p> : null}
-          </div>
+          {titleHref ? (
+            <Link to={titleHref} className="group/title hover:text-primary transition-colors">
+              <h2 className={titleClass}>
+                {title}
+                {/* "Explore all" already names the destination. */}
+                {viewAllHref || onViewAll ? null : (
+                  <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
+                    View
+                  </span>
+                )}
+              </h2>
+            </Link>
+          ) : (
+            <h2 className={titleClass}>{title}</h2>
+          )}
           {headerActions}
         </div>
         {viewAllHref ? (

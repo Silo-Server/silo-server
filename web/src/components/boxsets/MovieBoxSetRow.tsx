@@ -25,8 +25,6 @@ export default function MovieBoxSetRow({
 
   const boxSetLibraryId = Number(boxSet.library_id) || undefined;
   const current = boxSet.items.findIndex((item) => item.content_id === contentId);
-  const watched =
-    boxSet.played_count > 0 ? ` · ${boxSet.played_count} of ${boxSet.movie_count} watched` : "";
 
   return (
     <MediaCarousel
@@ -35,7 +33,6 @@ export default function MovieBoxSetRow({
       viewAllHref={buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id })}
       viewAllLabel="View box set"
       startSlide={current >= 0 ? current : undefined}
-      subtitle={`Box set${watched}`}
     >
       {boxSet.items.map((item) => {
         const isCurrent = item.content_id === contentId;
