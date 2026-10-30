@@ -5,9 +5,15 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
+
+// indexLoadTimeout bounds a shared index read. A read that hangs, as on a
+// stalled network mount, then fails the callers waiting on it, and the next
+// caller starts another, instead of every later caller waiting on it.
+var indexLoadTimeout = 30 * time.Second
 
 // Cache keeps recently read indexes in memory, keyed by path, size and
 // modification time, so a file that changes gets a fresh index. It holds
@@ -88,21 +94,40 @@ func (c *Cache) Index(ctx context.Context, path string) (*Index, error) {
 }
 
 // load reads the index for key and publishes it to the callers waiting on
-// load. A panic fails them rather than leaving them waiting.
+// load, within indexLoadTimeout. A panic fails them rather than leaving them
+// waiting. A read still blocked at the deadline is left to finish on its own
+// and its result dropped.
 func (c *Cache) load(ctx context.Context, key cacheKey, load *cacheLoad) {
-	defer func() {
-		if r := recover(); r != nil {
-			load.idx, load.err = nil, fmt.Errorf("embeddedsub: index read panicked: %v", r)
-		}
-		c.mu.Lock()
-		delete(c.loading, key)
-		if load.err == nil {
-			c.add(cacheKey{path: key.path, size: load.idx.Size, mtime: load.idx.ModTime.UnixNano()}, load.idx)
-		}
-		c.mu.Unlock()
-		close(load.done)
+	ctx, cancel := context.WithTimeout(ctx, indexLoadTimeout)
+	defer cancel()
+	type result struct {
+		idx *Index
+		err error
+	}
+	read := make(chan result, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				read <- result{err: fmt.Errorf("embeddedsub: index read panicked: %v", r)}
+			}
+		}()
+		idx, err := ReadIndex(ctx, key.path)
+		read <- result{idx: idx, err: err}
 	}()
-	load.idx, load.err = ReadIndex(ctx, key.path)
+	var res result
+	select {
+	case res = <-read:
+	case <-ctx.Done():
+		res.err = fmt.Errorf("embeddedsub: index read: %w", ctx.Err())
+	}
+	c.mu.Lock()
+	delete(c.loading, key)
+	if res.err == nil {
+		c.add(cacheKey{path: key.path, size: res.idx.Size, mtime: res.idx.ModTime.UnixNano()}, res.idx)
+	}
+	c.mu.Unlock()
+	load.idx, load.err = res.idx, res.err
+	close(load.done)
 }
 
 // add stores idx under key and evicts down to the budget. c.mu is held.

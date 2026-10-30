@@ -88,7 +88,9 @@ each frame with the ones after it in view.
 ## Use
 
 An `Index` is immutable and safe for concurrent use; `Cache` keeps them by
-path, size and modification time. `ReadPackets` opens the file itself, sets
+path, size and modification time. Concurrent misses share one read, which
+gets 30 s: a read that hangs, as on a stalled network mount, fails the
+callers waiting on it, and the next caller reads again. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each
 small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
 data by default (`ErrTooLarge`), and refuses a file whose size or
