@@ -224,19 +224,13 @@ state in `plugins`, `artwork`, and `compat`. That file is now
 `docker-compose.split.yml`, and an install of that layout keeps it by
 selecting it in `COMPOSE_FILE`.
 
-`docker-compose.yml` mounts `SILO_DATA_ROOT` at `/silo-data`. Before Silo
-starts in a primary mode (`integrated` or `api`), `init-postgres` looks there
-for the earlier stack's cluster (`postgres/*/docker` or `postgres/data`) or
-Silo directories, and when it finds them it refuses to start and names both
-choices. That holds with the bundled database and with a `DATABASE_URL` in
-`.env`, which the earlier Compose file overrode and this one passes through:
-either way Silo could open first-run setup on the published ports, while the
-earlier `postgres` container, still running as an orphan of the Compose
-project, and the `.env` credentials for it stay within reach of Silo's
-plugins. The check skips an install with a finished move (the done marker
-below) or a bundled database of its own, and proxy and transcode nodes, which
-serve no setup. Selecting `docker-compose.split.yml` and
-running `docker compose up -d` again brings the earlier install back.
+`docker-compose.yml` is an example of a new install and does not look for an
+earlier one. Started on its `SILO_DATA_ROOT`, it replaces the earlier `silo`
+container and creates a new, empty bundled database, with first-run setup open
+on the published ports. The earlier `postgres`, `redis`, and `meilisearch`
+containers keep running as orphans of the Compose project, their data
+untouched; selecting `docker-compose.split.yml` and running `docker compose up
+-d` again brings the install back.
 
 Moving an install into the single container is a separate step that an
 administrator runs once: `/etc/silo-omnibus/migrate-compose-stack`, with the
@@ -245,13 +239,13 @@ settings, and `COMPOSE_FILE` removed from it once the stack is down:
 
 ```sh
 docker compose -f docker-compose.split.yml down
-docker compose run --rm --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
+docker compose run --rm -v <SILO_DATA_ROOT>:/silo-data \
+  --entrypoint /etc/silo-omnibus/migrate-compose-stack silo
 docker compose up -d
 ```
 
-`docker compose run` gives the script the `silo` service's `.env`, `PUID`, and
-`/silo-data` mount, and the script works within that one mount so it can
-hard-link:
+`docker compose run` gives the script the `silo` service's `.env` and `PUID`,
+and the script works within the one mount so it can hard-link:
 
 - Silo's three directories are hard-linked into `config/silo`, or copied when
   hard links fail across file systems. This happens with an external
@@ -356,9 +350,12 @@ How it stays safe to repeat and to roll back:
   changes the checkpoint, so the script refuses to go on once the earlier
   Compose file has been used since the copy: starting on the copy would drop
   what it wrote. It checks the same before moving a copy into place.
-- Silo directories that `init-config` made, empty, on a start the check
-  refused are removed instead of set aside. A database an earlier image
-  created beside the old install has to be moved aside by hand (above).
+- Going back to `docker-compose.split.yml` after a move leaves the copy
+  stale. Before using `docker-compose.yml` again, move `config` aside and run
+  the move again; a run on the stale copy refuses (the done marker above).
+- Silo directories that `init-config` made, empty, before the move are
+  removed instead of set aside. A database created beside the old install
+  has to be moved aside by hand (above).
 
 A `docker-compose.override.yml` that still changes the old `postgres`,
 `redis`, or `meilisearch` services makes Compose reject `docker-compose.yml`,

@@ -9,10 +9,12 @@
 # with MODE, DATABASE_URL, REDIS_URL, and NODE_URL in its .env; see the node
 # section of .env.example.
 #
-# An install of the earlier multi-container layout keeps it by selecting
-# docker-compose.split.yml in .env before it updates. Started on such an
-# install, this file's Silo refuses to start and says how to keep the layout
-# or move it; see "Moving from the multi-container stack" in
+# This file is an example of a new install. An existing install keeps its own
+# Compose file; docker-compose.split.yml is the earlier multi-container layout.
+# This file does not look for an earlier install: started on one's
+# SILO_DATA_ROOT, Silo comes up on a new, empty database with first-run setup
+# open on the published ports. Moving an earlier install into this layout is a
+# separate step; see "Moving from the multi-container stack" in
 # docs/architecture/omnibus-image.md.
 
 services:
@@ -56,8 +58,6 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      # Host paths in startup messages, and the root the move works in.
-      SILO_DATA_ROOT: ${SILO_DATA_ROOT:-/opt/silo}
       # Master key for at-rest credential encryption. The server refuses to
       # start without it. Generate one with: openssl rand -base64 48
       # Back it up apart from your database dumps; without it, encrypted
@@ -95,12 +95,6 @@ services:
       # download.artifact_max_bytes, in Settings > Downloads).
       - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
-      # The whole data root. Until this container has a database of its own or
-      # a finished move, startup looks here for an earlier multi-container
-      # install and refuses to start beside it, since Silo would open first-run
-      # setup on the published ports. Moving such an install into this
-      # container also works here.
-      - ${SILO_DATA_ROOT:-/opt/silo}:/silo-data
       # These three matter only when the Docker host is itself an LXC container.
       # There the files describe the physical machine, and the LXC's own limit
       # sits on a cgroup this container cannot see. lxcfs rewrites them to the
