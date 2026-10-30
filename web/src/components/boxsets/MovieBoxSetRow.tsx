@@ -31,7 +31,6 @@ export default function MovieBoxSetRow({
       title={boxSet.title}
       edgePadding={false}
       viewAllHref={buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id })}
-      viewAllLabel="View box set"
       startSlide={current >= 0 ? current : undefined}
     >
       {boxSet.items.map((item) => {
