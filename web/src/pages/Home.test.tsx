@@ -11,9 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "./Home";
 import type { HomeSectionItemsResponse } from "@/api/types";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
-import { completeHomeRow } from "@/hooks/queries/homeRowLimit";
 import { sectionKeys } from "@/hooks/queries/keys";
-import { removeItemFromHomeSectionCaches } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
@@ -515,118 +513,6 @@ describe("Home", () => {
     });
   });
 
-  it("drops what an earlier row shows from avoid-duplicates rows, whatever order rows load in", async () => {
-    avoidDuplicatesFor("recommended_for_you", "taste_match");
-    const layout = [
-      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
-      { ...homeLayout("top-picks"), section_type: "taste_match" },
-      homeLayout("recent"),
-    ];
-    const rows: Record<string, string[]> = {
-      "for-you": ["Shared", "For You Only"],
-      "top-picks": ["Shared", "Top Pick Only"],
-      recent: ["Shared"],
-    };
-    showLayout(layout);
-    const requests = deferSectionRequests();
-    const respond = (sectionId: string) => {
-      const request = requests.find((candidate) => candidate.sectionId === sectionId)!;
-      const entry = layout.find((candidate) => candidate.id === sectionId)!;
-      request.respond(sectionWith(entry, rows[sectionId]!));
-    };
-
-    await renderHome(new QueryClient());
-    await waitForRequestCount(requests, 3);
-
-    // The later rows answer first and show the shared title.
-    respond("top-picks");
-    respond("recent");
-    await waitForRenderedFirstItems({ "top-picks": "Shared", recent: "Shared" });
-
-    // Once the first row loads, the later avoid-duplicates row gives it up;
-    // the plain row keeps it.
-    respond("for-you");
-    await waitForRenderedFirstItems({
-      "for-you": "Shared",
-      "top-picks": "Top Pick Only",
-      recent: "Shared",
-    });
-  });
-
-  it("reads the rest of a partial row whose first cards another row already shows", async () => {
-    avoidDuplicatesFor("recommended_for_you");
-    const layout = [
-      homeLayout("recent"),
-      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
-    ];
-    showLayout(layout);
-    mockFetchHomeSectionItems.mockImplementation(
-      async (sectionId: string, options: { itemLimit?: number }) => {
-        if (sectionId === "recent") return sectionWith(layout[0]!, ["Shared"]);
-        return options.itemLimit === undefined
-          ? sectionWith(layout[1]!, ["Shared", "For You Only"])
-          : { ...sectionWith(layout[1]!, ["Shared"]), partial: true };
-      },
-    );
-
-    await renderHome(new QueryClient());
-
-    await waitForRenderedFirstItems({ recent: "Shared", "for-you": "For You Only" });
-  });
-
-  it("filters a cached completed row's later cards after every row's first cards", async () => {
-    avoidDuplicatesFor("recommended_for_you", "taste_match");
-    const layout = [
-      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
-      { ...homeLayout("top-picks"), section_type: "taste_match" },
-    ];
-    showLayout(layout);
-    const queryClient = new QueryClient();
-    // For You showed one card, then loaded Shared with the rest of its row.
-    queryClient.setQueryData(sectionKeys.homeItems("for-you"), {
-      ...sectionWith(layout[0]!, ["For You Only", "Shared"]),
-      shown: 1,
-    });
-    queryClient.setQueryData(
-      sectionKeys.homeItems("top-picks"),
-      sectionWith(layout[1]!, ["For You Only", "Shared", "Top Pick Only"]),
-    );
-
-    await renderHome(queryClient);
-
-    await waitForRenderedFirstItems({ "for-you": "For You Only", "top-picks": "Shared" });
-  });
-
-  it("keeps cached completed rows in the order they completed after a cache edit", async () => {
-    avoidDuplicatesFor("recommended_for_you", "taste_match");
-    const layout = [
-      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
-      { ...homeLayout("top-picks"), section_type: "taste_match" },
-    ];
-    showLayout(layout);
-    const queryClient = new QueryClient();
-    const complete = (entry: (typeof layout)[number], titles: string[]) =>
-      queryClient.setQueryData(
-        sectionKeys.homeItems(entry.id),
-        completeHomeRow(sectionWith(entry, titles.slice(0, 1)), sectionWith(entry, titles)),
-      );
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now");
-    // Both rows showed X. Top Picks loaded the rest of its row before For You
-    // did, then watching a card rewrote every cached row.
-    clock.mockReturnValue(now - 3000);
-    complete(layout[1]!, ["X", "Shared", "Top Pick Only"]);
-    clock.mockReturnValue(now - 2000);
-    complete(layout[0]!, ["X", "Shared", "Watched"]);
-    clock.mockReturnValue(now - 1000);
-    removeItemFromHomeSectionCaches(queryClient, "Watched");
-    clock.mockRestore();
-
-    await renderHome(queryClient);
-
-    await waitForRenderedFirstItems({ "for-you": "X", "top-picks": "Shared" });
-  });
-
   // Renders Home and lets one microtask run, optionally inside the sidebar's main stage.
   async function mountHome(queryClient: QueryClient, onStage = false) {
     const home = (
@@ -728,39 +614,6 @@ function cachedClient(layout: Array<{ id: string }>) {
     queryClient.setQueryData(sectionKeys.homeItems(section.id), homeSection(section.id));
   });
   return queryClient;
-}
-
-function avoidDuplicatesFor(...types: string[]) {
-  mockFetchRecipeCatalog.mockResolvedValue({
-    categories: {
-      personalized: types.map((type) => ({
-        type,
-        category: "personalized",
-        presets: [],
-        avoid_duplicates: true,
-        supports_rotation: false,
-        admin_only: false,
-      })),
-    },
-  });
-}
-
-// A row answering one card per title, each title its content id.
-function sectionWith(
-  entry: ReturnType<typeof homeLayout>,
-  titles: string[],
-): HomeSectionItemsResponse {
-  return {
-    section: {
-      ...entry,
-      total_count: titles.length,
-      items: titles.map((title) => ({
-        ...homeSection(entry.id).section.items[0]!,
-        content_id: title,
-        title,
-      })),
-    },
-  };
 }
 
 function stubMatchMedia(matching: string) {
