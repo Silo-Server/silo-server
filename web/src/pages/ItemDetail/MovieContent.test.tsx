@@ -391,17 +391,21 @@ describe("MovieContent", () => {
   it("hands the page's library scope to the match and split dialogs", () => {
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
     const scoped = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1?libraryId=5"]}>
-        <MovieContent item={makeMovieItem()} libraryId={5} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/movie-1?libraryId=5"]}>
+          <MovieContent item={makeMovieItem()} libraryId={5} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(scoped).toContain('data-testid="match-dialog" data-library="5"');
     expect(scoped).toContain('data-testid="split-dialog" data-library="5"');
 
     const unscoped = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent item={makeMovieItem()} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/movie-1"]}>
+          <MovieContent item={makeMovieItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(unscoped).toContain('data-testid="match-dialog" data-library="none"');
   });
