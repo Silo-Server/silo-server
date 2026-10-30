@@ -575,7 +575,9 @@ function ActivateDeviceRequest() {
                 {resultMessage}
               </p>
 
-              {!token ? (
+              {/* A link carries its request in the token, so it offers manual
+                  entry only once that request has expired. */}
+              {!token || details.status === "expired" ? (
                 <Button
                   type="button"
                   variant="outline"
