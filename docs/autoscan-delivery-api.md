@@ -36,13 +36,13 @@ The operation is `non_retryable`: a lost response leaves admission uncertain,
 and repeated delivery is not guaranteed to reproduce the same result forever.
 The service's internal processing retry is separate from caller replay.
 
-`GET /api/v2/autoscan/capabilities` returns revision `1` and state `available`
-when the ingress service exists, otherwise `not_configured`. It does not reveal
+`GET /api/v2/autoscan/capabilities` returns an opaque `revision` and state
+`available` when the ingress service exists, otherwise `not_configured`. It does not reveal
 source configuration, delivery tokens or whether a particular source is enabled.
 
 The bridge remains unchanged. Operations administration owns source-management
-UI and callback URL projection; those consumers must emit the v2 URL before the
-two legacy registration rows can be ratified. Existing external webhook
+UI and callback URL projection; source management emits the v2 delivery URL, and
+both legacy registration rows are ratified. Existing external webhook
 configurations require an explicit update; this implementation does not contact
 providers or modify their registered destinations. There is no first-party
 native or Jellyfin delivery consumer.
