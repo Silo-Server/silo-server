@@ -152,4 +152,10 @@ func TestHandleItems_SmartBoxSetChildrenPageInSQL(t *testing.T) {
 	if result.StartIndex != 2 {
 		t.Fatalf("expected StartIndex 2, got %d", result.StartIndex)
 	}
+
+	// Limit=0 reads one row for the total, not the executor's default page.
+	performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Limit=0")
+	if exec.gotPageLimit != 1 {
+		t.Fatalf("expected a count-only request to read limit=1, got limit=%d", exec.gotPageLimit)
+	}
 }

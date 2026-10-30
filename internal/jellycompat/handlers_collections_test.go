@@ -308,8 +308,9 @@ func TestHandleItems_BoxSetChildrenPagination(t *testing.T) {
 	}
 }
 
-// Limit=0 asks only for TotalRecordCount (#2841). Every BoxSet children path
-// answers it with no items and the total it reports for a page.
+// Limit=0 asks only for TotalRecordCount (#2841). BoxSet children answer it
+// with no items and the total a paged request reports. The stored page in SQL
+// is covered by TestBoxSetChildrenPageVisibleMembersDB.
 func TestHandleItems_BoxSetChildrenCountOnly(t *testing.T) {
 	libraries := []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}
 	// m-2 is hidden from the viewer, so neither total counts it.
@@ -350,7 +351,7 @@ func TestHandleItems_BoxSetChildrenCountOnly(t *testing.T) {
 		query   string
 		total   int
 	}{
-		{"stored collection in curated order", stored, "", 2},
+		{"stored collection without a database pool", stored, "", 2},
 		{"smart collection in query order", smart, "", 2},
 		{"Play all leaves", newPlayAllFixture, "&Filters=IsNotFolder&Recursive=true", 6},
 		{"episode smart collection with SortBy", episodes, "&SortBy=SortName", 3},
