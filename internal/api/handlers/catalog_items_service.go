@@ -661,15 +661,15 @@ func (h *CatalogResourceHandler) SeasonEpisodes(ctx context.Context, v ItemViewe
 // a title it cannot see.
 func (h *CatalogResourceHandler) SeriesWatchCounts(ctx context.Context, v ItemViewer, ids []string) (map[string]*catalog.SeasonUserData, error) {
 	const failed = "Failed to count watched episodes"
-	accessible, err := h.items.itemRepo.EnsureAccessibleIDs(ctx, ids, v.Access)
+	accessible, err := h.items.itemRepo.EnsureAccessibleIDsOfType(ctx, ids, v.Access, itemTypeSeries)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 	}
-	// Movies and other items pass the access check too; they have no
-	// episodes, so the rollup leaves them out.
+	// Only series: a podcast show's episodes share the episodes table, so
+	// the rollup would count them too.
 	visible := make([]string, 0, len(accessible))
 	for _, id := range ids {
 		if accessible[id] {

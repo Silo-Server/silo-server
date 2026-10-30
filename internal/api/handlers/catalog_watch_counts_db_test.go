@@ -46,6 +46,7 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 
 	prefix := fmt.Sprintf("watch-counts-%d", time.Now().UnixNano())
 	started, finished, hidden, movie := prefix+"-started", prefix+"-finished", prefix+"-hidden", prefix+"-movie"
+	podcast := prefix + "-podcast"
 	var allowedFolder, hiddenFolder, userID int
 	for _, f := range []struct {
 		name string
@@ -61,8 +62,8 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id=$1`, userID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE series_id = ANY($1)`, []string{started, finished, hidden})
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{started, finished, hidden, movie})
+		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE series_id = ANY($1)`, []string{started, finished, hidden, podcast})
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{started, finished, hidden, movie, podcast})
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{allowedFolder, hiddenFolder})
 	})
 
@@ -79,6 +80,11 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES
 		($1||'-e1',$4), ($1||'-e2',$4), ($1||'-e3',$4), ($1||'-e4',$4), ($2||'-e1',$4), ($2||'-e2',$4), ($3||'-e1',$5)`,
 		started, finished, hidden, allowedFolder, hiddenFolder)
+	// A podcast show is not a series, though its episodes share the table.
+	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Podcast')`, podcast)
+	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, podcast, allowedFolder)
+	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1||'-e1',$1,1,1,'One')`, podcast)
+	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1||'-e1',$2)`, podcast, allowedFolder)
 
 	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1_000_000_000_000)
 	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$2,'Watch counts fixture')`, profileID, userID)
@@ -108,7 +114,7 @@ func TestSeriesWatchCountsPostgres(t *testing.T) {
 				episodeRepo:   catalog.NewEpisodeRepository(pool),
 				storeProvider: testUserStoreProvider{store: store},
 			}}
-			got, err := h.SeriesWatchCounts(authCtx, viewer, []string{started, finished, hidden, movie, prefix + "-unknown"})
+			got, err := h.SeriesWatchCounts(authCtx, viewer, []string{started, finished, hidden, movie, podcast, prefix + "-unknown"})
 			if err != nil {
 				t.Fatal(err)
 			}
