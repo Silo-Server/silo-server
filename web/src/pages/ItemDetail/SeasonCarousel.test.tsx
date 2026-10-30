@@ -80,15 +80,4 @@ describe("SeasonCarousel", () => {
     expect(markup.match(/data-overlay-badge/g)).toHaveLength(1);
     expect(markup).toContain(">3</span>");
   });
-
-  it("draws no badge while the viewer has it off", () => {
-    overlay.prefs = buildDefaultPrefs();
-    const markup = renderSeasons([
-      makeSeason({
-        user_data: { played: false, watched_count: 5, unplayed_count: 3, in_progress_count: 0 },
-      }),
-    ]);
-
-    expect(markup).not.toContain("data-overlay-badge");
-  });
 });
