@@ -333,6 +333,7 @@ export const v2Operations = {
   "GET /api/v2/catalog/filters": "getCatalogFilters",
   "GET /api/v2/catalog/filters/search": "searchCatalogFacet",
   "GET /api/v2/catalog/items/{id}": "getCatalogItem",
+  "GET /api/v2/catalog/items/{id}/box-set": "getCatalogItemBoxSet",
   "GET /api/v2/catalog/items/{id}/episodes": "listCatalogItemEpisodes",
   "GET /api/v2/catalog/items/{id}/manga-files": "listCatalogItemMangaFiles",
   "GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio": "getThemeSongAudio",

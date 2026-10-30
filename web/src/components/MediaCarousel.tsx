@@ -49,6 +49,15 @@ interface MediaCarouselProps {
   onViewAll?: () => void;
   /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
   viewAllHref?: string;
+  /** Replaces "Explore all" on the view-all link or button. */
+  viewAllLabel?: string;
+  /** Shown under the title, such as a count or progress line. */
+  subtitle?: ReactNode;
+  /**
+   * The slide to show, such as the item the page is about. The carousel jumps
+   * to it again whenever it changes, as when the page moves to another item.
+   */
+  startSlide?: number;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -209,6 +218,9 @@ export default function MediaCarousel({
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
   viewAllHref,
+  viewAllLabel = "Explore all",
+  subtitle,
+  startSlide,
   headerActions,
   edgePadding = true,
   compact = false,
@@ -217,7 +229,16 @@ export default function MediaCarousel({
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  useEffect(() => {
+    if (!emblaApi || startSlide === undefined) return;
+    // Slides scroll in groups, so jump to the snap whose group holds the slide.
+    const snap = emblaApi
+      .internalEngine()
+      .slideRegistry.findIndex((slides) => slides.includes(startSlide));
+    if (snap >= 0) emblaApi.scrollTo(snap, true);
+  }, [emblaApi, startSlide]);
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
@@ -259,35 +280,38 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex items-center gap-2">
-          {titleHref ? (
-            <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-              <h2 className={titleClass}>
-                {title}
-                {/* "Explore all" already names the destination. */}
-                {viewAllHref || onViewAll ? null : (
-                  <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
-                    View
-                  </span>
-                )}
-              </h2>
-            </Link>
-          ) : (
-            <h2 className={titleClass}>{title}</h2>
-          )}
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0">
+            {titleHref ? (
+              <Link to={titleHref} className="group/title hover:text-primary transition-colors">
+                <h2 className={titleClass}>
+                  {title}
+                  {/* "Explore all" already names the destination. */}
+                  {viewAllHref || onViewAll ? null : (
+                    <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
+                      View
+                    </span>
+                  )}
+                </h2>
+              </Link>
+            ) : (
+              <h2 className={titleClass}>{title}</h2>
+            )}
+            {subtitle ? <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p> : null}
+          </div>
           {headerActions}
         </div>
         {viewAllHref ? (
           <Link
             to={viewAllHref}
-            aria-label={`Explore all ${title}`}
+            aria-label={`${viewAllLabel} ${title}`}
             className={`${viewAllClass} shrink-0`}
           >
-            Explore all
+            {viewAllLabel}
           </Link>
         ) : onViewAll ? (
           <button onClick={onViewAll} className={viewAllClass}>
-            Explore all
+            {viewAllLabel}
           </button>
         ) : null}
       </div>

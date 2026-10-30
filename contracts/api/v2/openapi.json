@@ -24108,8 +24108,9 @@
             "type": "string"
           },
           "title": {
+            "description": "The collection's TMDB name, with a trailing \"Collection\" shown as \"Box Set\"",
             "examples": [
-              "Harry Potter Collection"
+              "Harry Potter Box Set"
             ],
             "type": "string"
           }
@@ -24201,8 +24202,9 @@
             "type": "string"
           },
           "title": {
+            "description": "The collection's TMDB name, with a trailing \"Collection\" shown as \"Box Set\"",
             "examples": [
-              "Harry Potter Collection"
+              "Harry Potter Box Set"
             ],
             "type": "string"
           }
@@ -24772,6 +24774,16 @@
           "keywords",
           "status"
         ],
+        "type": "object"
+      },
+      "CatalogItemBoxSet": {
+        "additionalProperties": false,
+        "properties": {
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSetDetail",
+            "description": "The movie's box set with its movies, as getCatalogBoxSet answers it; absent when the movie is in no box set the viewer sees"
+          }
+        },
         "type": "object"
       },
       "CatalogItemCollection": {
@@ -144396,6 +144408,275 @@
           }
         ],
         "summary": "The detail page of one item, with the viewer's state.",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/catalog/items/{id}/box-set": {
+      "get": {
+        "operationId": "getCatalogItemBoxSet",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Content id of the movie",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Content id of the movie",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library the movie is being viewed in; only its box set is returned. Absent uses the first of the movie's libraries with box sets on",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library the movie is being viewed in; only its box set is returned. Absent uses the first of the movie's libraries with box sets on",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogItemBoxSet"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 only when the item is missing or hidden.",
         "tags": [
           "catalog"
         ],

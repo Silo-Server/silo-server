@@ -57,7 +57,7 @@ func seedBoxSets(t *testing.T) boxSetFixture {
 		}
 	}
 	stamp := time.Now().UnixNano()
-	f := boxSetFixture{pool: pool, repo: NewBoxSetRepository(pool), prefix: fmt.Sprintf("box-set-%d", stamp)}
+	f := boxSetFixture{pool: pool, repo: NewBoxSetRepository(pool), prefix: fmt.Sprintf("tmdb-franchise-%d", stamp)}
 	f.franchise = stamp%1_000_000_000 + 1_000_000_000
 	f.single = f.franchise + 1
 	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled,box_sets_enabled) VALUES('movies',$1,true,true) RETURNING id`, f.prefix).Scan(&f.lib); err != nil {
@@ -227,6 +227,13 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	}
 	if byName := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(byName, []int64{f.franchise}) {
 		t.Fatalf("name search = %v, want [%d]", byName, f.franchise)
+	}
+	// The name is searched as it is shown: "Saga Box Set", not "Saga Collection".
+	if shown := search(f.prefix+" saga box set", []int{f.lib}, f.viewer, 10, 0); !slices.Equal(shown, []int64{f.franchise}) {
+		t.Fatalf("search by shown name = %v, want [%d]", shown, f.franchise)
+	}
+	if stored := search(f.prefix+" saga collection", []int{f.lib}, f.viewer, 10, 0); len(stored) != 0 {
+		t.Fatalf("search by stored TMDB name = %v, want empty", stored)
 	}
 	if next := search(f.prefix+" saga", []int{f.lib}, f.viewer, 10, 1); len(next) != 0 {
 		t.Fatalf("second page = %v, want empty", next)
@@ -408,4 +415,46 @@ func TestBoxSetCollectionArtworkDB(t *testing.T) {
 		t.Fatal("the displaced cached poster was not queued for collection")
 	}
 	_, _ = f.pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, cachedKey)
+}
+
+// TestMovieBoxSetDB checks which box set a movie's page shows: the box set
+// the viewer sees in a library with box sets on, and none for a movie the
+// viewer cannot see, a stale lookup, a collection below the minimum, a
+// standalone movie, or a library with box sets off.
+func TestMovieBoxSetDB(t *testing.T) {
+	f := seedBoxSets(t)
+	ctx := t.Context()
+	executor := &QueryExecutor{Pool: f.pool}
+	lookup := func(name string, libraryID int) (MovieBoxSet, bool) {
+		t.Helper()
+		got, ok, err := executor.movieBoxSet(ctx, f.id(name), libraryID, f.viewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got, ok
+	}
+	got, ok := lookup("second", 0)
+	if !ok || got.LibraryID != f.lib || got.CollectionID != f.franchise {
+		t.Fatalf("box set of a member = %+v, %v; want the franchise in library %d", got, ok, f.lib)
+	}
+	if want := []string{f.id("first"), f.id("second"), f.id("third")}; !slices.Equal(got.MemberContentIDs, want) {
+		t.Fatalf("members = %v, want visible current members in collection order %v", got.MemberContentIDs, want)
+	}
+	if _, ok := lookup("second", f.lib); !ok {
+		t.Fatal("no box set when the movie's own library is named")
+	}
+	if _, ok := lookup("second", f.lib+1_000_000); ok {
+		t.Fatal("a box set from a library that does not hold the movie")
+	}
+	for _, name := range []string{"hidden", "stale", "lonely", "solo"} {
+		if got, ok := lookup(name, 0); ok {
+			t.Fatalf("box set of %s = %+v, want none", name, got)
+		}
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE media_folders SET box_sets_enabled = false WHERE id = $1`, f.lib); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := lookup("second", 0); ok {
+		t.Fatalf("box set with box sets off = %+v, want none", got)
+	}
 }

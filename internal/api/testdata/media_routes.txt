@@ -494,6 +494,7 @@ GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
+GET /api/v2/catalog/items/{id}/box-set	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
@@ -1808,6 +1809,7 @@ GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
+GET /api/v2/catalog/items/{id}/box-set	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true

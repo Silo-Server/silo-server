@@ -147,7 +147,7 @@ func (h *CatalogHandler) boxSetViews(ctx context.Context, v ItemViewer, libraryI
 		views[g.CollectionID] = BoxSetView{
 			CollectionID:      g.CollectionID,
 			LibraryID:         libraryID,
-			Title:             c.Name,
+			Title:             catalog.BoxSetTitle(c.Name),
 			Overview:          c.Overview,
 			PosterURL:         artwork[c.PosterPath],
 			PosterThumbhash:   c.PosterThumbhash,
@@ -260,15 +260,54 @@ func (h *CatalogHandler) BoxSet(ctx context.Context, v ItemViewer, collectionID 
 	if len(groups) == 0 {
 		return BoxSetDetailView{}, notFound
 	}
-	views, err := h.boxSetViews(ctx, v, libraryID, groups, true)
+	return h.boxSetDetail(ctx, v, libraryID, groups[0])
+}
+
+// ItemBoxSet returns the box set a movie's page shows: the movie's box set
+// as the viewer sees it, in libraryID or, when it is 0, the first of the
+// movie's libraries with box sets on. It is nil when the item has none, and
+// a 404 only when the item is missing or hidden from the viewer, so a page
+// asking for every movie does not read as probing (issue #952).
+func (h *CatalogHandler) ItemBoxSet(ctx context.Context, v ItemViewer, contentID string, libraryID int) (*BoxSetDetailView, error) {
+	if h == nil || h.boxSets == nil || h.resolver == nil || h.itemsH == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Box sets are not configured")
+	}
+	if err := h.itemsH.itemRepo.EnsureAccessible(ctx, contentID, v.Access); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return nil, apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		return nil, boxSetError(ctx, err)
+	}
+	found, ok, err := h.resolver.MovieBoxSet(ctx, contentID, libraryID, v.Access)
+	if err != nil {
+		return nil, boxSetError(ctx, err)
+	}
+	if !ok {
+		return nil, nil
+	}
+	detail, err := h.boxSetDetail(ctx, v, found.LibraryID, found.BoxSetGroup)
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &detail, nil
+}
+
+// boxSetDetail builds one box set of a library with its movies in
+// collection order.
+func (h *CatalogHandler) boxSetDetail(ctx context.Context, v ItemViewer, libraryID int, group catalog.BoxSetGroup) (BoxSetDetailView, error) {
+	views, err := h.boxSetViews(ctx, v, libraryID, []catalog.BoxSetGroup{group}, true)
 	if err != nil {
 		return BoxSetDetailView{}, boxSetError(ctx, err)
 	}
-	view, ok := views[collectionID]
+	view, ok := views[group.CollectionID]
 	if !ok {
-		return BoxSetDetailView{}, notFound
+		return BoxSetDetailView{}, apiError(http.StatusNotFound, "not_found", "Box set not found")
 	}
-	members := groups[0].MemberContentIDs
+	members := group.MemberContentIDs
 	loaded, err := h.itemsH.itemRepo.GetByIDs(ctx, members)
 	if err != nil {
 		return BoxSetDetailView{}, boxSetError(ctx, err)

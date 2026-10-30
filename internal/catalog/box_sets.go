@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,22 @@ const (
 func LibraryTypeSupportsBoxSets(libraryType string) bool {
 	return librarykind.IsMovie(libraryType) || librarykind.IsMixed(libraryType)
 }
+
+// BoxSetTitle names a box set after its TMDB collection, whose names end in
+// "Collection" ("Harry Potter Collection"): that word becomes "Box Set", so a
+// box set does not read as one of Silo's own collections. Other names are
+// kept as they are. boxSetTitleSQL is the same rule for search.
+func BoxSetTitle(name string) string {
+	name = strings.TrimSpace(name)
+	const suffix = " collection"
+	if len(name) > len(suffix) && strings.EqualFold(name[len(name)-len(suffix):], suffix) {
+		return name[:len(name)-len(suffix)] + " Box Set"
+	}
+	return name
+}
+
+// boxSetTitleSQL is BoxSetTitle of c.name, lowercased.
+const boxSetTitleSQL = `lower(regexp_replace(btrim(c.name), '(.) collection$', '\1 box set', 'i'))`
 
 // BoxSetContentID is the synthetic content ID of a box set card.
 func BoxSetContentID(collectionID int64) string {
@@ -431,6 +448,73 @@ func (e *QueryExecutor) boxSetGroups(ctx context.Context, def QueryDefinition, a
 	return groups, nil
 }
 
+// MovieBoxSet is the box set a movie's page shows: a BoxSetGroup the movie is
+// a member of, in the library it was found in.
+type MovieBoxSet struct {
+	BoxSetGroup
+	LibraryID int
+}
+
+// MovieBoxSet returns the box set of a movie as the viewer sees it: the
+// movie's current collection in the first of its libraries with box sets on
+// (only libraryID when it is not 0) where the viewer sees the movie and at
+// least that library's minimum of the collection's movies. ok is false when
+// there is none.
+func (r *CatalogResolver) MovieBoxSet(ctx context.Context, contentID string, libraryID int, access AccessFilter) (MovieBoxSet, bool, error) {
+	if r == nil || r.itemRepo == nil {
+		return MovieBoxSet{}, false, errors.New("catalog resolver requires an item repository")
+	}
+	return r.queryExecutorForScope(playableTypeMovie, nil).movieBoxSet(ctx, contentID, libraryID, access)
+}
+
+func (e *QueryExecutor) movieBoxSet(ctx context.Context, contentID string, libraryID int, access AccessFilter) (MovieBoxSet, bool, error) {
+	if e == nil || e.Pool == nil {
+		return MovieBoxSet{}, false, errors.New("query executor requires a database pool")
+	}
+	rows, err := e.Pool.Query(ctx, `
+		SELECT bsm.tmdb_collection_id, f.id, f.type, f.box_set_min_movies
+		FROM media_items mi
+		JOIN media_item_tmdb_collections bsm ON bsm.content_id = mi.content_id
+			AND bsm.checked_tmdb_id::text = mi.tmdb_id AND bsm.tmdb_collection_id IS NOT NULL
+		JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+		JOIN media_folders f ON f.id = mil.media_folder_id AND f.box_sets_enabled AND f.enabled IS NOT FALSE
+		WHERE mi.content_id = $1 AND ($2 = 0 OR f.id = $2)
+		ORDER BY f.sort_order, f.id`, contentID, libraryID)
+	if err != nil {
+		return MovieBoxSet{}, false, fmt.Errorf("querying movie box set libraries: %w", err)
+	}
+	type candidate struct {
+		collectionID int64
+		libraryID    int
+		libraryType  string
+		minMovies    int
+	}
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
+		var c candidate
+		err := row.Scan(&c.collectionID, &c.libraryID, &c.libraryType, &c.minMovies)
+		return c, err
+	})
+	if err != nil {
+		return MovieBoxSet{}, false, fmt.Errorf("reading movie box set libraries: %w", err)
+	}
+	for _, c := range candidates {
+		if !LibraryTypeSupportsBoxSets(c.libraryType) {
+			continue
+		}
+		def := QueryDefinition{MediaScope: playableTypeMovie, LibraryIDs: []int{c.libraryID}}
+		groups, err := e.boxSetGroups(ctx, def, access, c.minMovies, []int64{c.collectionID})
+		if err != nil {
+			return MovieBoxSet{}, false, err
+		}
+		// The movie must be a member the viewer sees, or its page would
+		// reveal a box set through a movie outside the viewer's access.
+		if len(groups) == 1 && slices.Contains(groups[0].MemberContentIDs, contentID) {
+			return MovieBoxSet{BoxSetGroup: groups[0], LibraryID: c.libraryID}, true, nil
+		}
+	}
+	return MovieBoxSet{}, false, nil
+}
+
 // SearchBoxSetCollectionIDs returns up to limit stored collections that match
 // query among the movies of libraryIDs the viewer can see, skipping the first
 // offset: first those whose name contains every word of it, then those with
@@ -469,11 +553,11 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 	sql := fmt.Sprintf(`%sSELECT bsm.tmdb_collection_id
 		%s
 		GROUP BY bsm.tmdb_collection_id, c.name
-		HAVING lower(c.name) LIKE ALL($%[3]d::text[])
+		HAVING %[6]s LIKE ALL($%[3]d::text[])
 			OR count(*) FILTER (WHERE lower(mi.title) LIKE ALL($%[3]d::text[])) >= 2
-		ORDER BY CASE WHEN lower(c.name) LIKE ALL($%[3]d::text[]) THEN length(c.name) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
+		ORDER BY CASE WHEN %[6]s LIKE ALL($%[3]d::text[]) THEN length(%[6]s) ELSE NULL END NULLS LAST, bsm.tmdb_collection_id
 		LIMIT $%[4]d OFFSET $%[5]d`,
-		with, from, patternIdx, patternIdx+1, patternIdx+2)
+		with, from, patternIdx, patternIdx+1, patternIdx+2, boxSetTitleSQL)
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching box sets: %w", err)

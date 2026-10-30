@@ -45,6 +45,7 @@
 ./internal/catalog TestBoxSetGroupedBrowseDB
 ./internal/catalog TestBoxSetSearchAndSyncDB
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
+./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
 
 # A watched special does not anchor Next Up for a series with regular seasons.

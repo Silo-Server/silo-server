@@ -18,6 +18,8 @@ export const boxSetKeys = {
   search: (q: string, libraryId?: string) =>
     [...boxSetKeys.all, "search", q, libraryId ?? ""] as const,
   detail: (id: string, libraryId: string) => [...boxSetKeys.all, "detail", id, libraryId] as const,
+  item: (contentId: string, libraryId: number | undefined) =>
+    [...boxSetKeys.all, "item", contentId, libraryId ?? ""] as const,
 };
 
 /** The box sets matching a search, best match first; see searchCatalogBoxSets. */
@@ -79,5 +81,39 @@ export function useBoxSet(id: string | undefined, libraryId: string | undefined)
     queryKey: boxSetKeys.detail(id ?? "", libraryId ?? ""),
     queryFn: ({ signal }) => fetchBoxSet(id!, libraryId!, { signal }),
     enabled: Boolean(id && libraryId),
+  });
+}
+
+/** The box set a movie's page shows, or null; see getCatalogItemBoxSet. */
+export async function fetchItemBoxSet(
+  contentId: string,
+  libraryId?: number,
+  options?: Pick<RequestInit, "signal">,
+): Promise<BoxSetDetail | null> {
+  const result = await v2("GET /api/v2/catalog/items/{id}/box-set", {
+    path: { id: contentId },
+    query: { library_id: libraryId !== undefined ? String(libraryId) : undefined },
+    signal: options?.signal ?? undefined,
+  });
+  if (!result.box_set) return null;
+  const { items, ...boxSet } = result.box_set;
+  return { ...boxSet, items: items.map(catalogItemFromV2) };
+}
+
+/**
+ * The box set of the movie a detail page shows. The read is skipped until
+ * one of the viewer's libraries has box sets on, and a failure shows no row
+ * rather than an error on the movie's page.
+ */
+export function useItemBoxSet(contentId: string, libraryId?: number) {
+  const libraries = useAvailableUserLibraries();
+  const hasBoxSetLibrary = (libraries.data ?? []).some(
+    (library) => library.box_sets_enabled === true,
+  );
+  return useQuery({
+    queryKey: boxSetKeys.item(contentId, libraryId),
+    queryFn: ({ signal }) => fetchItemBoxSet(contentId, libraryId, { signal }),
+    enabled: hasBoxSetLibrary && contentId !== "",
+    retry: false,
   });
 }

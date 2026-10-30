@@ -6887,6 +6887,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/catalog/items/{id}/box-set": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 only when the item is missing or hidden. */
+    get: operations["getCatalogItemBoxSet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/catalog/items/{id}/episodes": {
     parameters: {
       query?: never;
@@ -21977,7 +21994,10 @@ export interface components {
        * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
        */
       poster_url?: string;
-      /** @example Harry Potter Collection */
+      /**
+       * @description The collection's TMDB name, with a trailing "Collection" shown as "Box Set"
+       * @example Harry Potter Box Set
+       */
       title: string;
     };
     CatalogBoxSetDetail: {
@@ -22030,7 +22050,10 @@ export interface components {
        * @description The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none
        */
       poster_url?: string;
-      /** @example Harry Potter Collection */
+      /**
+       * @description The collection's TMDB name, with a trailing "Collection" shown as "Box Set"
+       * @example Harry Potter Box Set
+       */
       title: string;
     };
     CatalogBoxSetList: {
@@ -22280,6 +22303,10 @@ export interface components {
        * @example 1995
        */
       year?: number;
+    };
+    CatalogItemBoxSet: {
+      /** @description The movie's box set with its movies, as getCatalogBoxSet answers it; absent when the movie is in no box set the viewer sees */
+      box_set?: components["schemas"]["CatalogBoxSetDetail"];
     };
     CatalogItemCollection: {
       /** @description The page's items; empty, never null */
@@ -95283,6 +95310,130 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CatalogItemDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getCatalogItemBoxSet: {
+    parameters: {
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description The library the movie is being viewed in; only its box set is returned. Absent uses the first of the movie's libraries with box sets on */
+        library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Content id of the movie */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogItemBoxSet"];
         };
       };
       /** @description Bad Request */

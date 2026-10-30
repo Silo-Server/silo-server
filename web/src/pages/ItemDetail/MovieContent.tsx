@@ -13,6 +13,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
+import MovieBoxSetRow from "@/components/boxsets/MovieBoxSetRow";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -416,6 +417,8 @@ export default function MovieContent({
         </>
       }
     >
+      <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
+
       {canCurateMetadata && (
         <MediaLocations
           title="Media locations"

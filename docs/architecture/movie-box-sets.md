@@ -20,6 +20,9 @@ contract is in [catalog-api.md](../catalog-api.md#movie-box-sets).
   collected. TMDB returns a collection's
   parts in no reliable order, so the sync sorts them by release date, with
   undated (announced) parts last.
+- The stored name is TMDB's. Reads show it through `catalog.BoxSetTitle`
+  ("… Collection" becomes "… Box Set"), and search matches the same rule in
+  SQL (`boxSetTitleSQL`); change the two together.
 
 ## Sync
 
@@ -49,3 +52,11 @@ The qualifying collections are recomputed on every page, not carried in the
 browse cursor. A sync that stores or drops a collection while a viewer is
 scrolling can group earlier and later pages differently until the browse is
 reloaded; the window is the sync's run, which is short after the first one.
+
+## Movie page
+
+`CatalogResolver.MovieBoxSet` picks the box set a movie's page shows: the
+movie's current collection in the first of its libraries with box sets on,
+using the same viewer filter and minimum as browse. The movie itself must be
+one of the members the viewer sees, so a movie outside the viewer's access
+never reveals its box set.
