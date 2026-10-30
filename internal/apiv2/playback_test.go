@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -192,23 +193,27 @@ func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 // client reached. Behind a TLS-terminating reverse proxy that is the forwarded
 // origin, not the internal host the proxy dialed; a client on the LAN keeps
 // the address it used; and a proxy that rewrites Host to a bare IP without
-// naming the client's host falls back to the configured public URL.
+// naming the client's host falls back to the configured public URL, except
+// on an overlay provider's path, which keeps Host and may name an IP.
 func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 	const probe = Prefix + "/playback/bandwidth-probe?media_path=true"
 	cases := []struct {
 		name, host, publicURL string
 		headers               map[string]string
+		path                  netaccess.Path
 		want                  string
 	}{
 		{"forwarded host", "10.0.0.5:8090", "https://public.example.test",
-			map[string]string{"X-Forwarded-Host": "media.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-For": "198.51.100.7"}, "https://media.example.test"},
-		{"lan client on its address", "192.168.1.20:8090", "https://public.example.test", nil, "http://192.168.1.20:8090"},
+			map[string]string{"X-Forwarded-Host": "media.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://media.example.test"},
+		{"lan client on its address", "192.168.1.20:8090", "https://public.example.test", nil, netaccess.Path{}, "http://192.168.1.20:8090"},
 		{"proxy rewrote host to an IP", "203.0.113.5:8090", "https://public.example.test/silo/",
-			map[string]string{"X-Forwarded-For": "198.51.100.7"}, "https://public.example.test/silo"},
+			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://public.example.test/silo"},
 		{"proxy rewrote host, no public URL", "203.0.113.5:8090", "",
-			map[string]string{"X-Forwarded-For": "198.51.100.7"}, "http://203.0.113.5:8090"},
+			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "http://203.0.113.5:8090"},
 		{"proxy kept a named host", "media.example.test", "https://public.example.test",
-			map[string]string{"X-Forwarded-For": "198.51.100.7", "X-Forwarded-Proto": "https"}, "https://media.example.test"},
+			map[string]string{"X-Forwarded-For": "198.51.100.7", "X-Forwarded-Proto": "https"}, netaccess.Path{}, "https://media.example.test"},
+		{"overlay provider on an IP", "100.64.0.9", "https://public.example.test",
+			map[string]string{"X-Forwarded-For": "100.64.0.20", "X-Forwarded-Proto": "https"}, netaccess.Path{Provider: "tailscale", InstallationID: 1}, "https://100.64.0.9"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,6 +221,7 @@ func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 			deps.Playback = &scheduleService{}
 			deps.ServerConnections.PublicURL = func() string { return c.publicURL }
 			r := httptest.NewRequest(http.MethodGet, "http://"+c.host+Prefix+"/playback/capabilities", nil)
+			r = r.WithContext(netaccess.WithPath(r.Context(), c.path))
 			for k, v := range viewerHeaders() {
 				r.Header.Set(k, v)
 			}

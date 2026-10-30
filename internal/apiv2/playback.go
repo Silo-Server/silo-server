@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -596,10 +597,13 @@ func playbackBandwidthLimit(limit *playback.BandwidthLimitV3) *PlaybackBandwidth
 // the server's own network keeps the LAN address it used. A proxy that
 // rewrites Host to a bare IP address and names no client host leaves only the
 // address it dialed, which a client elsewhere may not reach; then the URL is
-// on the configured public URL, when there is one.
+// on the configured public URL, when there is one. A network access
+// provider's path keeps Host, which can be an overlay IP, so it always keeps
+// the origin it reached.
 func (reg *Registry) bandwidthProbeBaseURL(r *http.Request) string {
 	_, err := netip.ParseAddr((&url.URL{Host: r.Host}).Hostname())
-	hostRewritten := err == nil && r.Header.Get("X-Forwarded-Host") == "" && clientip.HasForwardingHeaders(r.Header)
+	hostRewritten := err == nil && r.Header.Get("X-Forwarded-Host") == "" && clientip.HasForwardingHeaders(r.Header) &&
+		netaccess.PathFromContext(r.Context()).IsDefault()
 	if base := reg.publicBaseURL(); hostRewritten && base != "" {
 		return base
 	}
