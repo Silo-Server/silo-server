@@ -44,6 +44,7 @@ export const SAMPLE_SHOW_DATA: OverlayData = {
   studio: undefined,
   network: "HBO",
   show_status: "returning",
+  unwatched_episodes: 4,
   rt_certified_fresh: false,
   imdb_top_250: null,
 };

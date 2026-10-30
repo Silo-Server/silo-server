@@ -53,6 +53,7 @@ import {
 } from "@/api/v2/adminDownloadPreparations";
 import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorageCache";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
+import { refreshUnwatchedEpisodeCount } from "@/hooks/queries/watchCounts";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
@@ -385,6 +386,9 @@ function updateHistoryImportCaches(queryClient: QueryClient, run?: HistoryImport
   });
 }
 
+// The changes that can move a series' watched episode count.
+const WATCH_COUNT_CHANGES = new Set<UserStatePayload["change"]>(["progress", "watched", "history"]);
+
 function handleUserStateEvent(
   queryClient: QueryClient,
   payload: UserStatePayload,
@@ -471,6 +475,12 @@ function handleUserStateEvent(
       .then(() => bumpHomeRefreshSignal(queryClient));
   } else {
     scheduleProgressHomeRefresh(queryClient);
+  }
+  // The unwatched-episodes badge counts a series' episodes. An episode's
+  // event names its series; a mark on the series itself names only the series.
+  const countedSeries = payload.series_id || payload.content_id;
+  if (countedSeries && WATCH_COUNT_CHANGES.has(payload.change)) {
+    refreshUnwatchedEpisodeCount(queryClient, countedSeries, payload.change);
   }
   void queryClient.invalidateQueries({
     queryKey: adminKeys.stats(),

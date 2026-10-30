@@ -8,6 +8,8 @@ import type { OverlayData } from "./types";
 // extractor centralizes the mapping so adding a new overlay-relevant field
 // only touches one place.
 interface OverlaySourceItem {
+  content_id: string;
+  type?: string;
   overlay_summary?: OverlaySummary | null;
   rating_imdb?: number | null;
   rating_tmdb?: number | null;
@@ -62,6 +64,8 @@ function extract(item: OverlaySourceItem): OverlayData {
     // they stay null until backend data sources land.
     imdb_top_250: null,
     rt_certified_fresh: null,
+    // Only a series card counts its episodes; CardOverlays fetches the count.
+    unwatched_episodes_series_id: item.type === "series" ? item.content_id : undefined,
   };
 }
 
