@@ -642,29 +642,35 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 // condition keeps track lengths that understate the media (stale Matroska
 // statistics tags) from shortening a file on their own: with nothing else
 // explaining the container duration, it stands.
+//
+// A track that starts late ends at its offset plus its length. Muxers
+// disagree on whether a DURATION tag already counts that offset (ffmpeg
+// writes the end, mkvmerge the span), so video and audio take the later
+// reading, which can only keep a duration longer, and another track
+// accounts for the container duration under either reading.
 func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
-	var audioVideo, other float64
-	hasVideo := false
+	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
+	formatStart := parseFloat(raw.Format.StartTime)
+	var audioVideo float64
+	hasVideo, accounted := false, false
 	for _, stream := range raw.Streams {
 		length, known := trackLength(stream)
+		end := max(0, parseFloat(stream.StartTime)-formatStart) + length
 		switch {
 		case mediaprobe.IsPrimaryVideoStream(stream) || stream.CodecType == "audio":
 			if !known {
 				return 0, false
 			}
 			hasVideo = hasVideo || stream.CodecType == "video"
-			audioVideo = max(audioVideo, length)
+			audioVideo = max(audioVideo, end)
 		case stream.CodecType == "video":
 			// Attached pictures carry no timeline.
 		case known:
-			other = max(other, length)
+			accounted = accounted || math.Abs(formatDuration-length) <= tolerance ||
+				math.Abs(formatDuration-end) <= tolerance
 		}
 	}
-	if !hasVideo || !durationIsPositiveFinite(audioVideo) {
-		return 0, false
-	}
-	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
-	if formatDuration-audioVideo <= tolerance || math.Abs(formatDuration-other) > tolerance {
+	if !hasVideo || !accounted || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= tolerance {
 		return 0, false
 	}
 	return audioVideo, true
@@ -672,16 +678,25 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 
 // trackLength is a stream's own length: ffprobe's duration when it reports
 // one, else the DURATION statistics tag Matroska muxers write per track.
+// ffprobe names a tag with a language DURATION-<language>; with several, the
+// longest counts, and one that does not parse leaves the length unknown.
 func trackLength(stream ffprobeStream) (float64, bool) {
 	if duration := parseFloat(stream.Duration); durationIsPositiveFinite(duration) {
 		return duration, true
 	}
+	var length float64
 	for key, value := range stream.Tags {
-		if strings.EqualFold(key, "DURATION") {
-			return parseMatroskaTagDuration(value)
+		key = strings.ToUpper(key)
+		if key != "DURATION" && !strings.HasPrefix(key, "DURATION-") {
+			continue
 		}
+		parsed, ok := parseMatroskaTagDuration(value)
+		if !ok {
+			return 0, false
+		}
+		length = max(length, parsed)
 	}
-	return 0, false
+	return length, length > 0
 }
 
 // parseMatroskaTagDuration parses a Matroska DURATION tag,

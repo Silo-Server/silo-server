@@ -85,6 +85,18 @@ func TestDurationFromProbeMetadata(t *testing.T) {
 		// container duration, so it stands.
 		{"keeps container duration no track accounts for", stretched,
 			[]ffprobeStream{tagged("video", "00:05:00.000000000"), tagged("audio", "00:05:00.024000000"), tagged("subtitle", "00:04:58.000000000")}, 1198},
+		{"reads language-suffixed duration tags", stretched,
+			[]ffprobeStream{
+				{CodecType: "video", Duration: "N/A", Tags: map[string]string{"DURATION-eng": "00:10:00.022000000"}},
+				tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000"),
+			}, 600},
+		// Video and audio that start late end at their offset plus length.
+		{"counts late-starting video and audio to their end", stretched,
+			[]ffprobeStream{
+				{CodecType: "video", StartTime: "120.000000", Duration: "600.000000"},
+				{CodecType: "audio", StartTime: "120.000000", Duration: "600.000000"},
+				{CodecType: "subtitle", StartTime: "0.000000", Duration: "1198.000000"},
+			}, 720},
 		{"keeps audio-only duration past a longer lyrics track", ffprobeFormat{Duration: "1198.000000"},
 			[]ffprobeStream{tagged("audio", "00:10:00.049000000"), tagged("subtitle", "00:19:58.000000000")}, 1198},
 	}
