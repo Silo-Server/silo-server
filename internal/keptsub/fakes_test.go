@@ -23,6 +23,9 @@ type memRepo struct {
 	claims map[trackKey]memClaim
 	// counts
 	puts, claimCalls, fileTrackCalls int
+	// queued lists the keys queued for collection; putErr fails PutTrack.
+	queued []string
+	putErr error
 	// trackHook, when set, runs at the start of every Track call.
 	trackHook func(ctx context.Context) error
 }
@@ -67,6 +70,9 @@ func (r *memRepo) FileTracks(_ context.Context, fileID int) ([]Track, error) {
 func (r *memRepo) PutTrack(_ context.Context, t Track) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.putErr != nil {
+		return r.putErr
+	}
 	r.puts++
 	r.tracks[trackKey{t.MediaFileID, t.StreamIndex}] = t
 	return nil
@@ -103,6 +109,13 @@ func (r *memRepo) Release(_ context.Context, fileID, stream int, token string) e
 	return nil
 }
 
+func (r *memRepo) QueueCollection(_ context.Context, key string, _ time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.queued = append(r.queued, key)
+	return nil
+}
+
 func (r *memRepo) counts() (puts, claims int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -116,13 +129,17 @@ type memBlobs struct {
 	gets    int
 }
 
-func (b *memBlobs) Put(_ context.Context, key string, data []byte) error {
+func (b *memBlobs) PutStream(_ context.Context, key string, r io.Reader, _ string) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.objects == nil {
 		b.objects = map[string][]byte{}
 	}
-	b.objects[key] = bytes.Clone(data)
+	b.objects[key] = data
 	return nil
 }
 

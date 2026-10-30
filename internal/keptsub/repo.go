@@ -58,6 +58,9 @@ type Repo interface {
 	Claim(ctx context.Context, fileID, streamIndex int, token string, lease time.Duration) (bool, error)
 	// Release gives up a claim token holds.
 	Release(ctx context.Context, fileID, streamIndex int, token string) error
+	// QueueCollection queues an object key for the blob collector, which
+	// deletes it after the delay unless a row names it.
+	QueueCollection(ctx context.Context, key string, after time.Duration) error
 }
 
 // PgRepo is Repo on PostgreSQL.
@@ -164,6 +167,17 @@ func (r *PgRepo) Release(ctx context.Context, fileID, streamIndex int, token str
 	if _, err := r.pool.Exec(ctx, `DELETE FROM public.embedded_subtitle_track_claims
 		WHERE media_file_id = $1 AND embedded_stream_index = $2 AND claim_token = $3`, fileID, streamIndex, token); err != nil {
 		return fmt.Errorf("release subtitle track claim: %w", err)
+	}
+	return nil
+}
+
+func (r *PgRepo) QueueCollection(ctx context.Context, key string, after time.Duration) error {
+	if _, err := r.pool.Exec(ctx, `
+		INSERT INTO public.blob_gc_queue (prefix, not_before)
+		VALUES ($1, now() + $2 * interval '1 millisecond')
+		ON CONFLICT (prefix) DO UPDATE
+		SET not_before = GREATEST(public.blob_gc_queue.not_before, EXCLUDED.not_before)`, key, after.Milliseconds()); err != nil {
+		return fmt.Errorf("queue kept subtitle stream for collection: %w", err)
 	}
 	return nil
 }

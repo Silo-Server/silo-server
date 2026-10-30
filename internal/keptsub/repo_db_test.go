@@ -206,6 +206,28 @@ func TestKeptTracksGoWithTheirFileDB(t *testing.T) {
 	}
 }
 
+// A key queued before its object is stored waits out the grace, and
+// queuing it again never brings its deadline forward.
+func TestQueueCollectionDB(t *testing.T) {
+	f := newDBFixture(t)
+	ctx := t.Context()
+	file := f.file(t)
+	key := keptRow(file, 1, "f").BlobKey
+	if err := f.repo.QueueCollection(ctx, key, orphanGrace); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repo.QueueCollection(ctx, key, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var due time.Duration
+	if err := f.pool.QueryRow(ctx, `SELECT extract(epoch FROM not_before - now()) * interval '1 second' FROM public.blob_gc_queue WHERE prefix = $1`, key).Scan(&due); err != nil {
+		t.Fatal(err)
+	}
+	if due < orphanGrace-time.Minute || due > orphanGrace {
+		t.Fatalf("due in %v, want about %v", due, orphanGrace)
+	}
+}
+
 func TestSubtitleTrackClaimsDB(t *testing.T) {
 	f := newDBFixture(t)
 	ctx := t.Context()

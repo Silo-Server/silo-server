@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,8 +16,12 @@ import (
 
 // Kept streams are copied to the node's local disk, named by their SHA-256,
 // so reading one again, or cutting a window from it, costs no storage
-// request. A copy never goes stale: its name is its content. The copies are
-// held to a byte budget, evicting the least recently used.
+// request. A copy never goes stale: its name is its content. Its file is
+// never touched after it is written, so the index cache, keyed by path,
+// size and modification time, keeps finding it; recency for eviction is kept
+// in memory, and the copies are held to a byte budget, least recently used
+// first, with copies this process hasn't used ordered by when they were
+// written.
 
 const (
 	defaultMirrorMaxBytes = 1 << 30
@@ -45,6 +48,16 @@ func (s *Store) mirrorDir() string {
 
 func mirrorName(t *Track) string { return t.SHA256 + streamExt(t.StreamFormat) }
 
+// used records that the copy at path was just used.
+func (s *Store) used(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.mirrorUsed) >= startTimesKept {
+		clear(s.mirrorUsed)
+	}
+	s.mirrorUsed[path] = time.Now()
+}
+
 // mirror returns the local copy of t's stream, fetching it from storage
 // when the node has none. The fetched bytes must hash to t's SHA-256.
 func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
@@ -54,8 +67,7 @@ func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
 	}
 	path := filepath.Join(dir, mirrorName(t))
 	if _, err := os.Stat(path); err == nil {
-		now := time.Now()
-		_ = os.Chtimes(path, now, now) // recency for eviction; best effort
+		s.used(path)
 		return path, nil
 	}
 	s.mu.Lock()
@@ -72,7 +84,7 @@ func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
 			}()
 			fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 			defer cancel()
-			f.path, f.err = s.fetchMirror(fetchCtx, dir, path, t)
+			f.path, f.err = s.fetchMirror(fetchCtx, dir, t)
 		}()
 	}
 	s.mu.Unlock()
@@ -84,60 +96,61 @@ func (s *Store) mirror(ctx context.Context, t *Track) (string, error) {
 	}
 }
 
-func (s *Store) fetchMirror(ctx context.Context, dir, path string, t *Track) (string, error) {
+func (s *Store) fetchMirror(ctx context.Context, dir string, t *Track) (string, error) {
 	r, _, err := s.blobs.Get(ctx, t.BlobKey)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = r.Close() }()
-	return s.writeMirror(dir, path, t, func(w io.Writer) error {
+	path, sum, _, err := s.writeMirror(dir, streamExt(t.StreamFormat), func(w io.Writer) error {
 		_, err := io.Copy(w, r)
 		return err
 	})
-}
-
-// mirrorData copies data, t's stream just kept, locally. A failure only
-// costs a fetch later.
-func (s *Store) mirrorData(t *Track, data []byte) {
-	dir := s.mirrorDir()
-	if dir == "" {
-		return
-	}
-	if _, err := s.writeMirror(dir, filepath.Join(dir, mirrorName(t)), t, func(w io.Writer) error {
-		_, err := w.Write(data)
-		return err
-	}); err != nil {
-		slog.Warn("local copy of a kept subtitle track failed", "component", "keptsub", "key", t.BlobKey, "error", err)
-	}
-}
-
-// writeMirror writes a copy through a temp file, checks its hash, and
-// renames it into place.
-func (s *Store) writeMirror(dir, path string, t *Track, write func(io.Writer) error) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", err
-	}
-	tmp, err := os.CreateTemp(dir, mirrorTempPrefix+"*")
 	if err != nil {
 		return "", err
 	}
+	if sum != t.SHA256 {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("keptsub: %s holds bytes with SHA-256 %s, want %s", t.BlobKey, sum, t.SHA256)
+	}
+	return path, nil
+}
+
+// writeMirror writes a copy through a temp file, hashing it, and renames it
+// to its hash with ext. It returns the copy's path, SHA-256 and size.
+func (s *Store) writeMirror(dir, ext string, write func(io.Writer) error) (path, sum string, size int64, err error) {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", "", 0, err
+	}
+	tmp, err := os.CreateTemp(dir, mirrorTempPrefix+"*")
+	if err != nil {
+		return "", "", 0, err
+	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	h := sha256.New()
-	err = write(io.MultiWriter(tmp, h))
+	counter := &byteCounter{}
+	err = write(io.MultiWriter(tmp, h, counter))
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		return "", err
+		return "", "", 0, err
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != t.SHA256 {
-		return "", fmt.Errorf("keptsub: %s holds bytes with SHA-256 %s, want %s", t.BlobKey, got, t.SHA256)
-	}
+	sum = hex.EncodeToString(h.Sum(nil))
+	path = filepath.Join(dir, sum+ext)
 	if err := os.Rename(tmp.Name(), path); err != nil {
-		return "", err
+		return "", "", 0, err
 	}
+	s.used(path)
 	s.evictMirrors(dir)
-	return path, nil
+	return path, sum, counter.n, nil
+}
+
+type byteCounter struct{ n int64 }
+
+func (c *byteCounter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	return len(p), nil
 }
 
 // evictMirrors removes the least recently used copies over the budget, and
@@ -148,12 +161,13 @@ func (s *Store) evictMirrors(dir string) {
 		return
 	}
 	type copyFile struct {
-		path  string
-		size  int64
-		mtime time.Time
+		path string
+		size int64
+		used time.Time
 	}
 	var copies []copyFile
 	var total int64
+	s.mu.Lock()
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil || !info.Mode().IsRegular() {
@@ -166,16 +180,24 @@ func (s *Store) evictMirrors(dir string) {
 			}
 			continue
 		}
-		copies = append(copies, copyFile{path: path, size: info.Size(), mtime: info.ModTime()})
+		used := info.ModTime()
+		if at, ok := s.mirrorUsed[path]; ok && at.After(used) {
+			used = at
+		}
+		copies = append(copies, copyFile{path: path, size: info.Size(), used: used})
 		total += info.Size()
 	}
-	slices.SortFunc(copies, func(a, b copyFile) int { return a.mtime.Compare(b.mtime) })
+	s.mu.Unlock()
+	slices.SortFunc(copies, func(a, b copyFile) int { return a.used.Compare(b.used) })
 	for _, c := range copies {
 		if total <= s.opts.MirrorMaxBytes {
 			return
 		}
 		if err := os.Remove(c.path); err == nil || os.IsNotExist(err) {
 			total -= c.size
+			s.mu.Lock()
+			delete(s.mirrorUsed, c.path)
+			s.mu.Unlock()
 		}
 	}
 }

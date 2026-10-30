@@ -10,17 +10,14 @@
 package keptsub
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +31,7 @@ import (
 
 // Blobs is the part of the assets store kept tracks use.
 type Blobs interface {
-	Put(ctx context.Context, key string, data []byte) error
+	PutStream(ctx context.Context, key string, r io.Reader, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error)
 }
 
@@ -45,9 +42,20 @@ const (
 	// index: tens of seconds on slow network storage. A read that takes
 	// longer gives way to the demux, which streams cues as it goes.
 	wholeReadTimeout = 3 * time.Minute
-	// claimLease outlasts the read it covers, so a claim never runs out
-	// under a read that is still going.
-	claimLease = wholeReadTimeout + time.Minute
+	// keepTimeout bounds storing what a read kept.
+	keepTimeout = time.Minute
+	// claimLease outlasts the read and the keep it covers, so a claim never
+	// runs out under a read that is still going.
+	claimLease = wholeReadTimeout + keepTimeout + time.Minute
+	// wholeReads bounds the whole reads running on a node: each can hold a
+	// track's packets in memory, up to keptMaxBytes.
+	wholeReads = 4
+	// keptMaxBytes bounds the packets one whole read holds. It is above
+	// nearly every film's PGS track; a larger track is demuxed instead.
+	keptMaxBytes = 128 << 20
+	// orphanGrace is when the collector checks a stored object no row may
+	// name: one stored just before its row failed to land.
+	orphanGrace = 24 * time.Hour
 	// foregroundWait is how long a request waits on a whole read before it
 	// demuxes the source instead, which streams its first cues at once. It
 	// sits well inside the response's write stall window
@@ -57,8 +65,6 @@ const (
 	// defaultPollInterval is how often a request waiting on another
 	// server's read looks for its result.
 	defaultPollInterval = time.Second
-	// backgroundConcurrency bounds the reads a prefetch keeps in flight.
-	backgroundConcurrency = 4
 	// defaultIndexCacheBytes holds the indexes of a few thousand files.
 	defaultIndexCacheBytes = 64 << 20
 	// startTimesKept bounds the source start times remembered.
@@ -99,10 +105,14 @@ type Store struct {
 	// foregroundWait is foregroundWait; tests shorten it.
 	foregroundWait time.Duration
 
-	mu      sync.Mutex
-	flights map[flightKey]*flight
-	starts  map[sourceVersion]time.Duration
-	mirrors map[string]*mirrorFetch
+	// reads holds a slot per whole read running (wholeReads).
+	reads chan struct{}
+
+	mu         sync.Mutex
+	flights    map[flightKey]*flight
+	starts     map[sourceVersion]time.Duration
+	mirrors    map[string]*mirrorFetch
+	mirrorUsed map[string]time.Time
 }
 
 // NewStore returns a Store over repo and blobs, or nil without either.
@@ -124,6 +134,8 @@ func NewStore(repo Repo, blobs Blobs, opts Options) *Store {
 		foregroundWait: foregroundWait,
 		starts:         map[sourceVersion]time.Duration{},
 		mirrors:        map[string]*mirrorFetch{},
+		mirrorUsed:     map[string]time.Time{},
+		reads:          make(chan struct{}, wholeReads),
 	}
 	s.probeStart = func(ctx context.Context, path string) (time.Duration, error) {
 		return playback.SubtitleSourceStartTime(ctx, s.ffmpegPath(), path)
@@ -192,6 +204,7 @@ func (s *Store) streamInput(ctx context.Context, t *Track, local string) *playba
 	return &playback.SubtitlePacketInput{
 		StreamFormat:    t.StreamFormat,
 		SourceStartTime: t.StartTime,
+		ExpectCues:      t.Packets > 0,
 		Stream: func() (io.ReadCloser, error) {
 			f, err := os.Open(local) //nolint:gosec // G304: a copy under the mirror directory, named by its hash
 			if err == nil {
@@ -302,11 +315,16 @@ func (s *Store) Prefetch(ctx context.Context, path string, ref playback.Embedded
 
 // ensure returns ref's kept track for the source's current version, reading
 // and keeping it when there is none. Concurrent calls for a track share one
-// read; a background call reads at idle priority and gives way to another
-// server's read.
+// read. A background call reads at idle priority, gives way to another
+// server's read, and stops when its callers go, until a foreground call
+// joins it.
 func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, background bool) (*Track, error) {
 	if !servable(ref.Codec) {
 		return nil, errNotServable
+	}
+	if s.mirrorDir() == "" {
+		// Kept tracks are served from their local copies.
+		return nil, errNoMirrorDir
 	}
 	info, err := fspath.Stat(path)
 	if err != nil {
@@ -325,18 +343,27 @@ func (s *Store) ensure(ctx context.Context, path string, ref playback.EmbeddedSu
 	if err != nil {
 		return nil, err
 	}
-	key := flightKey{fileID: ref.MediaFileID, stream: ref.StreamIndex, version: v, background: background}
+	key := flightKey{fileID: ref.MediaFileID, stream: ref.StreamIndex, version: v}
 	wait := s.foregroundWait
 	if background {
 		wait = 0
 	}
-	return s.shared(ctx, key, wait, func(ctx context.Context) (*Track, error) {
-		return s.readWhole(ctx, path, ref, number, v, background)
-	})
+	read := func(ctx context.Context, f *flight) (*Track, error) {
+		return s.readWhole(ctx, f, path, ref, number, v)
+	}
+	t, err = s.shared(ctx, key, background, wait, read)
+	if !background && errors.Is(err, errClaimedElsewhere) {
+		// A background read gave way to another server just before this
+		// request joined it; a read of the request's own waits instead.
+		t, err = s.shared(ctx, key, background, wait, read)
+	}
+	return t, err
 }
 
 // readWhole reads a track whole through the source's index and keeps it.
-func (s *Store) readWhole(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, number uint64, v sourceVersion, background bool) (*Track, error) {
+// Waiting on another server's read and the read itself are bounded
+// separately, each by wholeReadTimeout.
+func (s *Store) readWhole(ctx context.Context, f *flight, path string, ref playback.EmbeddedSubtitleRef, number uint64, v sourceVersion) (*Track, error) {
 	// Another caller may have kept it since this one looked.
 	if t, err := s.repo.Track(ctx, ref.MediaFileID, ref.StreamIndex); err == nil && t.matches(v, ref) {
 		return t, nil
@@ -347,7 +374,7 @@ func (s *Store) readWhole(ctx context.Context, path string, ref playback.Embedde
 		slog.WarnContext(ctx, "subtitle track claim failed; reading without it", "component", "keptsub",
 			"file_id", ref.MediaFileID, "stream_index", ref.StreamIndex, "error", err)
 	} else if !claimed {
-		if background {
+		if !s.isForeground(f) {
 			return nil, errClaimedElsewhere
 		}
 		t, ok, err := s.waitForOther(ctx, ref, v, token)
@@ -366,36 +393,62 @@ func (s *Store) readWhole(ctx context.Context, path string, ref playback.Embedde
 		}()
 	}
 
-	idx, track, err := s.sourceTrack(ctx, path, ref, number)
+	readCtx, cancel := context.WithTimeout(ctx, wholeReadTimeout)
+	defer cancel()
+	t, stats, err := s.readAndCopy(readCtx, f, path, ref, number, v)
 	if err != nil {
 		return nil, err
+	}
+	// The read is done: keep it even if every caller has gone.
+	keepCtx, cancelKeep := context.WithTimeout(context.WithoutCancel(ctx), keepTimeout)
+	defer cancelKeep()
+	if err := s.keep(keepCtx, t, filepath.Join(s.mirrorDir(), mirrorName(t))); err != nil {
+		return nil, err
+	}
+	slog.InfoContext(ctx, "kept embedded subtitle track", "component", "keptsub",
+		"file_id", t.MediaFileID, "stream_index", t.StreamIndex, "method", t.Method, "packets", t.Packets,
+		"bytes", t.Bytes, "reads", stats.Reads, "read_bytes", stats.Bytes, "elapsed_ms", stats.Wall.Milliseconds(),
+		"background", f.prio != nil)
+	return t, nil
+}
+
+// readAndCopy reads the track's packets, in one of the node's whole-read
+// slots, and writes them as a kept stream to the local copies, returning
+// the track to record.
+func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref playback.EmbeddedSubtitleRef, number uint64, v sourceVersion) (*Track, embeddedsub.ReadStats, error) {
+	select {
+	case s.reads <- struct{}{}:
+		defer func() { <-s.reads }()
+	case <-ctx.Done():
+		return nil, embeddedsub.ReadStats{}, ctx.Err()
+	}
+	idx, track, err := s.sourceTrack(ctx, path, ref, number)
+	if err != nil {
+		return nil, embeddedsub.ReadStats{}, err
 	}
 	start, err := s.startTime(ctx, path, v)
 	if err != nil {
-		return nil, err
+		return nil, embeddedsub.ReadStats{}, err
 	}
-	opts := embeddedsub.ReadOptions{}
-	if background {
-		opts = embeddedsub.ReadOptions{IdleIO: true, Concurrency: backgroundConcurrency}
-	}
-	readCtx, cancel := context.WithTimeout(ctx, wholeReadTimeout)
-	defer cancel()
-	res, err := embeddedsub.ReadPackets(readCtx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo, opts)
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo,
+		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: keptMaxBytes})
 	if err != nil {
-		return nil, err
+		return nil, embeddedsub.ReadStats{}, err
 	}
 	if len(res.Packets) == 0 {
-		return nil, errNoPackets
+		return nil, res.Stats, errNoPackets
 	}
-	var kept bytes.Buffer
-	if err := embeddedsub.WriteKept(&kept, idx, track, res.Packets); err != nil {
-		return nil, err
+	_, sum, size, err := s.writeMirror(s.mirrorDir(), streamExt(idx.StreamFormat()), func(w io.Writer) error {
+		return embeddedsub.WriteKept(w, idx, track, res.Packets)
+	})
+	if err != nil {
+		return nil, res.Stats, err
 	}
 	completeness := CompletenessUnknown
 	if track.Completeness == embeddedsub.CompletenessComplete {
 		completeness = CompletenessComplete
 	}
-	t := &Track{
+	return &Track{
 		MediaFileID:      ref.MediaFileID,
 		StreamIndex:      ref.StreamIndex,
 		ContainerTrackID: ref.ContainerTrackID,
@@ -404,22 +457,13 @@ func (s *Store) readWhole(ctx context.Context, path string, ref playback.Embedde
 		SourceModTime:    idx.ModTime.UnixNano(),
 		StreamFormat:     idx.StreamFormat(),
 		StartTime:        start,
+		SHA256:           sum,
+		Bytes:            size,
 		Packets:          len(res.Packets),
 		Completeness:     completeness,
 		Method:           MethodCues,
 		HasOverrideTags:  overrideTags(ref.Codec, res.Packets),
-	}
-	// The read is done: keep it even if every caller has gone.
-	keepCtx, cancelKeep := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-	defer cancelKeep()
-	if err := s.keep(keepCtx, t, kept.Bytes()); err != nil {
-		return nil, err
-	}
-	slog.InfoContext(ctx, "kept embedded subtitle track", "component", "keptsub",
-		"file_id", t.MediaFileID, "stream_index", t.StreamIndex, "method", t.Method, "packets", t.Packets,
-		"bytes", t.Bytes, "reads", res.Stats.Reads, "read_bytes", res.Stats.Bytes, "elapsed_ms", res.Stats.Wall.Milliseconds(),
-		"background", background)
-	return t, nil
+	}, res.Stats, nil
 }
 
 // waitForOther waits while another server reads the track, for the track
@@ -455,7 +499,7 @@ func (s *Store) sourceTrack(ctx context.Context, path string, ref playback.Embed
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: %d", embeddedsub.ErrTrackNotFound, number)
 	}
-	if containerCodecFamily(track.CodecID) != codecFamily(ref.Codec) {
+	if codecFamily(track.FFmpegCodec()) != codecFamily(ref.Codec) {
 		return nil, nil, fmt.Errorf("%w: %s is %s", errCodecMismatch, ref.Codec, track.CodecID)
 	}
 	return idx, track, nil
@@ -489,6 +533,9 @@ func (s *Store) DemuxCopy(ctx context.Context, path string, ref playback.Embedde
 	if format == "" {
 		return playback.DemuxCopy{}, errNotServable
 	}
+	if s.mirrorDir() == "" {
+		return playback.DemuxCopy{}, errNoMirrorDir
+	}
 	info, err := fspath.Stat(path)
 	if err != nil {
 		return playback.DemuxCopy{}, err
@@ -501,7 +548,8 @@ func (s *Store) DemuxCopy(ctx context.Context, path string, ref playback.Embedde
 }
 
 // KeepDemuxed keeps the copy of ref's track a demux of path wrote, once it
-// reads back as one track with packets.
+// indexes as one track with packets. Only a text track's packets are read,
+// for its override-tag fact; a PGS track's are counted from the index.
 func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.EmbeddedSubtitleRef, demuxCopy playback.DemuxCopy, srcSize int64, srcModTime time.Time) error {
 	idx, err := embeddedsub.ReadIndex(ctx, demuxCopy.Path)
 	if err != nil {
@@ -511,17 +559,33 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 		return fmt.Errorf("%w: demuxed copy has %d tracks", embeddedsub.ErrMalformed, len(idx.Tracks))
 	}
 	track := &idx.Tracks[0]
-	res, err := embeddedsub.ReadPackets(ctx, demuxCopy.Path, idx, track.Number, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
-	if err != nil {
-		return err
+	packets := len(track.Cues)
+	if idx.Container == embeddedsub.ContainerMP4 {
+		packets = int(track.FrameCount)
 	}
-	if len(res.Packets) == 0 {
+	var tags *bool
+	if overrideTagsApply(ref.Codec) {
+		res, err := embeddedsub.ReadPackets(ctx, demuxCopy.Path, idx, track.Number, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{MaxBytes: keptMaxBytes})
+		if err != nil {
+			return err
+		}
+		packets, tags = len(res.Packets), overrideTags(ref.Codec, res.Packets)
+	}
+	if packets <= 0 {
 		return errNoPackets
 	}
 	if info, err := fspath.Stat(path); err != nil || info.Size() != srcSize || !info.ModTime().Equal(srcModTime) {
 		return errSourceChanged
 	}
-	data, err := os.ReadFile(demuxCopy.Path)
+	copyFile, err := os.Open(demuxCopy.Path)
+	if err != nil {
+		return err
+	}
+	local, sum, size, err := s.writeMirror(s.mirrorDir(), streamExt(demuxCopy.Format), func(w io.Writer) error {
+		_, err := io.Copy(w, copyFile)
+		return err
+	})
+	_ = copyFile.Close()
 	if err != nil {
 		return err
 	}
@@ -534,13 +598,15 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 		SourceModTime:    srcModTime.UnixNano(),
 		StreamFormat:     demuxCopy.Format,
 		StartTime:        demuxCopy.StartTime,
-		Packets:          len(res.Packets),
+		SHA256:           sum,
+		Bytes:            size,
+		Packets:          packets,
 		// FFmpeg demuxed the whole file.
 		Completeness:    CompletenessComplete,
 		Method:          MethodFFmpeg,
-		HasOverrideTags: overrideTags(ref.Codec, res.Packets),
+		HasOverrideTags: tags,
 	}
-	if err := s.keep(ctx, t, data); err != nil {
+	if err := s.keep(ctx, t, local); err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "kept embedded subtitle track", "component", "keptsub",
@@ -548,18 +614,24 @@ func (s *Store) KeepDemuxed(ctx context.Context, path string, ref playback.Embed
 	return nil
 }
 
-// keep stores data as t's kept stream, copies it locally, and records t.
-// The object goes first, so a row never names a missing object; an object
-// whose row never lands is the orphan sweep's.
-func (s *Store) keep(ctx context.Context, t *Track, data []byte) error {
-	sum := sha256.Sum256(data)
-	t.SHA256 = hex.EncodeToString(sum[:])
-	t.Bytes = int64(len(data))
+// keep stores the local copy at local as t's kept stream and records t.
+// The key is queued for the collector before the object is stored, so an
+// object whose row never lands is deleted after orphanGrace, while one a row
+// names is live and stays. The object goes before the row, so a row never
+// names a missing object.
+func (s *Store) keep(ctx context.Context, t *Track, local string) error {
 	t.BlobKey = blobKey(t)
-	if err := s.blobs.Put(ctx, t.BlobKey, data); err != nil {
+	if err := s.repo.QueueCollection(ctx, t.BlobKey, orphanGrace); err != nil {
+		return err
+	}
+	f, err := os.Open(local) //nolint:gosec // G304: a copy under the mirror directory, named by its hash
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	if err := s.blobs.PutStream(ctx, t.BlobKey, f, "application/octet-stream"); err != nil {
 		return fmt.Errorf("store kept subtitle track: %w", err)
 	}
-	s.mirrorData(t, data)
 	return s.repo.PutTrack(ctx, *t)
 }
 
@@ -584,7 +656,9 @@ func trackNumber(ref playback.EmbeddedSubtitleRef) (uint64, error) {
 	return n, nil
 }
 
-// Codec families: the probed codec names that read the same way.
+// Codec families, as playback.SubtitleCodecFamilyV3 names them, that the
+// index reads: the text codecs and PGS, the bitmap codec served without
+// burn-in.
 const (
 	codecSubRip  = "subrip"
 	codecASS     = "ass"
@@ -593,47 +667,24 @@ const (
 	codecPGS     = "hdmv_pgs_subtitle"
 )
 
-// codecFamily groups the probed codec names that read the same way.
-func codecFamily(codec string) string {
-	switch c := strings.ToLower(strings.TrimSpace(codec)); c {
-	case codecSubRip, "srt":
-		return codecSubRip
-	case codecASS, "ssa":
-		return codecASS
-	case codecWebVTT, codecMovText, codecPGS:
-		return c
-	}
-	return ""
-}
+// codecFamily is playback's family of a codec name.
+func codecFamily(codec string) string { return playback.SubtitleCodecFamilyV3(codec) }
 
-// containerCodecFamily maps an index track's CodecID to codecFamily's
-// names.
-func containerCodecFamily(codecID string) string {
-	switch codecID {
-	case "S_TEXT/UTF8", "S_TEXT/ASCII":
-		return codecSubRip
-	case "S_TEXT/ASS", "S_TEXT/SSA", "S_ASS", "S_SSA":
-		return codecASS
-	case "S_TEXT/WEBVTT":
-		return codecWebVTT
-	case "S_HDMV/PGS":
-		return codecPGS
-	case "tx3g", "text":
-		return codecMovText
+// servable reports whether tracks of codec are read through the index.
+func servable(codec string) bool {
+	switch codecFamily(codec) {
+	case codecSubRip, codecASS, codecWebVTT, codecMovText, codecPGS:
+		return true
 	}
-	return ""
+	return false
 }
-
-// servable reports whether tracks of codec are read through the index:
-// the text codecs and PGS, the bitmap codec served without burn-in.
-func servable(codec string) bool { return codecFamily(codec) != "" }
 
 // demuxCopyFormat is the muxer a demux copies a track of codec into.
 func demuxCopyFormat(codec string) string {
-	switch codecFamily(codec) {
-	case "":
+	switch {
+	case !servable(codec):
 		return ""
-	case codecMovText:
+	case codecFamily(codec) == codecMovText:
 		return string(embeddedsub.ContainerMP4)
 	}
 	return string(embeddedsub.ContainerMatroska)

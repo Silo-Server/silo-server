@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -219,7 +218,7 @@ func (p *Prefetcher) targets(ctx context.Context, req PrefetchRequest) []prefetc
 		}
 		if next != nil && next.ID != req.File.ID {
 			add(next, func(t models.SubtitleTrack) bool {
-				return !t.External && textCodec(t.Codec) && sameLanguage(t.Language, req.Language)
+				return !t.External && textCodec(t.Codec) && playback.SameTrackLanguageV3(t.Language, req.Language)
 			})
 		}
 	}
@@ -240,13 +239,6 @@ func overrideTagsApply(codec string) bool {
 func textCodec(codec string) bool {
 	family := codecFamily(codec)
 	return family != "" && family != codecPGS
-}
-
-// sameLanguage compares languages by primary subtag, so eng, en and en-US
-// match.
-func sameLanguage(a, b string) bool {
-	pa, pb := lang.PrimaryLanguage(a), lang.PrimaryLanguage(b)
-	return pa != "" && pa == pb
 }
 
 // EpisodeLookup is the catalog the next episode is found in.

@@ -27,7 +27,8 @@ func (r *ioprioReader) ReadAt(p []byte, off int64) (int, error) {
 
 func TestIdleReaderReadsAtIdlePriority(t *testing.T) {
 	src := &ioprioReader{reader: strings.NewReader("subtitle bytes")}
-	ir := newIdleReader(src, 3)
+	prio := NewBackgroundPriority()
+	ir := newIdleReader(src, 3, prio)
 	var wg sync.WaitGroup
 	for i := range 12 {
 		wg.Go(func() {
@@ -40,7 +41,7 @@ func TestIdleReaderReadsAtIdlePriority(t *testing.T) {
 	wg.Wait()
 	ir.close()
 	if _, err := ir.ReadAt(make([]byte, 1), 0); err == nil {
-		t.Fatal("a closed reader read")
+		t.Fatal("a closed background reader read")
 	}
 	for _, prio := range src.prios {
 		if prio>>ioprioClassShift != ioprioClassIdle {
@@ -49,5 +50,16 @@ func TestIdleReaderReadsAtIdlePriority(t *testing.T) {
 	}
 	if own, _, _ := unix.Syscall(unix.SYS_IOPRIO_GET, ioprioWhoProcess, 0, 0); int(own)>>ioprioClassShift == ioprioClassIdle {
 		t.Fatal("the caller's thread was left in the idle class")
+	}
+
+	// Raised, reads run on the caller's thread at its priority, even after
+	// the idle threads are gone.
+	prio.Raise()
+	src.prios = nil
+	if _, err := ir.ReadAt(make([]byte, 1), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(src.prios) != 1 || src.prios[0]>>ioprioClassShift == ioprioClassIdle {
+		t.Fatalf("a raised read ran at I/O priority %#x", src.prios)
 	}
 }
