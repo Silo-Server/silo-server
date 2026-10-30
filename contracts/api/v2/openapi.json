@@ -23981,6 +23981,11 @@
             },
             "type": "array"
           },
+          "hero_video_url": {
+            "description": "A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -24430,6 +24435,11 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "hero_video_url": {
+            "description": "A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title",
+            "format": "uri-reference",
+            "type": "string"
           },
           "imdb_id": {
             "type": "string"
@@ -32531,6 +32541,11 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "hero_video_url": {
+            "description": "A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title",
+            "format": "uri-reference",
+            "type": "string"
           },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
@@ -53540,6 +53555,11 @@
             },
             "type": "array"
           },
+          "hero_video_url": {
+            "description": "A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -53932,6 +53952,11 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "hero_video_url": {
+            "description": "A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title",
+            "format": "uri-reference",
+            "type": "string"
           },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",

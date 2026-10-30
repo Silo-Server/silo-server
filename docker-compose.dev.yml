@@ -58,7 +58,13 @@ services:
             git \
             libvips-dev \
             pkg-config \
+            python3 \
+            python3-pip \
           && rm -rf /var/lib/apt/lists/*
+
+        # Current yt-dlp, not Debian's: an old downloader cannot answer today's
+        # YouTube signature challenges.
+        RUN python3 -m pip install --break-system-packages --no-cache-dir yt-dlp
 
         COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
         COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm

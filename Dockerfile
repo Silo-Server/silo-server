@@ -76,7 +76,11 @@ RUN apt-get update && \
     echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian trixie main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
+    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk python3 python3-pip && \
+    # yt-dlp downloads a title's trailer when the hero clip task makes one, and
+    # it has to be current: YouTube changes faster than Debian's package tracks,
+    # and a stale downloader fails with a signature challenge it cannot answer.
+    python3 -m pip install --break-system-packages --no-cache-dir yt-dlp && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 # Debian's Intel OpenCL runtime lags the media hardware supported by the

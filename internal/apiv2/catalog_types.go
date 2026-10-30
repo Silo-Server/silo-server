@@ -55,6 +55,7 @@ type CatalogItem struct {
 	BackdropURL            string                    `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	BackdropThumbhash      string                    `json:"backdrop_thumbhash,omitempty"`
 	LogoURL                string                    `json:"logo_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
+	HeroVideoURL           string                    `json:"hero_video_url,omitempty" format:"uri-reference" doc:"A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title"`
 	MangaChapterCount      *int                      `json:"manga_chapter_count,omitempty"`
 	MangaVolumeCount       *int                      `json:"manga_volume_count,omitempty"`
 	OverlaySummary         *CatalogItemOverlay       `json:"overlay_summary,omitempty" doc:"Technical badges of the best file"`
@@ -207,6 +208,7 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		SeriesBackdropURL: v.ParentArtwork.SeriesBackdropURL, SeriesBackdropThumbhash: v.ParentArtwork.SeriesBackdropThumbhash,
 		SeasonPosterURL: v.ParentArtwork.SeasonPosterURL, SeasonPosterThumbhash: v.ParentArtwork.SeasonPosterThumbhash,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
+		HeroVideoURL:               v.HeroVideoURL,
 		PendingTranslationLanguage: v.PendingTranslationLanguage, MachineTranslatedFields: v.MachineTranslatedFields,
 	}
 	if e := v.UpcomingEvent; e != nil {

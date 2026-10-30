@@ -55,6 +55,10 @@ export function HomePreferencesCard({
   onNewReleasesFirstReset,
   hideWatched,
   onHideWatchedChange,
+  heroTrailers,
+  heroTrailersChosen,
+  onHeroTrailersChange,
+  onHeroTrailersReset,
   loaded,
   disabled,
 }: {
@@ -69,6 +73,11 @@ export function HomePreferencesCard({
   onNewReleasesFirstReset: () => void;
   hideWatched: boolean;
   onHideWatchedChange: (checked: boolean) => void;
+  heroTrailers: boolean;
+  /** Whether the profile stored a choice, which is what a reset can undo. */
+  heroTrailersChosen: boolean;
+  onHeroTrailersChange: (checked: boolean) => void;
+  onHeroTrailersReset: () => void;
   /** Whether the effective values arrived; until then nothing claims a source. */
   loaded: boolean;
   disabled: boolean;
@@ -76,6 +85,7 @@ export function HomePreferencesCard({
   const nextUpId = useId();
   const newReleasesFirstId = useId();
   const hideWatchedId = useId();
+  const heroTrailersId = useId();
 
   return (
     <div className="surface-panel divide-border/60 divide-y rounded-[22px] px-[22px]">
@@ -165,6 +175,35 @@ export function HomePreferencesCard({
           disabled={disabled}
           onCheckedChange={(next) => onHideWatchedChange(next === true)}
         />
+      </div>
+      <div className="flex items-center justify-between gap-4 py-5">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={heroTrailersId} className="text-sm font-semibold">
+            Hero trailers
+          </label>
+          <p
+            id={`${heroTrailersId}-help`}
+            className="text-muted-foreground text-[13px] leading-relaxed"
+          >
+            Play a short clip of the title&apos;s trailer behind the featured row, in place of its
+            still backdrop. Labels keep their title art either way.
+          </p>
+          {loaded && !heroTrailersChosen ? (
+            <InheritedNote value={heroTrailers ? "on" : "off"} />
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {heroTrailersChosen ? (
+            <UseServerDefaultButton onClick={onHeroTrailersReset} disabled={disabled} />
+          ) : null}
+          <Switch
+            id={heroTrailersId}
+            aria-describedby={`${heroTrailersId}-help`}
+            checked={heroTrailers}
+            disabled={disabled}
+            onCheckedChange={(next) => onHeroTrailersChange(next === true)}
+          />
+        </div>
       </div>
     </div>
   );

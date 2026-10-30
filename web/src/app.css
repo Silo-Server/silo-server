@@ -1903,6 +1903,48 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .hero-progress-rail[data-paused="true"] > span {
     animation-play-state: paused;
   }
+  /*
+   * Hero trailer: the black the backdrop still fades through, and the muted clip
+   * itself. Both sit above the still and below the scrims, so the title block
+   * keeps its contrast, and both ignore the pointer — the hero's buttons and its
+   * swipe gesture stay theirs. The fade durations are set from the component, so
+   * the numbers live in one place (`./heroTrailer`).
+   */
+  .hero-trailer-black {
+    position: absolute;
+    inset: 0;
+    background: #000;
+    opacity: 0;
+    transition-property: opacity;
+    transition-timing-function: ease-out;
+    pointer-events: none;
+  }
+  .hero-trailer-black[data-visible="true"] {
+    opacity: 1;
+  }
+  .hero-trailer-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition-property: opacity;
+    transition-timing-function: ease-out;
+    pointer-events: none;
+  }
+  .hero-trailer-video[data-visible="true"] {
+    opacity: 1;
+  }
+  /*
+   * A slide with a clip has no 8s cycle to animate: the bar reports the clip's
+   * own position instead, so the shared animation is off and its width does the
+   * work. `HeroBanner` sets that width.
+   */
+  .hero-progress-rail[data-clip="true"] > span {
+    animation: none;
+    transform: none;
+  }
   @keyframes hero-progress {
     from {
       transform: scaleX(0);

@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 24,
+  "revision": 25,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1304,6 +1304,32 @@
       "label": "Theme music",
       "description": "Play local theme music while browsing movie and show detail pages.",
       "recommended_control": "switch"
+    },
+    {
+      "key": "hero.trailers_enabled",
+      "introduced_in": 25,
+      "persistence": "remote",
+      "allowed_scopes": [
+        "profile",
+        "profile_device"
+      ],
+      "resolution_order": [
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "platforms": [
+        "web"
+      ],
+      "category": "appearance",
+      "label": "Hero trailers",
+      "description": "Play a short clip of a title's trailer behind the featured row, in place of its still backdrop.",
+      "recommended_control": "switch",
+      "admin_default": true
     },
     {
       "key": "ui.theme_music_loop",

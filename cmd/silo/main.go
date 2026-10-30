@@ -70,6 +70,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/extrastills"
+	"github.com/Silo-Server/silo-server/internal/heroclips"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -3206,7 +3207,7 @@ func main() {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
-			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace()}
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace(), heroclips.BlobNamespace()}
 			// Replaced chapter images are queued by key; the sweep lists by file.
 			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace()}, mediaImages...)
 			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, collected...); collector != nil {
@@ -3215,6 +3216,16 @@ func main() {
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
+			// Hero clips are made here rather than on a page load: a task an
+			// administrator can see, schedule, or turn off where the rest of the
+			// background work lives.
+			heroClipRepo := heroclips.NewRepository(deps.DB)
+			heroClipGenerator := &heroclips.Generator{
+				Publisher:  heroClipRepo,
+				Clips:      deps.Blobs.Assets,
+				FFmpegPath: func() string { return cfg.Playback.FFmpegPath },
+			}
+			taskMgr.Register(tasks.NewGenerateHeroClipsTask(heroClipRepo, heroClipGenerator, heroclips.NewRecipe(0)))
 			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayService.Start(appCtx)
@@ -4343,6 +4354,9 @@ func configureBlobStorage(ctx context.Context, mode string, cfg *config.Config, 
 	deps.ArtworkBackend = backend
 	deps.ArtworkSigner = artworkurl.NewSigner(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry)
 	deps.ArtworkResolver = artworkurl.NewServerResolver(deps.ArtworkSigner)
+	// Hero clips are served through the same signing as artwork, with a longer
+	// lifetime: a clip plays for minutes and the element re-requests as it goes.
+	deps.HeroClips = heroclips.URLResolver{Clips: heroclips.NewRepository(deps.DB), Resolver: deps.ArtworkResolver}
 	deps.ArtworkDelivery = api.ArtworkDelivery{Scope: store.Identity()}
 	if direct, ok := store.(blobstore.DirectURLer); ok {
 		ttl := cfg.S3.MetadataPresignExpiry

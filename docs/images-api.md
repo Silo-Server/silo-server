@@ -303,6 +303,21 @@ no such image. There is no season backdrop field; Continue Watching and Next Up
 rows show it as `backdrop_url`.
 The frozen `/api/v1` responses do not carry them.
 
+## Hero clips
+
+`hero_video_url` on a section card is a short clip of the title's own trailer,
+for a client that renders the featured row as a video hero: it plays muted behind
+the backdrop the card already carries, and the client falls back to that backdrop
+whenever the field is absent. It is a finished file, made once per title from a
+trailer the catalog already knows, and served through the same signing as
+artwork with a longer lifetime — a clip plays for minutes, and a media element
+re-requests as it goes.
+
+The field is absent when this server has no clip for the title, which is the
+ordinary case: clips are made for the titles the featured discover rows hold, not
+for every title in a library. A client treats its absence as normal, never as an
+error, and never waits for it. The frozen `/api/v1` cards do not carry it.
+
 ## Jellyfin compatibility
 
 The Jellyfin-protocol surface maps its own `MaxWidth`/`MaxHeight`/`FillWidth`/

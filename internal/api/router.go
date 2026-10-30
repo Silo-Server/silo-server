@@ -149,7 +149,11 @@ type Dependencies struct {
 	ArtworkDelivery ArtworkDelivery
 	ArtworkSigner   *artworkurl.Signer
 	ArtworkResolver artworkurl.Resolver
-	ArtworkRepair   interface {
+	// HeroClips resolves the clip a hero card may play behind its backdrop
+	// (see internal/heroclips). Set where artwork resolution is configured; nil
+	// leaves every card without a clip, which is exactly the historical look.
+	HeroClips     handlers.HeroVideoURLSource
+	ArtworkRepair interface {
 		EnqueueArtworkRepair(context.Context, []string, int) (int, error)
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
@@ -2090,6 +2094,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if deps.SeasonalListRefresher != nil {
 			sectionHandler.SeasonalLists = deps.SeasonalListRefresher
+		}
+		if deps.HeroClips != nil {
+			sectionHandler.HeroClips = deps.HeroClips
 		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo

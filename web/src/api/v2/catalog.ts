@@ -82,6 +82,10 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     backdrop_url: item.backdrop_url ?? "",
     backdrop_thumbhash: item.backdrop_thumbhash ?? "",
     logo_url: item.logo_url ?? "",
+    // The clip the hero plays behind this card's backdrop, when the server has
+    // one for the title. Carried through untouched: the hero decides what to do
+    // with it, and its absence is the ordinary case.
+    hero_video_url: item.hero_video_url,
     added_at: item.added_at,
     release_date: item.release_date,
     last_air_date: item.last_air_date,

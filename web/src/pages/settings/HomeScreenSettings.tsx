@@ -43,6 +43,7 @@ const HOME_PREFERENCE_KEYS = [
   SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
   SETTING_KEYS.UI_NEXT_UP_MODE,
   SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+  SETTING_KEYS.HERO_TRAILERS_ENABLED,
 ] as const;
 
 /**
@@ -98,6 +99,8 @@ export default function HomeScreenSettings() {
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
   const newReleasesFirst =
     homePreferences.data?.[SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST]?.value === true;
+  const heroTrailers =
+    homePreferences.data?.[SETTING_KEYS.HERO_TRAILERS_ENABLED]?.value === true;
   // Next up is device-overridable, so it saves through the writer that also
   // clears a device row shadowing the profile's choice.
   const nextUpWriter = useProfileDefaultWriter(homePreferences.data);
@@ -276,6 +279,13 @@ export default function HomeScreenSettings() {
     );
   }
 
+  function handleHeroTrailersChange(enabled: boolean) {
+    saveHomePreference.mutate(
+      { key: SETTING_KEYS.HERO_TRAILERS_ENABLED, value: enabled, identity: PROFILE_SCOPE },
+      { onError: () => toast.error("Failed to save Home preference") },
+    );
+  }
+
   let notice = null;
   if (adapter.overridesFailed) {
     notice = (
@@ -323,6 +333,12 @@ export default function HomeScreenSettings() {
         }
         hideWatched={hideWatchedItems}
         onHideWatchedChange={handleHideWatchedItemsChange}
+        heroTrailers={heroTrailers}
+        heroTrailersChosen={
+          homePreferences.data?.[SETTING_KEYS.HERO_TRAILERS_ENABLED]?.source === "profile"
+        }
+        onHeroTrailersChange={handleHeroTrailersChange}
+        onHeroTrailersReset={() => resetToServerDefault(SETTING_KEYS.HERO_TRAILERS_ENABLED)}
         loaded={homePreferences.data !== undefined}
         disabled={
           homePreferences.isLoading ||

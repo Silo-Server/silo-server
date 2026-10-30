@@ -45,6 +45,27 @@ vi.mock("@/lib/thumbhash", () => ({
   decodeThumbhash: () => "",
 }));
 
+/*
+ * Title art is a profile setting the hero reads, so the hook is stubbed here
+ * rather than wired to a query client.
+ */
+const titleArt = vi.hoisted(() => ({ show: true as boolean | undefined }));
+
+vi.mock("@/hooks/useTitleArt", () => ({
+  useShowTitleArt: () => titleArt.show,
+}));
+
+/*
+ * Hero trailers are a profile setting the hero reads, so the hook is stubbed
+ * here rather than wired to a query client. On by default in these tests: the
+ * contract's own default is off, and the gate has its own test.
+ */
+const heroTrailers = vi.hoisted(() => ({ enabled: true as boolean | undefined }));
+
+vi.mock("@/hooks/useHeroTrailersEnabled", () => ({
+  useHeroTrailersEnabled: () => heroTrailers.enabled,
+}));
+
 vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
   useAudiobookPlaybackController: () => playbackMocks.controller,
 }));
@@ -180,6 +201,7 @@ describe("HeroBanner", () => {
     spoilerPrefs.hideOverviews = false;
     playbackMocks.controller = null;
     playbackMocks.toggleActivePlayback.mockClear();
+    titleArt.show = true;
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -600,5 +622,218 @@ describe("HeroBanner", () => {
       render(hero({ items: [movieSlide({ machine_translated_fields: ["overview"] })] }));
       expect(await screen.findByText("Translated by AI")).toBeInTheDocument();
     });
+  });
+});
+
+/*
+ * The hero trailer: the still holds, the fade hands the screen over, the
+ * clip's own length is the slide's length, and a clip that cannot play leaves
+ * the backdrop exactly where it was.
+ */
+describe("HeroBanner hero trailer", () => {
+  const clipSlide = () =>
+    movieSlide({
+      content_id: "movie-clip",
+      backdrop_url: "/clip-backdrop.jpg",
+      hero_video_url: "/clip.mp4",
+    });
+
+  function activeSlideNumber(container: HTMLElement): string {
+    return container.querySelector(".hero-slide-counter .num")?.textContent ?? "";
+  }
+
+  beforeEach(() => {
+    heroTrailers.enabled = true;
+    titleArt.show = true;
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    delete (navigator as Navigator & { connection?: unknown }).connection;
+  });
+
+  it("holds the backdrop until the clip can play", () => {
+    vi.useFakeTimers();
+    const { container } = render(hero({ items: [clipSlide()] }));
+
+    expect(container.querySelector("video")).toHaveAttribute("data-visible", "false");
+    expect(container.querySelector(".hero-trailer-black")).toHaveAttribute("data-visible", "false");
+
+    act(() => vi.advanceTimersByTime(30_000));
+
+    expect(container.querySelector("video")).toHaveAttribute("data-visible", "false");
+    expect(container.querySelector(".hero-trailer-black")).toHaveAttribute("data-visible", "false");
+  });
+
+  it("fades the clip in once it is ready, and moves on when it ends", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      hero({
+        items: [clipSlide(), movieSlide({ content_id: "movie-2", title: "Second" })],
+      }),
+    );
+    const video = container.querySelector("video")!;
+
+    fireEvent(video, new Event("canplay"));
+    act(() => vi.advanceTimersByTime(10_000));
+    // The hold hands the screen to the fade, and the fade to the clip.
+    act(() => vi.advanceTimersByTime(1_000));
+
+    expect(container.querySelector("video")).toHaveAttribute("data-visible", "true");
+
+    // The clip sets the pace: the 8s cycle does not move a slide with a clip.
+    expect(activeSlideNumber(container)).toBe("01");
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(activeSlideNumber(container)).toBe("01");
+
+    fireEvent(video, new Event("ended"));
+
+    expect(activeSlideNumber(container)).toBe("02");
+  });
+
+  it("keeps the backdrop when the clip cannot play", () => {
+    const { container } = render(hero({ items: [clipSlide()] }));
+
+    fireEvent(container.querySelector("video")!, new Event("error"));
+
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector(".hero-trailer-black")).toBeNull();
+    expect(container.querySelector('img[src="/clip-backdrop.jpg"]')).not.toBeNull();
+  });
+
+  it("does not play a clip for reduced motion or a metered connection", () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const reduced = render(hero({ items: [clipSlide()] }));
+    expect(reduced.container.querySelector("video")).toBeNull();
+    reduced.unmount();
+
+    Object.defineProperty(navigator, "connection", {
+      value: { saveData: true },
+      configurable: true,
+    });
+    const metered = render(hero({ items: [clipSlide()] }));
+    expect(metered.container.querySelector("video")).toBeNull();
+  });
+
+  it("shows the clip's own position on the rail instead of the 8s cycle", () => {
+    const { container } = render(
+      hero({ items: [clipSlide(), movieSlide({ content_id: "movie-2", title: "Second" })] }),
+    );
+    const video = container.querySelector("video")!;
+    const rail = container.querySelector(".hero-progress-rail");
+
+    expect(rail).toHaveAttribute("data-clip", "true");
+
+    Object.defineProperty(video, "duration", { value: 100, configurable: true });
+    Object.defineProperty(video, "currentTime", { value: 25, writable: true, configurable: true });
+    fireEvent.timeUpdate(video);
+
+    expect(rail?.querySelector("span")?.style.width).toBe("25%");
+  });
+
+  it("shows no sound control when the slide has no clip", () => {
+    const { container } = render(hero({ items: [movieSlide({ content_id: "movie-1" })] }));
+
+    expect(container.querySelector("video")).toBeNull();
+    expect(screen.queryByRole("button", { name: /trailer/i })).not.toBeInTheDocument();
+  });
+
+  it("starts muted, and the control un-mutes the element", () => {
+    const { container } = render(
+      hero({ items: [clipSlide(), movieSlide({ content_id: "movie-2", title: "Second" })] }),
+    );
+    const video = container.querySelector("video")!;
+    const [sound] = screen.getAllByRole("button", { name: "Unmute trailer" });
+
+    expect(video.muted).toBe(true);
+
+    fireEvent.click(sound);
+
+    expect(video.muted).toBe(false);
+    expect(screen.getAllByRole("button", { name: "Mute trailer" })).toHaveLength(2);
+  });
+
+  it("does not play a clip when the profile has hero trailers off", () => {
+    heroTrailers.enabled = false;
+    const { container } = render(hero({ items: [clipSlide()] }));
+
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector(".hero-trailer-black")).toBeNull();
+  });
+});
+
+/*
+ * The hero names a slide the way the rest of the app does: with the title's
+ * logo when the profile's `ui.title_art` choice allows it, and with the text
+ * otherwise — including when the art fails to load or has not been read yet.
+ */
+describe("HeroBanner title art", () => {
+  beforeEach(() => {
+    heroTrailers.enabled = true;
+    titleArt.show = true;
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names a slide with its logo, holding the box until the choice loads", () => {
+    titleArt.show = undefined;
+    const { container, rerender } = render(
+      hero({ items: [movieSlide({ logo_url: "/logo.webp" })] }),
+    );
+
+    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
+    expect(screen.getByTestId("hero-title-pending")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Featured Movie" })).toHaveClass("sr-only");
+
+    titleArt.show = true;
+    rerender(hero({ items: [movieSlide({ logo_url: "/logo.webp" })] }));
+
+    expect(container.querySelector('img[src="/logo.webp"]')).not.toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Featured Movie" })).toHaveClass("sr-only");
+  });
+
+  it("falls back to the text title without a logo, and when one fails to load", () => {
+    const withoutLogo = render(hero({ items: [movieSlide({ logo_url: "" })] }));
+
+    expect(withoutLogo.container.querySelector("img")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Featured Movie" })).not.toHaveClass(
+      "sr-only",
+    );
+    withoutLogo.unmount();
+
+    const failed = render(hero({ items: [movieSlide({ logo_url: "/broken.webp" })] }));
+    fireEvent.error(failed.container.querySelector('img[src="/broken.webp"]')!);
+
+    expect(failed.container.querySelector('img[src="/broken.webp"]')).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Featured Movie" })).not.toHaveClass(
+      "sr-only",
+    );
+  });
+
+  it("keeps the text title when the profile turned title art off", () => {
+    titleArt.show = false;
+    const { container } = render(hero({ items: [movieSlide({ logo_url: "/logo.webp" })] }));
+
+    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Featured Movie" })).not.toHaveClass(
+      "sr-only",
+    );
   });
 });

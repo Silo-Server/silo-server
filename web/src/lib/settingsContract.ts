@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 24;
+export const SETTINGS_REVISION = 25;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -196,6 +196,8 @@ export const SETTING_KEYS = {
   DOWNLOADS_KEEP_WATCHED: "downloads.keep_watched",
   /** Download over Wi-Fi only */
   DOWNLOADS_WIFI_ONLY: "downloads.wifi_only",
+  /** Hero trailers */
+  HERO_TRAILERS_ENABLED: "hero.trailers_enabled",
   /** Hide watched items from Home */
   HOME_HIDE_WATCHED_ITEMS: "home.hide_watched_items",
   /** Primary menu */
@@ -525,6 +527,24 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "downloads",
     control: "switch",
     platforms: ["ios", "android"],
+  },
+  "hero.trailers_enabled": {
+    key: "hero.trailers_enabled",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 25,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [25, 25],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    adminDefault: true,
+    label: "Hero trailers",
+    description:
+      "Play a short clip of a title's trailer behind the featured row, in place of its still backdrop.",
+    category: "appearance",
+    control: "switch",
+    platforms: ["web"],
   },
   "home.hide_watched_items": {
     key: "home.hide_watched_items",

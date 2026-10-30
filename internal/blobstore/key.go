@@ -36,6 +36,11 @@ func MediaType(k string) string {
 		return "image/x-icon"
 	case ".avif":
 		return "image/avif"
+	case ".mp4":
+		// Hero clips are the video the store holds. Served as octet-stream
+		// beside X-Content-Type-Options: nosniff, a browser is entitled to
+		// refuse to play it.
+		return "video/mp4"
 	default:
 		return "application/octet-stream"
 	}

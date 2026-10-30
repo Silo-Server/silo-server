@@ -4508,6 +4508,12 @@ export interface SectionItem {
   backdrop_url: string;
   backdrop_thumbhash: string;
   logo_url: string;
+  /**
+   * A short clip of the title's trailer, when this server has one for it: the
+   * hero plays it muted behind the backdrop, and falls back to the backdrop
+   * whenever it is absent. Mirrors the v2 `hero_video_url`.
+   */
+  hero_video_url?: string;
   overlay_summary?: OverlaySummary | null;
   badges?: string[];
   user_state?: MediaItemUserState;

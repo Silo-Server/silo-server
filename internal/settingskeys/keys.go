@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 24
+const Revision = 25
 
 // Setting keys, one constant per definition.
 const (
@@ -29,6 +29,8 @@ const (
 	DownloadsKeepWatched = "downloads.keep_watched"
 	// Download over Wi-Fi only
 	DownloadsWifiOnly = "downloads.wifi_only"
+	// Hero trailers
+	HeroTrailersEnabled = "hero.trailers_enabled"
 	// Hide watched items from Home
 	HomeHideWatchedItems = "home.hide_watched_items"
 	// Primary menu
@@ -172,6 +174,7 @@ var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
 	CatalogShowAdvisoryAge,
+	HeroTrailersEnabled,
 	HomeHideWatchedItems,
 	NavPrimaryMenu,
 	NavShortcuts,

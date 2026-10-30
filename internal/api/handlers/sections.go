@@ -60,6 +60,33 @@ type SectionHandler struct {
 	SeasonalLists interface {
 		RefreshConfig(context.Context, json.RawMessage)
 	}
+	// HeroClips resolves the clip a card's title may play behind the hero.
+	// Optional: without it the cards carry no clip URL and the hero keeps its
+	// backdrop, which is how a server with no clips behaves anyway.
+	HeroClips HeroVideoURLSource
+}
+
+// HeroVideoURLSource resolves the clip URL of each of these items, keyed by
+// content id. An item without a clip is absent from the result.
+type HeroVideoURLSource interface {
+	HeroVideoURLs(ctx context.Context, contentIDs []string) (map[string]string, error)
+}
+
+// heroVideoURLs resolves the clips the cards in a row may play. A failure is
+// logged and dropped: the row then renders exactly as it did before hero clips
+// existed — backdrop, no clip.
+func (h *SectionHandler) heroVideoURLs(ctx context.Context, contentIDs []string) map[string]string {
+	if h.HeroClips == nil || len(contentIDs) == 0 {
+		return nil
+	}
+
+	urls, err := h.HeroClips.HeroVideoURLs(ctx, contentIDs)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading hero clips", "component", "api", "error", err)
+		return nil
+	}
+
+	return urls
 }
 
 // refreshSeasonalLists fetches, in the background, the lists saved seasonal
@@ -419,8 +446,12 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge            *int                   `json:"-"`
-	AdvisorySource         string                 `json:"-"`
+	AdvisoryAge    *int   `json:"-"`
+	AdvisorySource string `json:"-"`
+	// HeroVideoURL is the clip this card's title may play behind the hero (see
+	// internal/heroclips). json:"-" for the same reason as the advisory: the
+	// field exists on the Go struct only, and apiv2 emits it under its own name.
+	HeroVideoURL           string                 `json:"-"`
 	Status                 string                 `json:"status"`
 	ShowStatus             string                 `json:"show_status,omitempty"`
 	RatingIMDB             *float64               `json:"rating_imdb,omitempty"`
@@ -1425,6 +1456,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	var playTargets map[string]string
 	var userStates map[string]*itemUserStateResponse
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
+	var heroVideos map[string]string
 	var episodeMeta map[string]sections.SectionItemMeta
 	var mangaChapterMeta map[string]sections.SectionItemMeta
 
@@ -1458,6 +1490,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
 	})
 	goSectionLookup(ctx, &wg, "image_urls", func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
+	goSectionLookup(ctx, &wg, "hero_clips", func() { heroVideos = h.heroVideoURLs(ctx, contentIDs) })
 	goSectionLookup(ctx, &wg, "episode_meta", func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
 
@@ -1480,6 +1513,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
 			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
 			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
+			response.HeroVideoURL = heroVideos[item.ContentID]
 			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{

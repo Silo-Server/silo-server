@@ -21805,6 +21805,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * Format: uri-reference
+       * @description A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title
+       */
+      hero_video_url?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -22041,6 +22046,11 @@ export interface components {
       folder_paths?: string[];
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * Format: uri-reference
+       * @description A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title
+       */
+      hero_video_url?: string;
       imdb_id?: string;
       intro?: components["schemas"]["Marker"];
       is_specials?: boolean;
@@ -25184,6 +25194,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * Format: uri-reference
+       * @description A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title
+       */
+      hero_video_url?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -34157,6 +34172,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * Format: uri-reference
+       * @description A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title
+       */
+      hero_video_url?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -34368,6 +34388,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * Format: uri-reference
+       * @description A short clip of the title's trailer, for a hero to play behind its backdrop. Presigned, long-lived; absent when this server has no clip for the title
+       */
+      hero_video_url?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */

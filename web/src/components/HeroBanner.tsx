@@ -6,14 +6,25 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type MouseEvent,
 } from "react";
 import { Link } from "react-router";
-import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
+import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen, Volume2, VolumeX } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useHeroTrailersEnabled } from "@/hooks/useHeroTrailersEnabled";
+import { useShowTitleArt } from "@/hooks/useTitleArt";
 import { HeroOverviewText } from "./HeroOverviewText";
+import { heroClipUrl } from "./heroClips";
+import HeroTrailerLayer from "./HeroTrailerLayer";
+import {
+  HERO_TRAILER_BLACK_MS,
+  HERO_TRAILER_STILL_HOLD_MS,
+  heroTrailerEnabled,
+  heroTrailerStage,
+} from "./heroTrailer";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -85,6 +96,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   keepsMotion,
   shouldLoad,
   hideImage,
+  faded,
 }: {
   slide: SectionItem;
   index: number;
@@ -92,6 +104,12 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   keepsMotion: boolean;
   shouldLoad: boolean;
   hideImage: boolean;
+  /**
+   * The slide's clip is taking over, so its still steps aside for the fade to
+   * black. Kept mounted rather than unmounted, so it can come straight back if
+   * the clip fails.
+   */
+  faded?: boolean;
 }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   // Keep the browser's loaded image visible while a refreshed URL is pending.
@@ -103,7 +121,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   return (
     <div
       aria-roledescription="slide"
-      className={`bg-muted absolute inset-0 transition-opacity duration-1000 ease-in-out ${isActive ? "opacity-100" : "opacity-0"}`}
+      className={`bg-muted absolute inset-0 transition-opacity duration-1000 ease-in-out ${isActive && !faded ? "opacity-100" : "opacity-0"}`}
       style={
         thumbhash
           ? {
@@ -219,15 +237,23 @@ export default function HeroBanner({
     return () => window.clearTimeout(timer);
   }, [outgoingIndex]);
 
-  // Pause/play helpers. Unpausing bumps playCycle so the rail animation
-  // restarts at scaleX(0) in sync with the fresh 8s interval started below.
-  const pause = useCallback(() => setPaused(true), []);
-  const resume = useCallback(() => {
-    setPaused((prev) => {
+  /*
+   * Pointer and keyboard focus hold the carousel where it is, so a slide cannot
+   * change under someone who is reading it. That is deliberately separate from
+   * the pause control: a hover that stopped a two-minute clip would look like a
+   * frozen hero, so the clip ignores it and only the control stops it.
+   */
+  const [hoverPaused, setHoverPaused] = useState(false);
+  const holdSlideshow = useCallback(() => setHoverPaused(true), []);
+  const releaseSlideshow = useCallback(() => {
+    setHoverPaused((prev) => {
       if (prev) setPlayCycle((c) => c + 1);
       return false;
     });
   }, []);
+
+  // The pause control. Unpausing bumps playCycle so the rail animation restarts
+  // at scaleX(0) in sync with the fresh 8s interval started below.
   const togglePause = useCallback(() => {
     setPaused((prev) => {
       if (prev) setPlayCycle((c) => c + 1);
@@ -235,19 +261,223 @@ export default function HeroBanner({
     });
   }, []);
 
+  const current = slides[activeIndex] ?? slides[0];
+
+  /*
+   * Title art. The hero names a title the way the rest of the app does, on the
+   * same `ui.title_art` choice the title pages read. Until the profile's answer
+   * is known the logo's box is reserved rather than flashing text, and a logo
+   * that fails to load falls back to the text for that slide.
+   */
+  const showTitleArt = useShowTitleArt();
+  const [logoFailed, setLogoFailed] = useState(false);
+  const logoUrl = showTitleArt && current.logo_url && !logoFailed ? current.logo_url : undefined;
+  const holdTitle = showTitleArt === undefined && Boolean(current.logo_url) && !logoFailed;
+  /* ── Hero trailer ─────────────────────────────────────────────────────────
+   * The active slide's clip, when it has one: the still holds, fades out to
+   * black, and the muted clip plays at its own length, handing the carousel on
+   * when it ends. `./heroTrailer` owns the gates and which layer is on screen;
+   * this only runs the timers and the element.
+   *
+   * Every step is opt-outable on purpose. A clip that is slow, blocked or
+   * missing never leaves the backdrop still, so the hero is never a black
+   * screen and never a spinner.
+   */
+  const heroRef = useRef<HTMLElement | null>(null);
+  const [clipHeld, setClipHeld] = useState(false);
+  const [clipReady, setClipReady] = useState(false);
+  const [clipFadeDone, setClipFadeDone] = useState(false);
+  const [clipFailed, setClipFailed] = useState(false);
+  const [clipProgress, setClipProgress] = useState(0);
+  /** The slide the sequence above belongs to; a new slide starts it over. */
+  const [clipSeededId, setClipSeededId] = useState<string | null>(null);
+  const [heroOnScreen, setHeroOnScreen] = useState(true);
+  const [tabVisible, setTabVisible] = useState(true);
+  /*
+   * Both media settings start as "backdrop only" and are corrected on the
+   * client, so neither the server's markup nor the first paint can be a clip.
+   */
+  const [reducedMotion, setReducedMotion] = useState(true);
+  const [saveData, setSaveData] = useState(true);
+  /** Muted unless the viewer says otherwise; see `handleClipMuteToggle`. */
+  const [clipMuted, setClipMuted] = useState(true);
+  const clipVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const heroTrailersEnabled = useHeroTrailersEnabled();
+  const clipUrl = current ? heroClipUrl(current) : undefined;
+  // Two gates decide whether a slide plays its clip: this profile asked for
+  // hero trailers, and the slide and device allow one. The setting's first read
+  // is undefined, so the hero holds its backdrop until the answer arrives.
+  const clipEnabled =
+    heroTrailersEnabled === true &&
+    heroTrailerEnabled({
+      hasClip: Boolean(clipUrl) && !clipFailed,
+      reducedMotion,
+      saveData,
+    });
+  // Which layer is on screen. Derived, so a clip that cannot play can never
+  // leave the still and the fade cannot start before the clip is ready.
+  const clipStage = heroTrailerStage({
+    enabled: clipEnabled,
+    held: clipHeld,
+    ready: clipReady,
+    faded: clipFadeDone,
+  });
+  // The pause control stops the clip too; a pointer hovering the hero does not.
+  const clipPlaying = clipEnabled && clipStage === "video" && heroOnScreen && tabVisible && !paused;
+
+  /*
+   * A new slide starts over — the still again, nothing carried in from the last
+   * one. React's "adjust state when a prop changes" pattern: one render instead
+   * of two, and no flash of the previous slide's clip.
+   */
+  if (current && clipSeededId !== current.content_id) {
+    setClipSeededId(current.content_id);
+    setClipFadeDone(false);
+    setClipHeld(false);
+    setClipReady(false);
+    setClipFailed(false);
+    setClipProgress(0);
+    // Sound is a per-slide choice: the next slide starts muted, which is also
+    // the only state a clip is allowed to autoplay in.
+    setClipMuted(true);
+    // A logo that failed on the last slide says nothing about this one.
+    setLogoFailed(false);
+  }
+
+  /* Read once on the client, and again whenever the media query changes. */
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+      .connection;
+
+    const sync = () => {
+      setReducedMotion(motion.matches);
+      setSaveData(Boolean(connection?.saveData));
+    };
+
+    sync();
+    motion.addEventListener("change", sync);
+
+    return () => motion.removeEventListener("change", sync);
+  }, []);
+
+  /* Hold the still before the clip may be revealed. */
+  useEffect(() => {
+    if (!clipEnabled || clipHeld) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setClipHeld(true), HERO_TRAILER_STILL_HOLD_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [clipEnabled, clipHeld]);
+
+  /*
+   * The hold is over and the clip is ready, so the backdrop fades out to black
+   * and the clip fades in behind it. Both are timer callbacks — nothing on the
+   * render path sets state, so there is no cascading render to pay for.
+   */
+  useEffect(() => {
+    if (!clipEnabled || !clipHeld || !clipReady || clipFadeDone) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setClipFadeDone(true), HERO_TRAILER_BLACK_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [clipEnabled, clipHeld, clipReady, clipFadeDone]);
+
+  /* Nothing plays off screen: pause when the tab is hidden or the hero leaves view. */
+  useEffect(() => {
+    const onVisibilityChange = () => setTabVisible(!document.hidden);
+
+    onVisibilityChange();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    const hero = heroRef.current;
+
+    // Older browsers — and jsdom — have no observer: the hero simply keeps playing.
+    if (!hero || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setHeroOnScreen(entry.isIntersecting);
+        }
+      },
+      { threshold: 0.15 },
+    );
+
+    observer.observe(hero);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const handleClipReady = useCallback(() => setClipReady(true), []);
+  const handleClipUnavailable = useCallback(() => setClipFailed(true), []);
+  const handleClipProgress = useCallback((fraction: number) => setClipProgress(fraction), []);
+
+  /*
+   * The sound control. Unmuting is a gesture, so it happens here rather than in
+   * an effect, and the element is asked rather than the state — a slide change
+   * mounts a new element, and the two must never be allowed to disagree.
+   */
+  const handleClipMuteToggle = useCallback(() => {
+    const video = clipVideoRef.current;
+    const next = video ? !video.muted : !clipMuted;
+
+    if (video) {
+      video.muted = next;
+
+      // Safari will not make a clip audible that began muted unless the element
+      // is played again inside the gesture that asked for sound.
+      if (!next) {
+        const started = video.play();
+
+        if (started && typeof started.catch === "function") {
+          void started.catch(() => undefined);
+        }
+      }
+    }
+
+    setClipMuted(next);
+  }, [clipMuted]);
+
+  /*
+   * The clip ends: its own length is the slide's length. With another slide to
+   * show, the carousel moves on; on its own it starts the sequence again, which
+   * `HeroTrailerLayer` rewinds the element for.
+   */
+  const handleClipEnded = useCallback(() => {
+    setClipFadeDone(false);
+    setClipHeld(false);
+    setClipProgress(0);
+
+    if (slides.length > 1) {
+      next();
+    }
+  }, [next, slides.length]);
+
   // `activeIndex` is in the dep list so that manual navigation (prev/next
   // chevrons) also resets the 8s countdown — otherwise after clicking next at
   // t=5s the auto-advance would still fire at t=8 instead of t=13, desyncing
-  // with the progress rail that restarts on slide change.
+  // with the progress rail that restarts on slide change. A slide with a clip
+  // sets its own pace: the clip's end moves the carousel on, not a timer.
   useEffect(() => {
-    if (slides.length <= 1 || paused) return;
+    if (slides.length <= 1 || paused || hoverPaused || clipEnabled) return;
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) return;
     const timer = setInterval(next, 8000);
     return () => clearInterval(timer);
-  }, [next, slides.length, paused, activeIndex]);
+  }, [next, slides.length, paused, hoverPaused, activeIndex, clipEnabled]);
 
-  const current = slides[activeIndex] ?? slides[0];
   useAmbientColor(current?.backdrop_thumbhash);
   if (slides.length === 0) return null;
   if (!current) return null;
@@ -294,6 +524,7 @@ export default function HeroBanner({
 
   return (
     <section
+      ref={heroRef}
       className={cn(
         "home-hero group relative w-full overflow-hidden",
         heightClassName,
@@ -301,11 +532,11 @@ export default function HeroBanner({
       )}
       aria-roledescription="carousel"
       aria-label="Featured content"
-      onMouseEnter={pause}
-      onMouseLeave={resume}
-      onFocus={pause}
+      onMouseEnter={holdSlideshow}
+      onMouseLeave={releaseSlideshow}
+      onFocus={holdSlideshow}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) resume();
+        if (!e.currentTarget.contains(e.relatedTarget)) releaseSlideshow();
       }}
     >
       {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
@@ -324,6 +555,7 @@ export default function HeroBanner({
           }
           index={i}
           isActive={i === activeIndex}
+          faded={i === activeIndex && clipEnabled && clipStage !== "still"}
           keepsMotion={i === activeIndex || i === outgoingIndex}
           shouldLoad={
             i === activeIndex ||
@@ -333,6 +565,30 @@ export default function HeroBanner({
           }
         />
       ))}
+
+      {/* Hero trailer: the black the still fades through, then the clip. Both
+          sit under the scrims, so the title block keeps its contrast. */}
+      {clipEnabled && (
+        <div
+          className="hero-trailer-black"
+          data-visible={clipStage === "still" ? "false" : "true"}
+          style={{ transitionDuration: `${HERO_TRAILER_BLACK_MS}ms` }}
+        />
+      )}
+      {clipEnabled && clipUrl && (
+        <HeroTrailerLayer
+          key={current.content_id}
+          videoRef={clipVideoRef}
+          clipUrl={clipUrl}
+          stage={clipStage}
+          muted={clipMuted}
+          playing={clipPlaying}
+          onReady={handleClipReady}
+          onProgress={handleClipProgress}
+          onEnded={handleClipEnded}
+          onUnavailable={handleClipUnavailable}
+        />
+      )}
 
       {/* Gradient overlays */}
       {bleed && <div className="hero-top-scrim" />}
@@ -355,13 +611,35 @@ export default function HeroBanner({
               <span className="hero-eyebrow-divider">—</span>
               <span>No. {padded(activeIndex + 1)}</span>
             </p>
-            <h1
-              key={current.content_id}
-              className="font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
-              style={{ textShadow: "var(--hero-text-shadow, none)" }}
-            >
-              {current.title}
-            </h1>
+            {logoUrl ? (
+              <>
+                <h1 className="sr-only">{current.title}</h1>
+                <img
+                  src={logoUrl}
+                  alt=""
+                  decoding="async"
+                  onError={() => setLogoFailed(true)}
+                  className="mb-4 h-16 w-full max-w-[300px] object-contain object-left sm:h-20 sm:max-w-[360px] lg:h-24 lg:max-w-[420px] xl:h-28 xl:max-w-[480px]"
+                />
+              </>
+            ) : holdTitle ? (
+              <>
+                <h1 className="sr-only">{current.title}</h1>
+                <div
+                  aria-hidden="true"
+                  data-testid="hero-title-pending"
+                  className="mb-4 h-16 w-full max-w-[300px] sm:h-20 sm:max-w-[360px] lg:h-24 lg:max-w-[420px] xl:h-28 xl:max-w-[480px]"
+                />
+              </>
+            ) : (
+              <h1
+                key={current.content_id}
+                className="font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
+                style={{ textShadow: "var(--hero-text-shadow, none)" }}
+              >
+                {current.title}
+              </h1>
+            )}
             {metadata.length > 0 && (
               <div className="hero-meta-track mb-5 text-white/85">
                 {metadata.map((entry) =>
@@ -425,7 +703,7 @@ export default function HeroBanner({
           disables autoplay, and for accessibility generally. On mobile they
           render smaller and slightly more transparent so they don't crowd
           narrow viewports. On lg+ they fade in on hover. */}
-      {slides.length > 1 && (
+      {(slides.length > 1 || clipEnabled) && (
         <>
           <button
             type="button"
@@ -464,6 +742,14 @@ export default function HeroBanner({
             </div>
             <button
               type="button"
+              onClick={handleClipMuteToggle}
+              aria-label={clipMuted ? "Unmute trailer" : "Mute trailer"}
+              className="glass-subtle flex h-7 w-7 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
+            >
+              {clipMuted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}
+            </button>
+            <button
+              type="button"
               onClick={togglePause}
               aria-label={paused ? "Play slideshow" : "Pause slideshow"}
               className="glass-subtle flex h-7 w-7 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
@@ -479,15 +765,30 @@ export default function HeroBanner({
             </div>
             <div
               className="hero-progress-rail"
-              data-paused={paused ? "true" : "false"}
+              data-paused={paused || hoverPaused ? "true" : "false"}
+              data-clip={clipEnabled ? "true" : "false"}
               aria-hidden="true"
             >
               {/* The key restarts the animation in lockstep with the
                   setInterval timer: on slide change, and on unpause (which
                   starts a fresh 8s cycle). Pausing mid-cycle freezes the bar
-                  via `animation-play-state: paused` without remounting. */}
-              <span key={`${activeIndex}-${playCycle}`} />
+                  via `animation-play-state: paused` without remounting. A
+                  slide with a clip has no timer to restart: the bar reports
+                  the clip's own position instead (see data-clip in app.css). */}
+              {clipEnabled ? (
+                <span style={{ width: `${Math.round(clipProgress * 100)}%` }} />
+              ) : (
+                <span key={`${activeIndex}-${playCycle}`} />
+              )}
             </div>
+            <button
+              type="button"
+              onClick={handleClipMuteToggle}
+              aria-label={clipMuted ? "Unmute trailer" : "Mute trailer"}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:text-white"
+            >
+              {clipMuted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+            </button>
             <button
               type="button"
               onClick={togglePause}
