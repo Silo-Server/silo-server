@@ -114,7 +114,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, and `codec_channel_ceilings_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, and `native_embedded_limitations_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -144,6 +144,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `hls_copy_mpegts_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. The client's `server_remux_hls` plans that copy H.264 or HEVC are packaged as MPEG-TS instead of fragmented MP4, marked by `effective_recipe.segment_container: "mpegts"` (§5) |
 | `hls_variable_substitution_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. Playlists the server rewrites may then carry a repeated media credential once through HLS variable substitution (`EXT-X-DEFINE`); without it they keep literal URIs (§4.2) |
 | `codec_channel_ceilings_v1` | `/api/v2` only. The server honors a delivery's `max_channels_by_codec` (§3). A client that needs a ceiling for one codec only (stereo AAC beside E-AC-3 5.1) sends it there instead of narrowing `max_channels` for every codec |
+| `native_embedded_limitations_v1` | `/api/v2` only. The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -945,7 +946,7 @@ parameter, and never carries a parameter across families.
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
 plus the fields in §5. A subtitle route never carries `seek`: a sidecar is
-fetched whole with absolute source timestamps and `subtitle.artifact.timing_origin_seconds: 0`. A receiver that cannot map its video clock may request a VTT-only `timestamp_offset` equal to the negative video timeline offset. The server shifts cues after reading the canonical artifact; this does not alter the extraction cache or the ordinary artifact contract. Shifted responses stream complete cues, omit cues that ended before time zero, clip overlapping cues at zero, and do not support byte ranges or conditional caching.
+fetched whole with absolute source timestamps and `subtitle.artifact.timing_origin_seconds: 0`. The server answers an embedded track's sidecar from its subtitle cache, a kept copy of the track, or the container's index before it demuxes the source, with the same bytes either way ([embedded-subtitle-index.md](embedded-subtitle-index.md#serving)). A receiver that cannot map its video clock may request a VTT-only `timestamp_offset` equal to the negative video timeline offset. The server shifts cues after reading the canonical artifact; this does not alter the extraction cache or the ordinary artifact contract. Shifted responses stream complete cues, omit cues that ended before time zero, clip overlapping cues at zero, and do not support byte ranges or conditional caching.
 
 `file_id` is required on a subtitle route because a plan can fall back to an
 alternate edition, so the session id alone does not fix which file's ordinal
@@ -1572,7 +1573,13 @@ Each entry carries `source` (`external` | `embedded` | `downloaded`), `delivery`
 (`sidecar` | `burn_in_only`), the `forced` / `default` / `hearing_impaired`
 flags, a `url` when deliverable, a `font_bundle_url` for embedded ASS tracks
 with attachments, and a `sync_key` on external and downloaded SRT, WebVTT, ASS,
-and SSA tracks. The sync key names the track to the subtitle sync operations
+and SSA tracks. Embedded entries also name their stream in the source:
+`stream_index` (the absolute probed stream index, the namespace of
+`subtitle.embedded.stream_index` and of the sidecar URL's
+`embedded_stream_index`) and, when the scanner recorded one,
+`container_track_id` (below). An embedded entry carries
+`native_selectable: true` when selecting it would give this plan a native
+embedded subtitle; the field is omitted otherwise (below). The sync key names the track to the subtitle sync operations
 (see [subtitles-api.md](../subtitles-api.md#subtitle-sync)); it is stable across
 sessions and inventory order, and realtime sync events carry it. `default` reflects the source container's own default flag, so
 only embedded and external tracks can carry it — a downloaded subtitle is never
@@ -1611,6 +1618,58 @@ Native embedded selection requires `embedded_subtitles_v1` in `client_features` 
 The scanner records `container_track_id` as the MP4 track ID (`tkhd`) that FFprobe reports and, for Matroska, as the TrackEntry's `TrackNumber`, which FFprobe does not report. The scanner reads the Matroska `Tracks` element itself and maps each entry to its FFmpeg stream the way FFmpeg's demuxer creates streams. It records a number only when the per-type stream counts, the subtitle positions, and the subtitle codecs all agree with the probe. A track number is often not stream index + 1, because remuxes keep the original numbers. Tracks with the legacy codec IDs `S_ASS` and `S_SSA` get no ID: FFmpeg reports them as `ass`, but Media3 drops them, so a client could not resolve the number and its capability cannot exclude them. Files probed before Matroska numbers were recorded get them from the `backfill_matroska_track_numbers` task, which reads only the `Tracks` element and writes only when the file and the row still match the stored probe. It reads only files with a SubRip or ASS track lacking an ID, the codecs a client currently plays by track number, and records each file it reads in `matroska_track_backfill_checks` against the file's size, mtime and stored tracks. A recorded file is read again only after one of those changes or the matching rules do; a file storage could not open, or that differs on disk from its row until a scan rewrites it, is retried on the next start. A file skipped for its codecs, such as a PGS-only one, gets an ID from its next reprobe, or from the backfill once its codec is added to that list. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
 
 The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars, burn-in, or, for an HLS transcode or HLS copy remux, an HLS subtitle rendition (below). Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
+
+**Limitations.** A `native_embedded` entry may carry `limitations`, renderer
+defects of that player, which `/api/v2` honors when it advertises
+`native_embedded_limitations_v1`. The server keeps a track off the native route
+when the entry declares:
+
+| Limitation | The track is not native when |
+| --- | --- |
+| `forced_unlisted` | it is flagged forced; the player does not list forced tracks |
+| `hidden_track_preemption` | the file has an embedded forced track in the language of the audio the plan plays, or any default-flagged bitmap track (`hdmv_pgs_subtitle`, `dvd_subtitle`, `dvb_subtitle`). The player draws that hidden track instead of any selection, so no track of the file is native. A default-flagged text track does not count |
+| `literal_override_tags` | the server knows the track's cues carry ASS override tags such as `{\an8}`, which the player prints as text. A track the server has not read counts as clean |
+
+The audio is the plan's selected audio track, or the file's default track when
+none is selected, and an `audio_track_changed` replan evaluates the rule again.
+Languages match on their primary subtag, case-insensitively and across ISO
+639-1 and 639-2 (`eng`, `en` and `en-US` match). Values with no readable
+language, such as `und`, match only when spelled the same. Request validation
+bounds the list (at most 16 values, each 1 to 64 characters) and lowercases
+the values, but it accepts values the server does not know. The frozen
+`/api/v1` surface, which never advertises the feature, ignores `limitations`
+and plans an entry as it did before they existed, and its inventory rows
+carry no `stream_index`, `container_track_id` or `native_selectable`. Planning then skips
+that whole entry, because the server cannot tell what its player gets wrong,
+and the track falls back to a sidecar or burn-in like any track without a
+native entry. Older clients send no limitations, and their entries plan as
+before.
+
+Roku OS 16 declares `{"container": "mkv", "codecs": ["subrip"],
+"track_identity": "container_track_id", "ass_styling": false,
+"font_attachments": false, "limitations": ["forced_unlisted",
+"hidden_track_preemption", "literal_override_tags"]}` and selects the plan's
+track as `mkv/<container_track_id>`.
+
+The server learns whether a track carries override tags when it reads the
+track whole, which it keeps
+([embedded-subtitle-index.md](embedded-subtitle-index.md#kept-tracks)): for a
+sidecar, a download, a translation, or a prefetch. When a start's request
+declares `literal_override_tags` on any native entry, the server reads the
+playing file's plain-text tracks in the background, so a later plan or replan
+of that file, including a `subtitle_track_changed` replan after a local
+switch, knows their tags. Until then a track counts as clean, so the first
+play of a tagged track can go native and show its tags.
+
+**Switching on the playing stream.** `native_selectable` is computed with the
+same rules as the selected track, against the plan's own delivery, capabilities
+and audio, so it is only ever set on an `original_http` plan. A client may
+switch to such a track on the stream it already plays, without waiting for the
+server, and then report the switch with a `subtitle_track_changed` (or
+`track_change`) replan. The answer is a plan for the same media, with the same
+effective file, delivery, stream URL and effective recipe, and only the
+subtitle selection changed, which the client applies in place. Inventory URLs
+stay published on native-selectable entries as the fallback.
 
 A confirmed native selection failure triggers `failure_recovery` with `failure.classification: "subtitle_embedded_failed"`. The server disables native selection for the rest of that playback attempt, including later capability refreshes, and replans with an executable fallback. The native identity participates in both plan identifiers, so the same video route with extracted subtitles is a distinct attempt. Seek reanchors preserve the native identity and reject source drift.
 

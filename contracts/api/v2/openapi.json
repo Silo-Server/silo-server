@@ -37299,6 +37299,14 @@
           "font_attachments": {
             "type": "boolean"
           },
+          "limitations": {
+            "description": "Renderer limitations of this native route: forced_unlisted, hidden_track_preemption, literal_override_tags. Honored when the server advertises native_embedded_limitations_v1; an entry naming a value the server does not know is not used for native selection.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "track_identity": {
             "type": "string"
           }
@@ -48953,6 +48961,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "container_track_id": {
+            "description": "Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown",
+            "type": "string"
+          },
           "default": {
             "type": "boolean"
           },
@@ -48976,8 +48988,17 @@
             "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
+          "native_selectable": {
+            "description": "Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url stays the fallback.",
+            "type": "boolean"
+          },
           "source": {
             "type": "string"
+          },
+          "stream_index": {
+            "description": "Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index",
+            "format": "int64",
+            "type": "integer"
           },
           "sync_key": {
             "type": "string"

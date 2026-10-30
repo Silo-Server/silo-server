@@ -248,6 +248,10 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
+./internal/keptsub TestKeptTrackRowsAndGarbageDB
+./internal/keptsub TestKeptTracksGoWithTheirFileDB
+./internal/keptsub TestSubtitleTrackClaimsDB
+./internal/keptsub TestQueueCollectionDB
 ./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
 ./internal/subtitles/ai TestReusableJobRequiresAStoredResultPostgres
 ./migrations TestSubtitleTimingFileReplacePostgres

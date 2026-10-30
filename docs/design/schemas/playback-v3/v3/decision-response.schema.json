@@ -812,6 +812,20 @@
           "type": "string",
           "description": "Names the track to the subtitle sync operations (/api/v2/subtitles/{media_file_id}/sync/{key}). Present on external and downloaded SRT, WebVTT, ASS, and SSA tracks; stable across sessions and inventory order.",
           "pattern": "^(stored-[1-9][0-9]*|external-[0-9a-f]{64})$"
+        },
+        "stream_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index."
+        },
+        "container_track_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown."
+        },
+        "native_selectable": {
+          "type": "boolean",
+          "description": "Embedded tracks only, omitted when false: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url stays the fallback."
         }
       },
       "additionalProperties": true

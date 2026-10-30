@@ -35,9 +35,17 @@ type fileReader struct {
 	done   <-chan struct{}
 	ctxErr func() error
 	// sem bounds concurrent reads; nil means unbounded.
-	sem   chan struct{}
+	sem chan struct{}
+	// bg bounds them further while prio is a background priority.
+	bg    chan struct{}
+	prio  *Priority
 	reads atomic.Int64
 	bytes atomic.Int64
+}
+
+// background bounds the reads to n in flight while prio isn't raised.
+func (fr *fileReader) background(prio *Priority, n int) {
+	fr.prio, fr.bg = prio, make(chan struct{}, n)
 }
 
 func newFileReader(ctx context.Context, r io.ReaderAt, concurrency int) *fileReader {
@@ -51,6 +59,15 @@ func newFileReader(ctx context.Context, r io.ReaderAt, concurrency int) *fileRea
 func (fr *fileReader) ReadAt(p []byte, off int64) (int, error) {
 	if err := fr.ctxErr(); err != nil {
 		return 0, err
+	}
+	if fr.prio.background() {
+		select {
+		case fr.bg <- struct{}{}:
+			defer func() { <-fr.bg }()
+		case <-fr.prio.up:
+		case <-fr.done:
+			return 0, fr.ctxErr()
+		}
 	}
 	if fr.sem != nil {
 		select {

@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -1391,6 +1392,9 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 	input.SubtitleRenditionExecutable = snapshot.subtitleRenditionExecutable
 	input.RemuxSubtitleRenditionExecutable = snapshot.remuxSubtitleRenditionExecutable
 	input.LocalNetwork = streamlocation.FromContext(ctx) == streamlocation.Local
+	if h.SubtitleTrackFacts != nil {
+		input.SubtitleTrackFacts = h.SubtitleTrackFacts.SubtitleTrackFacts(ctx, input.EffectiveFile)
+	}
 	result := playback.PlanPlaybackV3(input)
 	if result.SubtitleRendition && result.Plan != nil && !h.subtitleRenditionRoutableV3(ctx, result, proxyAllowed) {
 		// The planning gate counts any executor that emits renditions, but
@@ -2374,6 +2378,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		legacyAudioTrackIndex = &index
 	}
 	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, legacyAudioTrackIndex)
+	h.prefetchSubtitlesV3(session.ID, effectiveFile, req, result)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
 }
@@ -2448,6 +2453,53 @@ func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context,
 		// cost instead of silently dropping a provider event.
 		h.runPlaybackStartSideEffectsV3(task)
 	}
+}
+
+// prefetchSubtitlesV3 asks for the embedded subtitle tracks a playback will
+// likely want soon: the next episode's in the language of the subtitle it
+// plays, and, for a client whose native embedded entry declares
+// literal_override_tags, the playing file's plain-text tracks, whose facts
+// the next plan or replan needs. The reads run detached and end with the
+// session.
+func (h *PlaybackHandler) prefetchSubtitlesV3(sessionID string, file *models.MediaFile, req playback.StartRequestV3, result playback.PlannerResultV3) {
+	if h.SubtitlePrefetch == nil || file == nil {
+		return
+	}
+	h.SubtitlePrefetch.SessionStarted(keptsub.PrefetchRequest{
+		SessionID:         sessionID,
+		File:              file,
+		Language:          plannedSubtitleLanguageV3(file, result.SubtitleTrackIndex),
+		LearnOverrideTags: declaresLiteralOverrideTagsV3(req),
+	})
+}
+
+// plannedSubtitleLanguageV3 is the language of the sidecar or embedded
+// subtitle at a plan's combined subtitle ordinal, or "".
+func plannedSubtitleLanguageV3(file *models.MediaFile, ordinal int) string {
+	switch {
+	case ordinal < 0:
+		return ""
+	case ordinal < len(file.ExternalSubtitles):
+		return file.ExternalSubtitles[ordinal].Language
+	case ordinal-len(file.ExternalSubtitles) < len(file.SubtitleTracks):
+		return file.SubtitleTracks[ordinal-len(file.ExternalSubtitles)].Language
+	}
+	return ""
+}
+
+// declaresLiteralOverrideTagsV3 reports a native embedded entry, on any
+// delivery, that lists literal_override_tags.
+func declaresLiteralOverrideTagsV3(req playback.StartRequestV3) bool {
+	for _, delivery := range req.ClientPlaybackContext.Deliveries {
+		for _, entry := range delivery.Subtitles.NativeEmbedded {
+			for _, limitation := range entry.Limitations {
+				if strings.EqualFold(strings.TrimSpace(limitation), playback.NativeEmbeddedLimitationLiteralOverrideTagsV3) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (h *PlaybackHandler) runPlaybackStartSideEffectsV3(task playbackStartSideEffectsV3) {
@@ -2531,6 +2583,9 @@ func (h *PlaybackHandler) waitForPlaybackStartSideEffectsV3(ctx context.Context,
 func (h *PlaybackHandler) cancelPlaybackStartSideEffectsV3(ctx context.Context, sessionID string) {
 	if h == nil || sessionID == "" {
 		return
+	}
+	if h.SubtitlePrefetch != nil {
+		h.SubtitlePrefetch.SessionEnded(sessionID)
 	}
 	h.v3StartEffectsMu.Lock()
 	state := h.v3StartEffectsPending[sessionID]
@@ -4814,6 +4869,19 @@ func withoutNativeDeliveryFieldsV3(ctx *playback.ClientPlaybackContextV3) {
 			delivery.MaxChannelsByCodec = nil
 			ctx.Deliveries[name] = delivery
 		}
+		// Native embedded limitations came after the freeze: /api/v1 plans
+		// an entry as it did before them, and never advertises
+		// native_embedded_limitations_v1, without which a client must not
+		// send an entry that needs them.
+		if slices.ContainsFunc(delivery.Subtitles.NativeEmbedded, func(entry playback.NativeEmbeddedSubtitleCapabilityV3) bool {
+			return entry.Limitations != nil
+		}) {
+			delivery.Subtitles.NativeEmbedded = slices.Clone(delivery.Subtitles.NativeEmbedded)
+			for i := range delivery.Subtitles.NativeEmbedded {
+				delivery.Subtitles.NativeEmbedded[i].Limitations = nil
+			}
+			ctx.Deliveries[name] = delivery
+		}
 	}
 }
 
@@ -4877,7 +4945,17 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
-		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded)), clientFeatures)
+		rebuilt := playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded))
+		// The rebuild knows no request to evaluate native selection against;
+		// keep what planning decided for each embedded track that is still
+		// the same stream.
+		for i := range rebuilt {
+			planned, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, rebuilt[i].CombinedIndex)
+			if ok && planned.Source == playback.SubtitleSourceEmbeddedV3 && rebuilt[i].StreamIndex != nil && planned.StreamIndex != nil && *planned.StreamIndex == *rebuilt[i].StreamIndex {
+				rebuilt[i].NativeSelectable = planned.NativeSelectable
+			}
+		}
+		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, rebuilt, clientFeatures)
 	}
 	plan.Subtitle.Inventory = inventory
 	// Only render and convert publish a client-fetchable artifact; off and
@@ -7401,8 +7479,10 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 }
 
 // frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface: active_quality, and the menu rungs
-// below 1.5 Mbps that Auto lowering added after the freeze.
+// written on the frozen /api/v1 surface: active_quality, the menu rungs
+// below 1.5 Mbps that Auto lowering added after the freeze, and the
+// embedded inventory rows' stream_index, container_track_id and
+// native_selectable.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if response.PlaybackPlan == nil {
 		return response
@@ -7412,6 +7492,11 @@ func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionR
 	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
 		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
 	})
+	plan.Subtitle.Inventory = slices.Clone(plan.Subtitle.Inventory)
+	for i := range plan.Subtitle.Inventory {
+		item := &plan.Subtitle.Inventory[i]
+		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable = nil, "", false
+	}
 	response.PlaybackPlan = &plan
 	return response
 }

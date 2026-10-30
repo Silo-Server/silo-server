@@ -46,6 +46,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/invitations"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -228,6 +229,8 @@ type Dependencies struct {
 	Trickplay                 interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
 	TrickplayReader           *trickplay.Reader              // published seek previews for players (nil when not configured)
 	TrickplayAdmin            *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
+	KeptSubtitles             *keptsub.Store                 // embedded subtitle tracks kept in the assets store, read before demuxing a source (nil without a database or blob storage)
+	SubtitlePrefetch          *keptsub.Prefetcher            // reads the subtitle tracks a playback will likely want, at playback start (nil without KeptSubtitles)
 	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
@@ -1509,6 +1512,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
 		}
+		if deps.KeptSubtitles != nil {
+			playbackHandler.SubtitleTrackFacts = deps.KeptSubtitles
+			playbackHandler.SubtitlePrefetch = deps.SubtitlePrefetch
+		}
 		if deps.RecWorker != nil {
 			playbackHandler.SetSignalsChangedNotifier(deps.RecWorker)
 		}
@@ -1669,6 +1676,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		streamHandler.SubtitleCache = playback.NewSubtitleCache(func() string {
 			return deps.CurrentConfig().Playback.TranscodeDir
 		})
+		// Downloads and translation share this cache, so they read kept
+		// tracks too.
+		if deps.KeptSubtitles != nil {
+			streamHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
+		}
 	}
 
 	restartStatus := deps.ServerRestartStatus
