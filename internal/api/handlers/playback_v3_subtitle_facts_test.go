@@ -57,27 +57,14 @@ func TestNativeEmbeddedSubtitleFollowsOverrideTagFacts(t *testing.T) {
 		{fact: playback.SubtitleFactNoV3, wantNative: true},
 		{fact: playback.SubtitleFactYesV3},
 	} {
-		file := v3HandlerFixtureFile(t)
-		file.Container = "mkv"
-		file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, ContainerTrackID: "3", Codec: "subrip", Language: "eng"}}
-		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-		handler.ItemAccess = allowAllPlaybackItemAccess{}
-		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+		handler, file, start := rokuStyleStartV3(t)
 		facts := &overrideTagFactsLoader{fact: tc.fact}
 		prefetch := &recordingSubtitlePrefetcher{}
 		handler.SubtitleTrackFacts, handler.SubtitlePrefetch = facts, prefetch
-		start := v3HandlerStartRequest()
-		start.Capabilities.Containers = append(start.Capabilities.Containers, "mkv")
-		start.ClientFeatures = append(start.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
-		start.SubtitleTrackIndex = new(0)
-		start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
-		caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-		caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{
-			Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id",
-			Limitations: []string{playback.NativeEmbeddedLimitationForcedUnlistedV3, playback.NativeEmbeddedLimitationHiddenTrackPreemptionV3, playback.NativeEmbeddedLimitationLiteralOverrideTagsV3},
-		}}
-		start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
-		started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+		started, err := handler.startPlaybackV2ForTest(t, start)
+		if err != nil || started.PlaybackPlan == nil {
+			t.Fatalf("start: %+v, %v", started, err)
+		}
 		plan := started.PlaybackPlan
 		if native := plan.Subtitle.Embedded != nil; native != tc.wantNative || native == (plan.Subtitle.Artifact != nil) {
 			t.Fatalf("fact %v: embedded %+v, artifact %+v", tc.fact, plan.Subtitle.Embedded, plan.Subtitle.Artifact)
@@ -94,4 +81,44 @@ func TestNativeEmbeddedSubtitleFollowsOverrideTagFacts(t *testing.T) {
 			t.Fatalf("prefetch ended for %v", prefetch.ended)
 		}
 	}
+}
+
+// The frozen /api/v1 surface predates limitations and the inventory's
+// stream identity: it ignores the one and never publishes the other.
+func TestV1IgnoresLimitationsAndHidesInventoryIdentity(t *testing.T) {
+	handler, _, start := rokuStyleStartV3(t)
+	handler.SubtitleTrackFacts = &overrideTagFactsLoader{fact: playback.SubtitleFactYesV3}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+	if started.PlaybackPlan.Subtitle.Embedded == nil {
+		t.Fatalf("v1 honored a limitation: %+v", started.PlaybackPlan.Subtitle)
+	}
+	for _, item := range started.PlaybackPlan.Subtitle.Inventory {
+		if item.StreamIndex != nil || item.ContainerTrackID != "" || item.NativeSelectable {
+			t.Fatalf("v1 inventory row %+v", item)
+		}
+	}
+}
+
+// rokuStyleStartV3 is a start for an MKV with one embedded SubRip track,
+// selected, from a client whose native entry declares Roku's limitations.
+func rokuStyleStartV3(t *testing.T) (*PlaybackHandler, *models.MediaFile, playback.StartRequestV3) {
+	t.Helper()
+	file := v3HandlerFixtureFile(t)
+	file.Container = "mkv"
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, ContainerTrackID: "3", Codec: "subrip", Language: "eng"}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	start := v3HandlerStartRequest()
+	start.Capabilities.Containers = append(start.Capabilities.Containers, "mkv")
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3)
+	start.SubtitleTrackIndex = new(0)
+	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
+	caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{
+		Container: "mkv", Codecs: []string{"subrip"}, TrackIdentity: "container_track_id",
+		Limitations: []string{playback.NativeEmbeddedLimitationForcedUnlistedV3, playback.NativeEmbeddedLimitationHiddenTrackPreemptionV3, playback.NativeEmbeddedLimitationLiteralOverrideTagsV3},
+	}}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
+	return handler, file, start
 }

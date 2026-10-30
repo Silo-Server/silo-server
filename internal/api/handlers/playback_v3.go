@@ -4869,6 +4869,19 @@ func withoutNativeDeliveryFieldsV3(ctx *playback.ClientPlaybackContextV3) {
 			delivery.MaxChannelsByCodec = nil
 			ctx.Deliveries[name] = delivery
 		}
+		// Native embedded limitations came after the freeze: /api/v1 plans
+		// an entry as it did before them, and never advertises
+		// native_embedded_limitations_v1, without which a client must not
+		// send an entry that needs them.
+		if slices.ContainsFunc(delivery.Subtitles.NativeEmbedded, func(entry playback.NativeEmbeddedSubtitleCapabilityV3) bool {
+			return entry.Limitations != nil
+		}) {
+			delivery.Subtitles.NativeEmbedded = slices.Clone(delivery.Subtitles.NativeEmbedded)
+			for i := range delivery.Subtitles.NativeEmbedded {
+				delivery.Subtitles.NativeEmbedded[i].Limitations = nil
+			}
+			ctx.Deliveries[name] = delivery
+		}
 	}
 }
 
@@ -7466,8 +7479,10 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 }
 
 // frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface: active_quality, and the menu rungs
-// below 1.5 Mbps that Auto lowering added after the freeze.
+// written on the frozen /api/v1 surface: active_quality, the menu rungs
+// below 1.5 Mbps that Auto lowering added after the freeze, and the
+// embedded inventory rows' stream_index, container_track_id and
+// native_selectable.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if response.PlaybackPlan == nil {
 		return response
@@ -7477,6 +7492,11 @@ func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionR
 	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
 		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
 	})
+	plan.Subtitle.Inventory = slices.Clone(plan.Subtitle.Inventory)
+	for i := range plan.Subtitle.Inventory {
+		item := &plan.Subtitle.Inventory[i]
+		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable = nil, "", false
+	}
 	response.PlaybackPlan = &plan
 	return response
 }
