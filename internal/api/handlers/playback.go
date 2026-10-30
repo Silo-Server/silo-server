@@ -623,6 +623,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 			// reconstruction; plain cards just respawn the encode. Either way the
 			// atomic playback+runtime operation is the same front door.
 			card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+			h.withRecordedRenditionTracksV3(r.Context(), card)
 			if card == nil && session.RequireMediaAuthorization {
 				var recipeErr error
 				if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -652,6 +653,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	// decode so the recipe is available for reconstruction. A header-authenticated
 	// session carries no token; its recipe is the server-side recovery card.
 	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	h.withRecordedRenditionTracksV3(r.Context(), card)
 	if card == nil {
 		var recipeErr error
 		if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
@@ -2162,6 +2164,10 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "bad_request", "Playlist request query is too long")
 		return
 	}
+	if errors.Is(err, playback.ErrSubtitleRenditionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Subtitle rendition not found")
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "build transcode manifest", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode manifest not ready")
@@ -2293,8 +2299,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	segmentName := chi.URLParam(r, "name")
 	if isSubtitleSegment {
 		// Subtitle rendition segments never wait out or restart the video
-		// pipeline: they are answered from the cues already on disk.
-		transcodeSession.ServeSubtitleSegment(w, r, subtitleSegment)
+		// pipeline: they are answered from the cues already on disk, or read
+		// through the source's index.
+		transcodeSession.ServeSubtitleSegment(w, r, segmentName)
 		return
 	}
 	segmentLease, err := transcodeSession.OpenSegment(segmentName)

@@ -114,7 +114,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, and `native_embedded_limitations_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, `native_embedded_limitations_v1`, and `hls_subtitle_renditions_all_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -145,6 +145,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `hls_variable_substitution_v1` | `/api/v2` only, and sent by the client in `deliveries.hls.features` rather than `client_features`. Playlists the server rewrites may then carry a repeated media credential once through HLS variable substitution (`EXT-X-DEFINE`); without it they keep literal URIs (§4.2) |
 | `codec_channel_ceilings_v1` | `/api/v2` only. The server honors a delivery's `max_channels_by_codec` (§3). A client that needs a ceiling for one codec only (stereo AAC beside E-AC-3 5.1) sends it there instead of narrowing `max_channels` for every codec |
 | `native_embedded_limitations_v1` | `/api/v2` only. The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
+| `hls_subtitle_renditions_all_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1199,7 +1200,7 @@ and a replan can neither add nor drop them:
 | `software_video_decode_v1` | It widens the direct-play evidence tiers. Dropping it converts a direct route into a transcode and persists that downgrade into the durable request |
 | `subrip_sidecar_v1` | It picks the representation of every SRT sidecar URL. A mid-attempt switch would publish one track under two URLs (§8) |
 | `marker_thumbnails_v1` | It decides whether the session's realtime connection receives `marker_thumbnail_ready` events, which go only to attempts that opted in at start |
-| `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1` | They decide whether a transcode's or a copy remux's stream URL is a multivariant playlist carrying the subtitle or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
+| `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1`, `hls_subtitle_renditions_all_v1` | They decide whether a transcode's or a copy remux's stream URL is a multivariant playlist carrying the subtitle, or every embedded text track, or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
 
 The server silently restores the negotiated state of each, whatever the replan
 sends — including an explicit list that omits one, which is otherwise a valid
@@ -1798,6 +1799,114 @@ stops offering renditions for the rest of the attempt, so a later quality or
 track change does not repeat the failure, on a transcode or a remux. Both
 features are attempt-sticky (§6); `/api/v1` neither advertises nor negotiates
 them.
+
+**Every text track as a rendition.** A client that also sends
+`hls_subtitle_renditions_all_v1`, which `/api/v2` advertises, gets every
+embedded text track of an HLS plan as a rendition, read on demand, so all of
+them play from the first segment and switching needs no new stream. It
+applies to the same plans as the single rendition (a remux still needs
+`hls_remux_subtitle_renditions_v1`) whether a track is selected or not, unless
+a subtitle is burned in, and only when an executor serves on-demand
+renditions: this server, or a node advertising
+`hls_on_demand_subtitle_renditions_v1` as well as the rendition feature for
+its workload. The tracks are the embedded text tracks the single rendition
+could carry whose `container_track_id` is known and whose packets the
+source's own index finds: every Matroska track with Cues that the muxer's
+`NUMBER_OF_FRAMES` tag confirms or that has no such tag, and every MP4 text
+track (see [the index reader](embedded-subtitle-index.md)). The server reads
+the index when the attempt starts; every planning pass of one start or
+replan, alternate versions included, shares one 3 s bound and reads each
+file once. A replan that stays on the playing HLS stream's file lists the
+tracks the stream already serves, none for a stream serving none, without
+reading the index again, except that one selecting an embedded text track on
+a stream without on-demand renditions, which restarts anyway, reads it. A
+file whose index can't be read, or whose selected text track it can't find,
+keeps the single rendition (and its fallback to the sidecar); a failed plan
+with on-demand renditions falls back the same way. Tracks that aren't listed
+keep their sidecar. The plan records the file version (size and modification
+time) whose index it read; segments are read from that version only, so a
+file replaced while it plays answers empty segments rather than another
+file's cues.
+
+The multivariant playlist lists the tracks in inventory order in one group,
+`DEFAULT=YES` only on the selected one (none when subtitles are off or come
+from a sidecar):
+
+```
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="master.m3u8?silo_rendition=subtitles&silo_track=3&..."
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English (2)",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,URI="master.m3u8?silo_rendition=subtitles&silo_track=4&..."
+#EXT-X-STREAM-INF:BANDWIDTH=8192000,SUBTITLES="subs"
+master.m3u8?silo_rendition=video&...
+```
+
+`NAME` is the inventory row's `label` (its language, or `Subtitles`, when it
+has none), with `"` replaced by `'`, control characters dropped and ` (2)`,
+` (3)`... added to repeats; `LANGUAGE` is the row's language as a canonical
+BCP 47 tag (`eng` becomes `en`), left out when it is empty, `und` or not a
+language tag. With subtitles off every rendition is `DEFAULT=NO` but still
+`AUTOSELECT=YES`, so a player that follows the system's caption or language
+preferences may turn one on by itself: a client playing with subtitles off
+must disable subtitle selection in its player explicitly (AVPlayer: select
+no option in the legible group; Media3: disable the text track type; Roku:
+turn captions off). Each listed inventory row carries `hls_rendition: {"group_id":
+"subs", "name": "English (2)", "index": 2}`, `index` being its 1-based place
+in the group: Roku names the rendition `webvtt/<index>`, Media3 matches
+`group_id` and `name`, AVPlayer reads the same names from its media-selection
+options. The selected one is also `subtitle.hls_rendition`, with the same
+`name` and `index`, so a client that predates the inventory field finds it as
+before. A track's playlist, `silo_rendition=subtitles&silo_track=<track>`
+with the container track number, lists `segment/sub_<track>_NNNNN.vtt` on
+the video playlist's segments, as the single rendition's does. A client that
+scopes its media credentials to the plan's URLs must admit `silo_track`
+beside `silo_rendition=subtitles`.
+
+Each segment is read when it is requested: the server finds the track's
+packets for the segment's window in the track's kept copy when the server
+keeps one (on the API server, which keeps tracks; see
+[the index reader](embedded-subtitle-index.md)), else through the source's
+index, and converts them
+with the same FFmpeg WebVTT options the single rendition's output uses, on the
+clock that output would have used (the container's own timestamps for a
+transcode, less the source's start time for a copy remux), then cuts the
+segment exactly as above: the same window, generation origins, spans and
+`X-TIMESTAMP-MAP`. For the same generation the bytes match the single
+rendition's. A segment ahead of the stream's FFmpeg is answered at once with
+its cues; a segment waits only for its generation's origin, which the
+generation's first video segment shows, or, when no generation covers it, for
+the seek restart its video request starts, then answers empty as above, or,
+for a keyframe-planned copy, `404`, as its video segment does. A copy remux on
+FFmpeg's own playlist can list, and so serve, only what FFmpeg has produced.
+The stream's FFmpeg writes no cues; a copy generation still records its first
+video packet for the mux shift. Indexes, start times and converted windows
+are kept per process and shared by every session on a file version; at most
+eight windows are read and converted at once, and a read gets 30 s. A read
+that fails or runs out of time answers `404`, which the player retries, never
+an empty segment it would keep; a track the file can't give (no Cues, a
+replaced or missing file, a codec the reader can't decode) answers empty
+segments, so the player plays on. A window finds a cue that started before it only
+within the index reader's lookback (see its Windows section), so a cue without
+`CueDuration` that shows for minutes can be missing from later segments.
+
+Switching is the player's own media selection, reported with a `track_change`
+replan or a `failure_recovery` classified `subtitle_track_changed`. On a
+stream serving on-demand renditions the server takes that recovery as a
+`track_change`: it stays on the file playing, selects the track named, and
+turns subtitles off when none is named. When the new plan lists the same
+renditions, the server keeps the running stream, its URL and its generation;
+the plan changes only its `subtitle` decision, and the recipe it records only
+which track is the default. The multivariant playlist keeps the `DEFAULT` it
+was started with, so a client that loads it again selects the plan's
+rendition itself. A plan with another set, or one that moves to the single
+rendition, starts a new generation. The feature is attempt-sticky.
+
+A stream token carries only the tracks' numbers, the default and the source
+version, under the `transcode_subtitle_renditions_v1` or
+`transcode_copy_fmp4_subtitle_renditions_v1` method, which binaries that
+predate on-demand renditions refuse instead of rebuilding the stream with one
+rendition. When this server rebuilds or moves a transport from a token, it
+takes the renditions' names, languages and `FORCED` from the attempt's frozen
+recipe if that lists the same tracks; a node that rebuilds a session from a
+token alone names them `Track <n>`. Recipe cards keep the whole list.
 
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`

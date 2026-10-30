@@ -91,6 +91,9 @@ type SubtitleInventoryItemV3 struct {
 	// the stream it already plays: selecting it under this plan's
 	// capabilities, delivery and audio yields subtitle.embedded.
 	NativeSelectable bool `json:"native_selectable,omitempty" doc:"Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url stays the fallback."`
+	// HLSRendition places an embedded text track among the HLS stream's
+	// subtitle renditions (hls_subtitle_renditions_all_v1).
+	HLSRendition *SubtitleInventoryHLSRenditionV3 `json:"hls_rendition,omitempty" doc:"Embedded text tracks of an HLS plan under hls_subtitle_renditions_all_v1: the track's WebVTT rendition in the stream's SUBTITLES group. The client may select it in its player and report the change with a subtitle_track_changed replan, which keeps the stream; url stays the fallback."`
 	// downloadedSubtitleID is deliberately not serialized: clients address the
 	// opaque session URL, while the server uses the row ID to make that URL
 	// stable across inventory reordering and seek reanchors.

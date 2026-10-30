@@ -362,7 +362,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
