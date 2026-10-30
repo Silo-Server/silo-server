@@ -143,6 +143,9 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 	if cfg.AuthMode == AuthModeChatGPT {
 		return c.chatGPT(ctx, cfg, messages, jsonObject)
 	}
+	if cfg.ServiceTier == "ultrafast" {
+		return c.apiResponses(ctx, cfg, messages, jsonObject)
+	}
 	reqBody := chatCompletionRequest{
 		Model:           cfg.ChatModel,
 		Messages:        messages,

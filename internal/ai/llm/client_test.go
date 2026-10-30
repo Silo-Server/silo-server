@@ -51,6 +51,10 @@ func TestChatSendsExplicitServiceTier(t *testing.T) {
 		t.Run("tier="+tier, func(t *testing.T) {
 			cfg := chatConfig("https://api.openai.com")
 			cfg.ServiceTier = tier
+			if tier == "ultrafast" {
+				cfg.ChatModel = "gpt-6.1-sol"
+				cfg.ReasoningEffort = "high"
+			}
 			client := NewClient(cfg)
 			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				var body map[string]any
@@ -61,9 +65,27 @@ func TestChatSendsExplicitServiceTier(t *testing.T) {
 				if tier == "" && present || tier != "" && got != tier {
 					t.Fatalf("service_tier = %v (present: %v); want %q", got, present, tier)
 				}
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(chatOK))}, nil
+				response := chatOK
+				wantPath := "/v1/chat/completions"
+				if tier == "ultrafast" {
+					wantPath = "/v1/responses"
+					response = `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`
+					if body["reasoning"].(map[string]any)["effort"] != "high" || body["temperature"] != nil || body["text"].(map[string]any)["format"].(map[string]any)["type"] != "json_object" {
+						t.Fatal("Responses must use nested reasoning/text format and omit unsupported temperature")
+					}
+					if _, ok := body["input"]; !ok {
+						t.Fatal("Responses request must use input")
+					}
+					if body["store"] != false || body["stream"] != false {
+						t.Fatal("Responses must disable storage and streaming")
+					}
+				}
+				if r.URL.Path != wantPath || r.Header.Get("Authorization") != "Bearer test-key" {
+					t.Fatalf("unexpected endpoint or authorization: %s", r.URL.Path)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
 			})
-			if _, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, false); err != nil {
+			if _, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, true); err != nil {
 				t.Fatal(err)
 			}
 		})

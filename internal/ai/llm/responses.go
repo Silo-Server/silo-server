@@ -56,12 +56,14 @@ type responseTextFormat struct {
 }
 
 type responseRequest struct {
-	Model     string              `json:"model"`
-	Input     []Message           `json:"input"`
-	Store     bool                `json:"store"`
-	Stream    bool                `json:"stream"`
-	Reasoning *responseReasoning  `json:"reasoning,omitempty"`
-	Text      *responseTextFormat `json:"text,omitempty"`
+	Model       string              `json:"model"`
+	Input       []Message           `json:"input"`
+	Store       bool                `json:"store"`
+	Stream      bool                `json:"stream"`
+	Reasoning   *responseReasoning  `json:"reasoning,omitempty"`
+	Text        *responseTextFormat `json:"text,omitempty"`
+	ServiceTier string              `json:"service_tier,omitempty"`
+	Temperature *float32            `json:"temperature,omitempty"`
 }
 
 func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, jsonObject bool) (string, error) {

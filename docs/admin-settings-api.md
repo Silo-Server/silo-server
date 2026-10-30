@@ -141,7 +141,9 @@ effort, service tier, and active registration together at request start.
 `ai.service_tier` applies only to a text provider whose registry type is `openai`
 while `ai.auth_mode` is `api_key`. Its default, an empty string, omits OpenAI's
 `service_tier` parameter and inherits the OpenAI project's setting. `priority`
-requests Fast/Priority processing; `ultrafast` requests Ultrafast processing.
+requests Fast/Priority processing through Chat Completions; `ultrafast` uses
+API-key-authenticated Responses with storage disabled. Only completed text
+output is accepted; incomplete responses and refusals never replace source text.
 OpenAI decides whether the account and model support the requested tier. Silo
 does not silently fall back after a provider rejection. Switching to another
 provider or a ChatGPT plan keeps the setting but omits it from requests. Speech
