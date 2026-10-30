@@ -57,16 +57,22 @@ vi.mock("@/components/SectionRow", () => ({
   default: ({
     section,
     priority,
+    onNearEnd,
   }: {
     section: { id: string; items: Array<{ title: string }> };
     priority?: boolean;
+    onNearEnd?: (sectionId: string) => void;
   }) => (
     <div
       data-kind="section-row"
       data-section-id={section.id}
       data-first-item={section.items[0]?.title}
+      data-item-count={section.items.length}
       data-priority={String(Boolean(priority))}
-    />
+    >
+      {/* Stands in for the carousel nearing its last card. */}
+      <button type="button" onClick={() => onNearEnd?.(section.id)} />
+    </div>
   ),
 }));
 
@@ -362,6 +368,34 @@ describe("Home", () => {
 
     expect(container.querySelectorAll('[data-kind="section-row"]')).toHaveLength(5);
     expect(container.querySelectorAll("[data-home-section-placeholder]")).toHaveLength(0);
+  });
+
+  it("reads the rest of a row at its own limit when its total holds more cards", async () => {
+    // A whole read of an admin curated list answers every card it holds, past
+    // the row's own item_limit.
+    const picks = { ...homeLayout("picks"), section_type: "admin_curated_list", item_limit: 20 };
+    showLayout([picks]);
+    const cards = Array.from({ length: 21 }, (_, index) => ({
+      ...homeSection("picks").section.items[0]!,
+      content_id: `pick-${index}`,
+    }));
+    const read = (count: number) => ({
+      section: { ...picks, total_count: cards.length, items: cards.slice(0, count) },
+    });
+    mockFetchHomeSectionItems.mockImplementation(
+      async (_sectionId: string, options: { itemLimit?: number }) =>
+        options.itemLimit === undefined ? read(21) : { ...read(20), partial: true },
+    );
+    const itemCount = () =>
+      container.querySelector('[data-section-id="picks"]')?.getAttribute("data-item-count");
+
+    await renderHome(new QueryClient());
+    await waitFor(() => expect(itemCount()).toBe("20"));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-section-id="picks"] button')!.click();
+    });
+
+    await waitFor(() => expect(itemCount()).toBe("21"));
   });
 
   it.each([["WebKit", SAFARI_USER_AGENT]])(

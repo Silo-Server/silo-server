@@ -22,10 +22,15 @@ export const HOME_ROW_ITEM_LIMIT =
  * whatever it answered: Home's hide-watched and Not interested filters run on
  * the capped cards and cut both the items and total_count, so a short answer
  * does not prove the row is exhausted. Completing it reads the row whole once;
- * Home skips that read for a row already at its own limit.
+ * Home skips that read for a row already at its own limit unless total_count
+ * holds more, as an admin curated list's does: read whole, it answers every
+ * card it holds. A row with no item_limit shows the server's default of 20,
+ * which the cap reaches, so it may hold more only when total_count says so.
  */
 export function isPartialHomeRow(section: ResolvedSection, itemLimit: number | undefined): boolean {
-  return itemLimit !== undefined && section.item_limit >= itemLimit;
+  if (itemLimit === undefined) return false;
+  if (section.item_limit <= 0) return section.total_count > section.items.length;
+  return section.item_limit >= itemLimit;
 }
 
 /** The cached form of a row read with itemLimit, or read whole without one. */
