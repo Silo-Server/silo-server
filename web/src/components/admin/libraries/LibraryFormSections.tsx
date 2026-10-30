@@ -41,6 +41,10 @@ import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
 import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
+// A library's metadata_language is a bare ISO 639-1 code; the server rejects
+// regional tags such as pt-BR, so the picker leaves them out.
+const LIBRARY_METADATA_LANGUAGES = LANGUAGES.filter((lang) => /^[a-z]{2}$/.test(lang.code));
+
 function SettingCard({
   htmlFor,
   title,
@@ -345,7 +349,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LANGUAGES.map((lang) => (
+            {LIBRARY_METADATA_LANGUAGES.map((lang) => (
               <SelectItem key={lang.code} value={lang.code}>
                 {lang.label}
               </SelectItem>
