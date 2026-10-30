@@ -662,6 +662,17 @@ func TestQueryCatalogWatchCounts(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodPost, path, body, viewerHeaders()), TypeValidationFailed)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, path, `{"series_ids":["series:severance"]}`, bearer(memberToken)), TypeValidationFailed)
+
+	// The capability follows the catalog wiring alone, not the search provider.
+	rec = do(t, h, http.MethodGet, "/api/v2/capabilities/watch-counts", "", viewerHeaders())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"available"`) || !strings.Contains(rec.Body.String(), `"max_series_ids":250`) {
+		t.Fatalf("capability: %d %s", rec.Code, rec.Body.String())
+	}
+	deps.CatalogItems = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/watch-counts", "", viewerHeaders())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) || strings.Contains(rec.Body.String(), "max_series_ids") {
+		t.Fatalf("unwired capability: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestListCatalogItemsPreservesResolvedSourceOrderCursors(t *testing.T) {

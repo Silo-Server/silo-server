@@ -323,6 +323,7 @@ export const v2Operations = {
   "GET /api/v2/capabilities/personal-lists": "getPersonalListCapability",
   "GET /api/v2/capabilities/ratings": "getRatingsCapability",
   "GET /api/v2/capabilities/trailers": "getTrailersCapability",
+  "GET /api/v2/capabilities/watch-counts": "getWatchCountsCapability",
   "GET /api/v2/catalog": "listCatalogItems",
   "GET /api/v2/catalog/audiobook-groups": "listAudiobookGroups",
   "GET /api/v2/catalog/filters": "getCatalogFilters",

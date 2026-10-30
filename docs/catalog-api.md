@@ -823,9 +823,12 @@ names it in `content_id` or `series_id` with `change` `progress`, `watched` or
 `history`. Season lists already carry each season's counts in `user_data`
 (`listSeriesSeasons`).
 
-`getCatalogSearchCapabilities` reports `watch_counts: true` when the operation
-is available. The web client shows the counts as the `unwatched_episodes` card
-overlay, which settings manifest revision 25 adds to `ui.card_overlays`.
+Detect support with `GET /api/v2/capabilities/watch-counts`
+(`getWatchCountsCapability`): `state` is `available` when the read answers, and
+`max_series_ids` gives the per-request bound. It depends only on the catalog,
+so a search provider outage does not hide it. The web client shows the counts
+as the `unwatched_episodes` card overlay, which settings manifest revision 25
+adds to `ui.card_overlays`.
 
 ## Season-list artwork
 

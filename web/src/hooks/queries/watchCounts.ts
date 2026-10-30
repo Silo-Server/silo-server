@@ -85,12 +85,20 @@ const progressRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
  * mark or a history change refetches it at once. Progress only marks it stale,
  * so a card mounted later (on leaving the player, say) reads it again, and
  * refetches the cards on screen once per window.
+ *
+ * Without a series, a watched mark or history change refreshes every count:
+ * history removals and marks made from Jellyfin clients name only the episode.
+ * Only the cards on screen refetch, in one request.
  */
 export function refreshUnwatchedEpisodeCount(
   queryClient: QueryClient,
-  seriesId: string,
+  seriesId: string | undefined,
   change: string,
 ) {
+  if (seriesId === undefined) {
+    if (change !== "progress") void queryClient.invalidateQueries({ queryKey: watchCountKeys.all });
+    return;
+  }
   const queryKey = watchCountKeys.series(seriesId);
   // Nothing to refresh for a series no card has counted (or a movie's ID).
   if (!queryClient.getQueryCache().find({ queryKey, exact: true })) return;

@@ -14,7 +14,28 @@ import (
 // and a page of cards does not pay for them. A client that shows the badge asks
 // for the series it draws.
 
-const opQueryCatalogWatchCounts = "queryCatalogWatchCounts"
+const (
+	opQueryCatalogWatchCounts = "queryCatalogWatchCounts"
+	// maxWatchCountSeries is the series bound CatalogWatchCountsQuery's tag
+	// enforces, reported by getWatchCountsCapability.
+	maxWatchCountSeries = 250
+)
+
+// WatchCountsCapability reports whether queryCatalogWatchCounts answers. It
+// stands apart from the search capabilities because the read needs only the
+// catalog, not the search provider.
+type WatchCountsCapability struct {
+	Capability
+	MaxSeriesIDs int `json:"max_series_ids,omitzero" doc:"Most series one queryCatalogWatchCounts request may name; absent unless state is available" example:"250"`
+}
+
+// WatchCountsCapabilityOutput is the getWatchCountsCapability response.
+type WatchCountsCapabilityOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         WatchCountsCapability
+}
 
 // CatalogWatchCountsInput is the queryCatalogWatchCounts request.
 type CatalogWatchCountsInput struct {
@@ -44,12 +65,22 @@ type CatalogWatchCountsOutput struct {
 }
 
 func registerCatalogWatchCounts(reg *Registry) {
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/watch-counts", "getWatchCountsCapability", "catalog",
+		"Whether the acting profile can read episode watch counts for a batch of series, and how many series one request may name.")), reg.getWatchCountsCapability)
 	op := humaOp(http.MethodPost, Prefix+"/catalog/watch-counts", opQueryCatalogWatchCounts, "catalog",
 		"The acting profile's episode watch counts for up to 250 series, in request order, for unwatched-episode badges on series cards. An ID that is not a series, that the viewer may not see, or whose series has no available episodes is left out rather than answered with zero counts.")
 	op.DefaultStatus = http.StatusOK
 	operation := viewerOperation(op)
 	operation.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, operation, reg.queryCatalogWatchCounts)
+}
+
+func (reg *Registry) getWatchCountsCapability(_ context.Context, _ *CapabilityInput) (*WatchCountsCapabilityOutput, error) {
+	body := WatchCountsCapability{Capability: Capability{State: StateNotConfigured}}
+	if _, p := reg.catalogItems(); p == nil {
+		body = WatchCountsCapability{Capability: Capability{State: StateAvailable}, MaxSeriesIDs: maxWatchCountSeries}
+	}
+	return &WatchCountsCapabilityOutput{CacheControl: cacheControlPrivateNoCache, Body: body}, nil
 }
 
 func (reg *Registry) queryCatalogWatchCounts(ctx context.Context, in *CatalogWatchCountsInput) (*CatalogWatchCountsOutput, error) {

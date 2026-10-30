@@ -91,9 +91,15 @@ describe("unwatched-episodes badge", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(queryFn).toHaveBeenCalledTimes(3);
 
-    // A series no card counted (or a movie's ID) schedules nothing.
+    // A history removal or a Jellyfin client's mark names only the episode, so
+    // it refreshes every count; progress without a series (a movie) does not.
+    refreshUnwatchedEpisodeCount(client, undefined, "history");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queryFn).toHaveBeenCalledTimes(4);
     const timers = vi.getTimerCount();
-    refreshUnwatchedEpisodeCount(client, "movie:heat-1995", "progress");
+    refreshUnwatchedEpisodeCount(client, undefined, "progress");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queryFn).toHaveBeenCalledTimes(4);
     expect(vi.getTimerCount()).toBe(timers);
     unsubscribe();
   });

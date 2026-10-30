@@ -1,5 +1,5 @@
 {
-  "revision": "366bfbef39c327b4294857e83a2941d24d808665b1fbda47cd66279970b9e2bc",
+  "revision": "9cc6c59e878668a6410bba1c347d11c8d7fbafd7ef5684f84089fc56cb25f86b",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
@@ -9,7 +9,6 @@
   "extended_query_rules": true,
   "show_title_rules": true,
   "letter_index": true,
-  "watch_counts": true,
   "provider": "meilisearch",
   "result_window_limit": 1000,
   "session_ttl_seconds": 900,

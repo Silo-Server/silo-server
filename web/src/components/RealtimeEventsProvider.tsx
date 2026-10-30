@@ -476,11 +476,10 @@ function handleUserStateEvent(
   } else {
     scheduleProgressHomeRefresh(queryClient);
   }
-  // The unwatched-episodes badge counts a series' episodes. An episode's
-  // event names its series; a mark on the series itself names only the series.
-  const countedSeries = payload.series_id || payload.content_id;
-  if (countedSeries && WATCH_COUNT_CHANGES.has(payload.change)) {
-    refreshUnwatchedEpisodeCount(queryClient, countedSeries, payload.change);
+  // The unwatched-episodes badge counts a series' episodes. Progress names the
+  // episode's series; events that name no series refresh every count.
+  if (WATCH_COUNT_CHANGES.has(payload.change)) {
+    refreshUnwatchedEpisodeCount(queryClient, payload.series_id || undefined, payload.change);
   }
   void queryClient.invalidateQueries({
     queryKey: adminKeys.stats(),

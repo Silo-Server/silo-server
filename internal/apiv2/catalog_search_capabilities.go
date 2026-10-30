@@ -17,7 +17,6 @@ type CatalogSearchCapabilities struct {
 	ExtendedQueryRules    bool   `json:"extended_query_rules,omitzero" doc:"Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields"`
 	ShowTitleRules        bool   `json:"show_title_rules,omitzero" doc:"Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match"`
 	LetterIndex           bool   `json:"letter_index,omitzero" doc:"queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar"`
-	WatchCounts           bool   `json:"watch_counts,omitzero" doc:"queryCatalogWatchCounts answers the acting profile's watched, unwatched, and in-progress episode counts for up to 250 series at once, for unwatched-episode badges on series cards"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`
 	SessionTTLSeconds     int    `json:"session_ttl_seconds,omitzero" doc:"Fixed Meilisearch ranking-session lifetime; requests do not extend it"`
@@ -58,7 +57,6 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 				ExtendedQueryRules: true,
 				ShowTitleRules:     true,
 				LetterIndex:        true,
-				WatchCounts:        reg.deps.CatalogItems != nil,
 				ResultWindowLimit:  result.ResultWindowLimit, SessionTTLSeconds: result.SessionTTLSeconds, MaxSessionsPerAccount: result.MaxSessionsPerAccount,
 			}}, nil
 		})
