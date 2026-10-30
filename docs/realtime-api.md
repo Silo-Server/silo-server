@@ -324,7 +324,8 @@ playback session. The body's `installation_id` is optional: send the value
 omit it for a session the bridge started. Minting checks, in order: a bounded
 login session; the current session, enabled account, role and viewer/PIN proof;
 that the playback session exists in the session manager and belongs to the
-caller's account and profile (`403 permission_denied` otherwise); and that a
+caller's account and profile (`404 not_found` when it does not exist,
+`403 permission_denied` when it belongs to someone else); and that a
 presented `installation_id` matches the server's (`409 conflict`). A lane
 already held by a different account, profile or installation is also `409`. The
 response carries `ticket`, `expires_in` (at most 30 seconds),
@@ -361,13 +362,12 @@ access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
 than 64 KiB closes the connection with `1009` (message too big); the bridge
 socket applies the same limit.
 
-`GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
-`protocol` only when this server serves the handshake. The web player mints
-under captured profile authority for every connection, offers the protocol pair,
-discards frames once that authority changes, and uses the bridge socket only
-when the handshake is not served (`404`/`503`), never after an ownership
-refusal. The bridge socket route is
-unchanged.
+`GET /api/v2/playback/sessions/control/capabilities` reports `available` and
+`protocol`, an empty string when this server does not serve the handshake. The web
+player mints under captured profile authority for every connection, offers the
+protocol pair, discards frames once that authority changes, and retries a refused
+mint with bounded backoff under the same authority. It does not fall back to the
+bridge socket. The bridge socket route is unchanged.
 
 
 ### V2 suggestion reads and vote membership
@@ -380,7 +380,7 @@ The response is `{items, page}` with string identifiers and UTC timestamps.
 suggestion ID. Cursor scope includes account, profile, access policy, room and
 page size. Vote changes do not move suggestions across the cursor. Concurrent
 creation/deletion is not a snapshot; clients refresh to reconcile live changes.
-Room lifecycle and the room websocket still use the bridge contract.
+Room lifecycle and the room websocket have their own v2 operations, described below.
 
 HTTP suggestion reads return the requesting profile's authoritative
 `voted_by_me`. Both v1 and v2 socket `suggestions_update` frames carry common room
@@ -418,7 +418,7 @@ not establish that the entry still exists.
 The existing web delete action sends once, surfaces errors including `404`, and
 reloads the bounded list only after success under the original captured authority.
 It does not replay after a lost response or authentication error. Suggestion
-creation and promotion remain separate bridge operations.
+creation and promotion are separate v2 operations, described below.
 
 ### End a Watch Together room
 
@@ -426,7 +426,7 @@ creation and promotion remain separate bridge operations.
 
 Success returns bodyless `204` after the existing room-close service completes. Non-host authority returns `403`, a missing room `404`, an already-ended room `409`, and unavailable service `503`. Natural-idempotent classification describes convergence on ended state, not a promise that every repeated request returns `204`. The actual web action sends once without authentication replay and fences original authority before dispatch, after receipt and before completion feedback. It does not optimistically mark the room ended or automatically retry an uncertain close.
 
-The owning service retains persistence, host/wait timer cleanup, local connected-member `room_closed` dispatch with the existing `host_left` reason, and live-room removal. This port changes no domain persistence or callback behavior. It does not cancel already-dispatched playback, establish cross-node socket broadcast, or complete the separate v2 room-socket contract. Existing room creation, joining and room credentials remain separate migration scopes; v1 wire behavior is unchanged.
+The owning service retains persistence, host/wait timer cleanup, local connected-member `room_closed` dispatch with the existing `host_left` reason, and live-room removal. The committed close is published; other API servers refresh the room and send `room_closed` to their own connected members. This port changes no domain persistence or callback behavior. It does not cancel already-dispatched playback. Room creation, joining and the room socket are separate v2 operations, described below; v1 wire behavior is unchanged.
 
 ### Read a Watch Together room
 
@@ -442,7 +442,7 @@ The existing web initial-room read sends proof only in the header, captures auth
 
 Success returns a no-store `200` room snapshot and renewed existing room proof. The owning service retains generation-based persistence and local snapshot broadcasts. If a competing writer wins the generation check, it can return the refreshed winning snapshot without retrying or broadcasting the failed write. Clients must use that returned policy rather than assuming the requested value was stored. Natural-idempotent classification describes the policy value; it does not promise an unchanged generation or suppress successful-write broadcasts.
 
-The existing web toggle captures policy and authority, sends once without authentication replay, and fences authority, replaced room and superseded run before publication or feedback. It retains a newer currently held room generation when a policy response is older. Stale room/run failures do not report into the replacement context. It does not automatically read, rebase or retry a conflict/uncertain result. Existing proof renewal is not a session-bound socket credential. V1 service behavior, guest transport enforcement and socket protocol remain unchanged; no cross-node broadcast or native activation is implied.
+The existing web toggle captures policy and authority, sends once without authentication replay, and fences authority, replaced room and superseded run before publication or feedback. It retains a newer currently held room generation when a policy response is older. Stale room/run failures do not report into the replacement context. It does not automatically read, rebase or retry a conflict/uncertain result. Existing proof renewal is not a session-bound socket credential. V1 service behavior, guest transport enforcement and socket protocol remain unchanged; no native activation is implied.
 
 ### Resolve a room invitation
 
@@ -534,7 +534,7 @@ The actual web candidate holds an immutable ID, metadata, room proof and authori
 
 The v2 path retains playable/access resolution, then uses the guarded selection transaction. Promotion chooses content rather than an explicit file variant: already-selected content preserves its selected file/library, playback anchor, revision/generation, attached readiness and local broadcast count even if the resolver now prefers another variant. A different eligible content selection resets playback/readiness once. Direct selection continues to compare all resolved identities. Host/closed/mode checks still precede the no-op. No historical replay receipt is promised after intervening different content, so promotion remains non-retryable. Frozen v1 promotion remains unchanged.
 
-Success returns the authoritative room snapshot and renewed existing room proof. A competing writer may determine that snapshot; the web reports selection updated without asserting playback started. Missing room/suggestion returns `404`, non-host or invalid proof `403`, closed room `409`, unplayable selection `422`, and unavailable service `503`. V2 permits a host override of the tally. The frozen v1 route retains its `409` for a non-leader or a room with no votes. The actual panel sends once without auth replay, suppresses stale room/run/authority success and error feedback, and compares generations only within one room before publication. No new session-bound socket proof, cross-node broadcast, native activation or real playback dispatch is established by this port.
+Success returns the authoritative room snapshot and renewed existing room proof. A competing writer may determine that snapshot; the web reports selection updated without asserting playback started. Missing room/suggestion returns `404`, non-host or invalid proof `403`, closed room `409`, unplayable selection `422`, and unavailable service `503`. V2 permits a host override of the tally. The frozen v1 route retains its `409` for a non-leader or a room with no votes. The actual panel sends once without auth replay, suppresses stale room/run/authority success and error feedback, and compares generations only within one room before publication. No new session-bound socket proof, native activation or real playback dispatch is established by this port.
 
 ### Room creation identity storage
 

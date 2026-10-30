@@ -2,8 +2,10 @@
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
 > 1.0. The frozen alpha `/api/v1` surface carries the same auth routes through the pre-1.0 bridge
-> window, after which Silo answers the whole `/api/v1` namespace with `410 Gone` and the
-> `client_upgrade_required` problem code. See
+> window. After the bridge window, and once a maintainer decides to retire it
+> ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API listener answers
+> the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem code;
+> `/api/v1/health` and `/api/v1/ready` keep answering. See
 > [the native API contract](architecture/api-contract.md).
 
 Commands assume the repository root is the cwd. Unprefixed paths are relative to the
@@ -109,11 +111,15 @@ Accounts whose local password login is disabled keep their credential at the ext
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
 
-### `GET /auth/account/capability`
+The next two routes are the frozen `/api/v1` bridge. The v2 operations are under
+[V2 password management](#v2-password-management).
+
+### `GET /api/v1/auth/account/capability` (frozen bridge)
 
 Requires an authenticated access-token session. When the request names an active profile, normal
-profile and PIN verification applies. Clients should read this endpoint rather than infer support
-from a server version.
+profile and PIN verification applies. Clients should read this endpoint, or
+`GET /api/v2/account/password/capability` on v2, rather than infer support from a server
+version.
 
 ```json
 {
@@ -129,7 +135,7 @@ from a server version.
 local password login enabled. The remaining fields describe the server contract even when it is
 false.
 
-### `POST /auth/account/password`
+### `POST /api/v1/auth/account/password` (frozen bridge)
 
 Requires the same authenticated profile authority as the capability endpoint. The request is
 rate-limited separately from login attempts.
@@ -271,9 +277,10 @@ keep their previous `net/mail` acceptance.
 sessions on its other devices. Authentication is required; no active profile is needed.
 Expired and revoked sessions are excluded before pagination.
 
-The response uses the v2 collection envelope: `items` and `page`. Each item contains `id`,
-`device_name`, `ip_address`, `created_at`, and `expires_at`, plus `device_id` and
-`device_platform` when the client reported them. Timestamps use UTC with millisecond
+The response uses the v2 collection envelope, `items` and `page`, plus `current_session`. Each
+item contains `id`, `device_name`, `ip_address`, `created_at`, `expires_at`, `last_seen_at`,
+and `current`, plus `device_id` and `device_platform` when the client reported them.
+Timestamps use UTC with millisecond
 precision. There is no `revoked_at` member because every returned session is active.
 
 A session records the device that opened it. Every sign-in that opens a login session (password
@@ -358,7 +365,8 @@ Operations that name a rate-limit budget (`login`, `setup`, `signup`, `invitatio
 budget wherever they run: v1 and v2, and for `login` and the device budgets the
 Jellyfin-compatible listener too. A budget counts per client address. That is the address
 taken from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
-(`clientip.trusted_proxies`, every private range and loopback by default), otherwise the
+(`clientip.trusted_proxies`; by default the RFC 1918 IPv4 ranges, `127.0.0.0/8` and
+`::1`), otherwise the
 connection's own address. A public IPv6 address counts by its /64, because one home line or
 server usually holds a whole /64; this applies to every per-address budget, including the
 per-address request budget of authenticated routes. Every other address counts on its own:
