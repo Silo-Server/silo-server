@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -187,20 +188,50 @@ func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 	}
 }
 
-// TestPlaybackV2ProbeURLUsesForwardedOrigin: behind a TLS-terminating reverse
-// proxy the request's Host is the internal origin the proxy dialed, which a
-// client cannot reach. The advertised probe URL names the forwarded origin.
-func TestPlaybackV2ProbeURLUsesForwardedOrigin(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	deps.Playback = &scheduleService{}
-	headers := with(with(viewerHeaders(), "X-Forwarded-Host", "media.example.test"), "X-Forwarded-Proto", "https")
-	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", headers)
-	var body PlaybackCapabilities
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
-		t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+// TestPlaybackV2ProbeURLOrigin: the advertised probe URL names the origin the
+// client reached. Behind a TLS-terminating reverse proxy that is the forwarded
+// origin, not the internal host the proxy dialed; a client on the LAN keeps
+// the address it used; and a proxy that rewrites Host to a bare IP without
+// naming the client's host falls back to the configured public URL.
+func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
+	const probe = Prefix + "/playback/bandwidth-probe?media_path=true"
+	cases := []struct {
+		name, host, publicURL string
+		headers               map[string]string
+		want                  string
+	}{
+		{"forwarded host", "10.0.0.5:8090", "https://public.example.test",
+			map[string]string{"X-Forwarded-Host": "media.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-For": "198.51.100.7"}, "https://media.example.test"},
+		{"lan client on its address", "192.168.1.20:8090", "https://public.example.test", nil, "http://192.168.1.20:8090"},
+		{"proxy rewrote host to an IP", "203.0.113.5:8090", "https://public.example.test/silo/",
+			map[string]string{"X-Forwarded-For": "198.51.100.7"}, "https://public.example.test/silo"},
+		{"proxy rewrote host, no public URL", "203.0.113.5:8090", "",
+			map[string]string{"X-Forwarded-For": "198.51.100.7"}, "http://203.0.113.5:8090"},
+		{"proxy kept a named host", "media.example.test", "https://public.example.test",
+			map[string]string{"X-Forwarded-For": "198.51.100.7", "X-Forwarded-Proto": "https"}, "https://media.example.test"},
 	}
-	if want := "https://media.example.test" + Prefix + "/playback/bandwidth-probe?media_path=true"; body.BandwidthProbeURL != want {
-		t.Fatalf("bandwidth_probe_url = %q, want %q", body.BandwidthProbeURL, want)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			deps, _ := catalogDeps(t)
+			deps.Playback = &scheduleService{}
+			deps.ServerConnections.PublicURL = func() string { return c.publicURL }
+			r := httptest.NewRequest(http.MethodGet, "http://"+c.host+Prefix+"/playback/capabilities", nil)
+			for k, v := range viewerHeaders() {
+				r.Header.Set(k, v)
+			}
+			for k, v := range c.headers {
+				r.Header.Set(k, v)
+			}
+			response := httptest.NewRecorder()
+			newTestHandler(t, deps).ServeHTTP(response, r)
+			var body PlaybackCapabilities
+			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+				t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+			}
+			if want := c.want + probe; body.BandwidthProbeURL != want {
+				t.Fatalf("bandwidth_probe_url = %q, want %q", body.BandwidthProbeURL, want)
+			}
+		})
 	}
 }
 
