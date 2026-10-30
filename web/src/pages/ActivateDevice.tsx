@@ -43,6 +43,8 @@ function platformLabel(platform: string) {
     case "android-tv":
     case "androidtv":
       return "Android TV";
+    case "roku":
+      return "Roku";
     default:
       return platform;
   }
@@ -337,7 +339,7 @@ function ActivateDeviceRequest() {
       } else if (isQuickConnect) {
         resultMessage = "This code expired. Start Quick Connect again in the app.";
       } else {
-        resultMessage = "This code expired. Your TV is showing a new one; scan it again.";
+        resultMessage = "This code expired. Your TV is showing a new one. Use that code instead.";
       }
       break;
   }
@@ -414,9 +416,13 @@ function ActivateDeviceRequest() {
           ) : details ? (
             <div className="space-y-5">
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">
-                  {remotePlayback ? `Play on ${deviceName}?` : `Sign in ${deviceName}?`}
-                </h2>
+                {/* An expired request has nothing left to approve, so it
+                    drops the question. */}
+                {details.status === "expired" ? null : (
+                  <h2 className="text-lg font-semibold">
+                    {remotePlayback ? `Play on ${deviceName}?` : `Sign in ${deviceName}?`}
+                  </h2>
+                )}
                 {deviceLine ? <p className="text-muted-foreground text-sm">{deviceLine}</p> : null}
               </div>
 
