@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -130,5 +131,84 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 	}
 	if _, err := register(accountB, "shared-phone"); err != nil {
 		t.Fatalf("registration after owner unregisters: %v", err)
+	}
+}
+
+// TestWebhookRejectionStreak covers the three-consecutive-4xx auto-disable
+// rule: only rejected deliveries extend the streak, re-enabling and success
+// reset it, and concurrent disables agree on one winner so one notice posts.
+func TestWebhookRejectionStreak(t *testing.T) {
+	pool := schemaDB(t, "notification_webhook_streak_")
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE notification_webhooks (LIKE public.notification_webhooks INCLUDING ALL);
+		CREATE TABLE webhook_delivery_attempts (LIKE public.webhook_delivery_attempts INCLUDING ALL);
+		INSERT INTO notification_webhooks (id, user_id, profile_id, name, type, url_ciphertext, url_host)
+		VALUES ('wh', 1, 'default', 'Discord', 'discord', 'x', 'discord.com')`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewWebhookRepository(pool)
+	status := 404
+	attempts := 0
+	// newAttempt queues an attempt for the next send to finalize.
+	newAttempt := func() string {
+		t.Helper()
+		attempts++
+		id := "attempt-" + strconv.Itoa(attempts)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webhook_delivery_attempts (id, notification_delivery_id, webhook_id, attempt_number, outcome)
+			VALUES ($1, $1, 'wh', 0, 'pending')`, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	fail := func(rejected bool, want int) {
+		t.Helper()
+		done := WebhookAttemptOutcome{AttemptID: newAttempt(), Outcome: WebhookOutcomeFailed,
+			AttemptNumber: 1, HTTPStatus: &status, Message: "rejected"}
+		got, err := repo.RecordFailure(ctx, "wh", done, rejected)
+		if err != nil || got != want {
+			t.Fatalf("RecordFailure(rejected=%v) = %d, %v; want %d", rejected, got, err, want)
+		}
+	}
+	fail(true, 1)
+	fail(false, 1) // a retryable failure is not a rejection
+	fail(true, 2)
+	fail(true, 3)
+
+	if disabled, err := repo.Disable(ctx, "wh", "rejected"); err != nil || !disabled {
+		t.Fatalf("first Disable = %v, %v; want true", disabled, err)
+	}
+	if disabled, err := repo.Disable(ctx, "wh", "rejected"); err != nil || disabled {
+		t.Fatalf("second Disable = %v, %v; want false", disabled, err)
+	}
+
+	if _, err := repo.UpdateGuarded(ctx, 1, "default", "wh", func(hook *Webhook) error {
+		hook.Enabled, hook.ConsecutiveFailures, hook.DisabledReason = true, 0, nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fail(true, 1) // re-enabled: the old rejections do not count
+
+	// A send another worker already finished (its lease expired mid-send)
+	// changes neither the attempt nor the streak.
+	late := WebhookAttemptOutcome{AttemptID: "attempt-" + strconv.Itoa(attempts), Outcome: WebhookOutcomeFailed,
+		AttemptNumber: 1, HTTPStatus: &status}
+	if _, err := repo.RecordFailure(ctx, "wh", late, true); !errors.Is(err, errAttemptSuperseded) {
+		t.Fatalf("second finalize of one send = %v; want errAttemptSuperseded", err)
+	}
+	fail(true, 2)
+
+	delivered := WebhookAttemptOutcome{AttemptID: newAttempt(), Outcome: WebhookOutcomeDelivered, AttemptNumber: 1}
+	if err := repo.RecordSuccess(ctx, "wh", delivered); err != nil {
+		t.Fatal(err)
+	}
+	fail(true, 1)
+
+	// Each send's outcome lands with its streak update.
+	var unfinished int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM webhook_delivery_attempts WHERE outcome = 'pending'`).Scan(&unfinished); err != nil || unfinished != 0 {
+		t.Fatalf("pending attempts = %d, %v; want every attempt finalized", unfinished, err)
 	}
 }

@@ -10,7 +10,11 @@ const (
 	webhookDispatchWorkers = 16
 	webhookDispatchQueue   = 256
 	webhookRetryInterval   = 30 * time.Second
-	webhookRetryClaimLimit = 50
+	// webhookRetryClaimLimit keeps a claimed batch, sent one attempt at a
+	// time, well inside its lease even when every send times out; otherwise
+	// another node reclaims the unsent tail and both send it. The sweep
+	// drains batch after batch, so a small batch costs only claim queries.
+	webhookRetryClaimLimit = int(webhookClaimLease / webhookRequestTimeout / 2)
 )
 
 // WebhookDispatcher implements the channel Dispatcher interface for outbound

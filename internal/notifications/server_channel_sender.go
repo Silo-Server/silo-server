@@ -13,15 +13,13 @@ import (
 // handling and the guarded HTTP client. It is shared by the sweep worker, the
 // request-event path, and admin test sends.
 type serverChannelSender struct {
-	cipher   *secret.Cipher
-	settings *Settings
-	client   *http.Client
+	cipher *secret.Cipher
+	client *http.Client
 }
 
 func newServerChannelSender(cipher *secret.Cipher, settings *Settings) *serverChannelSender {
 	return &serverChannelSender{
-		cipher:   cipher,
-		settings: settings,
+		cipher: cipher,
 		client: newWebhookHTTPClient(func() bool {
 			return settings.WebhooksAllowPrivateDestinations(context.Background())
 		}),

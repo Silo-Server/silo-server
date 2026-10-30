@@ -26,7 +26,7 @@ whose metadata lands a few days after the file.
 
 The detector also stores that decision on the availability row: an episode's
 `episode_availability.released_at` is set when it was recorded as a release
-(seeded library, inside the window), even while release events are turned off,
+(seeded library, inside the window),
 and stays empty for back catalog and late matches. A profile that turns on
 `ui.next_up_new_releases_first` (off by default) gets Next Up ranked by the
 later of when it finished a series' previous episode and the `released_at` of
@@ -43,11 +43,25 @@ Event kinds:
   feed the server-channel broadcast feed; they do not fan out per profile.
 
 Events can be suppressed instead of fanned out, with the reason recorded on
-the row: `series_burst` when the per-series burst cap consumed the event
-(bulk imports fan out only the highest few episode keys per series per
-batch), or `stale` when the event aged past the fanout staleness horizon
-(extended downtime, fanout disabled for a stretch) — delivering it long after
-the fact would be noise.
+the row: `stale` when the event aged past the fanout staleness horizon
+(72 hours; extended downtime) — delivering it long after the fact would be
+noise. Older rows may carry `series_burst` from the removed per-series burst
+cap.
+
+Fanout claims events as soon as they are recorded and runs each series'
+events in ascending episode-key order, so the notified cursor never skips a
+lower episode of the same batch. The claim breaks ties in `created_at` by
+episode key, so one ingest larger than a claim batch splits in episode order
+too. Every new episode gets its own delivery, and
+the inbox, email and webhooks see each one. Push is rate-limited per series:
+a delivery reaches the profile's mobile push devices and web push
+subscriptions only when the profile had no other `episode.available`
+delivery for that series in the last 12 hours (`pushSeriesCooldown`). A
+season that lands together therefore pushes its lowest new episode once and
+fills the inbox with the rest. The window is measured from the latest
+delivery, so a season that trickles in over hours still pushes once. The
+check runs under the inbox locks, so concurrent fanout on two nodes cannot
+both push.
 
 Server channels read the event feed directly, suppressed events included, and
 skip a title that a different, still existing library had made available
@@ -125,10 +139,10 @@ release event's episode key:
   profile's notification cursor does not move. The mute is read when fanout
   evaluates a release, not when the episode arrives: unmuting does not
   announce episodes fanout already evaluated during the mute, since their
-  release events are processed, but an event still inside the settle delay at
+  release events are processed, but an event fanout has not claimed yet at
   unmute is fanned out to the profile. No suppression state is kept per
-  release; the window is the settle delay plus one claim pass, and it applies
-  symmetrically to a mute made just after a release. A mute follows its series through a
+  release; the window is one claim pass, and it applies symmetrically to a
+  mute made just after a release. A mute follows its series through a
   catalog merge or split like other per-profile series state, and profile
   deletion removes it.
 - Profile-level notification preferences are a hard gate: a reason disabled
@@ -180,6 +194,10 @@ out the per-episode checks (Next Up's expected episode and the
 already-notified cursor), which depend on the episode that arrives.
 
 ## Release-event retention
+
+Retention runs daily with fixed windows: read deliveries are kept 90 days,
+unread ones 180 days, processed release events 30 days, and unprocessed
+events past the 72-hour staleness horizon are deleted.
 
 Release events and inbox deliveries have independent lifetimes. Pruning an old
 release event clears `notification_deliveries.release_event_id` through its
@@ -306,10 +324,13 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
-reason flags, and the series/episode (or request) content blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID,
+delivery type, reason flags, and the series/episode (or request) content
+blocks.
 
-Each request is signed with the webhook's per-destination 32-byte secret:
+Each request is signed with the webhook's per-destination signing secret: 32
+random bytes, base64-encoded into the 44-character string the API returns.
+The HMAC key is that string's bytes as returned, not the decoded 32 bytes.
 
 - Headers: `X-Silo-Event`, `X-Silo-Webhook-Id`, `X-Silo-Delivery-Id`,
   `X-Silo-Timestamp` (Unix epoch seconds), and
@@ -338,7 +359,16 @@ Non-retryable 4xx responses (everything except 408, 425, and 429) are
 deterministic destination-side rejections: the attempt fails immediately
 without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
-destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
-`Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
+destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
+row counts that streak (`consecutive_rejections`); a successful delivery,
+re-enabling the webhook, or a new URL resets it. Only the call that actually
+flips the webhook off posts the notice, so concurrent failures post one. 429
+honors `Retry-After` when present, as a minimum: the wait is the longer of
+`Retry-After` and the schedule's next delay.
+
+A retry sweep claims only as many attempts as it can send in half of the
+90-second claim lease if every send times out. A larger batch would let the
+lease on its tail expire while those attempts wait their turn, and another
+node would send them a second time. Auto-disable posts a `webhook.auto_disabled`
 notice to the profile's inbox — a type that is itself excluded from webhook
 dispatch so a broken webhook cannot loop.

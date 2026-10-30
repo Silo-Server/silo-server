@@ -166,7 +166,7 @@ type EmailPreferencesState struct {
 
 // EmailPreferences returns the profile's email notification state.
 func (s *System) EmailPreferences(ctx context.Context, userID int, profileID string) (EmailPreferencesState, error) {
-	state := EmailPreferencesState{Mode: EmailModeOff}
+	state := EmailPreferencesState{Mode: ChannelModeOff}
 	if s == nil || s.EmailPrefs == nil {
 		return state, nil
 	}
@@ -194,7 +194,7 @@ func (s *System) SetEmailMode(ctx context.Context, userID int, profileID, mode s
 	if ModeIncludesPerEpisode(mode) && !s.Settings.EmailAllowPerEpisode(ctx) {
 		return ErrEmailModeNotAllowed
 	}
-	if mode != EmailModeOff {
+	if mode != ChannelModeOff {
 		prefs, err := s.EmailPrefs.Get(ctx, profileID)
 		if err != nil {
 			return err

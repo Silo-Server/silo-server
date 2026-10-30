@@ -44,8 +44,6 @@ vi.mock("@/hooks/queries/admin/serverNotificationChannels", () => ({
 const makeForm = (overrides: Record<string, string> = {}) =>
   fakeSettingsForm(
     {
-      "notifications.release_events_enabled": "true",
-      "notifications.fanout_enabled": "true",
       "notifications.ui_enabled": "true",
       "notifications.web_push_enabled": "true",
       "notifications.apple_push_delivery_enabled": "true",
@@ -112,15 +110,6 @@ describe("NotificationsAdminSettings", () => {
     expect(screen.getByText("Re-registration required")).toHaveClass("text-amber-500");
     await userEvent.click(screen.getByRole("button", { name: /Silo Push Relay/ }));
     expect(screen.getByRole("button", { name: "Re-register relay" })).toBeInTheDocument();
-  });
-
-  it("says so up top, and opens the switches, when the pipeline is paused", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "notifications.fanout_enabled": "false" }));
-
-    render(renderPage());
-
-    expect(screen.getByRole("status")).toHaveTextContent(/Sending is paused/);
-    expect(screen.getByRole("switch", { name: "Work out who wants it" })).not.toBeChecked();
   });
 
   it("says so when the invite link could not be copied", async () => {

@@ -14,17 +14,15 @@ const availabilityDetectTimeout = 2 * time.Minute
 // fails the ingest itself.
 type AvailabilityDetector struct {
 	releases *ReleaseRepository
-	settings *Settings
 	logger   *slog.Logger
 	// nudge wakes the fanout worker after new release events land; may be nil.
 	nudge func()
 }
 
 // NewAvailabilityDetector creates an AvailabilityDetector.
-func NewAvailabilityDetector(releases *ReleaseRepository, settings *Settings) *AvailabilityDetector {
+func NewAvailabilityDetector(releases *ReleaseRepository) *AvailabilityDetector {
 	return &AvailabilityDetector{
 		releases: releases,
-		settings: settings,
 		logger:   slog.Default().With("component", "notifications.availability"),
 	}
 }
@@ -112,18 +110,14 @@ func (d *AvailabilityDetector) runKind(ctx context.Context, libraryID int, fullL
 			"library_id", libraryID, "kind", ops.kind, "error", err)
 		return
 	}
-	emitEvents := seeded && d.settings.ReleaseEventsEnabled(ctx)
-
+	// An unseeded library records availability silently. A subtree/file
+	// ingest never seed-marks it below: only a successful full scan proves
+	// the back catalog has been captured.
 	var inserted, events int
 	if fullLibrary {
-		inserted, events, err = ops.recordForLibrary(ctx, libraryID, emitEvents)
-	} else if seeded {
-		inserted, events, err = ops.recordForPaths(ctx, libraryID, scopePaths, emitEvents)
+		inserted, events, err = ops.recordForLibrary(ctx, libraryID, seeded)
 	} else {
-		// Subtree/file ingest on an unseeded library: record silently but do
-		// not seed-mark — only a successful full scan proves the back catalog
-		// has been captured.
-		inserted, events, err = ops.recordForPaths(ctx, libraryID, scopePaths, false)
+		inserted, events, err = ops.recordForPaths(ctx, libraryID, scopePaths, seeded)
 	}
 	if err != nil {
 		d.logger.WarnContext(ctx, "availability detection failed",

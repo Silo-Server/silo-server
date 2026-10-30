@@ -29,6 +29,29 @@ type channelDispatcher[A any] struct {
 	claimLimit int
 }
 
+// pushRetrySchedule serves web push and mobile push. It is deliberately
+// shorter than the webhook schedule: push services queue undeliverable
+// messages themselves (the TTL covers offline devices), so server-side
+// retries only need to ride out transient push-service errors.
+var pushRetrySchedule = []time.Duration{
+	0,
+	30 * time.Second,
+	2 * time.Minute,
+	10 * time.Minute,
+	30 * time.Minute,
+}
+
+// retryDelay returns how long to wait after a retryable failure of attempt N
+// (1-based) before the next attempt, or false once the schedule is
+// exhausted. A schedule holds cumulative delays since the first attempt:
+// index N is when attempt N+1 runs.
+func retryDelay(schedule []time.Duration, completedAttempt int) (time.Duration, bool) {
+	if completedAttempt < 1 || completedAttempt >= len(schedule) {
+		return 0, false
+	}
+	return schedule[completedAttempt] - schedule[completedAttempt-1], true
+}
+
 // dispatch queues the delivery's attempts for immediate send without blocking.
 func (d *channelDispatcher[A]) dispatch(deliveryID string) {
 	select {

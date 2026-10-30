@@ -132,74 +132,9 @@ func (s *ServerChannelService) Create(ctx context.Context, createdByUserID int, 
 	return &ch, signingSecret, nil
 }
 
-// Update applies the provided fields. A URL change re-validates the
-// destination; URL changes and enable transitions reset the failure streak
-// and fast-forward the content watermark to now (a long-dead channel must
-// resume from the present, not replay the gap).
-func (s *ServerChannelService) Update(ctx context.Context, id string, input ServerChannelInput) (*ServerChannel, error) {
-	ch, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if ch == nil {
-		return nil, ErrServerChannelNotFound
-	}
-	resetDispatch, err := s.applyChannelInput(ctx, ch, input)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := s.repo.Update(ctx, *ch); err != nil {
-		if errors.Is(err, ErrServerChannelNameTaken) {
-			return nil, fmt.Errorf("%w: %s", ErrServerChannelInvalid, err.Error())
-		}
-		return nil, err
-	}
-
-	// Reset after the update commits: an enable transition (off→on or
-	// auto-disabled→re-enabled) or a replacement URL clears the streak and
-	// moves the watermark to now.
-	if resetDispatch {
-		if err := s.repo.ResetDispatchState(ctx, ch.ID); err != nil {
-			return nil, err
-		}
-		ch.ConsecutiveFailures = 0
-		ch.DisabledReason = nil
-	}
-	return ch, nil
-}
-
 // Delete removes a server channel. Idempotent.
 func (s *ServerChannelService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
-}
-
-// RotateSecret generates and stores a new signing secret for a generic
-// channel, returning it exactly once.
-func (s *ServerChannelService) RotateSecret(ctx context.Context, id string) (string, error) {
-	ch, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if ch == nil {
-		return "", ErrServerChannelNotFound
-	}
-	if ch.Type != WebhookTypeGeneric {
-		return "", fmt.Errorf("%w: only generic channels have signing secrets", ErrServerChannelInvalid)
-	}
-	signingSecret, err := newSigningSecret()
-	if err != nil {
-		return "", err
-	}
-	ciphertext, err := s.cipher.Encrypt(signingSecret, serverChannelSecretAAD(ch.ID))
-	if err != nil {
-		return "", fmt.Errorf("encrypt signing secret: %w", err)
-	}
-	ch.SigningSecretCiphertext = &ciphertext
-	if err := s.repo.Update(ctx, *ch); err != nil {
-		return "", err
-	}
-	return signingSecret, nil
 }
 
 // Test synchronously POSTs a clearly marked sample content digest. Test sends
@@ -258,8 +193,10 @@ func (s *ServerChannelService) ListPage(ctx context.Context, limit int, after *C
 	return s.repo.ListPage(ctx, limit, after)
 }
 
-// RotateSecretV2 writes only the secret, preserving current channel configuration.
-func (s *ServerChannelService) RotateSecretV2(ctx context.Context, id string) (string, error) {
+// RotateSecret generates and stores a new signing secret for a generic
+// channel, returning it exactly once. Only the secret column is written, so
+// a concurrent auto-disable or edit is never undone.
+func (s *ServerChannelService) RotateSecret(ctx context.Context, id string) (string, error) {
 	ch, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return "", err
@@ -284,7 +221,8 @@ func (s *ServerChannelService) RotateSecretV2(ctx context.Context, id string) (s
 	return signingSecret, nil
 }
 
-// applyChannelInput shares the existing bridge validation and reset conditions.
+// applyChannelInput applies the provided fields and reports whether dispatch
+// state must reset: a replacement URL or an enable transition.
 func (s *ServerChannelService) applyChannelInput(ctx context.Context, ch *ServerChannel, input ServerChannelInput) (bool, error) {
 	wasDelivering := ch.Enabled && ch.DisabledReason == nil
 
@@ -343,7 +281,11 @@ func (s *ServerChannelService) applyChannelInput(ctx context.Context, ch *Server
 	return resetDispatch || (ch.Enabled && !wasDelivering), nil
 }
 
-func (s *ServerChannelService) UpdateV2(ctx context.Context, id string, input ServerChannelInput) (*ServerChannel, error) {
+// Update applies the provided fields. A URL change re-validates the
+// destination; URL changes and enable transitions reset the failure streak
+// and fast-forward the content watermark to now (a long-dead channel must
+// resume from the present, not replay the gap).
+func (s *ServerChannelService) Update(ctx context.Context, id string, input ServerChannelInput) (*ServerChannel, error) {
 	row, err := s.repo.UpdateConfiguration(ctx, id, func(ch *ServerChannel) (bool, error) { return s.applyChannelInput(ctx, ch, input) })
 	if errors.Is(err, ErrServerChannelNameTaken) {
 		return nil, fmt.Errorf("%w: %s", ErrServerChannelInvalid, err.Error())
