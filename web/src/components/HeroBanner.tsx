@@ -190,7 +190,9 @@ export default function HeroBanner({
   const [paused, setPaused] = useState(false);
   const { isVisible: pageVisible } = usePageActivity();
   const sectionRef = useRef<HTMLElement>(null);
-  const [onScreen, setOnScreen] = useState(true);
+  // Unknown until the observer first reports, so a hero mounted below the
+  // fold preloads nothing; without IntersectionObserver it counts as shown.
+  const [onScreen, setOnScreen] = useState(() => typeof IntersectionObserver === "undefined");
   // A hero scrolled out of view or in a background tab neither advances nor
   // downloads the next slide's backdrop.
   const shown = pageVisible && onScreen;
