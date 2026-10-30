@@ -51,6 +51,7 @@ type Config struct {
 
 const AuthModeChatGPT = "chatgpt"
 const chatJSONFormat = "json_object"
+const serviceTierUltrafast = "ultrafast"
 
 // ErrQuotaExhausted means the provider requires a billing or quota change;
 // waiting and retrying the same request cannot recover it.
@@ -143,7 +144,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 	if cfg.AuthMode == AuthModeChatGPT {
 		return c.chatGPT(ctx, cfg, messages, jsonObject)
 	}
-	if cfg.ServiceTier == "ultrafast" {
+	if cfg.ServiceTier == serviceTierUltrafast {
 		return c.apiResponses(ctx, cfg, messages, jsonObject)
 	}
 	reqBody := chatCompletionRequest{

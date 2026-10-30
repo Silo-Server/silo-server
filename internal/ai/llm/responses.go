@@ -16,6 +16,7 @@ const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceede
 const subscriptionUserNotEligible = "subscription_sharing_user_not_eligible"
 const subscriptionInvalidUser = "subscription_sharing_invalid_user"
 const responseFailedEvent = "response.failed"
+const responseServerError = "server_error"
 
 var ErrPlanIneligible = errors.New("this account cannot share ChatGPT plan usage; check ChatGPT usage settings")
 
@@ -199,7 +200,7 @@ func readResponseStream(data io.Reader) (string, error) {
 			if code == "subscription_sharing_user_unavailable" {
 				return errors.New("ChatGPT subscriber information is temporarily unavailable")
 			}
-			if code == "server_error" {
+			if code == responseServerError {
 				return errors.New("ChatGPT is temporarily unavailable")
 			}
 			if code == subscriptionUsageLimitExceeded {

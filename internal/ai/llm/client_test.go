@@ -47,11 +47,11 @@ func TestChatSuccessSendsAuthAndModel(t *testing.T) {
 }
 
 func TestChatSendsExplicitServiceTier(t *testing.T) {
-	for _, tier := range []string{"", "priority", "ultrafast"} {
+	for _, tier := range []string{"", "priority", serviceTierUltrafast} {
 		t.Run("tier="+tier, func(t *testing.T) {
 			cfg := chatConfig("https://api.openai.com")
 			cfg.ServiceTier = tier
-			if tier == "ultrafast" {
+			if tier == serviceTierUltrafast {
 				cfg.ChatModel = "gpt-6.1-sol"
 				cfg.ReasoningEffort = "high"
 			}
@@ -67,7 +67,7 @@ func TestChatSendsExplicitServiceTier(t *testing.T) {
 				}
 				response := chatOK
 				wantPath := "/v1/chat/completions"
-				if tier == "ultrafast" {
+				if tier == serviceTierUltrafast {
 					wantPath = "/v1/responses"
 					response = `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`
 					if body["reasoning"].(map[string]any)["effort"] != "high" || body["temperature"] != nil || body["text"].(map[string]any)["format"].(map[string]any)["type"] != "json_object" {

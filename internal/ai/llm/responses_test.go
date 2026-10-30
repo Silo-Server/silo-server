@@ -386,7 +386,7 @@ func TestAPIResponsesRejectsUnusableOutput(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := chatConfig("https://api.openai.com")
-			cfg.ServiceTier = "ultrafast"
+			cfg.ServiceTier = serviceTierUltrafast
 			client := NewClient(cfg)
 			calls := 0
 			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -406,7 +406,7 @@ func TestAPIResponsesRetriesTransientFailure(t *testing.T) {
 		t.Run(code, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cfg := chatConfig("https://api.openai.com")
-				cfg.ServiceTier = "ultrafast"
+				cfg.ServiceTier = serviceTierUltrafast
 				client := NewClient(cfg)
 				calls := 0
 				client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {

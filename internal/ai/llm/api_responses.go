@@ -27,7 +27,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshal Responses request: %w", err)
+		return "", fmt.Errorf("marshal responses request: %w", err)
 	}
 	var content string
 	err = c.doWithRetry(ctx, c.chatHTTP, "Responses API", func() (*http.Request, error) {
@@ -55,18 +55,18 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			} `json:"output"`
 		}
 		if err := json.Unmarshal(data, &response); err != nil {
-			return fmt.Errorf("decode Responses result: %w", err)
+			return fmt.Errorf("decode responses result: %w", err)
 		}
 		if response.Error != nil {
 			if isExhaustedQuota(data) {
 				return &permanentError{ErrQuotaExhausted}
 			}
-			if response.Error.Code == "server_error" || response.Error.Code == "rate_limit_exceeded" {
-				return errors.New("Responses API is temporarily unavailable")
+			if response.Error.Code == responseServerError || response.Error.Code == "rate_limit_exceeded" {
+				return errors.New("responses API is temporarily unavailable")
 			}
 		}
 		if response.Status != "completed" || response.Error != nil {
-			return &permanentError{errors.New("Responses API did not complete the text response")}
+			return &permanentError{errors.New("responses API did not complete the text response")}
 		}
 		var text strings.Builder
 		for _, item := range response.Output {
@@ -75,7 +75,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			}
 			for _, part := range item.Content {
 				if part.Type == "refusal" {
-					return &permanentError{errors.New("Responses API refused the text request")}
+					return &permanentError{errors.New("responses API refused the text request")}
 				}
 				if part.Type == "output_text" {
 					text.WriteString(part.Text)
@@ -83,7 +83,7 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 			}
 		}
 		if text.Len() == 0 {
-			return &permanentError{errors.New("Responses API returned no text")}
+			return &permanentError{errors.New("responses API returned no text")}
 		}
 		content = text.String()
 		return nil
