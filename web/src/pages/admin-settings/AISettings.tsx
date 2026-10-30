@@ -548,9 +548,12 @@ export default function AISettings() {
   const [expandedTile, setExpandedTile] = useState<string | null>(null);
 
   const authMode = form.getValue("ai.auth_mode") || "api_key";
-  const configuredChatModel =
-    form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
-  const currentModel = configuredChatModel || "gpt-6-luna";
+  const chatModelEdited = form.isDirty("ai.chat_model");
+  const configuredChatModel = chatModelEdited
+    ? form.getValue("ai.chat_model")
+    : form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
+  // A cleared draft must stay empty; only untouched settings inherit defaults.
+  const currentModel = chatModelEdited ? configuredChatModel : configuredChatModel || "gpt-6-luna";
   const capabilityModel = useDebounce(currentModel, 300);
   const capabilities = useAdminAICapabilities(capabilityModel);
   const chatGPTSupported = capabilities.data?.chatgpt_sign_in === true;
@@ -588,10 +591,12 @@ export default function AISettings() {
 
   const providers = providerList.data?.providers ?? [];
   const providerTypes = providerList.data?.types ?? [];
-  const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-6-luna");
+  const chatModel = currentModel;
   const textProviderID = value("ai.text_provider_id");
   const speechProviderID = value("ai.speech_provider_id");
-  const asrModel = value("ai.asr_model", "whisper-1");
+  const asrModel = form.isDirty("ai.asr_model")
+    ? form.getValue("ai.asr_model")
+    : value("ai.asr_model", "whisper-1");
   const serves = (id: string, capability: AIProvider["capabilities"][number]) =>
     providers.some((provider) => provider.id === id && provider.capabilities.includes(capability));
   const textReady =

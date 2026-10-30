@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -19,6 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import {
   useAIProviderModels,
   useAIProviders,
@@ -108,12 +115,13 @@ export function ModelField({
   kind: AICapability;
   value: string;
   onChange: (value: string) => void;
-  /** Called when the field loses focus, for pages that save each field. */
-  onCommit?: () => void;
+  /** Called when focus leaves the field, for pages that save each field. */
+  onCommit?: (value: string) => void;
   placeholder?: string;
 }) {
   const inputID = useId();
-  const listID = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pickerOpen = useRef(false);
   const models = useAIProviderModels(providerID);
   const suggestions = (models.data?.models ?? []).filter((model) => model.kind === kind);
   const status =
@@ -128,22 +136,55 @@ export function ModelField({
     ) : undefined;
   return (
     <SettingFieldRow label={label} htmlFor={inputID} description={description} status={status}>
-      <Input
-        id={inputID}
-        list={listID}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onCommit}
-        placeholder={placeholder}
-        autoComplete="off"
-        spellCheck={false}
-        className={cn(SETTINGS_CONTROL_WIDTH, "font-mono text-[13px]")}
-      />
-      <datalist id={listID}>
-        {suggestions.map((model) => (
-          <option key={model.id} value={model.id} />
-        ))}
-      </datalist>
+      <div
+        className={cn(SETTINGS_CONTROL_WIDTH, "flex min-w-0 items-center gap-1")}
+        onBlur={(event) => {
+          if (!pickerOpen.current && !event.currentTarget.contains(event.relatedTarget)) {
+            onCommit?.(value);
+          }
+        }}
+      >
+        <Input
+          ref={inputRef}
+          id={inputID}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          className="font-mono text-[13px]"
+        />
+        {suggestions.length > 0 && (
+          <Select
+            value={suggestions.some((model) => model.id === value) ? value : ""}
+            onOpenChange={(open) => {
+              pickerOpen.current = open;
+            }}
+            onValueChange={onChange}
+          >
+            <SelectTrigger
+              aria-label={`Choose ${label.toLowerCase()}`}
+              className="size-9 shrink-0 justify-center px-0"
+            />
+            <SelectContent
+              position="popper"
+              align="end"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                inputRef.current?.focus();
+              }}
+            >
+              <SelectGroup>
+                {suggestions.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.id}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        )}
+      </div>
     </SettingFieldRow>
   );
 }

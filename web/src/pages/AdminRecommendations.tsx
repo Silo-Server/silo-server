@@ -722,9 +722,9 @@ export default function AdminRecommendations() {
                         value={embeddingModel}
                         placeholder="text-embedding-3-large, qwen3-embedding:0.6b"
                         onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
-                        onCommit={() => {
-                          if (embeddingModel !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
-                            void handleCommit(EMBEDDING_MODEL_KEY, embeddingModel);
+                        onCommit={(next) => {
+                          if (next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
+                            void handleCommit(EMBEDDING_MODEL_KEY, next);
                           }
                         }}
                       />
