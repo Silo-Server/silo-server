@@ -106,6 +106,10 @@
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
 
+# People search: each query is planned for its own words, exact names rank
+# first, and viewer access applies before the limit.
+./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
+
 # Card play targets: leaf cards and a validated anchor hint resolve without a
 # watch-progress query, and the PostgreSQL path picks what the general path
 # picks.

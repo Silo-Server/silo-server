@@ -651,19 +651,28 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 	}
 	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx))
 	where := strings.Join(conditions, " AND ")
-	order := "name ASC, id ASC"
+	const columns = `id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
+		photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+		metadata_refresh_attempted_at`
+	sql := `SELECT ` + columns + ` FROM people WHERE ` + where + ` ORDER BY name ASC, id ASC LIMIT $1`
 	if scoped && query != "" {
 		// Words match however they are spaced, so a name equal to the query
-		// as typed or with its whitespace collapsed counts as exact.
-		order = fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d))) DESC, ", argIdx, argIdx+1) + order
+		// as typed or with its whitespace collapsed counts as exact. Exact
+		// names and the rest are separate branches, each in name order, so
+		// the second can read idx_people_name in order and stop at the limit:
+		// one ORDER BY that ranks exact names first must sort every match,
+		// thousands of rows for a one-letter query.
+		exact := fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d)))", argIdx, argIdx+1)
 		args = append(args, query, strings.Join(strings.Fields(query), " "))
+		sql = `SELECT ` + columns + ` FROM (
+			(SELECT ` + columns + `, true AS exact FROM people WHERE ` + where + ` AND ` + exact + ` ORDER BY name, id LIMIT $1)
+			UNION ALL
+			(SELECT ` + columns + `, false FROM people WHERE ` + where + ` AND NOT ` + exact + ` ORDER BY name, id LIMIT $1)
+		) ranked ORDER BY exact DESC, name ASC, id ASC LIMIT $1`
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
-			metadata_refresh_attempted_at
-		FROM people WHERE `+where+` ORDER BY `+order+` LIMIT $1`, args...,
-	)
+	// How many names a query matches ranges from a handful to most of the
+	// table, so each search is planned for its own words (searchPlanArgs).
+	rows, err := r.pool.Query(ctx, sql, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
 	}

@@ -103,6 +103,20 @@ the person without `prefetch` when the user actually opens them.
 the server accepts the parameter. Check it first: `/api/v2` rejects unknown query
 parameters, so an older server answers a prefetch read with `422`.
 
+## Filter values
+
+`GET /api/v2/catalog/filters` (`getCatalogFilters`) lists the facet values of a
+scope. The `technical` lists (resolutions, audio languages, and subtitle
+languages) come from the scope's files, and building them reads every present
+file in the scope. Each node keeps them for five minutes, keyed by the scope's
+full SQL and arguments like the typeahead lists below, so viewers with
+different access never share them. A value that only a newly added or removed
+file brings or takes away can take up to five minutes to appear in or leave
+`technical`. The other lists are read on every request. Pass
+`skip_technical=true` when a screen does not show the technical lists. The
+audio and subtitle language lists of the Jellyfin-compatible `/Items/Filters2`
+share these cached lists.
+
 ## Facet typeahead
 
 `GET /api/v2/catalog/filters/search` (`searchCatalogFacet`) searches the values of
