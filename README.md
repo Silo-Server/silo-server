@@ -111,35 +111,14 @@ lines you need.
 
 ### Updating an install from before the omnibus image
 
-An install that runs PostgreSQL, Redis, and Silo in separate containers can
-keep that layout. Before updating, set this in its `.env`:
-
-```sh
-COMPOSE_FILE=docker-compose.split.yml
-```
-
-Without it, `docker compose up -d` stops at the `postgres` service and leaves
-Silo down; `docker compose logs postgres` says what to do. Nothing is moved.
-
-The separate GPU and node files (`docker-compose.vaapi.yml`,
-`docker-compose.nvidia.yml`, `docker-compose.node-access.yml`, and
-`docker-compose.node.yml`) are gone. If `COMPOSE_FILE` named one, Compose
-reports it missing: name only the main file, and uncomment the matching lines
-in it instead. A node's host runs `docker-compose.yml` with the node settings
-in `.env.example`.
-
-To move the install into the single container instead, back it up, then set
-`MIGRATE_COMPOSE_STACK=true` in `.env` and run `docker compose up -d`. The
-earlier data directories stay in place until you delete them. Before that:
-
-- Remove any `docker-compose.override.yml` entries for the old `postgres`,
-  `redis`, or `meilisearch` services.
-- The earlier stack ran Silo as root; the omnibus image runs it as `PUID`
-  (default 1000), so set `PUID` and `PGID` to an account that can read
-  `MEDIA_ROOT`.
-- If `.env` sets `SILO_SEARCH_PROVIDER`, `SILO_MEILISEARCH_URL`, or
-  `SILO_MEILISEARCH_API_KEY` for the separate Meilisearch service, remove them
-  and set `ENABLE_MEILISEARCH=true` to use the bundled one.
+An install that runs Silo, PostgreSQL, and Redis in separate containers keeps
+that layout when its `.env` sets `COMPOSE_FILE=docker-compose.split.yml`; set
+it before updating. Otherwise `docker compose up -d` stops before Silo starts
+and moves nothing; `docker compose logs postgres` explains how to keep the
+layout or move into the single container. The separate GPU and node Compose
+files are gone, so a `COMPOSE_FILE` that names one fails until it names only
+the main file. See [Moving from the multi-container
+stack](docs/architecture/omnibus-image.md#moving-from-the-multi-container-stack).
 
 The [user manual](https://siloserver.org/docs) covers the rest, starting with
 [installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
