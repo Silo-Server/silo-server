@@ -77,7 +77,7 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 				// A bracketed code after an episode number belongs to the
 				// episode title: Show - 03 - Title (2x14). A number that is the
 				// show folder's title is not one: 24/Season 1/24 [1x02].
-				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 && !namesShowFolder(name[:open], directories) {
+				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 && !namesShowFolder(name[:open], name, directories, rootRelative, allowNumericSeason) {
 					continue
 				}
 			}
@@ -108,14 +108,7 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 		if exactExtra || pluralExtra {
 			return episodeToken{}, false
 		}
-		if len(directories) > 1 {
-			showDirectory = directories[len(directories)-2]
-		}
-		topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
-		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
-		if !hasSeason {
-			showDirectory = parent
-		}
+		season, hasSeason, showDirectory = folderSeason(name, directories, rootRelative, allowNumericSeason)
 	}
 	unseasoned := len(allowUnseasoned) > 0 && allowUnseasoned[0]
 	if !hasSeason && !unseasoned {
@@ -309,15 +302,30 @@ func completesShowTitle(prefix, showDirectory string) bool {
 	return title != "" && normalizeInferComparable(prefix) == title
 }
 
-// namesShowFolder reports a prefix that is only the title of the file's show
-// folder, its parent or the folder above a season folder.
-func namesShowFolder(prefix string, directories []string) bool {
-	for i := len(directories) - 1; i >= 0 && i >= len(directories)-2; i-- {
-		if completesShowTitle(prefix, directories[i]) {
-			return true
-		}
+// folderSeason reads the season a file's folder names, and finds its show
+// folder: the folder itself, or the one above a season folder.
+func folderSeason(name string, directories []string, rootRelative, allowNumericSeason bool) (season int, ok bool, showDirectory string) {
+	if len(directories) == 0 {
+		return 0, false, ""
 	}
-	return false
+	parent := strings.TrimSpace(directories[len(directories)-1])
+	if len(directories) > 1 {
+		showDirectory = directories[len(directories)-2]
+	}
+	topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
+	season, ok = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
+	if !ok {
+		showDirectory = parent
+	}
+	return season, ok, showDirectory
+}
+
+// namesShowFolder reports a prefix that is only the title of the file's show
+// folder, as "24 " is in 24/Season 1/24 [1x02]. A season folder is not the
+// show's: "03 " in Show/03/03 (2x14) is an episode number.
+func namesShowFolder(prefix, name string, directories []string, rootRelative, allowNumericSeason bool) bool {
+	_, _, showDirectory := folderSeason(name, directories, rootRelative, allowNumericSeason)
+	return completesShowTitle(prefix, showDirectory)
 }
 
 func startsWithShowTitle(name, showDirectory string) bool {
