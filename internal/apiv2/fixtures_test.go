@@ -1773,7 +1773,7 @@ func fixtureCases() []fixtureCase {
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
 // section reads, which getHomeCapabilities advertises as
 // section_item_limit_max, and of the Home row reads, which it advertises as
-// row_item_limit_max.
+// row_item_limit_max, and a capped Home row read's has_more.
 func sectionItemLimitFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -1794,6 +1794,10 @@ func sectionItemLimitFixtureCases() []fixtureCase {
 			scenario: "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
 			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&item_limit=101", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_home_section_items_capped_ok", operationID: opGetHomeSectionItems,
+			scenario: "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+			method:   http.MethodGet, path: "/api/v2/home/sections/continue_watching/items?item_limit=1", headers: viewer,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Section"},
 	}
 }
 

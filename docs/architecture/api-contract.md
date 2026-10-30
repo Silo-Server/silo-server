@@ -1630,8 +1630,15 @@ only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is
 `getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
 one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
 `getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
-row's own `item_limit`, so a client can tell a capped row from a complete one. Neither read runs
-the cross-row duplicate filter. A client sends `item_limit` to these two reads only when
+row's own `item_limit`. Neither read runs the cross-row duplicate filter. A row either read
+answers with `item_limit` carries `has_more: true` when it holds more cards than it answered, so
+that reading it again without `item_limit` answers more; the field is absent when false and on
+every other read that answers a `Section`. This includes an admin curated list, which an uncapped
+read can answer past its own `item_limit`. The server fetches one card past the cap and runs the
+hide-watched and Not interested filters before it trims, so a row those filters shorten still
+fills the cap and reports what is left. Rows those filters thin fetch the bounded candidate
+window hide-watched already uses, so a profile that has filtered out nearly all of that window
+can see a short row without `has_more`. A client sends `item_limit` to these two reads only when
 `getHomeCapabilities` reports `row_item_limit_max` (100), which a server that predates the
 parameter on them does not send. A capped row is the first `item_limit` cards of the row built at
 that size: rows that draw a subset of a pool sized by their limit (hidden gems, random picks) may

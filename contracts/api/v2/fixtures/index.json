@@ -7384,6 +7384,27 @@
       "body_file": "get_home_layout_with_items_ok.json"
     },
     {
+      "name": "get_home_section_items_capped_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items?item_limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_capped_ok.json"
+    },
+    {
       "name": "get_home_section_items_item_limit_out_of_range",
       "operation_id": "getHomeSectionItems",
       "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",

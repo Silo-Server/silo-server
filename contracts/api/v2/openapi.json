@@ -46481,6 +46481,13 @@
             ],
             "type": "boolean"
           },
+          "has_more": {
+            "description": "The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "id": {
             "examples": [
               "recently_added"

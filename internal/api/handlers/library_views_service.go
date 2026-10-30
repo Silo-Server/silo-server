@@ -56,11 +56,19 @@ func capSectionItemLimits(resolved []sections.ResolvedSection, limit int) []sect
 	}
 	out := slices.Clone(resolved)
 	for i := range out {
-		if effectiveHomeItemLimit(out[i].ItemLimit) > limit {
-			out[i].ItemLimit = limit
-		}
+		out[i], _ = capSectionItemLimit(out[i], limit)
 	}
 	return out
+}
+
+// capSectionItemLimit is capSectionItemLimits for one row, and reports
+// whether the cap lowered the row's limit.
+func capSectionItemLimit(s sections.ResolvedSection, limit int) (sections.ResolvedSection, bool) {
+	if limit <= 0 || effectiveHomeItemLimit(s.ItemLimit) <= limit {
+		return s, false
+	}
+	s.ItemLimit = limit
+	return s, true
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {

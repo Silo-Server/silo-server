@@ -119,7 +119,12 @@ func (f *fakeHome) HomeSectionItems(_ context.Context, sectionID string, viewer 
 	f.lastViewer = viewer
 	switch sectionID {
 	case "continue_watching":
-		return handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}, nil
+		row := handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}
+		if viewer.ItemLimitCap > 0 {
+			// A capped read of a row that holds one card more.
+			row.ItemLimit, row.TotalCount, row.HasMore = min(row.ItemLimit, viewer.ItemLimitCap), 2, true
+		}
+		return row, nil
 	case "next_up":
 		return handlers.SectionView{ID: sectionID, SectionType: "next_up", Title: "Next Up", ItemLimit: 20, TotalCount: 1, Customized: true, Items: []handlers.SectionItemView{fakeCard()}}, nil
 	}

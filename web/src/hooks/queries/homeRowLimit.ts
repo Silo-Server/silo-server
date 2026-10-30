@@ -1,5 +1,9 @@
-import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
+import type { HomeSectionItemsResponse } from "@/api/types";
+import { sectionFromV2 } from "@/api/v2/catalog";
+import type { components } from "@/api/v2/schema";
 import { visibleCarouselSlideCount } from "@/lib/carouselWindow";
+
+type SectionV2 = components["schemas"]["Section"];
 
 /** The viewport width, in CSS pixels, a Home row's first read is sized for. */
 const HOME_ROW_REFERENCE_VIEWPORT_PX = 1920;
@@ -16,29 +20,14 @@ export const HOME_ROW_ITEM_LIMIT =
   2 * visibleCarouselSlideCount("standard", HOME_ROW_REFERENCE_VIEWPORT_PX);
 
 /**
- * Whether a row read with itemLimit may hold more cards than it answered.
- * The server reports the smaller of the row's own limit and itemLimit, so a
- * row under the cap was answered whole. A row the cap reached may hold more
- * whatever it answered: Home's hide-watched and Not interested filters run on
- * the capped cards and cut both the items and total_count, so a short answer
- * does not prove the row is exhausted. Completing it reads the row whole once;
- * Home skips that read for a row already at its own limit unless total_count
- * holds more, as an admin curated list's does: read whole, it answers every
- * card it holds. A row with no item_limit shows the server's default of 20,
- * which the cap reaches, so it may hold more only when total_count says so.
+ * The cached form of a Home row read. A read with item_limit is partial when
+ * the server reports the row holds more cards than it answered (has_more);
+ * Home's completeSection then reads the rest. The server sends has_more only
+ * to a read with item_limit, so a row read whole is never partial.
  */
-export function isPartialHomeRow(section: ResolvedSection, itemLimit: number | undefined): boolean {
-  if (itemLimit === undefined) return false;
-  if (section.item_limit <= 0) return section.total_count > section.items.length;
-  return section.item_limit >= itemLimit;
-}
-
-/** The cached form of a row read with itemLimit, or read whole without one. */
-export function homeRowResponse(
-  section: ResolvedSection,
-  itemLimit?: number,
-): HomeSectionItemsResponse {
-  return isPartialHomeRow(section, itemLimit) ? { section, partial: true } : { section };
+export function homeRowResponse(section: SectionV2): HomeSectionItemsResponse {
+  const row = { section: sectionFromV2(section) };
+  return section.has_more ? { ...row, partial: true } : row;
 }
 
 /**

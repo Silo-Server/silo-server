@@ -31212,6 +31212,11 @@ export interface components {
       customized: boolean;
       /** @example false */
       featured: boolean;
+      /**
+       * @description The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false
+       * @example true
+       */
+      has_more?: boolean;
       /** @example recently_added */
       id: string;
       /** @example false */

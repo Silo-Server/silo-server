@@ -51,14 +51,28 @@ func homeSectionsForFetch(resolved []sections.ResolvedSection, hideWatched bool)
 		return resolved
 	}
 	fetch := make([]sections.ResolvedSection, len(resolved))
-	copy(fetch, resolved)
-	for i := range fetch {
-		if keepsWatchedItemsOnHome(fetch[i]) {
-			continue
-		}
-		fetch[i].ItemLimit = homeWatchedCandidateLimit(fetch[i].ItemLimit)
+	for i, s := range resolved {
+		fetch[i] = homeRowForFetch(s, hideWatched, 0)
 	}
 	return fetch
+}
+
+// homeRowForFetch is the section one Home row read fetches: s with its limit
+// lowered to itemLimitCap when that is set (see capSectionItemLimit), and
+// widened when hide-watched filters it. A row the cap lowers is fetched one
+// card past the cap, so homeSectionRow can tell a row that holds more than it
+// answers from one that ends at the cap. Not interested drops marked titles
+// after the fetch without refilling (see sections.HidesNotInterested), so such
+// a lowered row is widened too, to fill the cap and see past it.
+func homeRowForFetch(s sections.ResolvedSection, hideWatched bool, itemLimitCap int) sections.ResolvedSection {
+	s, lowered := capSectionItemLimit(s, itemLimitCap)
+	if lowered {
+		s.ItemLimit++
+	}
+	if hideWatched && !keepsWatchedItemsOnHome(s) || lowered && sections.HidesNotInterested(s.SectionType) {
+		s.ItemLimit = homeWatchedCandidateLimit(s.ItemLimit)
+	}
+	return s
 }
 
 // homeSectionDefaultItemLimit is the row size sections.Fetcher uses when a

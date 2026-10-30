@@ -70,8 +70,8 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 }
 
 // HomeSectionItems answers one section of the home page with its items,
-// capped at viewer.ItemLimitCap items when it is set, or an error when its
-// items cannot be fetched.
+// capped at viewer.ItemLimitCap items when it is set (see homeSectionRow), or
+// an error when its items cannot be fetched.
 func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer) (SectionView, error) {
 	return h.homeSectionItems(ctx, sectionID, viewer, false)
 }
@@ -85,13 +85,13 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
 	userID := apimw.GetUserID(ctx)
-	resolved = capSectionItemLimits(h.maybeInjectNextUp(ctx, resolved, userID), viewer.ItemLimitCap)
+	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
 	hideWatched := h.homeHidesWatchedItems(ctx)
 	for _, s := range resolved {
 		if s.ID != sectionID {
 			continue
 		}
-		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
+		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeRowForFetch(s, hideWatched, viewer.ItemLimitCap), nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			sections.LogFetchError(ctx, "api", s, fetchErr)
 			// Unlike the aggregate read, which keeps the page up with an
@@ -111,38 +111,52 @@ func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string,
 // homeSectionRow turns one fetched Home row into the cards HomeSectionItems
 // answers: the hide-watched filter, then user states, overlays, playable
 // targets and artwork. The cross-row diversity filter does not run, and a row
-// the filter empties is kept. s is the row's unwidened section, so the row is
-// cut back to its display limit.
+// the filter empties is kept. s is the row's section as configured, and
+// withItems what homeRowForFetch fetched for it; the row is cut back to its
+// display limit, at most viewer.ItemLimitCap cards when that is set. A capped
+// read reports in HasMore whether the row holds more cards than it answers.
 func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.ResolvedSection, withItems sections.SectionWithItems, hideWatched bool, viewer SectionViewer) SectionView {
-	withItems.ItemLimit = s.ItemLimit
+	shown, lowered := capSectionItemLimit(s, viewer.ItemLimitCap)
+	kept := shown
+	if lowered {
+		// The filter keeps the card past the cap that homeRowForFetch fetched.
+		kept.ItemLimit++
+	}
 	rows := []sections.SectionWithItems{withItems}
 	var userStates map[string]*itemUserStateResponse
 	if hideWatched {
 		// The direct section endpoint returns the section even if the
 		// filter empties it; only aggregate Home drops such sections.
-		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{s})
-	} else if viewer.ItemLimitCap > 0 {
+		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{kept})
+	}
+	row := &rows[0]
+	row.ItemLimit = shown.ItemLimit
+	hasMore := false
+	if viewer.ItemLimitCap > 0 {
 		// Most fetchers stop at the row's limit, but an admin curated list
-		// returns every configured item; a capped read answers at most the
-		// cap. Uncapped reads keep the whole list, as before.
-		if limit := effectiveHomeItemLimit(s.ItemLimit); len(rows[0].Items) > limit {
-			rows[0].Items = rows[0].Items[:limit]
+		// returns every configured item. A capped read answers at most the
+		// cap, and any card past it means the row holds more. Uncapped reads
+		// keep the whole list, as before.
+		if limit := effectiveHomeItemLimit(shown.ItemLimit); len(row.Items) > limit {
+			row.Items, hasMore = row.Items[:limit], true
 		}
 	}
 	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
-			ID:          withItems.ID,
-			SectionType: string(withItems.SectionType),
-			Title:       withItems.Title,
-			Featured:    withItems.Featured,
-			ItemLimit:   withItems.ItemLimit,
-			TotalCount:  withItems.TotalCount,
-			IsCustom:    withItems.IsCustom,
-			Customized:  withItems.Customized,
+			ID:          row.ID,
+			SectionType: string(row.SectionType),
+			Title:       row.Title,
+			Featured:    row.Featured,
+			ItemLimit:   row.ItemLimit,
+			TotalCount:  row.TotalCount,
+			IsCustom:    row.IsCustom,
+			Customized:  row.Customized,
 			Items:       []sectionItemResponse{},
+			HasMore:     hasMore,
 		}
 	}
+	built[0].HasMore = hasMore
 	return built[0]
 }
 
@@ -194,7 +208,7 @@ func (h *SectionHandler) homeLayoutWithItems(ctx context.Context, viewer Section
 	if n <= 0 || h.fetcher == nil {
 		return view, nil
 	}
-	view.IncludedSections = h.includedHomeRows(ctx, capSectionItemLimits(resolved[:n], viewer.ItemLimitCap), h.homeHidesWatchedItems(ctx), viewer, budget,
+	view.IncludedSections = h.includedHomeRows(ctx, resolved[:n], h.homeHidesWatchedItems(ctx), viewer, budget,
 		func(ctx context.Context, s sections.ResolvedSection) (sections.SectionWithItems, error) {
 			return h.fetcher.FetchOne(ctx, s, nil, libraryIDs, userID, profileID, accessFilter)
 		})
@@ -264,7 +278,7 @@ func (h *SectionHandler) includedHomeRow(ctx context.Context, s sections.Resolve
 			row, err = SectionView{}, errors.New("home layout row build panicked")
 		}
 	}()
-	withItems, err := fetch(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0])
+	withItems, err := fetch(ctx, homeRowForFetch(s, hideWatched, viewer.ItemLimitCap))
 	if err != nil {
 		return SectionView{}, err
 	}

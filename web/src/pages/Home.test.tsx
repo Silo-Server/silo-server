@@ -370,21 +370,30 @@ describe("Home", () => {
     expect(container.querySelectorAll("[data-home-section-placeholder]")).toHaveLength(0);
   });
 
-  it("reads the rest of a row at its own limit when its total holds more cards", async () => {
-    // A whole read of an admin curated list answers every card it holds, past
-    // the row's own item_limit.
+  it.each([
+    { name: "reads the rest of a row the server says holds more", partial: true, cards: "21" },
+    {
+      name: "reads nothing more for a row the server answered in full",
+      partial: false,
+      cards: "20",
+    },
+  ])("$name when its carousel nears the end", async ({ partial, cards }) => {
+    // An admin curated list at its own item_limit, which a whole read can
+    // answer past.
     const picks = { ...homeLayout("picks"), section_type: "admin_curated_list", item_limit: 20 };
     showLayout([picks]);
-    const cards = Array.from({ length: 21 }, (_, index) => ({
+    const all = Array.from({ length: 21 }, (_, index) => ({
       ...homeSection("picks").section.items[0]!,
       content_id: `pick-${index}`,
     }));
     const read = (count: number) => ({
-      section: { ...picks, total_count: cards.length, items: cards.slice(0, count) },
+      section: { ...picks, total_count: count, items: all.slice(0, count) },
     });
     mockFetchHomeSectionItems.mockImplementation(
       async (_sectionId: string, options: { itemLimit?: number }) =>
-        options.itemLimit === undefined ? read(21) : { ...read(20), partial: true },
+        options.itemLimit !== undefined && partial
+          ? { ...read(20), partial: true }
+          : read(options.itemLimit ?? 21),
     );
     const itemCount = () =>
       container.querySelector('[data-section-id="picks"]')?.getAttribute("data-item-count");
@@ -395,7 +404,8 @@ describe("Home", () => {
       container.querySelector<HTMLButtonElement>('[data-section-id="picks"] button')!.click();
     });
 
-    await waitFor(() => expect(itemCount()).toBe("21"));
+    await waitFor(() => expect(itemCount()).toBe(cards));
+    expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(partial ? 2 : 1);
   });
 
   it.each([["WebKit", SAFARI_USER_AGENT]])(

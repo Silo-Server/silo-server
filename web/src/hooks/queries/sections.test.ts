@@ -5,6 +5,7 @@ import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layo
 import getHomeLayoutIncludeItemsOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_layout_include_items_out_of_range.json";
 import getHomeLayoutWithItemsOk from "../../../../contracts/api/v2/fixtures/get_home_layout_with_items_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
+import getHomeSectionItemsCappedOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_capped_ok.json";
 import getHomeSectionItemsItemLimitOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_section_items_item_limit_out_of_range.json";
 import getHomeLayoutItemLimitOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_layout_item_limit_out_of_range.json";
 
@@ -31,7 +32,7 @@ import {
   homeLayoutQueryOptions,
   HOME_LAYOUT_INCLUDED_ROWS,
 } from "./sections";
-import { completeHomeRow, HOME_ROW_ITEM_LIMIT, isPartialHomeRow } from "./homeRowLimit";
+import { completeHomeRow, HOME_ROW_ITEM_LIMIT } from "./homeRowLimit";
 import { sectionKeys } from "./keys";
 import type { ResolvedSection } from "@/api/types";
 
@@ -142,41 +143,43 @@ describe("sections query helpers", () => {
     expect(cached?.section.id).toBe(included.id);
     expect(cached?.section.items).toHaveLength(included.items.length);
   });
-  it("reads a row whole when the server rejects item_limit", async () => {
-    mocks.fetchWithSession
-      .mockResolvedValueOnce(jsonResponse(getHomeSectionItemsItemLimitOutOfRange, 422))
-      .mockResolvedValueOnce(jsonResponse(getHomeSectionItemsOk));
 
-    const response = await fetchHomeSectionItems("continue_watching", { itemLimit: 20 });
+  it.each([
+    {
+      name: "a capped row the server says holds more as partial",
+      responses: () => [jsonResponse(getHomeSectionItemsCappedOk)],
+      urls: ["/api/v2/home/sections/continue_watching/items?item_limit=20"],
+      partial: true,
+    },
+    {
+      name: "a capped row the server answered in full as whole",
+      responses: () => [jsonResponse(getHomeSectionItemsOk)],
+      urls: ["/api/v2/home/sections/continue_watching/items?item_limit=20"],
+      partial: undefined,
+    },
+    {
+      name: "a row whole when the server rejects item_limit",
+      responses: () => [
+        jsonResponse(getHomeSectionItemsItemLimitOutOfRange, 422),
+        jsonResponse(getHomeSectionItemsOk),
+      ],
+      urls: [
+        "/api/v2/home/sections/continue_watching/items?item_limit=20",
+        "/api/v2/home/sections/continue_watching/items",
+      ],
+      partial: undefined,
+    },
+  ])("reads $name", async ({ responses, urls, partial }) => {
+    for (const response of responses()) mocks.fetchWithSession.mockResolvedValueOnce(response);
 
-    expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual([
-      "/api/v2/home/sections/continue_watching/items?item_limit=20",
-      "/api/v2/home/sections/continue_watching/items",
-    ]);
-    expect(response.partial).toBeUndefined();
-    expect(response.section.items).toHaveLength(getHomeSectionItemsOk.items.length);
+    const row = await fetchHomeSectionItems("continue_watching", { itemLimit: 20 });
+
+    expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual(urls);
+    expect(row.partial).toBe(partial);
   });
 });
 
 describe("home row limit", () => {
-  const ids = (count: number) => Array.from({ length: count }, (_, i) => `movie:${i}`);
-
-  it.each([
-    ["a row read whole", row(ids(20), { total_count: 80 }), undefined, false],
-    ["a row under the cap", row(ids(12), { item_limit: 12, total_count: 12 }), 20, false],
-    ["a row that filled the cap", row(ids(20), { total_count: 80 }), 20, true],
-    ["a short row whose source holds more", row(ids(9), { total_count: 80 }), 20, true],
-    ["a short row the filters may have cut", row(ids(9), { total_count: 9 }), 20, true],
-    [
-      "a row with no limit whose total holds more",
-      row(ids(20), { item_limit: 0, total_count: 21 }),
-      20,
-      true,
-    ],
-  ])("%s", (_name, section, itemLimit, partial) => {
-    expect(isPartialHomeRow(section, itemLimit)).toBe(partial);
-  });
-
   it("completes a row with the shown cards in place and the rest after them", () => {
     const shown = { section: row(["a", "b", "c"]), partial: true };
     const whole = { section: row(["a", "x", "b", "y"], { item_limit: 100, total_count: 4 }) };

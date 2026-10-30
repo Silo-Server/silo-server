@@ -272,20 +272,16 @@ export default function Home() {
       );
   };
 
-  // Reads the whole of a row loaded in part once its carousel nears the last
-  // card, keeping the cards it shows in place. A row already at its own
-  // limit is whole unless its total_count holds more (see isPartialHomeRow).
-  // On failure the row keeps what it has, and scrolling near its end again
-  // retries.
+  // Reads the whole of a row loaded in part, one the server said holds more
+  // cards than it answered (see homeRowResponse), once its carousel nears the
+  // last card, keeping the cards it shows in place. On failure the row keeps
+  // what it has, and scrolling near its end again retries.
   const completingIdsRef = useRef(new Set<string>());
   const completeSection = useCallback(
     (sectionId: string) => {
       const queryKey = sectionKeys.homeItems(sectionId);
       const shown = queryClient.getQueryData<HomeSectionItemsResponse>(queryKey);
-      const ownLimit = layout.find((section) => section.id === sectionId)?.item_limit ?? 0;
-      if (!shown?.partial) return;
-      if (Math.max(ownLimit, shown.section.total_count) <= shown.section.items.length) return;
-      if (completingIdsRef.current.has(sectionId)) return;
+      if (!shown?.partial || completingIdsRef.current.has(sectionId)) return;
       completingIdsRef.current.add(sectionId);
       const generation = loadGenerationRef.current;
       void queryClient
@@ -306,12 +302,13 @@ export default function Home() {
         .catch(() => undefined)
         .finally(() => completingIdsRef.current.delete(sectionId));
     },
-    [layout, queryClient],
+    [queryClient],
   );
 
-  // A row loaded in part that shows no cards, because hide-watched or the
-  // duplicate filter took every one, is hidden and has no carousel to report
-  // its end; it reads the rest at once, which may hold cards to show.
+  // A row loaded in part that shows no cards, because the duplicate filter
+  // took every one or the viewer dismissed them, is hidden and has no
+  // carousel to report its end; it reads the rest at once, which may hold
+  // cards to show. A row the server answered empty is never loaded in part.
   useEffect(() => {
     for (const [sectionId, section] of visibleSections) {
       if (section.items.length === 0) completeSection(sectionId);

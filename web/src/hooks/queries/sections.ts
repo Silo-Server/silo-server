@@ -88,16 +88,16 @@ export const HOME_LAYOUT_INCLUDED_ROWS = 3;
  * The home layout query. Rows the server included, capped at
  * HOME_ROW_ITEM_LIMIT cards, are written into their own item caches before the
  * layout resolves, so Home finds them already loaded and does not request them
- * again. A capped featured row is left out: the hero shows every card of its
- * row, so Home reads it whole.
+ * again. A featured row that holds more cards than the cap is left out: the
+ * hero shows every card of its row, so Home reads it whole.
  */
 export function homeLayoutQueryOptions(queryClient: QueryClient) {
   return queryOptions({
     queryKey: sectionKeys.homeLayout(),
     queryFn: async ({ signal }): Promise<HomeLayoutResponse> => {
-      const { layout, itemLimit } = await fetchHomeLayout(signal);
+      const layout = await fetchHomeLayout(signal);
       for (const section of layout.included_sections) {
-        const row = homeRowResponse(sectionFromV2(section), itemLimit);
+        const row = homeRowResponse(section);
         if (row.partial && section.featured) continue;
         const queryKey = sectionKeys.homeItems(section.id);
         // A row the viewer has already completed or read whole past the cap
@@ -119,32 +119,29 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
 
 /**
  * Reads the home layout with its first rows' items, capped at
- * HOME_ROW_ITEM_LIMIT cards; itemLimit reports the cap the answer honoured. A
- * server that predates item_limit (an older node during a rolling upgrade)
- * answers 422 and is asked again without it, so its included rows come whole.
- * One that also predates include_items, or allows fewer rows, answers 422
- * again; the layout is then read alone and Home loads every row itself.
+ * HOME_ROW_ITEM_LIMIT cards. A server that predates item_limit (an older node
+ * during a rolling upgrade) answers 422 and is asked again without it, so its
+ * included rows come whole. One that also predates include_items, or allows
+ * fewer rows, answers 422 again; the layout is then read alone and Home loads
+ * every row itself.
  */
-async function fetchHomeLayout(
-  signal?: AbortSignal,
-): Promise<{ layout: V2HomeLayout; itemLimit?: number }> {
+async function fetchHomeLayout(signal?: AbortSignal): Promise<V2HomeLayout> {
   const included = { include_items: HOME_LAYOUT_INCLUDED_ROWS };
   try {
-    const layout = await v2("GET /api/v2/home/layout", {
+    return await v2("GET /api/v2/home/layout", {
       query: { ...included, item_limit: HOME_ROW_ITEM_LIMIT },
       signal,
     });
-    return { layout, itemLimit: HOME_ROW_ITEM_LIMIT };
   } catch (error) {
     if (!isUnprocessable(error)) throw error;
   }
   try {
-    return { layout: await v2("GET /api/v2/home/layout", { query: included, signal }) };
+    return await v2("GET /api/v2/home/layout", { query: included, signal });
   } catch (error) {
     if (!isUnprocessable(error)) throw error;
   }
   const layout = await v2("GET /api/v2/home/layout", { signal });
-  return { layout: { ...layout, included_sections: [] } };
+  return { ...layout, included_sections: [] };
 }
 
 type V2HomeLayout = components["schemas"]["HomeLayout"];
@@ -174,7 +171,7 @@ export async function fetchHomeSectionItems(
       path: { id: sectionId },
       query: itemLimit === undefined ? undefined : { item_limit: itemLimit },
       signal: options?.signal,
-    }).then((section) => homeRowResponse(sectionFromV2(section), itemLimit));
+    }).then(homeRowResponse);
   try {
     return await read(options?.itemLimit);
   } catch (error) {
