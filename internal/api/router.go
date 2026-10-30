@@ -4888,7 +4888,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	// media routes unwrapped so their io.ReaderFrom/sendfile path survives,
 	// and serving validator-bearing v2 responses identity-encoded so a strong
 	// ETag names exactly one representation (apiv2.IdentityEncoded).
-	r.Use(httpstream.CompressWithExclusions(5, skipNativeMediaCompression, apiv2.IdentityEncoded))
+	r.Use(httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded))
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
