@@ -12,7 +12,7 @@ their startup wiring in `cmd/silo/main.go`, and the shipped Compose file.
 
 | Listener | Log label | Policy |
 |---|---|---|
-| Native API, including the listener passed to `internal/lantls` | `api` | Request BBR and evaluate send-buffer forcing |
+| Native API in integrated, API and frontend modes, including the listener passed to `internal/lantls` | `api` | Request BBR and evaluate send-buffer forcing |
 | Jellyfin compatibility | `jellyfin` | Request BBR and evaluate send-buffer forcing |
 | Audiobookshelf compatibility | `abs` | Request BBR and evaluate send-buffer forcing |
 | Standalone proxy mode | `proxy` | Request BBR and evaluate send-buffer forcing |
@@ -56,12 +56,14 @@ shares that configuration with all listeners and logs each adjustment once.
 `SILO_NET_TCP_CONGESTION` accepts `bbr` (default) and `off`.
 Parsing trims surrounding whitespace and lowercases the value. An unset
 or blank value selects `bbr` silently. Any other value is refused: the effective
-value is `bbr`, and a warning records the original value with `reason=invalid`.
+value is `off`, and a warning records the original value with `reason=invalid`.
+Like the flags in `internal/envutil`, an unrecognized value fails toward off,
+because an operator who mistypes the off switch was reaching for off.
 
 `SILO_NET_TCP_SEND_BUFFER` accepts a positive decimal byte size up to 1073741823
 (default 33554432), or `off`. It uses the same whitespace and case normalization.
-An unset or blank value selects the default silently; an invalid value selects
-33554432 and records an adjustment with `reason=invalid`. The upper bound is
+An unset or blank value selects the default silently; an invalid value,
+including `0`, selects `off` and records an adjustment with `reason=invalid`. The upper bound is
 Linux's `INT_MAX/2` limit before the kernel doubles a request.
 
 The two knobs are independent. Congestion `off` skips its set and readback.
@@ -170,10 +172,16 @@ rewriting unknown capability sets. Builds without the Linux cgo constructor repo
 
 When NET_ADMIN is absent from the effective set at constructor entry, the helper
 is `none`. Any remaining inheritable, permitted, ambient or bounding grant still
-triggers cleanup and containment readback. This includes a refused ambient raise
-in `svc-silo`: Silo clears the inheritable bit and enables `no_new_privs` even
-though no helper starts. `children_inherit` reports the readback in this path too.
-With no grant in any set, startup leaves `no_new_privs` unchanged.
+triggers cleanup and containment readback. A launcher that sets the inheritable
+bit but has its ambient raise refused leaves such a grant: Silo clears the
+inheritable bit and enables `no_new_privs` even though no helper starts.
+(`svc-silo` never starts Silo that way: `setpriv` exits on a refused raise and
+the script falls back to `s6-setuidgid`.) `children_inherit` reports the
+readback in this path too.
+With no grant in any set, startup leaves `no_new_privs` unchanged. Linux's
+default bounding set includes NET_ADMIN, so a non-root run outside a container,
+for example under systemd, takes the cleanup path and runs with `no_new_privs`
+even though nothing granted it NET_ADMIN.
 
 The helper keeps only NET_ADMIN in its effective and permitted sets and enables
 `no_new_privs`. Its closed protocol accepts two socket operations:
@@ -186,21 +194,28 @@ allowed range. No algorithm payload is accepted. Other commands, sizes, socket
 types, descriptor counts, malformed lengths and truncated messages are refused
 with `EINVAL`. The helper closes every received
 descriptor before replying. Both ends of its socket pair are close-on-exec, so
-programs Silo executes do not inherit that channel.
+programs Silo executes do not inherit that channel. Before creating it, the
+constructor opens `/dev/null` on any closed fd 0, 1 or 2, as the Go runtime
+would later, so the channel never takes a standard descriptor; if that fails,
+the helper does not start.
 
 The startup wiring closes the helper channel and reaps the helper after the
-last client listener bind attempt: after compatibility binds in integrated and
-API modes, and after the standalone bind in proxy and transcode modes.
+last client listener bind attempt: after compatibility binds in integrated, API
+and frontend modes, and after the standalone bind in proxy and transcode modes.
 Closed-channel end-of-file or a parent-death signal ends the helper on other
 exit paths. `Release` is idempotent; its state becomes `released`
 and later requests return `netadmin.ErrUnavailable`.
 
-While the helper holds NET_ADMIN, compromise can reach the network namespace's
-interfaces, routes, firewall rules and nf_tables kernel code. With
-`network_mode: host`, that includes the host's network. The restricted protocol
+Whoever holds NET_ADMIN can reach the network namespace's interfaces, routes,
+firewall rules and nf_tables kernel code. With `network_mode: host`, that
+includes the host's network. Silo confines its own use to the helper, but a
+container grant also stays with the container's root processes for the
+container's life: in the omnibus image, the s6 supervisor, disabled-service
+placeholders and `docker exec` shells. The restricted protocol
 limits requests from Silo; NET_ADMIN itself remains broader than these two
 socket operations. Removing NET_ADMIN from Silo's capability set before startup
-removes the helper and this exposure, regardless of how the capability is granted.
+removes the helper, regardless of how the capability is granted; removing the
+container grant also removes it from the container's root processes.
 Silo and its children lose NET_ADMIN on a successful drop; the state log reports
 when that cannot be confirmed.
 
@@ -258,8 +273,7 @@ Attributes: `component`, `env`, `requested`, `effective`, `reason`.
 
 The component is `tuning`. Each invalid value adjustment logs at Warn.
 `env` names the knob and `requested` preserves the original text. `effective`
-is `bbr` for `SILO_NET_TCP_CONGESTION` or `33554432` for
-`SILO_NET_TCP_SEND_BUFFER`; `reason` is `invalid`. This line has no `action`.
+is `off` for both knobs; `reason` is `invalid`. This line has no `action`.
 
 ### `tcp buffer limits: kernel state`
 

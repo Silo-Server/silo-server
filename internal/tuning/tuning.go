@@ -5,7 +5,6 @@ package tuning
 import (
 	"context"
 	"log/slog"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -36,7 +35,7 @@ type Config struct {
 	TCPSendBuffer int
 }
 
-// Adjustment describes a requested value refused in favor of its default.
+// Adjustment describes a requested value refused in favor of off.
 type Adjustment struct {
 	Env       string
 	Requested string
@@ -46,59 +45,46 @@ type Adjustment struct {
 
 const reasonInvalid = "invalid"
 
-var knobs = [...]struct {
-	env          string
-	defaultValue TCPCongestion
-	allowed      []TCPCongestion
-}{
-	{
-		env:          EnvTCPCongestion,
-		defaultValue: TCPCongestionBBR,
-		allowed:      []TCPCongestion{TCPCongestionBBR, TCPCongestionOff},
-	},
-}
-
-// Parse reads each knob through getenv. Empty values use the default; invalid
-// values also use the default and return an adjustment. No adjustments means a
-// nil slice. The caller parses once at startup and shares the resulting Config.
+// Parse reads both knobs through getenv. Empty values use the defaults. A value
+// a knob does not recognize turns that knob off and returns an adjustment, as
+// internal/envutil does for flags that default on: an operator who mistypes the
+// off switch was reaching for off. No adjustments means a nil slice. The caller
+// parses once at startup and shares the resulting Config.
 func Parse(getenv func(string) string) (Config, []Adjustment) {
-	knob := knobs[0]
-	requested := getenv(knob.env)
-	effective := TCPCongestion(strings.ToLower(strings.TrimSpace(requested)))
+	cfg := Config{TCPCongestion: TCPCongestionBBR, TCPSendBuffer: DefaultTCPSendBuffer}
 	var adjustments []Adjustment
-	if effective == "" {
-		effective = knob.defaultValue
-	} else if !slices.Contains(knob.allowed, effective) {
-		effective = knob.defaultValue
+	refuse := func(env, requested string) {
 		adjustments = append(adjustments, Adjustment{
-			Env:       knob.env,
+			Env:       env,
 			Requested: requested,
-			Effective: string(effective),
+			Effective: string(TCPCongestionOff),
 			Reason:    reasonInvalid,
 		})
 	}
-	sendBuffer := DefaultTCPSendBuffer
+	requested := getenv(EnvTCPCongestion)
+	switch TCPCongestion(strings.ToLower(strings.TrimSpace(requested))) {
+	case "", TCPCongestionBBR:
+	case TCPCongestionOff:
+		cfg.TCPCongestion = TCPCongestionOff
+	default:
+		cfg.TCPCongestion = TCPCongestionOff
+		refuse(EnvTCPCongestion, requested)
+	}
 	requested = getenv(EnvTCPSendBuffer)
-	normalized := strings.ToLower(strings.TrimSpace(requested))
-	switch normalized {
+	switch normalized := strings.ToLower(strings.TrimSpace(requested)); normalized {
 	case "":
-	case "off":
-		sendBuffer = 0
+	case string(TCPCongestionOff):
+		cfg.TCPSendBuffer = 0
 	default:
 		// Linux doubles SO_SNDBUF and clamps requests to INT_MAX/2.
-		bytes, err := strconv.ParseUint(normalized, 10, 30)
-		if err == nil && bytes > 0 {
-			sendBuffer = int(bytes)
+		if bytes, err := strconv.ParseUint(normalized, 10, 30); err == nil && bytes > 0 {
+			cfg.TCPSendBuffer = int(bytes)
 		} else {
-			adjustments = append(adjustments, Adjustment{
-				Env:       EnvTCPSendBuffer,
-				Requested: requested,
-				Effective: strconv.Itoa(DefaultTCPSendBuffer),
-				Reason:    reasonInvalid,
-			})
+			cfg.TCPSendBuffer = 0
+			refuse(EnvTCPSendBuffer, requested)
 		}
 	}
-	return Config{TCPCongestion: effective, TCPSendBuffer: sendBuffer}, adjustments
+	return cfg, adjustments
 }
 
 // LogAdjustments logs one warning per adjustment using ctx.

@@ -101,6 +101,20 @@ func TestHelperRefusesInvalidRequests(t *testing.T) {
 	}
 }
 
+// A closed fd 2 at exec must not become the helper channel, or log writes
+// reach the helper and its replies fall out of step with requests.
+func TestHelperChannelAvoidsClosedStdio(t *testing.T) {
+	if os.Getenv("SILO_TEST_NET_ADMIN") != "closed_stderr" {
+		t.Skip("requires SILO_TEST_NET_ADMIN=closed_stderr in a Linux container with NET_ADMIN, started with fd 2 closed")
+	}
+	if state := Current(); state.Helper != HelperRunning || helper.fd <= 2 {
+		t.Fatalf("helper fd = %d with Current() = %+v, want a running helper above fd 2", helper.fd, state)
+	}
+	if target, err := os.Readlink("/proc/self/fd/2"); err != nil || target != "/dev/null" {
+		t.Fatalf("fd 2 = %q (%v), want /dev/null", target, err)
+	}
+}
+
 func protocolSocket(t *testing.T, domain, kind, protocol int, address unix.Sockaddr) *os.File {
 	t.Helper()
 	fd, err := unix.Socket(domain, kind|unix.SOCK_CLOEXEC, protocol)

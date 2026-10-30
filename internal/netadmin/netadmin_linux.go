@@ -6,6 +6,7 @@ package netadmin
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/capability.h>
 #include <limits.h>
 #include <netinet/in.h>
@@ -48,6 +49,16 @@ static int silo_capget(struct __user_cap_data_struct data[2]) {
 static int silo_capset(struct __user_cap_data_struct data[2]) {
     struct __user_cap_header_struct header = {_LINUX_CAPABILITY_VERSION_3, 0};
     return syscall(SYS_capset, &header, data);
+}
+
+// The Go runtime opens /dev/null on a closed fd 0, 1 or 2 only after this
+// constructor runs. Do it first so the helper channel never becomes stdio.
+static int silo_reserve_stdio(void) {
+    for (int fd = 0; fd <= 2; fd++) {
+        if (fcntl(fd, F_GETFD) >= 0) continue;
+        if (errno != EBADF || open("/dev/null", O_RDWR) != fd) { silo_record_error(errno); return 0; }
+    }
+    return 1;
 }
 
 static void silo_count_threads(void) {
@@ -227,6 +238,7 @@ static void silo_start_helper(void) {
 }
 
 __attribute__((constructor)) static void silo_netadmin_init(void) {
+    int stdio_reserved = silo_reserve_stdio();
     silo_count_threads();
     struct __user_cap_data_struct data[2] = {{0}};
     if (silo_capget(data) < 0) {
@@ -253,7 +265,8 @@ __attribute__((constructor)) static void silo_netadmin_init(void) {
     }
     if (data[0].effective & (1U << CAP_NET_ADMIN)) {
         silo_state.held = 1;
-        silo_start_helper();
+        if (stdio_reserved) silo_start_helper();
+        else silo_state.helper = SILO_NA_START_FAILED;
     }
     silo_drop_bounding_and_ambient();
     data[0].effective &= ~(1U << CAP_NET_ADMIN);

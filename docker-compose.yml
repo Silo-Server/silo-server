@@ -37,10 +37,12 @@ services:
     # 100 ms and 1% loss). Silo gives up NET_ADMIN before its own code runs:
     # a small helper process holds it only until the listeners are configured,
     # then exits. Silo, ffmpeg, ffprobe and plugins never keep it; the start
-    # log says if dropping it fails. While the helper holds it, NET_ADMIN can
-    # change this container's interfaces, routes and firewall rules and
-    # reaches more kernel code (nf_tables); with network_mode: host, the
-    # host's. Undo: remove this line. Silo then logs the TCP limits it cannot
+    # log says if dropping it fails. The container's root processes (the s6
+    # supervisor, disabled-service placeholders, docker exec shells) keep it
+    # while the container runs. NET_ADMIN can change this container's
+    # interfaces, routes and firewall rules and reaches more kernel code
+    # (nf_tables); with network_mode: host, the host's.
+    # Undo: remove this line. Silo then logs the TCP limits it cannot
     # change and how to raise them. SILO_NET_TCP_CONGESTION=off in .env turns
     # BBR off; SILO_NET_TCP_SEND_BUFFER=off keeps send-buffer autotuning.
     cap_add: [NET_ADMIN]
