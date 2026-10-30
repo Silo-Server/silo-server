@@ -139,7 +139,8 @@ export default function Home() {
     );
 
     return () => {
-      // Cancelling settles each in-flight request with its pre-fetch data, or
+      // Cancelling settles each in-flight request with the data last written
+      // to the cache, which keeps an edit made while it ran (a dismissal), or
       // a CancelledError when there was none. Neither answers the next
       // generation, which re-requests these sections itself.
       loadGenerationRef.current += 1;
