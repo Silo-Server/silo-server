@@ -62,28 +62,28 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(name, directories, rootRelative, allowNumericSeason, allowUnseasoned...) {
 				continue
 			}
-			closed := -1
+			open, closed, bracketed := 0, 0, false
 			if pattern == xEpisodeRe {
-				if open, end, ok := bracketedCoordinate(name, match[2], match[5]); ok {
-					// Only the first bracketed code is weighed: a later one has
-					// the same earlier text before it. Weighing each would
-					// re-parse every prefix once per bracket in the name.
-					if bracketWeighed {
-						continue
-					}
-					bracketWeighed = true
-					// A bracketed code after an episode number belongs to the
-					// episode title: Show - 03 - Title (2x14).
-					if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 {
-						continue
-					}
-					closed = end
+				open, closed, bracketed = bracketedCoordinate(name, match[2], match[5])
+			}
+			if bracketed {
+				// Only the first bracketed code is weighed: a later one has the
+				// same earlier text before it. Weighing each would re-parse
+				// every prefix once per bracket in the name.
+				if bracketWeighed {
+					continue
+				}
+				bracketWeighed = true
+				// A bracketed code after an episode number belongs to the
+				// episode title: Show - 03 - Title (2x14).
+				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 {
+					continue
 				}
 			}
 			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]})
 			// The closing bracket of Show - [1x02] - Title belongs to the
 			// coordinate, not to the episode title after it.
-			if closed >= 0 {
+			if bracketed {
 				token.end = closed
 			}
 			return token, true
