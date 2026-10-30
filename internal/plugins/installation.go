@@ -16,9 +16,9 @@ import (
 var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
 
-// ErrArchiveUnreadable marks a stored plugin archive that cannot be opened or
-// does not match the installation it is stored for. Only that plugin is
-// affected: it cannot load until it is reinstalled.
+// ErrArchiveUnreadable marks a stored plugin archive that won't open or
+// extract, or doesn't match the installation row it was read for. That plugin
+// can't load from it; other plugins are unaffected.
 var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
 
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")

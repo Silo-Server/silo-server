@@ -21,6 +21,7 @@ import (
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -1410,6 +1411,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	taskBindings []*plugins.TaskBinding,
 	repositoriesByID map[int]*plugins.Repository,
 ) (PluginInstallationView, error) {
+	var unreadableArchive error
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
@@ -1421,6 +1423,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
 		case errors.Is(err, plugins.ErrArchiveUnreadable):
 			slog.WarnContext(ctx, "listing plugin without its manifest", "component", "api", "installation_id", installation.ID, "plugin_id", installation.PluginID, "error", err)
+			unreadableArchive = err
 		default:
 			return PluginInstallationView{}, err
 		}
@@ -1474,6 +1477,12 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 					runtime.Resident = true
 				}
 			}
+		}
+		// A plugin that isn't running can't start from an archive that won't
+		// load, so show it as failed and say why.
+		if unreadableArchive != nil && state.State == plugins.ResidentStopped {
+			runtime.State = string(plugins.ResidentFailed)
+			runtime.LastError = logredact.SanitizeText(unreadableArchive.Error())
 		}
 	}
 

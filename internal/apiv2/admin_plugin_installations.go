@@ -197,11 +197,12 @@ type AdminPluginCatalogEntry struct {
 // with exponential backoff, and parked as failed after repeated failures
 // until an administrator restarts or reconfigures it. Other plugins start on
 // first use and report running, stopped, or failed when their last launch on
-// this server failed (with last_error); a later successful launch, an
-// administrator restart, an update or a configuration change clears the failure.
+// this server failed or their stored archive can't be read (with last_error); a
+// later successful launch, an administrator restart, an update or a
+// configuration change clears a launch failure.
 type AdminPluginRuntime struct {
 	Resident      bool     `json:"resident" doc:"True when the server supervises this plugin's process"`
-	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed"`
+	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed or whose stored archive can't be read"`
 	RestartCount  int      `json:"restart_count" doc:"Automatic restarts since the plugin last ran stably or was restarted by an administrator"`
 	LastError     string   `json:"last_error,omitempty" doc:"Why the process last stopped or failed to start"`
 	LastStartedAt *Instant `json:"last_started_at,omitempty"`

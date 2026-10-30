@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -201,7 +202,13 @@ func (c *ArchiveCache) ensure(
 	}
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		// Creating or writing the files fails with a *fs.PathError, a fault
+		// of this host's disk. Anything else came from the archive: an entry
+		// that doesn't decompress or match its CRC, or an unsafe entry name.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		}
+		return nil, unreadableArchivef("extract stored plugin archive for installation %d: %w", installation.ID, err)
 	}
 	info, err := c.validateInstalledFiles(binaryPath, manifest)
 	if err != nil {

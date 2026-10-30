@@ -69,8 +69,9 @@ func TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB(t *testing.T) {
 }
 
 // An enabled plugin whose stored archive no longer opens, on a host whose
-// plugin cache is empty, never loads. It must not fail the admin list or the
-// user settings list, and turning it off must answer with its row.
+// plugin cache is empty, never loads. The admin list keeps it, marked failed
+// with the reason, the user settings list leaves it out, and turning it off
+// answers with its row.
 func TestPluginListsKeepWorkingWithAnUnreadableArchiveDB(t *testing.T) {
 	pool, h := newPluginHandlerDB(t)
 
@@ -97,12 +98,17 @@ func TestPluginListsKeepWorkingWithAnUnreadableArchiveDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAdminPluginInstallations() error = %v", err)
 	}
-	found := false
-	for _, view := range listed {
-		found = found || view.ID == brokenID
+	var broken *PluginInstallationView
+	for i := range listed {
+		if listed[i].ID == brokenID {
+			broken = &listed[i]
+		}
 	}
-	if !found {
+	switch {
+	case broken == nil:
 		t.Errorf("installations list left out installation %d", brokenID)
+	case broken.Runtime == nil || broken.Runtime.State != string(plugins.ResidentFailed) || broken.Runtime.LastError == "":
+		t.Errorf("installation %d runtime = %+v, want failed with the reason", brokenID, broken.Runtime)
 	}
 
 	if _, err := h.ListUserPluginSettings(t.Context()); err != nil {
