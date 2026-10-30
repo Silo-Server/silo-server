@@ -114,7 +114,7 @@ type CatalogItemUpcomingEvent struct {
 	EpisodeTitle  *string  `json:"episode_title,omitempty"`
 	SeasonNumber  *int     `json:"season_number,omitempty"`
 	EpisodeNumber *int     `json:"episode_number,omitempty"`
-	Badges        []string `json:"badges" doc:"Empty, never null"`
+	Badges        []string `json:"badges" doc:"The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null"`
 }
 
 // CatalogItemSortMetrics is what a sorted listing sorted on.

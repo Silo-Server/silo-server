@@ -23508,7 +23508,7 @@
             "type": "string"
           },
           "badges": {
-            "description": "series_premiere, season_premiere, finale; empty, never null",
+            "description": "series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null",
             "items": {
               "type": "string"
             },
@@ -24906,7 +24906,7 @@
             "type": "string"
           },
           "badges": {
-            "description": "Empty, never null",
+            "description": "The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null",
             "items": {
               "type": "string"
             },

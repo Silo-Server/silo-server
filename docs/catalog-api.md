@@ -888,6 +888,33 @@ used cannot be deleted (`409`) until those rows stop showing it.
 Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
 unchanged and carries no counts.
 
+## Calendar movie dates
+
+`GET /api/v2/calendar` lists each movie once, on its first home release: the
+earlier of its digital (streaming or purchase) and physical (disc) release
+dates, each the earliest in any country. A theatrical release never reaches a
+media server, so the calendar does not use `release_date` for movies, and a
+movie with no home release date yet is not listed. The event carries a
+`digital` or `physical` badge naming the release it is listed on; when both
+fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
+movies on the same dates, because both read the same events, but never sends
+these two badges.
+
+The home release dates pick only the calendar day. The upcoming titles in the
+For You discover row follow the same day, and their `upcoming_event.badges`
+carry the same `digital` or `physical` badge on `/api/v2` (never on
+`/api/v1/recommendations/discover`). Item detail, sorting, filters and the year
+still use `release_date`, and no item response carries the home release dates.
+
+Metadata providers supply them as `digital_release_date` and
+`physical_release_date` (`YYYY-MM-DD`) in the `metadata` Struct of a movie's
+`GetMetadata` response. The host ignores the keys on other item types and drops
+a value that is not a calendar date. The TMDB plugin derives them from TMDB's
+type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
+ones included, replaces a stored date with the one the provider sends now,
+because providers revise them. A date the provider stops sending is kept.
+Locking release dates on an item also locks them.
+
 ## Advisory age
 
 Movies and series may carry `advisory_age`, a recommended minimum viewer age from
