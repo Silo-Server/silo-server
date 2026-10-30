@@ -123,16 +123,14 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 		// whose entries do not cover the source) still fails closed below.
 		if routeVideoMetadataCompleteV3(source) {
 			detailedBoundsChecked = true
-			// A download plays offline with no replan to recover from a
-			// wrong admission, so the decoder's frame rate stays absolute.
-			videoOK, _ = videoEligibleRateV3(source, StartRequestV3{
+			videoOK, _ = videoEligibleV3(source, StartRequestV3{
 				ClientFeatures: caps.ClientFeatures,
 				Capabilities: ClientCodecCapabilitiesV3{
 					VideoEvidence: caps.VideoEvidence,
 					CodecsVideo:   caps.CodecsVideo,
 					VideoDecode:   caps.VideoDecode,
 				},
-			}, false)
+			})
 		}
 	}
 	// Audio is considered OK if the client can decode the codec itself OR its

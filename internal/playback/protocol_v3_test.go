@@ -1281,7 +1281,7 @@ func TestVideoEligibleV3SoftwareEntryCanFollowARejectingHardwareEntryForTheSameC
 
 // An exact decoder's reported frame rate holds at its largest size, as for
 // encode targets, so a smaller source may run faster within the same
-// macroblock rate, while the maximum size still binds. A platform-attested or
+// macroblock rate up to 60 fps, while the maximum size still binds. A platform-attested or
 // declared entry is a tested envelope whose rate stays absolute.
 func TestVideoEligibleV3DecoderFrameRateHoldsAtItsLargestSize(t *testing.T) {
 	for _, tc := range []struct {
@@ -1297,6 +1297,9 @@ func TestVideoEligibleV3DecoderFrameRateHoldsAtItsLargestSize(t *testing.T) {
 		// 1080 rows code as 1088, so 1080p120 needs more macroblocks a second
 		// than 4K30 although its pixel rate ties.
 		{name: "4K30 decoder refuses 1080p120", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 120},
+		// 720p120 fits 4K30's macroblock rate, but the trade stops at 60 fps:
+		// the entry does not report the codec's overall frame-rate range.
+		{name: "4K30 decoder refuses 720p120", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1280, height: 720, frameRate: 120},
 		{name: "platform-attested 4K30 refuses 1080p50", evidence: EvidencePlatformAttestedV3, maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50},
 		{name: "declared 4K30 refuses 1080p50", evidence: EvidenceDeclaredV3, maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 1920, height: 1080, frameRate: 50},
 		{name: "4K30 decoder refuses 4K60", maxWidth: 3840, maxHeight: 2160, maxFrameRate: 30, width: 3840, height: 2160, frameRate: 60},

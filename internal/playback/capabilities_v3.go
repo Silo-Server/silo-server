@@ -120,17 +120,9 @@ const h264BaselineProfileV3 = "baseline"
 // result reports that the route was blocked by insufficient evidence for the
 // tier — the client claims the codec in its flat lists but the tier's
 // validation could not confirm the stream — rather than by device facts.
-// An exact decoder's frame rate may trade against its size (see
-// decoderTakesFrameV3): a failed copy is never offered again, so playback
-// recovers from an optimistic admission.
+// An exact decoder's frame rate may trade against its size up to
+// maxTradedFrameRateV3 (see decoderTakesFrameV3).
 func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, bool) {
-	return videoEligibleRateV3(source, request, true)
-}
-
-// videoEligibleRateV3 is videoEligibleV3 with the frame-rate trade optional:
-// tradeRate false keeps every reported rate absolute, for a download that
-// plays offline with no replan to fall back on.
-func videoEligibleRateV3(source SourceDescriptorV3, request StartRequestV3, tradeRate bool) (bool, bool) {
 	if !routeVideoMetadataCompleteV3(source) {
 		return false, false
 	}
@@ -168,8 +160,12 @@ func videoEligibleRateV3(source SourceDescriptorV3, request StartRequestV3, trad
 			matchedCodec = true
 			skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3 && capability.Hardware
 			// Only an exact entry reports a rate measured at its largest size;
-			// a platform-attested entry is a fixed, tested envelope.
-			rateAtMaxSize := tradeRate && request.Capabilities.VideoEvidence == EvidenceExactV3
+			// a platform-attested entry is a fixed, tested envelope. Android
+			// also caps a smaller frame's rate by the codec's overall
+			// frame-rate range, which the entry does not report, so the trade
+			// stops at maxTradedFrameRateV3.
+			rateAtMaxSize := request.Capabilities.VideoEvidence == EvidenceExactV3 &&
+				source.FrameRate <= maxTradedFrameRateV3+0.01
 			if videoDecodeTakesSourceV3(capability, source, skipProfileLevel, rateAtMaxSize) {
 				return true, false
 			}
@@ -202,6 +198,12 @@ func videoDecodeTakesSourceV3(capability VideoDecodeCapabilityV3, source SourceD
 	return decoderTakesFrameV3(capability, source.Width, source.Height, source.FrameRate, rateAtMaxSize) &&
 		(capability.MaxBitrateKbps <= 0 || source.BitrateKbps <= capability.MaxBitrateKbps)
 }
+
+// maxTradedFrameRateV3 is the highest source frame rate a copy route admits
+// by trading an exact decoder's rate against its size. It covers the 50 and
+// 60 fps sources the trade is for without assuming a frame-rate range the
+// decoder never reported.
+const maxTradedFrameRateV3 = 60
 
 // decoderTakesFrameRateV3 reports whether a decoder takes a frame rate at its
 // largest size; an unknown rate or limit always passes.

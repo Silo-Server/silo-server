@@ -206,9 +206,9 @@ var resolverPlayMethodCases = []struct {
 		want: playback.PlayTranscode,
 	},
 	{
-		// Playback lets an exact 4K30 decoder copy 1080p50, but a download
-		// plays offline with no replan to recover, so its rate stays absolute.
-		name: "a download keeps an exact decoder's frame rate absolute",
+		// The download's fallback encode would keep 1080p50, so keeping the
+		// original takes the same frame-rate trade as playback.
+		name: "a download keeps a 1080p50 original on an exact 4K30 decoder",
 		file: &models.MediaFile{
 			CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
 			Resolution: "1080p", Bitrate: 3_000,
@@ -229,7 +229,7 @@ var resolverPlayMethodCases = []struct {
 				Hardware: true,
 			}},
 		},
-		want: playback.PlayTranscode,
+		want: playback.PlayDirect,
 	},
 }
 
