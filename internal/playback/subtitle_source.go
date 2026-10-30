@@ -80,6 +80,19 @@ type DemuxCopy struct {
 	StartTime time.Duration
 }
 
+// subtitleIndexCacheBytes bounds the embedded subtitle indexes the process
+// keeps. An index is a few kilobytes to a few hundred.
+const subtitleIndexCacheBytes = 64 << 20
+
+// subtitleIndexes is the process's one cache of embedded subtitle indexes,
+// of sources and of kept tracks alike: sidecar serving through kept tracks
+// (keptsub), on-demand HLS renditions and the planner's check for them all
+// read through it, so a file indexed for one is indexed for all.
+var subtitleIndexes = embeddedsub.NewCache(subtitleIndexCacheBytes)
+
+// SubtitleIndexes returns the process's cache of embedded subtitle indexes.
+func SubtitleIndexes() *embeddedsub.Cache { return subtitleIndexes }
+
 // SetEmbeddedSource makes the cache read embedded tracks through src before
 // it demuxes their source. A nil cache ignores it.
 func (c *SubtitleCache) SetEmbeddedSource(src EmbeddedSubtitleSource) {

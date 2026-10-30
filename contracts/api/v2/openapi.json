@@ -233604,6 +233604,9 @@
       "playback_SubtitleRenditionTrack": {
         "additionalProperties": false,
         "properties": {
+          "codec": {
+            "type": "string"
+          },
           "default": {
             "type": "boolean"
           },

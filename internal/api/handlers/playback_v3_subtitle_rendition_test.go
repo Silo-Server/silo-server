@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -388,12 +387,10 @@ func onDemandRenditionStartV3(t *testing.T, media string, numbers []uint64) (*Pl
 	}
 	english := 0
 	request.SubtitleTrackID, request.SubtitleTrackIndex = playback.TrackIDV3(file.ID, "subtitle", english), &english
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).
-		WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
-	var started playback.DecisionResponseV3
-	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	// The renditions and the inventory fields that place them are /api/v2's.
+	started, err := handler.startPlaybackV2ForTest(t, request)
+	if err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start: %+v, %v", started, err)
 	}
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 	return handler, request, started
@@ -470,21 +467,13 @@ func switchOnDemandRenditionV3(t *testing.T, handler *PlaybackHandler, request p
 	if recovery {
 		replan.Operation, replan.Failure = playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "subtitle_track_changed"}
 	}
-	replanned := servePlaybackReplanNativeV3(handler, sessionID, mustMarshalJSON(t, replan))
-	var response playback.DecisionResponseV3
-	if replanned.Code != http.StatusOK || json.Unmarshal(replanned.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
-		t.Fatalf("replan status = %d, body = %s", replanned.Code, replanned.Body.String())
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+	response, err := handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), caller, sessionID,
+		PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("rendition-switch-digest-%d", n)})
+	if err != nil || response.PlaybackPlan == nil {
+		t.Fatalf("replan: %+v, %v", response, err)
 	}
 	return response.PlaybackPlan
-}
-
-func mustMarshalJSON(t *testing.T, value any) []byte {
-	t.Helper()
-	data, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
 }
 
 // A client may report its own switch among on-demand renditions as a

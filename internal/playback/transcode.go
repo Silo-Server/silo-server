@@ -153,6 +153,9 @@ type TranscodeOpts struct {
 	// SubtitleRenditionSource is the source version the on-demand renditions
 	// were planned from; segments are read from that version only.
 	SubtitleRenditionSource SubtitleRenditionSource
+	// MediaFileID is the catalog file InputPath is, or 0 when unknown. On-demand
+	// subtitle renditions find the file's kept tracks by it.
+	MediaFileID int
 	// subtitleCueFile is the per-generation cue file the rendition output
 	// writes. Process-local: every start and restart derives its own.
 	subtitleCueFile string

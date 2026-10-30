@@ -1783,7 +1783,7 @@ func onDemandRenditionCandidatesV3(input PlannerInputV3, plan PlanV3, subtitle S
 		}
 		seen[number] = true
 		candidates = append(candidates, onDemandRenditionV3{row: row, track: SubtitleRenditionTrack{
-			StreamIndex: track.Index, TrackNumber: number, Language: item.Language, Forced: item.Forced,
+			StreamIndex: track.Index, TrackNumber: number, Codec: track.Codec, Language: item.Language, Forced: item.Forced,
 			Default: subtitle.Source == SubtitleSourceEmbeddedV3 && subtitle.SelectedIndex == item.CombinedIndex,
 		}})
 	}

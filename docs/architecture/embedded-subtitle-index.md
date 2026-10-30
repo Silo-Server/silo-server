@@ -90,15 +90,20 @@ each frame with the ones after it in view.
 An `Index` is immutable and safe for concurrent use; `Cache` keeps them by
 path, size and modification time. Concurrent misses share one read, which
 gets 30 s: a read that hangs, as on a stalled network mount, fails the
-callers waiting on it, and the next caller reads again. `ReadPackets` opens the file itself, sets
+callers waiting on it, and the next caller reads again. A process keeps one
+`Cache` (`playback.SubtitleIndexes`, 64 MiB), for sources and kept tracks
+alike, which kept-track serving, on-demand renditions and the planner all
+read through. `ReadPackets` opens the file itself, sets
 `POSIX_FADV_RANDOM` on Linux so the kernel doesn't read ahead around each
 small read, keeps up to 16 reads in flight, holds at most 256 MiB of packet
 data by default (`ErrTooLarge`), and refuses a file whose size or
 modification time changed since it was indexed (`ErrFileChanged`).
 
 HLS streams read their on-demand subtitle renditions through it
-(`playback/subtitle_rendition_tracks.go`): one window per segment, from a
-process-wide `Cache`, converted by `playback.ExtractSubtitlePacketsWebVTT`
+(`playback/subtitle_rendition_tracks.go`): one window per segment, from the
+track's kept copy when there is one (`playback.SetRenditionKeptTracks`, on
+servers that keep tracks) or else the source, through that `Cache`, converted
+by `playback.ExtractSubtitlePacketsWebVTT`
 with the options of the stream's own cue output. The planner checks with
 `playback.CueIndexedSubtitleTracks` which tracks qualify before it lists them.
 

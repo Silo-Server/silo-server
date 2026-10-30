@@ -345,6 +345,7 @@ func (c RecipeCard) VideoStreamCopy() bool {
 func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLogSink) TranscodeOpts {
 	return TranscodeOpts{
 		InputPath:                  c.InputPath,
+		MediaFileID:                c.MediaFileID,
 		OutputSubdir:               c.OutputSubdir,
 		OutputDir:                  outputDir,
 		SessionID:                  c.SessionID,

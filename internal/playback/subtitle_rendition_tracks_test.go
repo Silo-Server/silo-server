@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -561,9 +564,9 @@ func TestPlanPlaybackV3ListsEveryEmbeddedTextTrackAsARendition(t *testing.T) {
 		t.Fatalf("want a transcode, got %s", ExplainPlannerResultV3(result))
 	}
 	wantTracks := []SubtitleRenditionTrack{
-		{StreamIndex: 2, TrackNumber: 3, Name: "English", Language: "eng"},
-		{StreamIndex: 3, TrackNumber: 4, Name: "English (2)", Language: "eng", Forced: true, Default: true},
-		{StreamIndex: 5, TrackNumber: 6, Name: "Signs", Language: "jpn"},
+		{StreamIndex: 2, TrackNumber: 3, Codec: "subrip", Name: "English", Language: "eng"},
+		{StreamIndex: 3, TrackNumber: 4, Codec: "subrip", Name: "English (2)", Language: "eng", Forced: true, Default: true},
+		{StreamIndex: 5, TrackNumber: 6, Codec: "ass", Name: "Signs", Language: "jpn"},
 	}
 	if !result.SubtitleRendition || !slices.Equal(result.SubtitleRenditionTracks, wantTracks) || result.SubtitleRenditionSource != testRenditionSource {
 		t.Fatalf("rendition tracks = %+v from %+v (rendition %v)", result.SubtitleRenditionTracks, result.SubtitleRenditionSource, result.SubtitleRendition)
@@ -804,5 +807,140 @@ func TestOnDemandSegmentFailures(t *testing.T) {
 	}
 	if body, err := session(ffmpeg, planned).subtitleTrackSegmentVTT(ctx, numbers[0], 0); err != nil || !strings.Contains(string(body), "Early A") {
 		t.Fatalf("segment of the planned source = %q, %v", body, err)
+	}
+}
+
+// keptWindowsV3 stands in for kept tracks (keptsub): it keeps a track the
+// way keptsub does, the whole track read through the source's index and
+// written with embeddedsub.WriteKept, and cuts windows from that copy the way
+// keptsub's Window does.
+type keptWindowsV3 struct {
+	EmbeddedSubtitleSource
+	dir, ffmpeg string
+	windows     atomic.Int32
+}
+
+func (k *keptWindowsV3) Window(ctx context.Context, path string, ref EmbeddedSubtitleRef, from, to time.Duration) (*SubtitlePacketInput, error) {
+	number, err := strconv.ParseUint(ref.ContainerTrackID, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	kept := filepath.Join(k.dir, ref.ContainerTrackID+".mks")
+	if _, err := os.Stat(kept); err != nil {
+		if err := keepTrackV3(ctx, path, number, kept); err != nil {
+			return nil, err
+		}
+	}
+	start, err := SubtitleSourceStartTime(ctx, k.ffmpeg, path)
+	if err != nil {
+		return nil, err
+	}
+	idx, err := embeddedsub.ReadIndex(ctx, kept)
+	if err != nil {
+		return nil, err
+	}
+	track := &idx.Tracks[0]
+	res, err := embeddedsub.ReadPackets(ctx, kept, idx, track.Number, from+start, to+start, embeddedsub.ReadOptions{})
+	if err != nil {
+		return nil, err
+	}
+	k.windows.Add(1)
+	return &SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: start}, nil
+}
+
+// keepTrackV3 writes track number of path, read whole through its index, as a
+// kept stream at kept.
+func keepTrackV3(ctx context.Context, path string, number uint64, kept string) error {
+	idx, err := embeddedsub.ReadIndex(ctx, path)
+	if err != nil {
+		return err
+	}
+	track, _ := idx.Track(number)
+	whole, err := embeddedsub.ReadPackets(ctx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo, embeddedsub.ReadOptions{})
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := embeddedsub.WriteKept(&buf, idx, track, whole.Packets); err != nil {
+		return err
+	}
+	return os.WriteFile(kept, buf.Bytes(), 0o644)
+}
+
+// A segment read from the track's kept copy is byte-for-byte the one read
+// through the source's index, on an encode's clock and a copy's, from a
+// source whose clock starts at zero and one that starts later.
+func TestOnDemandSegmentsReadFromKeptTracksMatchTheSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	if _, err := exec.LookPath(ffprobePathFromFFmpeg(ffmpeg)); err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
+	defer cancel()
+	base, shifted := onDemandRealSources(ctx, t, ffmpeg)
+	previous := renditionCues
+	t.Cleanup(func() {
+		renditionCues = previous
+		SetRenditionKeptTracks(nil)
+	})
+	for _, src := range []struct{ name, path string }{{"zero", base}, {"video-after-subtitles", shifted}} {
+		numbers := subtitleTrackNumbers(t, src.path)
+		for _, video := range []string{transcodeCodecH264, "copy"} {
+			t.Run(src.name+"/"+video, func(t *testing.T) {
+				opts := TranscodeOpts{
+					InputPath: src.path, MediaFileID: 42, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, SourceVideoCodec: "h264",
+					TargetCodecVideo: video, TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 30,
+					SubtitleRendition: true, SubtitleTrackIndex: -1, SubtitleRenditionTracks: []SubtitleRenditionTrack{
+						{StreamIndex: 2, TrackNumber: numbers[0], Codec: "subrip", Name: "A"},
+						{StreamIndex: 3, TrackNumber: numbers[1], Codec: "subrip", Name: "B"},
+					},
+				}
+				// An observed MPEG-TS origin, so the epoch is chosen too. A copy
+				// places its segments by its keyframe plan.
+				session := &TranscodeSession{outputDir: opts.OutputDir, opts: opts, subtitleSpans: []subtitleCueSpan{
+					{file: subtitleCueFileName(0), start: 0, end: 14, origin: 0, originKnown: true},
+				}}
+				if video == "copy" {
+					session.copyPlan = &copySegmentPlan{durations: slices.Repeat([]float64{2}, 15)}
+				}
+				segments := func(kept EmbeddedSubtitleSource) map[string]string {
+					renditionCues = newRenditionCueCache(renditionCueCacheBytes)
+					SetRenditionKeptTracks(kept)
+					got := map[string]string{}
+					for _, number := range numbers {
+						for segment := range 15 {
+							body, err := session.subtitleTrackSegmentVTT(ctx, number, segment)
+							if err != nil {
+								t.Fatal(err)
+							}
+							got[fmt.Sprintf("%d/%d", number, segment)] = string(body)
+						}
+					}
+					return got
+				}
+				direct := segments(nil)
+				kept := &keptWindowsV3{dir: t.TempDir(), ffmpeg: ffmpeg}
+				fromKept := segments(kept)
+				if kept.windows.Load() == 0 {
+					t.Fatal("no window was read from the kept track")
+				}
+				cues := 0
+				for key, want := range direct {
+					if fromKept[key] != want {
+						t.Fatalf("segment %s from the kept track:\n%s\nfrom the source:\n%s", key, fromKept[key], want)
+					}
+					cues += strings.Count(want, " --> ")
+				}
+				if cues == 0 {
+					t.Fatal("no segment carried a cue")
+				}
+			})
+		}
 	}
 }

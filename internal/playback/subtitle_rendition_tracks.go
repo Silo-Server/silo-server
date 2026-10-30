@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
@@ -47,6 +48,9 @@ type SubtitleRenditionTrack struct {
 	// TrackNumber is the Matroska TrackNumber or MP4 track ID, the track's
 	// container_track_id, which the source's index reads it by.
 	TrackNumber uint64 `json:"track_number"`
+	// Codec is the track's probed codec; a kept copy of the track is found
+	// by it (EmbeddedSubtitleRef).
+	Codec string `json:"codec,omitempty"`
 	// Name is the rendition's NAME: the inventory row's label, made unique in
 	// the group (SubtitleRenditionNames).
 	Name     string `json:"name"`
@@ -80,10 +84,6 @@ func (v SubtitleRenditionSource) matches(idx *embeddedsub.Index) bool {
 const SubtitleRenditionTrackQueryParam = "silo_track"
 
 const (
-	// renditionIndexCacheBytes bounds the indexes kept for on-demand
-	// renditions and the planner's check for them. An index is a few
-	// kilobytes to a few hundred.
-	renditionIndexCacheBytes = 64 << 20
 	// renditionCueCacheBytes bounds the converted windows kept for on-demand
 	// segments. A window of text cues is a few hundred bytes.
 	renditionCueCacheBytes = 16 << 20
@@ -96,13 +96,43 @@ const (
 )
 
 var (
-	// renditionIndexes keeps source indexes for on-demand renditions, shared
-	// by every session in the process and by the planner's check.
-	renditionIndexes = embeddedsub.NewCache(renditionIndexCacheBytes)
-	renditionCues    = newRenditionCueCache(renditionCueCacheBytes)
-	renditionSlots   = make(chan struct{}, renditionConversions)
-	renditionStarts  = newRenditionStartCache(renditionStartTimes)
+	renditionCues   = newRenditionCueCache(renditionCueCacheBytes)
+	renditionSlots  = make(chan struct{}, renditionConversions)
+	renditionStarts = newRenditionStartCache(renditionStartTimes)
+	// renditionKept holds the kept tracks (SetRenditionKeptTracks).
+	renditionKept atomic.Pointer[keptRenditionSource]
 )
+
+// keptRenditionSource wraps the EmbeddedSubtitleSource on-demand renditions
+// read kept tracks through.
+type keptRenditionSource struct{ src EmbeddedSubtitleSource }
+
+// SetRenditionKeptTracks makes on-demand renditions read a segment's window
+// from the track's kept copy (keptsub) when there is one, before reading the
+// source; it reads the source otherwise. A server without kept tracks, such
+// as a transcode node, doesn't set it.
+func SetRenditionKeptTracks(src EmbeddedSubtitleSource) {
+	if src == nil {
+		renditionKept.Store(nil)
+		return
+	}
+	renditionKept.Store(&keptRenditionSource{src: src})
+}
+
+// keptRenditionWindowSource returns the kept tracks to read track number's
+// windows through, or nil: none are set, or the recipe doesn't name the
+// catalog track a kept copy is found by.
+func keptRenditionWindowSource(opts TranscodeOpts, number uint64) (EmbeddedSubtitleSource, EmbeddedSubtitleRef) {
+	kept := renditionKept.Load()
+	rendition, ok := renditionTrack(opts, number)
+	if kept == nil || !ok || opts.MediaFileID <= 0 || rendition.StreamIndex < 0 || rendition.Codec == "" {
+		return nil, EmbeddedSubtitleRef{}
+	}
+	return kept.src, EmbeddedSubtitleRef{
+		MediaFileID: opts.MediaFileID, StreamIndex: rendition.StreamIndex,
+		ContainerTrackID: strconv.FormatUint(number, 10), Codec: rendition.Codec,
+	}
+}
 
 // SubtitleRenditionNames turns inventory labels into the NAMEs of one
 // rendition group, which HLS requires to differ: characters a quoted-string
@@ -391,12 +421,13 @@ func subtitleWindowBounds(opts TranscodeOpts, segNum int, window subtitleCueWind
 }
 
 // readOnDemandCues returns the cues of track number that show in segment
-// segNum's window as WebVTT, converted by FFmpeg from the packets the
-// source's index points at. Only the file version the plan read is read
-// (SubtitleRenditionSource). Windows are kept per file version, track and
-// clock, so every session on the file shares them.
+// segNum's window as WebVTT, converted by FFmpeg from the packets of the
+// track's kept copy (SetRenditionKeptTracks), or else the ones the source's
+// index points at; both give the same bytes. Only the file version the plan
+// read is read (SubtitleRenditionSource). Windows are kept per file version,
+// track and clock, so every session on the file shares them.
 func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, segNum int, span subtitleCueSpan, window subtitleCueWindow) ([]byte, error) {
-	idx, err := renditionIndexes.Index(ctx, opts.InputPath)
+	idx, err := subtitleIndexes.Index(ctx, opts.InputPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: source is gone: %w", embeddedsub.ErrFileChanged, err)
 	}
@@ -414,8 +445,9 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 	// (-start_at_zero), an encode's on the source's own (-copyts).
 	copyClock := copyMuxShiftsVideo(opts)
 	tsEpoch := window.observed && HLSOutputContainer(opts) == OutputContainerMPEGTS
+	kept, ref := keptRenditionWindowSource(opts, number)
 	var startTime time.Duration
-	if copyClock || tsEpoch {
+	if copyClock || tsEpoch || kept != nil {
 		if startTime, err = renditionStarts.get(ctx, opts.FFmpegPath, opts.InputPath, idx); err != nil {
 			return nil, err
 		}
@@ -446,6 +478,19 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 			return nil, ctx.Err()
 		}
 		defer func() { <-renditionSlots }()
+		// A window open to the end would have the kept tracks read the
+		// whole track first; it is read from the source.
+		if kept != nil && to != embeddedsub.WholeTo {
+			in, err := kept.Window(ctx, opts.InputPath, ref, from-startTime, to-startTime)
+			if err == nil {
+				return convertKeptRenditionWindow(ctx, opts, in, clockStart)
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			slog.InfoContext(ctx, "on-demand subtitle rendition window not read from the kept track; reading the source", "component", "playback",
+				"playback_session_id", opts.SessionID, "track_number", number, "error", err)
+		}
 		res, err := embeddedsub.ReadPackets(ctx, opts.InputPath, idx, number, from, to, embeddedsub.ReadOptions{})
 		var damaged *embeddedsub.DamagedError
 		if errors.As(err, &damaged) {
@@ -463,6 +508,19 @@ func readOnDemandCues(ctx context.Context, opts TranscodeOpts, number uint64, se
 		}
 		return ExtractSubtitlePacketsWebVTT(ctx, &SubtitlePacketInput{Index: idx, Track: track, Packets: res.Packets, SourceStartTime: clockStart}, opts.FFmpegPath)
 	})
+}
+
+// convertKeptRenditionWindow converts a window read from a kept track. Kept
+// windows are asked for on the playback timeline, which starts at the
+// source's start time, but their packets keep the source's timestamps, so
+// they convert on the cue clock as the source's do: clockStart is the start
+// time the cue clock leaves out.
+func convertKeptRenditionWindow(ctx context.Context, opts TranscodeOpts, in *SubtitlePacketInput, clockStart time.Duration) ([]byte, error) {
+	if in.Stream == nil && len(in.Packets) == 0 {
+		return nil, nil
+	}
+	in.SourceStartTime = clockStart
+	return ExtractSubtitlePacketsWebVTT(ctx, in, opts.FFmpegPath)
 }
 
 // ticks90kDuration converts 90 kHz ticks to a Duration without overflowing
@@ -664,10 +722,10 @@ type CueIndexedSubtitles struct {
 // CueIndexedSubtitleTracks reports which of the source's subtitle tracks an
 // on-demand rendition can read: their packets are all found through the
 // file's index (embeddedsub.Completeness complete or unknown) in a form the
-// reader decodes. It reads the index through the cache the renditions use, so
-// a stream that starts next finds it there.
+// reader decodes. It reads the index through the process's cache
+// (SubtitleIndexes), so a stream that starts next finds it there.
 func CueIndexedSubtitleTracks(ctx context.Context, path string) (CueIndexedSubtitles, error) {
-	idx, err := renditionIndexes.Index(ctx, path)
+	idx, err := subtitleIndexes.Index(ctx, path)
 	if err != nil {
 		return CueIndexedSubtitles{}, err
 	}

@@ -1861,7 +1861,10 @@ scopes its media credentials to the plan's URLs must admit `silo_track`
 beside `silo_rendition=subtitles`.
 
 Each segment is read when it is requested: the server finds the track's
-packets for the segment's window through the source's index and converts them
+packets for the segment's window in the track's kept copy when the server
+keeps one (on the API server, which keeps tracks; see
+[the index reader](embedded-subtitle-index.md)), else through the source's
+index, and converts them
 with the same FFmpeg WebVTT options the single rendition's output uses, on the
 clock that output would have used (the container's own timestamps for a
 transcode, less the source's start time for a copy remux), then cuts the
