@@ -83,6 +83,7 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 		{"Show - 12 H.265", "Show", 12},
 		{"[Group] Show - 12v2 [1080p]", "Show", 12},
 		{"Show S01E12v2", "Show", 12},
+		{"Show ( 1x02 ) - Second", "Show", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			token, ok := parseEpisodeToken(tc.name, nil, false, true, true)

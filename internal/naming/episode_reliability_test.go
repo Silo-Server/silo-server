@@ -307,6 +307,7 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example Show/Season 1/Example Show [16x10] - 02.mkv", 1, 2, true},
 		{"/tv/Example Show/Season 1/Example Show - 03 - Title (2x14).mkv", 1, 3, true},
 		{"/tv/Example Show/Season 1/Example Show - E03 - Title [2x14].mkv", 1, 3, true},
+		{"/tv/24/Season 1/24 [1x02].mkv", 1, 2, true},
 		// Each bracketed code must not re-parse the text before it.
 		{"/tv/Example Show/Season 1/Example Show - 05" + strings.Repeat(" (11x11)", 30) + ".mkv", 1, 5, true},
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
@@ -341,6 +342,7 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/Example Movie [1920x1080].mkv",
 		"/mixed/Example Movie (2019)/Example Movie (2019) [2x1].mkv",
 		"/mixed/[10x10] (2018).mkv",
+		"/mixed/Example Movie [16X10].mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {

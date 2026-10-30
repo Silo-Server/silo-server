@@ -75,14 +75,19 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 				}
 				bracketWeighed = true
 				// A bracketed code after an episode number belongs to the
-				// episode title: Show - 03 - Title (2x14).
-				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 {
+				// episode title: Show - 03 - Title (2x14). A number that is the
+				// show folder's title is not one: 24/Season 1/24 [1x02].
+				if earlier, found := parseEpisodeToken(name[:open], directories, rootRelative, allowNumericSeason, true); found && earlier.episode > 0 && !namesShowFolder(name[:open], directories) {
 					continue
 				}
 			}
-			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]})
-			// The closing bracket of Show - [1x02] - Title belongs to the
-			// coordinate, not to the episode title after it.
+			// The brackets of Show ( 1x02 ) - Title belong to the coordinate,
+			// not to the show or episode title around it.
+			start := match[0]
+			if bracketed {
+				start = open
+			}
+			token := finishEpisodeToken(name, episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: start, end: match[5]})
 			if bracketed {
 				token.end = closed
 			}
@@ -304,6 +309,17 @@ func completesShowTitle(prefix, showDirectory string) bool {
 	return title != "" && normalizeInferComparable(prefix) == title
 }
 
+// namesShowFolder reports a prefix that is only the title of the file's show
+// folder, its parent or the folder above a season folder.
+func namesShowFolder(prefix string, directories []string) bool {
+	for i := len(directories) - 1; i >= 0 && i >= len(directories)-2; i-- {
+		if completesShowTitle(prefix, directories[i]) {
+			return true
+		}
+	}
+	return false
+}
+
 func startsWithShowTitle(name, showDirectory string) bool {
 	title := showFolderTitle(showDirectory)
 	comparable := normalizeInferComparable(name)
@@ -364,7 +380,7 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	// apply ([1920x1080]).
 	_, closed, bracketed := bracketedCoordinate(name, start, match[5])
 	if bracketed {
-		if len(episode) < 2 || aspectRatioRe.MatchString(name[start:match[5]]) {
+		if len(episode) < 2 || aspectRatioRe.MatchString(strings.ToLower(name[start:match[5]])) {
 			return false
 		}
 	} else if insideReleaseTag(name, start) {
