@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
@@ -8,6 +8,8 @@ import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
+import { useHeroFitBelow } from "./useHeroFitBelow";
+import { useItemBoxSet } from "@/hooks/queries/boxSets";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -222,6 +224,11 @@ export default function MovieContent({
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
+  // On a tall screen the hero gives up just enough height for the box set
+  // row's titles to fit on the first screen; the row reads the same query.
+  const { data: boxSet } = useItemBoxSet(item.content_id, libraryId);
+  const boxSetRowRef = useRef<HTMLDivElement>(null);
+  const heroFitBelow = useHeroFitBelow(boxSetRowRef, Boolean(boxSet));
 
   const preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null =
     item.effective_subtitle_track_signature
@@ -253,6 +260,7 @@ export default function MovieContent({
           title={title}
           topNav={<PageBack />}
           context="Movie"
+          fitBelow={heroFitBelow === undefined ? undefined : heroFitBelow + 24}
           studioLabel={firstStudio}
           backdropUrl={item.backdrop_url}
           backdropThumbhash={item.backdrop_thumbhash}
@@ -417,7 +425,11 @@ export default function MovieContent({
         </>
       }
     >
-      <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
+      {boxSet ? (
+        <div ref={boxSetRowRef}>
+          <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
+        </div>
+      ) : null}
 
       {canCurateMetadata && (
         <MediaLocations
