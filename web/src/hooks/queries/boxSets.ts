@@ -110,10 +110,13 @@ export function useItemBoxSet(contentId: string, libraryId?: number) {
   const hasBoxSetLibrary = (libraries.data ?? []).some(
     (library) => library.box_sets_enabled === true,
   );
-  return useQuery({
+  const enabled = hasBoxSetLibrary && contentId !== "";
+  const query = useQuery({
     queryKey: boxSetKeys.item(contentId, libraryId),
     queryFn: ({ signal }) => fetchItemBoxSet(contentId, libraryId, { signal }),
-    enabled: hasBoxSetLibrary && contentId !== "",
+    enabled,
     retry: false,
   });
+  // A cached box set outlives the library turning box sets off; hide it then.
+  return enabled ? query : { ...query, data: undefined };
 }

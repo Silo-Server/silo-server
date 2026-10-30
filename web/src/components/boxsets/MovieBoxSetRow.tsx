@@ -8,8 +8,9 @@ import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 /**
  * The box set row on a movie's page: the box set's movies in release order,
- * starting at the movie being viewed, which is marked "This film". Nothing
- * shows while it loads, or when the movie is in no box set.
+ * opened at the page of cards that holds the movie being viewed, which is
+ * marked "This film". Nothing shows while it loads, or when the movie is in
+ * no box set.
  */
 export default function MovieBoxSetRow({
   contentId,

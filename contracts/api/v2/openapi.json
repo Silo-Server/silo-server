@@ -25938,7 +25938,7 @@
             "type": "boolean"
           },
           "box_sets": {
-            "description": "listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets and getCatalogBoxSet answer; listUserLibraries reports which libraries have box sets on",
+            "description": "listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on",
             "type": "boolean"
           },
           "extended_query_rules": {
