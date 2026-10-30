@@ -289,7 +289,11 @@ export default function Home() {
           queryKey,
           queryFn: ({ signal }) =>
             fetchHomeSectionItems(sectionId, { signal }).then((whole) =>
-              completeHomeRow(shown, whole),
+              completeHomeRow(
+                shown,
+                whole,
+                queryClient.getQueryData<HomeSectionItemsResponse>(queryKey) ?? shown,
+              ),
             ),
           staleTime: 0,
           gcTime: HOME_SECTION_GC_TIME,
@@ -297,7 +301,7 @@ export default function Home() {
         .then((response) => {
           if (loadGenerationRef.current !== generation) return;
           setLoadedSections((prev) => new Map(prev).set(sectionId, response.section));
-          setShownCounts((prev) => withShownCount(prev, sectionId, shown.section.items.length));
+          setShownCounts((prev) => withShownCount(prev, sectionId, response.shown));
         })
         .catch(() => undefined)
         .finally(() => completingIdsRef.current.delete(sectionId));

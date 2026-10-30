@@ -12,6 +12,7 @@ import Home from "./Home";
 import type { HomeSectionItemsResponse } from "@/api/types";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { sectionKeys } from "@/hooks/queries/keys";
+import { removeItemFromHomeSectionCaches } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
@@ -406,6 +407,46 @@ describe("Home", () => {
 
     await waitFor(() => expect(itemCount()).toBe(cards));
     expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(partial ? 2 : 1);
+  });
+
+  it("keeps a card removed while the rest of its row loads out of the completed row", async () => {
+    const row = homeLayout("row");
+    showLayout([row]);
+    const read = (ids: string[]) => ({
+      section: {
+        ...row,
+        total_count: ids.length,
+        items: ids.map((id) => ({
+          ...homeSection("row").section.items[0]!,
+          content_id: id,
+          title: id,
+        })),
+      },
+    });
+    let answerWhole: (whole: HomeSectionItemsResponse) => void = () => undefined;
+    mockFetchHomeSectionItems.mockImplementation(
+      (_sectionId: string, options: { itemLimit?: number }) =>
+        options.itemLimit === undefined
+          ? new Promise((resolve) => (answerWhole = resolve))
+          : Promise.resolve({ ...read(["dismissed", "kept"]), partial: true }),
+    );
+    const queryClient = new QueryClient();
+
+    await renderHome(queryClient);
+    await waitForRenderedFirstItems({ row: "dismissed" });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-section-id="row"] button')!.click();
+    });
+    await waitFor(() => expect(mockFetchHomeSectionItems).toHaveBeenCalledTimes(2));
+    // The viewer dismisses the first card, and the whole row, read before
+    // the server heard of it, still holds that card.
+    removeItemFromHomeSectionCaches(queryClient, "dismissed");
+    await act(async () => answerWhole(read(["dismissed", "kept", "more"])));
+
+    await waitForRenderedFirstItems({ row: "kept" });
+    const cached = queryClient.getQueryData<HomeSectionItemsResponse>(sectionKeys.homeItems("row"));
+    expect(cached?.section.items.map((item) => item.content_id)).toEqual(["kept", "more"]);
+    expect(cached?.shown).toBe(1);
   });
 
   it.each([["WebKit", SAFARI_USER_AGENT]])(

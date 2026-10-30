@@ -57,17 +57,25 @@ export function homeRowItemLimit(
  * Rows that draw a subset sized by their limit (hidden gems, random picks)
  * can draw different cards at the larger size, and keeping the shown ones in
  * place stops a carousel the viewer is scrolling from shifting.
+ *
+ * `current` is the row as cached when the whole row arrives, without any
+ * card the viewer removed (Not interested, a dismissal) since `shown` was
+ * read. Such a card stays out even when the whole row, read before the
+ * server heard of the removal, still holds it.
  */
 export function completeHomeRow(
   shown: HomeSectionItemsResponse,
   whole: HomeSectionItemsResponse,
+  current: HomeSectionItemsResponse = shown,
 ): HomeSectionItemsResponse {
-  const shownIds = new Set(shown.section.items.map((item) => item.content_id));
-  const rest = whole.section.items.filter((item) => !shownIds.has(item.content_id));
+  const seenIds = new Set(
+    [...shown.section.items, ...current.section.items].map((item) => item.content_id),
+  );
+  const rest = whole.section.items.filter((item) => !seenIds.has(item.content_id));
   const length = Math.max(whole.section.item_limit, whole.section.items.length);
   return {
-    section: { ...whole.section, items: [...shown.section.items, ...rest].slice(0, length) },
-    shown: shown.section.items.length,
+    section: { ...whole.section, items: [...current.section.items, ...rest].slice(0, length) },
+    shown: current.section.items.length,
     shownAt: Date.now(),
   };
 }
