@@ -48,7 +48,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
             <img
               src={event.poster_url}
               alt={event.title}
-              className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+              className={`h-full w-full object-cover transition-[transform,opacity] duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
               loading="lazy"
               onLoad={() => setLoaded(true)}
               onError={() => setFailedUrl(event.poster_url ?? null)}

@@ -90,7 +90,11 @@ export default function MediaCardArtwork({
           alt={alt}
           className={cn(
             "h-full w-full object-cover",
-            !priority && "transition-opacity duration-300",
+            // Transform belongs in the list: a plain `transition-opacity` sits in
+            // Tailwind's utilities layer, which outranks the components-layer
+            // transition that animates the card's hover scale — so the image
+            // snapped to size instead of growing into it.
+            !priority && "transition-[transform,opacity] duration-300",
             priority || loaded ? "opacity-100" : "opacity-0",
             dimClass,
           )}
