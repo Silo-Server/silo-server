@@ -121,6 +121,13 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 		// The direct section endpoint returns the section even if the
 		// filter empties it; only aggregate Home drops such sections.
 		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{s})
+	} else if viewer.ItemLimitCap > 0 {
+		// Most fetchers stop at the row's limit, but an admin curated list
+		// returns every configured item; a capped read answers at most the
+		// cap. Uncapped reads keep the whole list, as before.
+		if limit := effectiveHomeItemLimit(s.ItemLimit); len(rows[0].Items) > limit {
+			rows[0].Items = rows[0].Items[:limit]
+		}
 	}
 	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
 	if len(built) == 0 {

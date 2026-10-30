@@ -216,3 +216,30 @@ func TestHomeSectionRowAppliesHideWatchedPerRow(t *testing.T) {
 		}
 	}
 }
+
+// TestHomeSectionRowCapsFetchersThatIgnoreTheLimit pins item_limit on the
+// shared row builder when hide-watched is off: an admin curated list fetches
+// every configured item, so a capped read cuts it to the cap while an
+// uncapped read keeps the whole list.
+func TestHomeSectionRowCapsFetchersThatIgnoreTheLimit(t *testing.T) {
+	curated := []*models.MediaItem{
+		{ContentID: "movie:a", Type: "movie", Title: "a"},
+		{ContentID: "movie:b", Type: "movie", Title: "b"},
+		{ContentID: "movie:c", Type: "movie", Title: "c"},
+	}
+	for _, tc := range []struct {
+		name      string
+		cap       int
+		wantCards int
+	}{
+		{"capped read", 2, 2},
+		{"uncapped read", 0, 3},
+	} {
+		section := capSectionItemLimits([]sections.ResolvedSection{{ID: "picks", SectionType: sections.SectionAdminCuratedList, ItemLimit: 20}}, tc.cap)[0]
+		withItems := sections.SectionWithItems{ResolvedSection: section, Items: curated, TotalCount: len(curated)}
+		row := (&SectionHandler{}).homeSectionRow(t.Context(), section, withItems, false, SectionViewer{ItemLimitCap: tc.cap})
+		if len(row.Items) != tc.wantCards {
+			t.Errorf("%s: %d cards, want %d", tc.name, len(row.Items), tc.wantCards)
+		}
+	}
+}
